@@ -118,8 +118,6 @@
 //! all. On the same probe `didchange_revalidation.rs` reported 75 revalidated
 //! against its ceiling of 65 — the number its own docs record, reproduced.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use std::path::{Path, PathBuf};
 use std::str::FromStr as _;
 use std::sync::Arc;

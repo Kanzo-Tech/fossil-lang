@@ -166,7 +166,7 @@ fn node_range(node: &SyntaxNode) -> Range<u32> {
     u32::from(r.start())..u32::from(r.end())
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;

@@ -64,13 +64,10 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
   `tower-lsp` (unmaintained ~3 years; use `lsp-server`, as all three reference implementations do),
   `wasm-pack` (archived; use `wasm-bindgen-cli` + Vite),
   `sqlx` (not WASM-compatible).
-- **`tokio` never reaches a wasm build, and that is the whole rule.** A crate may hold it behind
-  `cfg(not(target_arch = "wasm32"))`, or as a dev-dependency, or unconditionally if it sits
-  outside the wasm closure — and it must say which, and why, in a comment beside the dependency
-  in its own `Cargo.toml`. **This rule names no crate, on purpose.** It read "no tokio outside X"
-  for months and X was the one crate that had none, because the set was kept by hand.
-  `crates/xtask/tests/tokio_placement.rs` derives it instead, prints the real table on any
-  failure, and goes red if a crate name reappears in this bullet.
+- **`tokio` never reaches a wasm build from our own manifests.** A crate may hold it behind
+  `cfg(not(target_arch = "wasm32"))`, as a dev-dependency, or unconditionally outside the wasm
+  closure. `cargo xtask wasm-check` reads the graph cargo resolves for wasm32 and fails on any
+  crate in the closure that still depends on it.
 - **No `Box<dyn Trait>` inside Salsa queries.** Salsa interns concrete types; trait objects break
   memoization. Use `&dyn` parameters or enum dispatch.
 - **`unsafe_code = "deny"`** at workspace level, not `"forbid"`. Per-item `#[allow(unsafe_code)]` is permitted ONLY at third-party-trait integration boundaries (future FFI — the four Salsa `Update` impls for rowan types went with salsa 0.28, whose `SalsaValue` needs none for a `'static` type, and the workspace holds no `unsafe` today), and MUST carry a one-line justification comment naming what the unsafe is for and why no safe alternative exists. Reviewers reject unjustified additions.
@@ -101,7 +98,6 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
 | rowan | 0.16 | lossless CST |
 | logos | 0.16 | lexer |
 | miette | 7.6 | diagnostics |
-| sqlparser | 0.59 | SQL AST construction |
 | duckdb | 1.10502 (`features = ["bundled"]`) | native execution |
 | wasm-bindgen | =0.2.120 | exact pin; CLI must match |
 | wasm-opt (binaryen) | 116 via `cargo install wasm-opt@0.116.1` | NOT apt (ubuntu ships binaryen 108, whose wasm-opt corrupts wasm-bindgen's externref table → `Table.grow(): failed to grow table` instantiating a wasm-bindgen module on Node 20, binaryen #4711; 116 fixes it). `packages/executor/scripts/build-wasm.sh` passes the six wasm32 default features (bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint, reference-types, multivalue — Rust 1.87/LLVM 20). NOT `-all` → no gc/typed-funcref, which break instantiation |
@@ -265,8 +261,7 @@ over somebody else's editor, and the somebody else is `@kanzo-tech/ui`.
 - Prefer enum dispatch over `Box<dyn Trait>`. Salsa interning needs concrete types.
 - `Result<T, E>` with thiserror-style enums in lib crates; `miette` only where a host renders a diagnostic.
 - `tracing` for structured logs (not `log`). `RUST_LOG=fossil=debug` is the canonical filter.
-- Snapshot tests via `insta` — `git ls-files '*.snap'` shows which crates carry them (not the
-  parser CST: too brittle).
+- Golden files via `expect-test` (`expect!`/`expect_file!`); `UPDATE_EXPECT=1` rewrites them.
 - Doc comments on `pub` items in compiler-core crates.
 
 ## Common Tasks

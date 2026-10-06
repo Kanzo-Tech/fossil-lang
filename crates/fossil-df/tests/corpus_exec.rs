@@ -41,8 +41,6 @@
 //! SELECT list of every executable entry) so both engines render numbers /
 //! strings identically and the Rust side only ever reads VARCHAR columns.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use std::path::{Path, PathBuf};
 
 use duckdb::Connection;

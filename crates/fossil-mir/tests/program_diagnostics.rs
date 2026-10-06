@@ -15,7 +15,6 @@
 //! What makes that visible is that there is one `pub fn` and three call sites,
 //! not a test.
 
-#![cfg(not(target_arch = "wasm32"))]
 // `{Row.id}` is fossil's interpolation hole, not a Rust format argument.
 #![allow(clippy::literal_string_with_formatting_args)]
 

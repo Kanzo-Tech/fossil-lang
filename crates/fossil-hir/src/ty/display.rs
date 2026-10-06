@@ -45,7 +45,7 @@ pub fn render_ty_kind<'db>(db: &'db dyn fossil_base::Db, kind: &TyKind<'db>) -> 
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::render_ty_kind;
     use crate::ty::{Ty, TyKind};

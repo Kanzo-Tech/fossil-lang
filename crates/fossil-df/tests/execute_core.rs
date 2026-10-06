@@ -12,7 +12,6 @@
 //! name is bound positionally against it, and a run that skipped it writes no
 //! type IRI.
 
-#![cfg(not(target_arch = "wasm32"))]
 #![allow(clippy::literal_string_with_formatting_args)]
 
 use std::collections::HashMap;

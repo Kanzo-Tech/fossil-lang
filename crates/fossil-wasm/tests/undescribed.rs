@@ -5,8 +5,6 @@
 //! and `FossilProgram.registerIntrospection` hands both halves over; this is the
 //! Rust half the second one drives.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use fossil_wasm::{CheckRow, FossilWorkspace};
 use lsp_types::{DiagnosticSeverity, Position};
 

@@ -17,8 +17,8 @@
       }
     },
     "format": {
-      "description": "Always [`FOSSIL_FORMAT`] for a corpus this writer produces.",
-      "type": "string"
+      "description": "The format the corpus is written in.",
+      "const": "fossil/1"
     },
     "vertex_tables": {
       "description": "One per vertex type, in the order the compiled schema lists them.",

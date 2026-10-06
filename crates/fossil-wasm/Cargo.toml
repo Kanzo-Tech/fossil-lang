@@ -90,5 +90,3 @@ console_error_panic_hook = { workspace = true }
 getrandom = { workspace = true }
 uuid      = { workspace = true }
 
-[dev-dependencies]
-wasm-bindgen-test.workspace = true

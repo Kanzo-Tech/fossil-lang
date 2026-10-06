@@ -30,11 +30,9 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{Diagnostic, FossilDb, FsError, Provider, SourceFile, System, file_at};
-use fossil_descriptors_input::DescriptorCache;
+use fossil_base::{Diagnostic, FossilDb, SourceFile, System, file_at};
 use fossil_df::{Executor, RunReport};
 use fossil_hir::documents::{documents_named, register_missing_documents, registry_key};
 use fossil_sinks::manifest::Manifest;
@@ -45,34 +43,20 @@ use object_store::{ObjectStore, ObjectStoreExt};
 
 // ───────────────────────────────────────────────────────────────────── check
 
-/// The real filesystem, the introspected-schema table, and every row of the
-/// provider registry — the types-reading ones included.
-#[derive(Debug, Default)]
-pub(crate) struct CheckHost(NativeSystem);
-
-impl System for CheckHost {
-    fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
-        self.0.read_file(path)
-    }
-    fn now(&self) -> SystemTime {
-        self.0.now()
-    }
-    fn descriptors(&self) -> Option<&DescriptorCache> {
-        self.0.descriptors()
-    }
-    fn providers(&self) -> &'static [&'static Provider] {
-        fossil_descriptors_output::PROVIDERS
-    }
+/// The host every check here runs on: every row of the provider registry, the
+/// types-reading ones included.
+pub(crate) fn check_host() -> NativeSystem {
+    NativeSystem::with_providers(fossil_descriptors_output::PROVIDERS)
 }
 
-/// A database over a fresh [`CheckHost`] holding the program at `path`: its
+/// A database over a fresh [`check_host`] holding the program at `path`: its
 /// sources introspected first, then every shape document it names read from
 /// disk and registered — parse → which documents → read → register → check,
 /// the order the registry forces.
 pub(crate) fn open_db(path: &Path) -> (FossilDb, SourceFile) {
     let text =
         std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-    let system: Arc<dyn System> = Arc::new(CheckHost::default());
+    let system: Arc<dyn System> = Arc::new(check_host());
     // A source that cannot be described is skipped, not fatal: the compile then
     // has no forward-propagated type for it, which is what the checker reports.
     let _ = fossil_introspect::introspect_program(

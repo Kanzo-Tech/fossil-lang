@@ -467,9 +467,8 @@ pub fn server_capabilities() -> ServerCapabilities {
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         definition_provider: Some(OneOf::Left(true)),
         completion_provider: Some(CompletionOptions {
-            // `.` opens field/property completion; `:` opens prefixed-name
-            // completion (after a `prefix:`).
-            trigger_characters: Some(vec![".".to_string(), ":".to_string()]),
+            // `.` opens field/property completion.
+            trigger_characters: Some(vec![".".to_string()]),
             ..CompletionOptions::default()
         }),
         document_symbol_provider: Some(OneOf::Left(true)),
@@ -548,7 +547,7 @@ fn handle_definition(state: &LspState, req: Request) -> Response {
     let locations: Vec<Location> = targets
         .into_iter()
         .filter_map(|t| {
-            let target_uri = Uri::from_str_maybe(t.file.path(&state.db))?;
+            let target_uri = fossil_ide::file_uri(t.file.path(&state.db))?;
             Some(Location {
                 uri: target_uri,
                 range: byte_range_to_lsp_range(&state.db, t.file, t.range),
@@ -834,24 +833,4 @@ where
     N: lsp_types::notification::Notification,
 {
     notif.extract::<N::Params>(N::METHOD)
-}
-
-/// Parse a path or URI string into an `lsp_types::Uri`. The LSP keys documents
-/// by URI; a `SourceFile.path` may be either a `file://` URI (from the LSP) or
-/// a bare path (from a test) — prepend `file://` when schemeless.
-trait UriExt: Sized {
-    fn from_str_maybe(s: &str) -> Option<Self>;
-}
-
-impl UriExt for Uri {
-    fn from_str_maybe(s: &str) -> Option<Self> {
-        use std::str::FromStr as _;
-        if s.contains("://") {
-            Self::from_str(s).ok()
-        } else if let Some(rest) = s.strip_prefix('/') {
-            Self::from_str(&format!("file:///{rest}")).ok()
-        } else {
-            Self::from_str(&format!("file://{s}")).ok()
-        }
-    }
 }

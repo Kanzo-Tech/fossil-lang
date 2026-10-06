@@ -130,7 +130,7 @@ pub fn node_at_position(
     token_at_position(db, file, line, character)?.parent()
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;

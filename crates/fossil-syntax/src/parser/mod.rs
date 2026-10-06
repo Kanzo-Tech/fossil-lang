@@ -134,15 +134,6 @@ pub fn parse(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> Cst<'_>
 // Internal recursive-descent parser
 // =====================================================================
 
-/// How far [`Parser::retire`] consumes. See its doc comment for the two.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RetiredRun {
-    /// Exactly N non-trivia tokens.
-    Count(usize),
-    /// The rest of the line.
-    Line,
-}
-
 pub(crate) struct Parser {
     tokens: Vec<LexedToken>,
     pos: usize,
@@ -153,26 +144,6 @@ pub(crate) struct Parser {
     /// `super::items` so the recovery helpers can push diagnostics without
     /// going through a `impl Parser { … }` shim per call site.
     pub(crate) diagnostics: Vec<ParseDiagnostic>,
-    /// How many ternary THEN-branches are open above the current position.
-    ///
-    /// # This is the contiguity check, and it is not the same thing
-    ///
-    /// Disambiguation rule 3 (grammar.bnf, § DISAMBIGUATION RULES) retires the
-    /// no-whitespace-before-the-colon rule, and it is right to: with no
-    /// `PrefixedName` left, a `:` in an expression
-    /// has exactly one reading and the parser needs nothing to find it. What
-    /// the tombstone does not account for is that REFUSING `ex:name` by name is
-    /// not free — to say «this is a CURIE and CURIEs are gone» you have to know
-    /// it is not the `:` of `cond ? a : b`, which is the very question the
-    /// deleted rule answered.
-    ///
-    /// So the check comes back one layer up, as a fact the parser already has
-    /// rather than a fact about whitespace: inside a then-branch a `:` belongs
-    /// to the ternary, and `expr::parse_primary` does not offer its refusal
-    /// there. Outside one, `IDENT : IDENT` is the dead spelling and nothing
-    /// else — which is what lets `cond ? a:b` parse clean, spaces or no spaces,
-    /// where the old rule made it a prefixed name.
-    ternary_then_depth: usize,
 }
 
 impl Parser {
@@ -182,21 +153,7 @@ impl Parser {
             pos: 0,
             builder: GreenNodeBuilder::new(),
             diagnostics: Vec::new(),
-            ternary_then_depth: 0,
         }
-    }
-
-    /// Run `f` with one more ternary then-branch open. See
-    /// [`Parser::ternary_then_depth`]; [`Parser::in_ternary_then`] reads it.
-    pub(crate) fn inside_ternary_then(&mut self, f: impl FnOnce(&mut Self)) {
-        self.ternary_then_depth += 1;
-        f(self);
-        self.ternary_then_depth -= 1;
-    }
-
-    /// Is a `:` at the current position the ternary's rather than a CURIE's?
-    pub(crate) const fn in_ternary_then(&self) -> bool {
-        self.ternary_then_depth > 0
     }
 
     /// Kind of the token at `pos`, or `None` at EOF. Does NOT skip trivia.
@@ -375,17 +332,6 @@ impl Parser {
             u32::try_from(span_end).unwrap_or(u32::MAX),
         );
         let diagnostic = match tok {
-            // The backtick is the one byte logos rejects that the language used
-            // to have a token for, so `unexpected character` would be true and
-            // useless: the author wrote a string, in the spelling that lost. It
-            // is named here rather than in a parser arm because there IS no arm
-            // — the byte never reaches a production.
-            Some(t) if t.kind == SyntaxKind::ERROR && t.text == "`" => {
-                ParseDiagnostic::RetiredSpelling {
-                    form: &diag::retired::BACKTICK,
-                    span,
-                }
-            }
             Some(t) if t.kind == SyntaxKind::ERROR && !t.text.is_empty() => {
                 ParseDiagnostic::UnlexableCharacter {
                     text: t.text.clone(),
@@ -400,70 +346,6 @@ impl Parser {
             self.bump();
         }
         self.finish();
-    }
-
-    /// How far [`Parser::retire`] consumes.
-    ///
-    /// Every retired spelling is CONSUMED under one `ERROR` node rather than
-    /// recovered past. Recovery would leave the tokens outside the node, and the
-    /// author would get `unexpected token` for a form the parser recognised
-    /// exactly — the same silence, one layer up, that made `lower_property`'s
-    /// bare `return None` cost a program its properties.
-    ///
-    /// # `RetiredRun::Count`
-    ///
-    /// Takes N non-trivia tokens. The CURIE is three (`ex` `:` `name`); a
-    /// leading `.` is two.
-    ///
-    /// # `RetiredRun::Line`
-    ///
-    /// Takes the rest of the line, COMMENT included. `prefix ex: <…>` is a
-    /// whole statement and underlining a prefix of it would point at a
-    /// plausible wrong place.
-    ///
-    /// There was a third, `Through(kind)` — «up to and including the first `>`»
-    /// — written for the absolute IRI and deleted when it was measured. It can
-    /// never find its `>`: `//` in the IRI's scheme is the comment opener, and
-    /// with `ABS_IRI` gone nothing claims it first, so `<https://example.org/>`
-    /// lexes as `< https :` and then a COMMENT that runs to the line break.
-    /// That is why the comment counts toward the span here rather than being
-    /// skipped as the trivia it is — the bytes are the form being refused.
-    pub(crate) fn retire(&mut self, form: &'static diag::retired::Retired, run: RetiredRun) {
-        self.skip_trivia();
-        let start = self.current_token_span_start();
-        let mut end = start;
-        let mut left = match run {
-            RetiredRun::Count(n) => n,
-            RetiredRun::Line => usize::MAX,
-        };
-        self.start(SyntaxKind::ERROR);
-        while left > 0 {
-            let Some(t) = self.tokens.get(self.pos) else {
-                break;
-            };
-            match t.kind {
-                // A line break ends every retired form: none of them spans one,
-                // and running past it would swallow the next item.
-                SyntaxKind::NEWLINE => break,
-                SyntaxKind::WHITESPACE => {}
-                // A comment is trivia everywhere else and is part of the form
-                // here: see the note above on `//`.
-                SyntaxKind::COMMENT => end = t.range.end,
-                _ => {
-                    left -= 1;
-                    end = t.range.end;
-                }
-            }
-            self.bump();
-        }
-        self.finish();
-        self.push_diagnostic(ParseDiagnostic::RetiredSpelling {
-            form,
-            span: fossil_base::Span::new(
-                u32::try_from(start).unwrap_or(u32::MAX),
-                u32::try_from(end).unwrap_or(u32::MAX),
-            ),
-        });
     }
 
     /// Byte-offset start of the current non-trivia token, or end-of-input
@@ -544,20 +426,6 @@ mod tests {
             .cloned()
             .map(|d| d.to_diagnostic().problem)
             .collect()
-    }
-
-    /// The retired vocabulary declaration is REFUSED, and the refusal names the
-    /// spelling that replaces it. Not `expected IDENT, found IDENT` — the parser
-    /// knows what this line is.
-    #[test]
-    fn a_prefix_declaration_is_refused_by_name() {
-        let msgs = diagnose_text("prefix ex: <https://example.org/>\n");
-        assert_eq!(msgs.len(), 1, "one refusal for one retired line: {msgs:?}");
-        assert!(
-            matches!(&msgs[0], fossil_base::Problem::RetiredSpelling { spelling, .. } if spelling == "prefix"),
-            "{:?}",
-            msgs[0]
-        );
     }
 
     /// And `prefix` is an ordinary identifier again

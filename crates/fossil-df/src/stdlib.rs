@@ -63,22 +63,9 @@ pub fn datafusion_name(duckdb_name: &str) -> Option<&'static str> {
         // into the `AggFn` that `fossil_mir::lower` reads. Only the scalar
         // rendering is missing, and only a scalar rendering should be.
         "avg" | "max" | "min" | "sum" => return None,
-        // `error`, `json_extract_string`, `split_part` and `regexp_matches`
-        // stood here and are gone with the rows that named them
-        // (`core.require` + `validate.*`, `parse.json`, `parse.csv_row`, and
-        // `validate.regex` respectively). `no_mapping_is_dead` below is what
-        // keeps this list from outliving its templates again — the arms used to
-        // be an append-only record of names once seen.
         _ => return None,
     })
 }
-
-// `template_to_datafusion` lived here: a textual pass over a whole template,
-// replacing `regexp_matches(` with `regexp_like(` and so on before the text was
-// handed to a SQL parser. It went with the SQL parser. `render_expr_template`
-// reads the template itself and reconciles each function name through
-// `datafusion_name` as it meets it, which is one mechanism instead of two and
-// cannot rewrite a name that appears inside a string literal.
 
 /// The catalogued functions this engine cannot render, pinned so that making
 /// one work — or breaking one — is a diff in this list and not a surprise in a
@@ -158,10 +145,7 @@ mod tests {
     /// nothing was red, because a mapping nobody reaches cannot be wrong.
     ///
     /// It reads this file as text rather than taking a hand-written list of the
-    /// arms, which is the shape `xtask`'s `registry_is_shared` and
-    /// `packages/introspect`'s parity test both use: derive the guard from the
-    /// original instead of repeating it. A second list here would need the same
-    /// guard one level up.
+    /// arms: a second list here would need the same guard one level up.
     ///
     /// **What it cannot prove:** that a mapping is CORRECT. That `substring`
     /// should become `substr` and not `substring` is a fact about `DataFusion`,

@@ -1395,7 +1395,7 @@ fn fold_concat_left<'db>(parts: Vec<Expr<'db>>) -> Expr<'db> {
     acc
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     // Every `@subject` below is an interpolated string, and `{Rows.id}` is
     // fossil's hole, not a Rust format argument. The lint reads the Rust
@@ -1837,7 +1837,7 @@ People : Person from Rows
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod null_lowering_tests {
     #![allow(clippy::literal_string_with_formatting_args)]
 

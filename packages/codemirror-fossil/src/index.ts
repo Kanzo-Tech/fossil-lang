@@ -80,7 +80,7 @@
  * would be genuinely useful and genuinely non-trivial — it needs the parser's view
  * of block openers, not the lexer's. Nothing here guesses at it.
  */
-export { fossilHighlighting, buildDecorations } from './highlight.js';
+export { fossilHighlighting } from './highlight.js';
 export type {
   TokenSource,
   HighlightOptions,
@@ -88,22 +88,18 @@ export type {
   SemanticTokenSource,
 } from './highlight.js';
 
-export { fossilLinter, problemMessage, toDiagnostics, uncheckedRow } from './lint.js';
+export { fossilLinter, uncheckedRow } from './lint.js';
 export type { CheckRowLike, CheckSource, LinterOptions } from './lint.js';
 
-export { fossilHover, renderMarkdown } from './hover.js';
+export { fossilHover } from './hover.js';
 export type { HoverRowLike, HoverSource, HoverOptions } from './hover.js';
 
-export { fossilCompletion, fossilCompletionSource, toCompletion } from './complete.js';
+export { fossilCompletion, fossilCompletionSource } from './complete.js';
 export type { CompletionRowLike, CompletionRowSource } from './complete.js';
 
-export { fossilGotoDefinition, gotoDefinitionAt } from './navigate.js';
+export { fossilGotoDefinition } from './navigate.js';
 export type { DefinitionRowLike, DefinitionSource, NavigateOptions } from './navigate.js';
 
-export { TAG_BY_NAME, tagFor, SEMANTIC_TAG_BY_KIND, LEXICAL_KINDS, semanticTagFor } from './tags.js';
-export { byteToUtf16Mapper } from './offsets.js';
-export { offsetOf, positionOf, rangeOf } from './positions.js';
-export type { Position, Range } from './positions.js';
 
 import { type Extension } from '@codemirror/state';
 

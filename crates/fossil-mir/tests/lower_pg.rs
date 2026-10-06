@@ -4,7 +4,6 @@
 //! Fija además la disciplina de fallo: un `from` que no resuelve a una fuente
 //! TIÑE el grafo en vez de sustituir un valor por defecto.
 
-#![cfg(not(target_arch = "wasm32"))]
 // Every `@subject` below is an interpolated string, and `{User.id}` is fossil's
 // hole, not a Rust format argument. The lint reads the Rust literal and cannot
 // know that.
@@ -144,11 +143,8 @@ Thing : Thing from filtered
         mir.ops(&db).is_empty(),
         "a poisoned graph carries no ops, so nothing can execute it by accident"
     );
-    // The specific regression, and it is asserted on the DIAGNOSTIC rather
-    // than on the ops. A loop over `ops` looking for `examples/users.csv` is
-    // what stood here, and it ran zero times against the empty vec the
-    // assertion above had just demanded — a guard that reads as a guard and
-    // proves nothing. The problem is the only observable that distinguishes
+    // Asserted on the DIAGNOSTIC rather than on the ops: the problem is the
+    // only observable that distinguishes
     // «poisoned because the source did not resolve» from «poisoned because the
     // body failed to type-check», and the two would both satisfy every
     // assertion above.
@@ -162,42 +158,6 @@ Thing : Thing from filtered
         diags.iter().map(|d| &d.problem).collect::<Vec<_>>(),
     );
 }
-
-// `EDGES` + `lower_pg_classifies_edge_vs_prop` lived here, and what they proved
-// is worth writing down because it has to be re-proved against the constructor.
-//
-// Given two mappings over two sources — `Person` keyed
-// `@subject = "https://example.org/person/{User.id}"` and `Order` keyed
-// `@subject = "https://example.org/order/{Purchase.order_id}"` — the `Order`
-// body wrote three non-identity properties and the lowering sorted them three
-// ways:
-//
-//   * `placedBy = "https://example.org/person/{Purchase.user_id}"` →
-//     `Op::EmitEdge { edge_type: "placedBy", dst_type: "Person" }`. The
-//     template's SKELETON (`https://example.org/person/{}`, every per-row hole
-//     replaced by a marker) equalled the skeleton of `Person`'s subject, so the
-//     value was taken to be a reference to a `Person`.
-//   * `total = Purchase.amount` → a vertex prop. `EmitVertex`'s props were
-//     exactly `["total"]`.
-//   * `external = "https://example.org/widget/{Purchase.wid}"` → NEITHER. A
-//     template whose skeleton matched no mapping's subject was dropped: no
-//     edge, and not a prop either.
-//
-// That mechanism is deleted (see the tombstone at `fossil_mir::lower`'s
-// `subject_skeletons`): an edge was GUESSED by comparing strings, and the guess
-// existed only because the identity rule was written once per mapping. There is
-// now exactly ONE identity per type — every mapping producing `T` declares the
-// same `@subject`, and disagreeing is an error — so the comparison becomes a
-// lookup, and an edge is written by naming the target type:
-// `buyer = Person(User.email)` builds that type's one subject template. The
-// successor test drives the constructor, and the three outcomes it has to keep
-// are the three above.
-//
-// The dangling case is the one most likely to be lost: a reference the program
-// writes to a subject nothing constructs must still be well-formed and must not
-// become a property. An edge is a reference and RDF
-// is open-world, so nothing checks that the target exists — which makes "it
-// silently became a column" the failure to guard against.
 
 // ── Schema-driven refinement (GraphSchema → edges + cardinality) ────────────
 

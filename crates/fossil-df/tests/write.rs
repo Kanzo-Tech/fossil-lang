@@ -26,7 +26,6 @@
 //! 9. `fossil.json` is the last object written, and a write that fails before
 //!    it leaves no `fossil.json` at all.
 
-#![cfg(not(target_arch = "wasm32"))]
 // Counts cross into `DuckDB`'s `BIGINT` and back; every one here is small. The
 // executor is single-threaded, so its futures are not `Send` and need not be.
 #![allow(

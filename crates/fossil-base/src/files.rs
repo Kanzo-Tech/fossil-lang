@@ -126,7 +126,7 @@ pub fn register_document(db: &mut dyn Db, key: &str, text: &str) {
     register_file(db, key.to_string(), document);
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};

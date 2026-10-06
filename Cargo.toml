@@ -24,7 +24,6 @@ miette = { version = "7.6", default-features = false }
 thiserror = "1"
 
 # === IR / codegen ===
-sqlparser = "0.59"
 indexmap = "2"
 smol_str = "0.3"
 
@@ -144,9 +143,7 @@ secrecy = { version = "0.10", features = ["serde"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 # === Dev / testing ===
-insta = { version = "1", features = ["yaml"] }
 expect-test = "1"
-wasm-bindgen-test = "0.3"
 # Native temp dirs for integration tests that write Parquet to disk and read it
 # back via duckdb — `fossil-df`, `fossil-introspect` and `fossil-lsp`, which
 # are its three dev-dependents. Native-only

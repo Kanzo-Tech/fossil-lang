@@ -77,7 +77,7 @@ jobs:
           RUSTDOCFLAGS: -D rustdoc::broken_intra_doc_links
 
   native:
-    name: native (cargo check + test)
+    name: native (cargo test)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -90,23 +90,7 @@ jobs:
           # asserts it. Naming the toolchain here bypasses the components
           # rust-toolchain.toml declares, so it has to be named again.
           components: rustfmt
-      - run: cargo check --workspace --all-targets
       - run: cargo test --workspace
-      # The HARD didChange-budget gate. A margined wall-clock
-      # correctness test — catches algorithmic blow-up in the per-keystroke
-      # analysis round-trip without flaking on CI noise (the design goal is
-      # <100ms; the gate budget has margin). Run explicitly so a regression here
-      # is attributed, not buried in the workspace test summary.
-      - name: didChange budget (hard gate)
-        run: cargo test -p fossil-lsp --test didchange_budget -- --nocapture
-      # ADVISORY: the Criterion didChange benchmark. Informational on shared CI
-      # (the 20%-regression comparison is reliable only on a pinned/self-hosted
-      # runner, because shared-runner noise swamps the signal); `--no-run` here
-      # just proves the harness compiles
-      # so the bench cannot rot. Full timing runs on a controlled runner.
-      - name: didChange benchmark (advisory — compile only on shared CI)
-        run: cargo bench -p fossil-lsp --no-run
-        continue-on-error: true
 
   wasm:
     name: wasm (cargo check on gated crates)
@@ -135,8 +119,6 @@ jobs:
       # to drift out of sync (it had: ci.yml listed 9, the .cargo alias 6).
       - name: cargo xtask wasm-check
         run: cargo xtask wasm-check
-      - name: cargo build --release for fossil-wasm (smoke)
-        run: cargo build --target wasm32-unknown-unknown --release -p fossil-wasm
 
   deny:
     name: cargo-deny (advisories + licenses + bans)

@@ -135,7 +135,7 @@ pub fn ast_id_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> AstIdM
     AstIdMap::new(db, entries)
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;

@@ -97,7 +97,7 @@ fn byte_range_to_lsp(start: u32, end: u32, li: &LineIndex) -> Range {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;

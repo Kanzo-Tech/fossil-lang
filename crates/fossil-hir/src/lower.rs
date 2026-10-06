@@ -1850,14 +1850,6 @@ fn emit_item(db: &dyn fossil_base::Db, span: Span, problem: Problem, help: Optio
         .accumulate(db);
 }
 
-// `lookup_prefix` lived here — four callers, and it WAS the language: it turned
-// `ex` into `https://example.org/` against the file's `prefix` lines. There are
-// no `prefix` lines — a vocabulary declaration is not a form of this language —
-// and no CURIE to expand: a `:` that is not a mapping header or a ternary is an
-// error. So the function and the `&[PrefixEntry]` slice its
-// four callers threaded between them are both gone. What resolves a name now is
-// `DefMap::lookup_type`, against a document — see `lower_mapping_node`.
-
 /// A `MAPPING` node whose header this cannot read: report it once, keep the
 /// slot, and hand back the taint.
 ///
@@ -2226,12 +2218,6 @@ fn lower_property(
             PropertyKey::Subject
         }
         [t] if t.kind() == SyntaxKind::IDENT => PropertyKey::Name(SmolStr::from(t.text())),
-        // An `ABS_IRI` arm and a `[prefix, sep, local]` CURIE arm lived here,
-        // each with its own «write `{short} = …` instead» message. Neither can
-        // fire: `ABS_IRI` is not a token and the parser refuses both forms
-        // where they are written, which is a better place for the message
-        // because it has the source span rather than a `PROPERTY_LHS` that may
-        // hold nothing at all.
         _ => {
             diagnose(
                 db,
@@ -2360,10 +2346,6 @@ fn lower_expr_inner(
             .and_then(|grouped| lower_expr_inner(db, &grouped, types)),
         SyntaxKind::TERNARY_EXPR => lower_ternary(db, &inner, types),
         SyntaxKind::UNARY_EXPR => lower_unary(db, &inner, types),
-        // A `TEMPLATE_EXPR` arm lived here — a backtick literal the carve left
-        // whole, lowered to one literal run. There is no TEMPLATE: the backtick,
-        // `${` and `\$` are not tokens, so a string with no hole reaches the
-        // `LITERAL_EXPR` arm below as the `STRING` it always was.
         SyntaxKind::INTERP_STRING_EXPR => {
             let mut parts = Vec::new();
             for child in inner.children_with_tokens() {
@@ -2387,11 +2369,6 @@ fn lower_expr_inner(
             }
             Some(HirExpr::Interpolation(parts))
         }
-        // A `FIELD_REF_EXPR` arm lived here — `DOT IDENT`, lowered to
-        // `HirExpr::FieldRef`. There is no such node: a
-        // leading `.` is refused by the parser, and every reference is
-        // qualified, which reaches the `POSTFIX_EXPR` arm as a `ColumnRef`.
-        //
         // `HirExpr::FieldRef` itself does NOT go with it: the `idents.len() == 1`
         // case below still builds one for a bare identifier. It is the CST node
         // that is gone, not the HIR form.
@@ -3136,7 +3113,7 @@ fn dotted_name(node: &fossil_syntax::SyntaxNode) -> Option<String> {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
@@ -3548,12 +3525,8 @@ User : Person from users
     /// and lowers like every other binary operator, and the leading `.` is not
     /// a form the parser reads. Every `*_EXPR` kind now has an arm, so nothing
     /// a well-formed parse produces can fall through — what reaches `other =>`
-    /// is the parser's `ERROR` node, which is exactly the property a retired
-    /// spelling leaves behind.
-    ///
-    /// That is why this is not deleted with the fixture it was written for: the
-    /// guarantee it pins is the DROP being loud, and while the surface is being
-    /// replaced a refused spelling is the commonest way to reach it.
+    /// is the parser's `ERROR` node, and the guarantee pinned here is that the
+    /// drop is loud.
     #[test]
     fn an_unlowerable_expression_is_a_diagnostic_and_not_a_silent_drop() {
         const REFUSED: &str = "\
@@ -3581,7 +3554,7 @@ User : Person from users
         let d = &diagnostics[0];
         assert_eq!(d.severity, fossil_base::Severity::Error);
         assert!(
-            d.message().contains(".id"),
+            d.message().contains("`.`"),
             "the diagnostic must quote what the user wrote, got: {}",
             d.message(),
         );
@@ -3639,24 +3612,6 @@ User : Person from users
             },
         );
     }
-
-    // `an_undeclared_prefix_is_a_diagnostic_and_not_a_silent_drop` stood here.
-    // It wrote `User : ex:Person from users` with `kind = ex:Human` and no
-    // `prefix` line, and asserted that the header position and the value
-    // position each said «undeclared prefix `ex:`» rather than dropping in
-    // silence. There is no prefix table and no CURIE in any position, so there
-    // is no lookup left to fail: a shape is one of the names a `type { … } :=
-    // …` binding introduced and a value is a qualified reference. The
-    // loud-drop guarantee it shared with the two tests above is pinned by
-    // `an_unlowerable_expression_is_a_diagnostic_and_not_a_silent_drop`.
-
-    // `an_absolute_iri_is_not_a_property_name_and_the_message_says_what_is`
-    // stood here, on `<https://example.org/name> = .name`. The `ABS_IRI` arm of
-    // the property-key lowering is gone with the token — `<` and `>` have one
-    // reading each — so the message it asserted on («not by an absolute IRI …
-    // write `name = …`») is not emitted from this crate at all. The parser
-    // refuses the form where it is written, which is where the span is, as a
-    // `syntax/retired-spelling` built from `fossil_syntax::parser::diag::retired::ABSOLUTE_IRI`.
 
     /// A name that is not catalogued is a type error, not a lowering hole: the
     /// HIR carries the call, and the checker is what refuses it.

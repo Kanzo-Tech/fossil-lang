@@ -42,7 +42,6 @@
 //! 4. **Silence is not deafness.** The program that names the document is still
 //!    checked against it, and a real mistake in a real program still reports.
 
-#![cfg(not(target_arch = "wasm32"))]
 // `{users.id}` is a Fossil interpolation hole in a literal program, not a Rust
 // format-string argument.
 #![allow(clippy::literal_string_with_formatting_args)]

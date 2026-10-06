@@ -30,44 +30,18 @@
 //! filesystem, a decoder table, and the documents put in the database before
 //! the queries look for them. It holds no descriptor of its own.
 
-#![cfg(not(target_arch = "wasm32"))]
 // The `.fossil` fixture sources interpolate — `"…/{users.id}"` is LITERAL
 // Fossil source, not a Rust format-string arg.
 #![allow(clippy::literal_string_with_formatting_args)]
 
-use std::path::Path;
 use std::sync::Arc;
-use std::time::SystemTime;
 
-use fossil_base::{Catalogue, Files, FsError, Provider, SourceFile, System};
-
-/// The test's host `System` — a filesystem plus the `ShEx` decoder row, the
-/// same pair `fossil-lsp`'s `LspSystem` installs. `fossil_base::test_support::NativeSystem`
-/// is not enough: its decoder table is the trait default `&[]`, and a document
-/// nothing decodes resolves no shape.
-#[derive(Debug, Default)]
-struct HostSystem(fossil_descriptors_input::DescriptorCache);
-
-impl System for HostSystem {
-    /// The introspected-schema table. The trait default is `None`, and a host
-    /// that keeps it hands these tests no typed source row at all.
-    fn descriptors(&self) -> Option<&fossil_descriptors_input::DescriptorCache> {
-        Some(&self.0)
-    }
-
-    fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
-        std::fs::read(path).map_err(|e| FsError::Io(e.to_string()))
-    }
-    fn now(&self) -> SystemTime {
-        SystemTime::UNIX_EPOCH
-    }
-    fn providers(&self) -> &'static [&'static Provider] {
-        fossil_descriptors_output::PROVIDERS
-    }
-}
+use fossil_base::test_support::NativeSystem;
+use fossil_base::{Catalogue, Files, SourceFile, System};
 
 /// A host db stand-in: a real Salsa db (so tracked queries run) over a
-/// [`HostSystem`] (so the documents the program names are readable).
+/// `NativeSystem` with every provider row (so the documents the program names
+/// are readable).
 #[salsa::db]
 #[derive(Clone)]
 struct HostDb {
@@ -104,7 +78,9 @@ impl HostDb {
     fn new() -> Self {
         Self {
             storage: salsa::Storage::default(),
-            system: Arc::new(HostSystem::default()),
+            system: Arc::new(NativeSystem::with_providers(
+                fossil_descriptors_output::PROVIDERS,
+            )),
             files: Files::default(),
             catalogue: Catalogue::default(),
         }

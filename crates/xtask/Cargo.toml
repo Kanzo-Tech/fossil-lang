@@ -12,6 +12,10 @@ description = "Repository automation — run via `cargo xtask <command>`."
 
 [dependencies]
 serde_json = { workspace = true }
+# `cargo xtask problem` derives `problem.schema.json` from `Problem`. A NORMAL
+# dependency, unlike `fossil-hir` below: nothing xtask generates is compiled
+# into it, so a bad emit cannot stop the generator building.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
 
 [dev-dependencies]
 # **A DEV-dependency, and the distinction is the whole point.** `cargo xtask
@@ -27,9 +31,6 @@ serde_json = { workspace = true }
 # receiver rule from `fossil_hir` instead of leaving `is_namespace_head` to
 # restate it.
 fossil-hir = { path = "../fossil-hir" }
-# `tests/problem_generated.rs` renders each code's detail with `Problem`'s own
-# `Display` and holds the translated `DETAILS` to it.
-fossil-graph-schema = { path = "../fossil-graph-schema" }
 # `tests/engine_reach.rs` reads `deny.toml` — the file that IS the engine-ring
 # policy — rather than a second copy of its list, so it needs a TOML parser.
 # Declared here and not in `[workspace.dependencies]` for the reason

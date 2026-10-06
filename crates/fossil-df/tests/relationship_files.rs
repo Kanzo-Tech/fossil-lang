@@ -13,8 +13,6 @@
 //! - an edge read from it is written by a SECOND mapping of a type that already
 //!   has one, and every edge the two share is one table, not two under one name.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 #[path = "support/native.rs"]
 mod native;
 mod support;

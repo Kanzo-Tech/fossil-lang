@@ -4,7 +4,7 @@
 import init from '../pkg/fossil_wasm.js';
 import type { InitInput } from '../pkg/fossil_wasm.js';
 
-import { boot } from '@fossil-lang/types';
+import { loader } from '@fossil-lang/types';
 
 export type { InitInput };
 
@@ -16,8 +16,6 @@ export interface BootOptions {
   /** Stops the wait for the boot, rejecting with its reason. The boot itself is shared and goes on. */
   signal?: AbortSignal;
 }
-
-let _initPromise: Promise<unknown> | null = null;
 
 /**
  * Boot the fossil-wasm module. MUST be awaited before calling any of
@@ -34,22 +32,4 @@ let _initPromise: Promise<unknown> | null = null;
  * `wasm` is for the host with no bundler to do that: Node, whose `fetch` rejects
  * `file://`, hands the bytes (`BufferSource`) or a `Response`.
  */
-export function initFossilWasm(wasm?: InitInput): Promise<unknown> {
-  if (_initPromise === null) {
-    // The object form: the positional one still works but logs a deprecation warning.
-    const pending = boot('fossil_wasm_bg.wasm', () => init(wasm === undefined ? undefined : { module_or_path: wasm }));
-    _initPromise = pending;
-    pending.catch(() => {
-      if (_initPromise === pending) _initPromise = null; // forgotten, so the next call boots again
-    });
-  }
-  return _initPromise;
-}
-
-/**
- * For tests + hot-reload — reset the memoised promise. NOT exported from the
- * package index (test-internal helper).
- */
-export function __resetForTests(): void {
-  _initPromise = null;
-}
+export const initFossilWasm = loader<InitInput>('fossil_wasm_bg.wasm', init);

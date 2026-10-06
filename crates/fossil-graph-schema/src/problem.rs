@@ -302,12 +302,6 @@ catalogue! {
     #[error("unexpected character `{character}` — no token starts with it")]
     UnknownCharacter { character: String },
 
-    /// A spelling the language had and retired, recognised on purpose so the
-    /// message can name what replaces it.
-    "syntax/retired-spelling", "A retired spelling",
-    #[error("`{spelling}` is retired: write `{replacement}`")]
-    RetiredSpelling { spelling: String, replacement: String },
-
     /// A `@rename` written incompletely; `missing` is the part it lacks.
     "syntax/malformed-rename", "A malformed rename",
     #[error(
@@ -919,19 +913,43 @@ catalogue! {
     Bug { what: String },
 }
 
-/// Codes that were live once and are not now, with the tag that last emitted
-/// each. A code is never reused, and a test holds that no live code is here.
-pub const RETIRED: &[(&str, &str)] = &[
-    ("write/unknown-type", "v0.3.0-alpha.18"),
-    ("layout/dangling-endpoint", "v0.3.0-alpha.18"),
-];
-
-/// The published documentation, and the error index within it — `DOCS` and
-/// `INDEX` in `@fossil-lang/types`' `error.ts`, held equal by a test below.
+/// The published documentation. `problem.schema.json` carries it, and
+/// `@fossil-lang/types`' `helpUrl` reads it from there.
 const DOCS: &str = "https://kanzo-tech.github.io/fossil-lang";
+/// The error index within it: a page per code, the code as its route.
 const INDEX: &str = "docs/errors";
 
 impl Problem {
+    /// `problem.schema.json`: the JSON Schema of this enum, each arm carrying
+    /// its `#[error]` as written (`x-detail`), and the help link's two halves
+    /// (`x-help`). `cargo xtask problem` writes it and generates the
+    /// TypeScript catalogue from it.
+    ///
+    /// # Panics
+    ///
+    /// If the derived schema is not the `oneOf` of one-code arms `schemars`
+    /// derives for this enum.
+    #[must_use]
+    pub fn json_schema() -> String {
+        let mut schema =
+            serde_json::to_value(schemars::schema_for!(Self)).expect("a derived schema serialises");
+        for arm in schema["oneOf"].as_array_mut().expect("a top-level oneOf") {
+            let code = arm["properties"]["code"]["enum"][0]
+                .as_str()
+                .expect("one code")
+                .to_string();
+            let (_, template) = TEMPLATES
+                .iter()
+                .find(|(c, _)| *c == code)
+                .expect("a template per code");
+            arm["x-detail"] = serde_json::Value::from(*template);
+        }
+        schema["x-help"] = serde_json::json!({ "site": DOCS, "index": INDEX });
+        let mut out = serde_json::to_string_pretty(&schema).expect("a derived schema serialises");
+        out.push('\n');
+        out
+    }
+
     /// The published page that explains this code — `helpUrl(code)` in
     /// `@fossil-lang/types`. What an LSP `codeDescription.href` points at; a
     /// host serving its own copy of the site builds the link with `helpUrl`.
@@ -1338,13 +1356,6 @@ mod tests {
     }
 
     #[test]
-    fn no_live_code_is_retired() {
-        for (code, _) in RETIRED {
-            assert!(!CODES.contains(code), "{code} is live and retired");
-        }
-    }
-
-    #[test]
     fn the_code_is_the_serde_tag_and_data_is_an_object() {
         for problem in samples() {
             let json = serde_json::to_value(&problem).expect("serialises");
@@ -1438,24 +1449,8 @@ mod tests {
         }
     }
 
-    /// `help_url` and TypeScript's `helpUrl` are two spellings of one link; the
-    /// constants are read out of `error.ts` rather than restated here.
     #[test]
-    fn the_help_url_is_the_one_typescript_builds() {
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../packages/types/src/error.ts"
-        );
-        let ts = std::fs::read_to_string(path).expect("packages/types/src/error.ts is readable");
-        let constant = |name: &str| {
-            ts.lines()
-                .find_map(|l| l.strip_prefix(&format!("const {name} = '")))
-                .and_then(|rest| rest.strip_suffix("';"))
-                .unwrap_or_else(|| panic!("error.ts declares `const {name} = '…';`"))
-                .to_string()
-        };
-        assert_eq!(constant("DOCS"), DOCS);
-        assert_eq!(constant("INDEX"), INDEX);
+    fn the_help_url_is_the_published_page() {
         assert_eq!(
             Problem::Busy {
                 call: "check".into()

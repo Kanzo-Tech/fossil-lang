@@ -396,7 +396,7 @@ async fn prepare_vertex_ops<'db>(
         })?;
 
     let df = plan_relation(ctx, ops, input, anchor).await?;
-    let projected = df.select(vertex_projection(render(&id), &props))?;
+    let projected = df.select(vertex_projection(render(&id)?, &props)?)?;
     let node = NodeType {
         label: type_name,
         iri: rdf_type,
@@ -556,12 +556,15 @@ fn node_property(db: &dyn fossil_base::Db, prop: &VProp<'_>) -> NodeProp {
 }
 
 /// The vertex projection exprs: `id AS subject`, then each prop.
-fn vertex_projection(subject: DfExpr, props: &[VProp<'_>]) -> Vec<DfExpr> {
-    std::iter::once(subject.alias("subject"))
+fn vertex_projection(
+    subject: DfExpr,
+    props: &[VProp<'_>],
+) -> datafusion::error::Result<Vec<DfExpr>> {
+    std::iter::once(Ok(subject.alias("subject")))
         .chain(
             props
                 .iter()
-                .map(|p| render(&p.value).alias(p.name.as_str())),
+                .map(|p| Ok(render(&p.value)?.alias(p.name.as_str()))),
         )
         .collect()
 }
@@ -723,8 +726,8 @@ async fn execute_edge(
     single_valued: bool,
 ) -> datafusion::error::Result<PreparedEdge> {
     let edge_src = rows.select(vec![
-        render(src_id).alias("src_iri"),
-        render(dst_id).alias("dst_iri"),
+        render(src_id)?.alias("src_iri"),
+        render(dst_id)?.alias("dst_iri"),
     ])?;
     // A multi-valued edge's `dst_iri` is a `List` (the RDF pivot kept every
     // object); UNNEST expands it to one (src, dst) row per element — the
@@ -871,14 +874,6 @@ async fn finalize_edge(
         dropped,
     })
 }
-
-// `resolve_source_uri` lived here and expanded `@conn` aliases and nothing else
-// — it was called THE source-resolution rule, and it was half of one. A
-// reference also has to be anchored somewhere, and every caller of this was
-// left to decide that for itself: the executor decided "nowhere", which is the
-// process's working directory. Both halves are one function now,
-// `fossil_locator::SourceAnchor::locator`, and it cannot be called without an
-// anchor.
 
 /// Every resolved source URI + format + binding name of a lowered mapping, in
 /// op order. A mapping had exactly one `Source` until a `join` gave it two,
@@ -1430,9 +1425,9 @@ pub fn register_provider_sources(
 /// Render a MIR [`Expr`] to a `DataFusion` logical [`DfExpr`]. Total over the
 /// MIR expression space since F2 §2 — there is no `unimplemented!()` left to
 /// reach, which is what makes a property that type-checks a property that runs.
-pub(crate) fn render(e: &Expr<'_>) -> DfExpr {
+pub(crate) fn render(e: &Expr<'_>) -> datafusion::error::Result<DfExpr> {
     use fossil_hir::{BinOp, UnOp};
-    match e {
+    Ok(match e {
         Expr::LitString(s) => lit(s.to_string()),
         // `new_unqualified` / `TableReference::bare` (NOT `col()`): a bare
         // `col("hasProject")` folds the identifier to lowercase, but the source
@@ -1452,9 +1447,9 @@ pub(crate) fn render(e: &Expr<'_>) -> DfExpr {
                 column.as_str(),
             )
         }),
-        Expr::Concat(a, b) => binary_expr(render(a), Operator::StringConcat, render(b)),
-        Expr::Assert { inner, .. } => render(inner),
-        Expr::Call { func, args, .. } => render_call(func.as_str(), args),
+        Expr::Concat(a, b) => binary_expr(render(a)?, Operator::StringConcat, render(b)?),
+        Expr::Assert { inner, .. } => render(inner)?,
+        Expr::Call { func, args, .. } => render_call(func.as_str(), args)?,
         Expr::LitInt(v) => lit(*v),
         Expr::LitFloat(v) => lit(v.get()),
         Expr::LitBool(b) => lit(*b),
@@ -1462,7 +1457,7 @@ pub(crate) fn render(e: &Expr<'_>) -> DfExpr {
         // NULL and not true, so this is where the surface's `x != null` gets
         // the operator it means.
         Expr::IsNull { operand, negated } => {
-            let inner = render(operand);
+            let inner = render(operand)?;
             if *negated {
                 DfExpr::IsNotNull(Box::new(inner))
             } else {
@@ -1481,17 +1476,19 @@ pub(crate) fn render(e: &Expr<'_>) -> DfExpr {
             rhs,
             ..
         } => binary_expr(
-            datafusion::logical_expr::cast(render(lhs), DataType::Float64),
+            datafusion::logical_expr::cast(render(lhs)?, DataType::Float64),
             Operator::Divide,
-            render(rhs),
+            render(rhs)?,
         ),
-        Expr::BinOp { op, lhs, rhs, .. } => binary_expr(render(lhs), df_operator(*op), render(rhs)),
+        Expr::BinOp { op, lhs, rhs, .. } => {
+            binary_expr(render(lhs)?, df_operator(*op), render(rhs)?)
+        }
         // `-x` and `not x`, as themselves. Rendering `-x` as `0 - x` would make
         // `-0.0` come out `+0.0` — measured, and the reason
         // `fossil_hir::HirExpr::UnaryOp` is a node at all.
         Expr::UnaryOp { op, operand, .. } => match op {
-            UnOp::Neg => DfExpr::Negative(Box::new(render(operand))),
-            UnOp::Not => DfExpr::Not(Box::new(render(operand))),
+            UnOp::Neg => DfExpr::Negative(Box::new(render(operand)?)),
+            UnOp::Not => DfExpr::Not(Box::new(render(operand)?)),
         },
         // A two-armed CASE. `otherwise` is always present — fossil has no
         // one-armed conditional, so no row can fall through to NULL.
@@ -1500,12 +1497,10 @@ pub(crate) fn render(e: &Expr<'_>) -> DfExpr {
             then,
             otherwise,
             ..
-        } => datafusion::prelude::when(render(cond), render(then))
-            .otherwise(render(otherwise))
-            .unwrap_or_else(|e| {
-                unsupported_call("? :", &format!("could not be built as a CASE: {e}"))
-            }),
-    }
+        } => {
+            datafusion::prelude::when(render(cond)?, render(then)?).otherwise(render(otherwise)?)?
+        }
+    })
 }
 
 /// The `DataFusion` operator for a fossil one. The two sets coincide exactly —
@@ -1540,20 +1535,21 @@ const fn df_operator(op: fossil_hir::BinOp) -> Operator {
 /// it can still hit is a function this engine has no implementation for — an
 /// aggregate in a scalar position — and that is an error carried in the plan,
 /// not a panic and not a dropped column.
-fn render_call(func: &str, args: &[Expr<'_>]) -> DfExpr {
+fn render_call(func: &str, args: &[Expr<'_>]) -> datafusion::error::Result<DfExpr> {
     use fossil_hir::stdlib::LoweringKind;
 
-    let rendered: Vec<DfExpr> = args.iter().map(render).collect();
+    let rendered = args
+        .iter()
+        .map(render)
+        .collect::<datafusion::error::Result<Vec<_>>>()?;
     let Some(entry) = fossil_hir::stdlib::stdlib().lookup(func) else {
-        return unsupported_call(func, "is not in the stdlib catalog");
+        return Err(unsupported_call(func));
     };
-
     match &entry.lowering {
-        LoweringKind::Expr(template) => match render_expr_template(template.as_str(), &rendered) {
-            Ok(e) => e,
-            Err(why) => unsupported_call(func, &why),
-        },
-        LoweringKind::Op(_) => unsupported_call(func, "is a plan operator, not a value"),
+        LoweringKind::Expr(template) => {
+            render_expr_template(template.as_str(), &rendered).map_err(|_| unsupported_call(func))
+        }
+        LoweringKind::Op(_) => Err(unsupported_call(func)),
     }
 }
 
@@ -1571,12 +1567,11 @@ fn render_call(func: &str, args: &[Expr<'_>]) -> DfExpr {
 /// `SessionContext::parse_sql_expr` is behind its `sql` feature, which
 /// `Cargo.toml` turns OFF on purpose — this crate compiles to `wasm32` and the
 /// SQL frontend is bundle weight for a backend that builds plans
-/// programmatically. `sqlparser` is declared in the workspace but is in nobody's
-/// dependency tree, so it would be a new dependency for one call site.
+/// programmatically. `sqlparser` would be a new dependency for one call site.
 ///
 /// What is read here is not SQL. It is the closed expression language the
-/// CATALOGUE writes, which is nine shapes wide and enumerated in
-/// [`TEMPLATE_GRAMMAR`]. A template outside it is an `Err` that names itself, so
+/// CATALOGUE writes, which is nine shapes wide and enumerated on
+/// [`TemplateReader`]. A template outside it is an `Err` that names itself, so
 /// the day the catalogue wants a tenth shape, the failure says so.
 ///
 /// # The dialect seam, which is real and is NOT hidden
@@ -1587,7 +1582,7 @@ fn render_call(func: &str, args: &[Expr<'_>]) -> DfExpr {
 /// rather than to a single builtin.
 ///
 /// What cannot be reconciled stays a NAMED gap — see [`crate::stdlib`]. An
-/// `Err` becomes an `unsupported_call`, never a dropped column.
+/// `Err` fails the plan as `unsupported/expression`, never a dropped column.
 ///
 /// # Errors
 ///
@@ -1611,15 +1606,8 @@ pub(crate) fn render_expr_template(template: &str, args: &[DfExpr]) -> Result<Df
     Ok(e)
 }
 
-/// A reader over one catalogue template. See [`TEMPLATE_GRAMMAR`] for the grammar.
-struct TemplateReader<'a> {
-    chars: Vec<char>,
-    pos: usize,
-    args: &'a [DfExpr],
-}
-
-/// The grammar of a catalogue template — the whole of it, and the reason a SQL
-/// parser is not needed:
+/// A reader over one catalogue template. Its grammar is the whole of it, and
+/// the reason a SQL parser is not needed:
 ///
 /// ```text
 /// Expr    := Or
@@ -1635,8 +1623,11 @@ struct TemplateReader<'a> {
 /// ```
 ///
 /// Nine shapes. Anything else is an error that names the offset.
-#[allow(dead_code)] // documentation anchor: the grammar above is the datum.
-const TEMPLATE_GRAMMAR: () = ();
+struct TemplateReader<'a> {
+    chars: Vec<char>,
+    pos: usize,
+    args: &'a [DfExpr],
+}
 
 impl TemplateReader<'_> {
     fn skip_ws(&mut self) {
@@ -1916,17 +1907,48 @@ fn cast_target(sql_type: &str) -> Option<datafusion::arrow::datatypes::DataType>
     })
 }
 
-/// A call the engine cannot make, rendered as an expression that fails the plan
-/// with fossil's own words. Not a panic: one unrunnable property must not take
-/// the whole run down before the other diagnostics are reported.
-fn unsupported_call(func: &str, why: &str) -> DfExpr {
-    DfExpr::Literal(datafusion::scalar::ScalarValue::Utf8(None), None)
-        .alias(format!("__fossil_unsupported__{func}__{why}"))
+/// A call the engine cannot make: the plan fails with fossil's own
+/// `unsupported/expression`, which [`crate::executor`] finds wherever
+/// `DataFusion` wrapped it.
+fn unsupported_call(func: &str) -> datafusion::error::DataFusionError {
+    datafusion::error::DataFusionError::External(Box::new(fossil_graph_schema::Failure::new(
+        fossil_graph_schema::Problem::UnsupportedExpression {
+            expression: func.to_owned(),
+        },
+    )))
 }
 
 #[cfg(test)]
 mod tests {
     use super::unique_column_names;
+
+    /// A plan operator in a value position fails the plan with fossil's
+    /// `unsupported/expression` — before, it rendered as a NULL column under an
+    /// alias nothing read, and the run wrote the property empty.
+    #[test]
+    fn a_call_the_engine_cannot_make_fails_the_plan() {
+        use fossil_hir::ty::{Ty, TyKind};
+        let db = fossil_base::test_support::new_db();
+        let call = fossil_mir::Expr::Call {
+            func: "seq.where".into(),
+            args: vec![],
+            ty: Ty::new(
+                &db,
+                TyKind::Primitive(fossil_graph_schema::Primitive::String),
+            ),
+        };
+        let err = super::render(&call).expect_err("a plan operator is not a value");
+        let datafusion::error::DataFusionError::External(e) = err else {
+            panic!("expected fossil's failure, got {err}");
+        };
+        let failure = e
+            .downcast_ref::<fossil_graph_schema::Failure>()
+            .expect("a Failure");
+        assert!(matches!(
+            &failure.problem,
+            fossil_graph_schema::Problem::UnsupportedExpression { expression } if expression == "seq.where"
+        ));
+    }
 
     #[test]
     fn a_repeated_header_is_named_as_duckdb_names_it() {

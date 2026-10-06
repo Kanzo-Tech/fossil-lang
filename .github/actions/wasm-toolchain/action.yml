@@ -1,0 +1,35 @@
+name: wasm toolchain
+description: >
+  What `build:wasm` needs, pinned once: Rust 1.90 with wasm32, the cargo cache,
+  wasm-bindgen-cli at the exact `wasm-bindgen` pin, wasm-opt from binaryen 116,
+  and a wasm-capable clang for the zstd-sys C build datafusion pulls in.
+runs:
+  using: composite
+  steps:
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: 1.90.0
+        targets: wasm32-unknown-unknown
+    # Without the cache every run rebuilds datafusion for wasm32 from scratch.
+    - uses: Swatinem/rust-cache@v2
+      with:
+        cache-all-crates: true
+    # Must equal the `wasm-bindgen` pin in Cargo.toml.
+    - name: Install wasm-bindgen-cli
+      shell: bash
+      run: cargo install --version 0.2.120 wasm-bindgen-cli
+    # binaryen 116 through the `wasm-opt` crate. NOT apt binaryen: ubuntu ships
+    # 108, whose wasm-opt corrupts wasm-bindgen's externref table (binaryen
+    # #4711), and the module then fails `Table.grow()` at instantiation.
+    - name: Install wasm-opt
+      shell: bash
+      run: cargo install wasm-opt --locked --version 0.116.1
+    # datafusion hardcodes `arrow-ipc[zstd]`, so zstd-sys compiles C for wasm32
+    # and needs a clang with that target.
+    - name: Install LLVM for the wasm32 C build
+      shell: bash
+      run: |
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq clang llvm
+        echo "CC_wasm32_unknown_unknown=clang" >> "$GITHUB_ENV"
+        echo "AR_wasm32_unknown_unknown=llvm-ar" >> "$GITHUB_ENV"

@@ -2,7 +2,6 @@
 //! same as `io.csv`, dispatching on the MIR `SourceFormat`. A `Provider` source
 //! (RDF) is host-decoded + scanned via the input seam — see `rdf_source.rs`.
 
-#![cfg(not(target_arch = "wasm32"))]
 #![allow(clippy::literal_string_with_formatting_args)]
 
 use datafusion::arrow::array::{Array, StringArray};

@@ -27,7 +27,6 @@
 //! test the decoder twice and this boundary not at all, which is why there is
 //! no `fossil-shex` dev-dependency to reach for.
 
-#![cfg(not(target_arch = "wasm32"))]
 // The split snippet + IRI templates are LITERAL Fossil source, not Rust
 // format-string args.
 #![allow(clippy::literal_string_with_formatting_args)]
@@ -135,13 +134,6 @@ fn did_you_mean_action_replaces_typo_with_suggestion() {
         "the did-you-mean edit must rewrite `.naem` to `.name`; got {edited:?}",
     );
 }
-
-// `auto_import_action_inserts_prefix_decl` stood here: it fed an «undeclared
-// prefix `xsd:`» diagnostic in and expected a top-of-file `prefix xsd: <…>`
-// insertion back. `lower.rs` emits no such diagnostic and `prefix` is not a
-// production, so the action, its message parser and the `WELL_KNOWN_PREFIXES`
-// table went together — see `code_action.rs`, where the same note sits over the
-// hole `auto_import_action` left.
 
 #[test]
 fn split_mapping_action_recompiles_second_order() {

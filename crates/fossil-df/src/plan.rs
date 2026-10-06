@@ -91,7 +91,7 @@ async fn build(
         ),
         // `where(User.age >= 18)`: the predicate is a MIR expression like any
         // other, so the render is the one every property already goes through.
-        Op::Filter { input: i, pred } => input(*i)?.filter(render(pred)),
+        Op::Filter { input: i, pred } => input(*i)?.filter(render(pred)?),
         // `select(users.a, users.b)`: restrict the row to the named columns, in
         // the order named — under the relation each was written against, which
         // after a join is the only thing that says which side `id` came from.
@@ -294,7 +294,7 @@ fn join_equalities(
                 )));
             }
         }
-        out.push(render(conjunct));
+        out.push(render(conjunct)?);
     }
     Ok(out)
 }

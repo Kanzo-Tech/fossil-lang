@@ -28,7 +28,6 @@
 //! the structured candidate / the pre-generated snippet, never from a type).
 
 use std::collections::HashMap;
-use std::str::FromStr as _;
 
 use fossil_base::{Diagnostic, SourceFile, Span};
 use lsp_types::{
@@ -64,7 +63,9 @@ pub fn code_actions(
     diagnostics: &[Diagnostic],
 ) -> Vec<CodeAction> {
     let index = line_index(db, file);
-    let uri = file_uri(db, file);
+    let Some(uri) = crate::file_uri(file.path(db)) else {
+        return Vec::new();
+    };
     let sel = range_to_byte_span(&index, range);
 
     let mut actions = Vec::new();
@@ -166,24 +167,6 @@ fn quick_fix(
     }
 }
 
-/// Build the `file:` [`Uri`] for a source file from its interned path.
-/// `fossil-lsp` keys its open-document table by the URI string; the
-/// path stored on the `SourceFile` is that same string (or a bare filename in
-/// tests), so we round-trip it through `Uri::from_str`, prepending the `file://`
-/// scheme when the path is schemeless.
-fn file_uri(db: &dyn fossil_base::Db, file: SourceFile) -> Uri {
-    let path = file.path(db);
-    let candidate = if path.contains("://") {
-        path.clone()
-    } else if path.starts_with('/') {
-        format!("file://{path}")
-    } else {
-        format!("file:///{path}")
-    };
-    Uri::from_str(&candidate)
-        .unwrap_or_else(|_| Uri::from_str("file:///unknown").expect("valid uri"))
-}
-
 /// Convert a `fossil_base::Span` (byte offsets) to a UTF-16 LSP [`Range`].
 fn byte_span_to_range(index: &LineIndex, span: Span) -> Range {
     Range {
@@ -221,7 +204,7 @@ const fn spans_overlap(a: Span, b: Span) -> bool {
     a.start <= b.end && b.start <= a.end
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use fossil_base::test_support::NativeSystem;

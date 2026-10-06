@@ -110,9 +110,8 @@ Its title, its detail and its help may be reworded in any release; its `data` ma
 Removing a field from `data`, or splitting one code into two, is a breaking change, stated in the
 consumer's words in the release notes — the same rule a renamed export is held to.
 
-**Retiring a code** is deleting its variant and moving it to a `RETIRED` list in the catalogue, one
-line: the code and the tag that last emitted it. A test fails if a live code equals a retired one. The
-page goes with the variant — see [the decisions](#the-decisions-and-what-would-reverse-each).
+**Retiring a code** is deleting its variant and its page, and saying so in the release notes — see
+[the decisions](#the-decisions-and-what-would-reverse-each).
 
 **What this reverses.** [Tooling for machines](/docs/design/tooling-for-machines#a-diagnostic-is-an-api)
 ends *a diagnostic is an API* with a corollary: *their text is an interface; rewording an error message
@@ -319,7 +318,7 @@ are the same mistake. The dead `ParseDiagnostic::InconsistentDedent` gets no cod
 
 | Area | Codes |
 | --- | --- |
-| `syntax` (14) | `expected-token`, `unexpected-token`, `unknown-character`, `retired-spelling`, `malformed-rename`, `misplaced-attribute`, `invalid-mapping-header`, `invalid-property-name`, `number-out-of-range`, `incomplete-conditional`, `uncalled-function`, `invalid-callee`, `needless-quotes`, `hole-in-member-name` |
+| `syntax` (13) | `expected-token`, `unexpected-token`, `unknown-character`, `malformed-rename`, `misplaced-attribute`, `invalid-mapping-header`, `invalid-property-name`, `number-out-of-range`, `incomplete-conditional`, `uncalled-function`, `invalid-callee`, `needless-quotes`, `hole-in-member-name` |
 | `name` (8) | `unknown-shape`, `unknown-property`, `unknown-field`, `row-not-in-scope`, `unknown-function`, `unknown-parameter`, `unknown-source`, `dotted-column` |
 | `argument` (6) | `arity`, `duplicate`, `skipped-parameter`, `positional-after-named`, `named-on-edge`, `alias-in-value-call` |
 | `type` (7) | `property-mismatch`, `argument-mismatch`, `relation-as-value`, `expected-bool`, `expected-number`, `incomparable`, `branch-mismatch` |
@@ -352,15 +351,17 @@ codes above (`provider/unknown`, `provider/wrong-capability`, `document/not-regi
 fresh object. Nobody branches on it; a host shows it and reports it. A panic stays a
 `WebAssembly.RuntimeError` — it is not a value that can be built at the moment it happens.
 
-**100 codes**, 99 of them a mistake someone other than fossil can repair.
+**99 codes**, 98 of them a mistake someone other than fossil can repair.
 
 **Retired, with no program that reached them.** `write/unknown-type` and `layout/dangling-endpoint`
-were released in `v0.3.0-alpha.18` and are in `RETIRED`: the executor builds the schema it writes
+were released in `v0.3.0-alpha.18` and are gone: the executor builds the schema it writes
 from the types it has, and joins each relation to the vertices it names before the layout pass sees
 it, so neither could fire. `pipeline/source-as-stage`, `name/ambiguous-member` and
 `syntax/missing-value` never shipped and were deleted outright: the parser reports a property with no
 value itself, a stage resolves only against relation verbs, and no member is spelled on two
-receivers. Each of their arms reports `internal/bug` now.
+receivers. Each of their arms reports `internal/bug` now. `syntax/retired-spelling`, released through
+`v0.3.0-alpha.26`, went with the parser's refusals of forms the grammar no longer has: such a form is
+now an ordinary `syntax/expected-token` or `syntax/unexpected-token`.
 
 ## The screen: kanzo-ui's `Diagnostic`, and the product decides the words
 
@@ -446,11 +447,12 @@ land with that batch.
 
 The owner accepted this page on 2026-10-01 and settled the four questions it had left open.
 
-1. **A retired code keeps no page.** It is one line in the `RETIRED` list — the code and the tag that
-   last emitted it — which is the part that stops reuse. rustc keeps a tombstone page per retired code
-   so an old log still resolves; fossil deletes rather than keeps, and at `0.x` there are no old logs
-   worth resolving. *What would reverse it:* a consumer holding logs across a release boundary that
-   cannot resolve a retired code from its release notes — then the tombstone is worth its page.
+1. **A retired code keeps nothing**: no page and no list. rustc keeps a tombstone page per retired code
+   so an old log still resolves, and a list that stops reuse; fossil deletes rather than keeps, because
+   at `0.x` there are no old logs worth resolving and the release notes record what went. *What would
+   reverse it:* a consumer holding logs across a release boundary that cannot resolve a retired code
+   from its release notes, or a code reused with a second meaning — then the tombstone and the list
+   are worth their lines.
 2. **keasy's server speaks the same shape** — `code`, `title`, `detail`, `data` — as its own keasy
    change after step 3, so a keasy screen renders a server refusal and a fossil failure with one view.
    Its `dependents` field becomes `data`. *What would reverse it:* a server refusal that needs a field
@@ -458,7 +460,7 @@ The owner accepted this page on 2026-10-01 and settled the four questions it had
 3. **The catalogue ships at the grain derived above.** The codes-to-pages suite is the pressure: a
    code whose page cannot say something different from its neighbour's is merged into it when the
    pages are written, not before. Four were merged when step 5 gave every compile emitter its code,
-   none of them released, so none is in `RETIRED`: `document/not-found` into `document/not-registered`
+   none of them released: `document/not-found` into `document/not-registered`
    (a document nothing registered under its key is one mistake, at `check` or at `run`),
    `document/not-named` into `provider/bare-document-path` (a document named by a bare path, with no
    provider to read it),

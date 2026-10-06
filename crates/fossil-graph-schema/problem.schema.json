@@ -86,39 +86,6 @@
       "x-detail": "\"unexpected character `{character}` — no token starts with it\""
     },
     {
-      "description": "A spelling the language had and retired, recognised on purpose so the message can name what replaces it.",
-      "properties": {
-        "code": {
-          "enum": [
-            "syntax/retired-spelling"
-          ],
-          "type": "string"
-        },
-        "data": {
-          "properties": {
-            "replacement": {
-              "type": "string"
-            },
-            "spelling": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "replacement",
-            "spelling"
-          ],
-          "type": "object"
-        }
-      },
-      "required": [
-        "code",
-        "data"
-      ],
-      "title": "A retired spelling",
-      "type": "object",
-      "x-detail": "\"`{spelling}` is retired: write `{replacement}`\""
-    },
-    {
       "description": "A `@rename` written incompletely; `missing` is the part it lacks.",
       "properties": {
         "code": {
@@ -3370,5 +3337,9 @@
       "x-detail": "\"internal error: {what}\""
     }
   ],
-  "title": "Problem"
+  "title": "Problem",
+  "x-help": {
+    "index": "docs/errors",
+    "site": "https://kanzo-tech.github.io/fossil-lang"
+  }
 }

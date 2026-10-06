@@ -306,7 +306,7 @@ pub fn rebase_to_file<'db>(
         .collect()
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::def_map::def_map;
@@ -660,10 +660,6 @@ User : Person from users
             "the span must cover exactly `users.name`, got {extracted:?}"
         );
     }
-
-    // `spans_for_prefixed_name_rhs` lived here: `link = ex:Foo` had to record a
-    // span covering the six characters exactly. What it proved about spans, the
-    // `StringLit` test below proves on a form the language still has.
 
     /// `greeting = "Alice"` exercises the `StringLit` RHS form. The
     /// recorded mapping-relative span MUST cover the literal INCLUDING

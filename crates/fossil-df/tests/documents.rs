@@ -12,8 +12,6 @@
 //! `tests/support/native.rs`; the executor registers the same way through
 //! `Executor::register_document`.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -125,7 +123,7 @@ fn counting_db(query: &'static str) -> (FossilDb, Arc<AtomicUsize>) {
             seen.fetch_add(1, Ordering::SeqCst);
         }
     });
-    let system: Arc<dyn System> = Arc::new(native::CheckHost::default());
+    let system: Arc<dyn System> = Arc::new(native::check_host());
     (FossilDb::with_event_callback(system, callback), executions)
 }
 
@@ -188,9 +186,8 @@ fn the_document_the_program_names_is_registered_and_decodes() {
 ///
 /// This loop's whole contract: it registers what the program NAMES, and
 /// passes no judgment on a program that names none. Naming a shape document
-/// is mandatory, but the refusal for omitting one is
-/// [`fossil_hir::shapes::TargetShapeError::NoDocument`], raised where the
-/// mapping is checked — not here.
+/// is mandatory, but the refusal for omitting one is `lower_to_hir`'s, at the
+/// mapping's header — not here.
 #[test]
 fn a_program_that_names_no_document_registers_nothing() {
     let dir = program_dir(DEMANDS_INTEGER);

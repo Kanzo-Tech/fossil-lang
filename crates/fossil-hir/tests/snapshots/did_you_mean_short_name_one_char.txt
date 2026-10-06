@@ -1,7 +1,3 @@
----
-source: crates/fossil-hir/tests/diagnostic_corpus.rs
-expression: "run_db_wired_fixture(\"did_you_mean\", \"short_name_one_char\")"
----
 # mode: Db-wired (production typecheck_mapping query)
 # bucket: did_you_mean
 Error: `ig` is not a field of `users`

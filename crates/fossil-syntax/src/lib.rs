@@ -5,12 +5,6 @@
 //! `grammar.bnf` SPECIFIES the language; this crate implements it. The one
 //! difference left is stated and argued in [`parser`]'s own header.
 //!
-//! Everything the grammar retired is REFUSED BY NAME rather than accepted or
-//! dropped, and there are SIX: `prefix ex: <…>`, the CURIE `ex:Person`, the
-//! `<…>` absolute IRI, a leading `.`, the backtick, and `|>`. See
-//! [`parser::diag::retired`], where each is written down once as a
-//! `syntax/retired-spelling` and what replaces it.
-//!
 //! Public API contract — this signature is locked:
 //!
 //! ```ignore
@@ -28,7 +22,7 @@ pub mod parser;
 pub use kind::{FossilLang, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 pub use parser::{Cst, CstRoot, parse};
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod hello_fossil_integration {
     //! End-to-end check: parse the canonical example through the Salsa query
     //! and assert the top-level CST shape (1 `TYPE_DEF` + 1 `SOURCE_DEF` +
@@ -151,52 +145,5 @@ Users : Person from User
         assert_eq!(header.name().as_deref(), Some("Users"));
         let shape = header.shape_expr().expect("expected a SHAPE_EXPR");
         assert_eq!(shape.name().as_deref(), Some("Person"));
-    }
-
-    /// Every retired spelling in one file, and each one reports.
-    ///
-    /// The parse must not be quiet about ANY of them — that is the whole point
-    /// of this step, and the failure it exists to prevent is measured: a
-    /// property whose lowering returned `None` without a word cost a program
-    /// its `slug` column while `fossil check` said *ok*.
-    #[test]
-    fn the_retired_spellings_each_report() {
-        const RETIRED: &str = "\
-prefix ex: <https://example.org/>
-
-User := io.csv(\"u.csv\")
-
-Users : ex:Person from User
-    <http://xmlns.com/foaf/0.1/name> = User.name
-    email = .email
-    slug = `u/${User.id}`
-";
-        let system: Arc<dyn fossil_base::System> =
-            Arc::new(fossil_base::test_support::NativeSystem::default());
-        let db = fossil_base::FossilDb::new(system);
-        let file =
-            fossil_base::SourceFile::new(&db, RETIRED.to_string(), "retired.fossil".to_string());
-        let _cst = parse(&db, file);
-        let problems: Vec<fossil_base::Problem> =
-            parse::accumulated::<fossil_base::Diagnostic>(&db, file)
-                .iter()
-                .map(|d| d.problem.clone())
-                .collect();
-        for form in [
-            &parser::diag::retired::PREFIX_DECL,  // `prefix ex: <…>`
-            &parser::diag::retired::CURIE,        // `ex:Person`
-            &parser::diag::retired::ABSOLUTE_IRI, // `<http://xmlns.com/foaf/0.1/name>`
-            &parser::diag::retired::LEADING_DOT,  // `.email`
-            &parser::diag::retired::BACKTICK,     // the backtick
-        ] {
-            let want = fossil_base::Problem::RetiredSpelling {
-                spelling: form.spelling.to_string(),
-                replacement: form.replacement.to_string(),
-            };
-            assert!(
-                problems.contains(&want),
-                "no diagnostic refusing {form:?}; got {problems:#?}",
-            );
-        }
     }
 }

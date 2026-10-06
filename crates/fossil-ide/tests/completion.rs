@@ -25,35 +25,13 @@
 //! either one resolves no shape — which is the correct answer, not a bug, and
 //! is why case (a) would otherwise fail silently.
 
-#![cfg(not(target_arch = "wasm32"))]
-
-use std::path::Path;
 use std::sync::Arc;
-use std::time::SystemTime;
 
-use fossil_base::{Catalogue, Files, FsError, Provider, SourceFile, System};
+use fossil_base::test_support::NativeSystem;
+use fossil_base::{Catalogue, Files, SourceFile, System};
 use lsp_types::CompletionItemKind;
 
-/// The test's host `System`: a filesystem plus the `ShEx` decoder row, exactly
-/// as `fossil-lsp`'s `LspSystem` installs it. `fossil_base::test_support::NativeSystem` is
-/// not enough any more — its decoder table is the trait default `&[]`, so a
-/// `.shex` it can read is still a document nothing decodes.
-#[derive(Debug, Default)]
-struct HostSystem;
-
-impl System for HostSystem {
-    fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
-        std::fs::read(path).map_err(|e| FsError::Io(e.to_string()))
-    }
-    fn now(&self) -> SystemTime {
-        SystemTime::UNIX_EPOCH
-    }
-    fn providers(&self) -> &'static [&'static Provider] {
-        fossil_descriptors_output::PROVIDERS
-    }
-}
-
-/// A host db stand-in: a real Salsa db over a `HostSystem`, so the shape
+/// A host db stand-in: a real Salsa db over a `NativeSystem` with every provider row, so the shape
 /// document the program names is readable from disk.
 #[salsa::db]
 #[derive(Clone)]
@@ -91,7 +69,9 @@ impl HostDb {
     fn new() -> Self {
         Self {
             storage: salsa::Storage::default(),
-            system: Arc::new(HostSystem),
+            system: Arc::new(NativeSystem::with_providers(
+                fossil_descriptors_output::PROVIDERS,
+            )),
             files: Files::default(),
             catalogue: Catalogue::default(),
         }

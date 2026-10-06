@@ -163,7 +163,7 @@ pub fn register_missing_documents(
 // The `.fossil` sources below carry a `{users.id}` interpolation hole and
 // `type { … }` braces — LITERAL Fossil source, not Rust format-string args.
 #[allow(clippy::literal_string_with_formatting_args)]
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -254,10 +254,7 @@ mod tests {
             .mappings(db)
             .first()
             .expect("the program has one mapping");
-        matches!(
-            crate::shapes::resolve_target_shape(db, mapping),
-            Ok(Some(_))
-        )
+        crate::shapes::resolve_target_shape(db, mapping).is_some()
     }
 
     #[test]

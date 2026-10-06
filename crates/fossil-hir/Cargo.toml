@@ -38,9 +38,8 @@ thiserror = { workspace = true }
 strsim = { workspace = true }
 
 [dev-dependencies]
-# The diagnostic golden-file corpus: insta snapshots over the neutral
-# shape vocabulary, built by hand (see tests/diagnostic_corpus.rs module docs).
-insta = { workspace = true }
+# The diagnostic golden files in tests/snapshots.
+expect-test = { workspace = true }
 # The host with a shape decoder installed, formerly `src/test_support.rs` here.
 # A DEV-dependency and a DEV-only feature: the decoder reads a line format with
 # no schema language behind it, which is what lets this crate test against a

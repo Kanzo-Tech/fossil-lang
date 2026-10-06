@@ -5,11 +5,9 @@
 import init from '../pkg/fossil_df_wasm.js';
 import type { InitInput } from '../pkg/fossil_df_wasm.js';
 
-import { boot } from '@fossil-lang/types';
+import { loader } from '@fossil-lang/types';
 
 export type { InitInput };
-
-let _initPromise: Promise<unknown> | null = null;
 
 /**
  * Boot the fossil-df-wasm executor module. MUST be awaited before constructing
@@ -26,19 +24,4 @@ let _initPromise: Promise<unknown> | null = null;
  * only when the user actually runs a job — do NOT call it on page-load (that's
  * what the light `@fossil-lang/wasm` module is for).
  */
-export function initFossilExecutor(wasm?: InitInput): Promise<unknown> {
-  if (_initPromise === null) {
-    // The object form: the positional one still works but logs a deprecation warning.
-    const pending = boot('fossil_df_wasm_bg.wasm', () => init(wasm === undefined ? undefined : { module_or_path: wasm }));
-    _initPromise = pending;
-    pending.catch(() => {
-      if (_initPromise === pending) _initPromise = null; // forgotten, so the next call boots again
-    });
-  }
-  return _initPromise;
-}
-
-/** For tests + hot-reload — reset the memoised promise. Not exported from index. */
-export function __resetForTests(): void {
-  _initPromise = null;
-}
+export const initFossilExecutor = loader<InitInput>('fossil_df_wasm_bg.wasm', init);

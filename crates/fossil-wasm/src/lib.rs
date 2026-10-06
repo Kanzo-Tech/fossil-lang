@@ -1127,10 +1127,3 @@ fn to_check_row(
             .collect(),
     }
 }
-
-// `diagnostics_for_file`, `severity_to_lsp_int`, `span_to_range` and
-// `utf16_to_pos` lived here, and every one of them had a twin in
-// `fossil-lsp/src/main.rs`. They are `crates/fossil-ide/src/diagnostics.rs` now.
-// The measurements this file used to carry — what a shape document produced
-// before the `claimed` guard — are in
-// `crates/fossil-wasm/tests/documents_are_not_programs.rs`.

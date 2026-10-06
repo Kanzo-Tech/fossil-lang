@@ -29,7 +29,6 @@ salsa           = { workspace = true }
 smol_str        = { workspace = true }
 
 [dev-dependencies]
-insta = { workspace = true }
 # The host with a shape decoder installed. A DEV-dependency on a DEV-only
 # feature of a crate this one already depends on — NOT a new crate in the graph,
 # and above all not `fossil-shex` or `fossil-descriptors-output`, which `0e6898d`

@@ -72,7 +72,7 @@
 //! directories away.
 //!
 //! Every snapshot header records which mode the fixture used so the
-//! test-helper-vs-Db-wired status is auditable in the committed `.snap` files.
+//! test-helper-vs-Db-wired status is auditable in the committed golden files in `tests/snapshots/`.
 
 // `doc_markdown`: the doc comments name bare SC identifiers (SC#1, AcceptAll,
 // Db) that read naturally without backticks in this test harness.
@@ -86,6 +86,7 @@
 use std::path::Path;
 use std::path::PathBuf;
 
+use expect_test::expect_file;
 use fossil_base::register_document;
 use fossil_base::test_support::new_db;
 use fossil_base::{Db, Diagnostic, SourceFile};
@@ -94,7 +95,6 @@ use fossil_hir::body::body;
 use fossil_hir::def_map::def_map;
 use fossil_hir::shapes::ResolvedShape;
 use fossil_hir::{render_split_suggestion, render_ty_kind, typecheck_mapping};
-use insta::assert_snapshot;
 
 // ---------------------------------------------------------------------------
 // Shared fixture infrastructure
@@ -207,7 +207,7 @@ fn render_diagnostic(out: &mut String, diag: &Diagnostic) {
 /// `resolve_target_shape` path and the source row by the real
 /// `resolve_source_scope` one.
 ///
-/// Returns the rendered diagnostics (the golden output the `.snap` captures).
+/// Returns the rendered diagnostics (the golden output the golden file captures).
 fn run_db_wired_fixture(bucket: &str, name: &str) -> String {
     let dir = fixture_dir(bucket, name);
     let src = read_fixture(&dir, "mapping.fossil")
@@ -305,7 +305,7 @@ fn shape(iri: &str, properties: Vec<PropertyConstraint>) -> Shape {
 /// Drive a shape document through the plain-Rust logic the production checker
 /// consumes (`ResolvedShape::from_shape` → `render_split_suggestion`). Renders
 /// the resolved constraint table + whatever the decoder rejected + the
-/// generated split suggestion, so the `.snap` locks the SC#2/SC#4 surface.
+/// generated split suggestion, so the golden file locks the SC#2/SC#4 surface.
 fn run_shape_fixture(bucket: &str, document: &Shape, rejections: &[Rejection]) -> String {
     use std::fmt::Write as _;
 
@@ -413,10 +413,9 @@ fn contact_disjunction(predicates: &[&str]) -> Rejection {
 
 #[test]
 fn forward_propagation_typo_with_did_you_mean() {
-    assert_snapshot!(run_db_wired_fixture(
-        "forward_propagation",
-        "typo_with_did_you_mean"
-    ));
+    expect_file!["snapshots/forward_propagation_typo_with_did_you_mean.txt"].assert_eq(
+        &run_db_wired_fixture("forward_propagation", "typo_with_did_you_mean"),
+    );
 }
 
 // ===== Bucket 2: Backward Check (SC#2) — helper-proven ======================
@@ -435,7 +434,8 @@ fn backward_check_optional_for_required() {
             Occurs { min: 1, max: None },
         )],
     );
-    assert_snapshot!(run_shape_fixture("backward_check", &document, &[]));
+    expect_file!["snapshots/backward_check_optional_for_required.txt"]
+        .assert_eq(&run_shape_fixture("backward_check", &document, &[]));
 }
 
 /// An `age` narrowed to `Integer` against a source column typed `String` — the
@@ -450,7 +450,8 @@ fn backward_check_type_mismatch_two_span() {
             Occurs::ONE,
         )],
     );
-    assert_snapshot!(run_shape_fixture("backward_check", &document, &[]));
+    expect_file!["snapshots/backward_check_type_mismatch_two_span.txt"]
+        .assert_eq(&run_shape_fixture("backward_check", &document, &[]));
 }
 
 /// A predicate the document mentions and does not narrow. It renders `(any)`,
@@ -463,7 +464,8 @@ fn backward_check_an_un_narrowed_predicate_expects_nothing() {
         "https://example.org/Person",
         vec![constraint("https://example.org/name", None, Occurs::ONE)],
     );
-    assert_snapshot!(run_shape_fixture("backward_check", &document, &[]));
+    expect_file!["snapshots/backward_check_an_un_narrowed_predicate_expects_nothing.txt"]
+        .assert_eq(&run_shape_fixture("backward_check", &document, &[]));
 }
 
 // ===== Bucket 3: Value-disjunction rejection (SC#4) — helper-proven =========
@@ -472,10 +474,10 @@ fn backward_check_an_un_narrowed_predicate_expects_nothing() {
 fn disjunction_rejection_two_branches() {
     let document = shape("http://example.org/Contact", Vec::new());
     let rejection = contact_disjunction(&["http://example.org/email", "http://example.org/phone"]);
-    assert_snapshot!(run_shape_fixture(
+    expect_file!["snapshots/disjunction_rejection_two_branches.txt"].assert_eq(&run_shape_fixture(
         "disjunction_rejection",
         &document,
-        &[rejection]
+        &[rejection],
     ));
 }
 
@@ -487,11 +489,9 @@ fn disjunction_rejection_three_branches() {
         "http://example.org/phone",
         "http://example.org/fax",
     ]);
-    assert_snapshot!(run_shape_fixture(
-        "disjunction_rejection",
-        &document,
-        &[rejection]
-    ));
+    expect_file!["snapshots/disjunction_rejection_three_branches.txt"].assert_eq(
+        &run_shape_fixture("disjunction_rejection", &document, &[rejection]),
+    );
 }
 
 // ===== Bucket 4: Implicit Closure Synthesis (diagnostic shape) ==============
@@ -510,32 +510,26 @@ fn disjunction_rejection_three_branches() {
 
 #[test]
 fn implicit_closure_synthesis_field_typo() {
-    assert_snapshot!(run_db_wired_fixture(
-        "implicit_closure_synthesis",
-        "field_typo"
-    ));
+    expect_file!["snapshots/implicit_closure_synthesis_field_typo.txt"].assert_eq(
+        &run_db_wired_fixture("implicit_closure_synthesis", "field_typo"),
+    );
 }
-
-// `implicit_closure_synthesis_type_mismatch_inside_body` was here. Its snapshot
-// contains no type mismatch and never contained one: a backward check needs a
-// resolved shape, and the fixture named no document — so the fixture could not
-// produce the diagnostic the test was named for, in any tree.
 
 // ===== Bucket 5: did-you-mean threshold edges — Db-wired =====================
 
 #[test]
 fn did_you_mean_short_name_one_char() {
     // 2-char column `id`, typo `ig` → DL distance 1, threshold max(2, 2/3) = 2 → match.
-    assert_snapshot!(run_db_wired_fixture("did_you_mean", "short_name_one_char"));
+    expect_file!["snapshots/did_you_mean_short_name_one_char.txt"]
+        .assert_eq(&run_db_wired_fixture("did_you_mean", "short_name_one_char"));
 }
 
 #[test]
 fn did_you_mean_unrelated_no_suggestion() {
     // Typo too far from any candidate → no "did you mean" in the diagnostic.
-    assert_snapshot!(run_db_wired_fixture(
-        "did_you_mean",
-        "unrelated_no_suggestion"
-    ));
+    expect_file!["snapshots/did_you_mean_unrelated_no_suggestion.txt"].assert_eq(
+        &run_db_wired_fixture("did_you_mean", "unrelated_no_suggestion"),
+    );
 }
 
 // ===== SC#4 second-order check: the generated split suggestion compiles ======

@@ -3,52 +3,19 @@
 // silenced the way the rest of the workspace silences it.
 #![allow(clippy::redundant_pub_crate)]
 
-//! The host half these integration tests owe the checker: a filesystem, a
-//! shape-decoder table, and the shape documents a program names, put into the
-//! database before any query goes looking for them.
-//!
-//! Since ruling 3 of 2026-08-11 a property key is a BARE NAME
-//! whose meaning is the last segment of a predicate IRI the shape declares, so
-//! a program that names no shape document cannot write a single property — the
-//! mapping stops compiling and `execute_*` fails with `Plan("the mapping did
-//! not compile")`. Every program in this crate's tests therefore carries a
-//! `type { … } := io.shex("…")` line, and every test builds its database here.
-//!
-//! `fossil_base::test_support::NativeSystem` is NOT enough on its own: its decoder table is
-//! the trait default `&[]`, and a document nothing decodes resolves no shape —
-//! which `resolve_target_shape` reports as `Undecodable`, not as a missing
-//! document. Hence [`ShapeHost`], which delegates the filesystem to
-//! `NativeSystem` and adds the one row `fossil-descriptors-output` publishes.
-//! Same pair `fossil-lsp`'s `LspSystem` and `fossil-ide`'s hover test install.
+//! The host half these integration tests owe the checker: a filesystem, every
+//! provider row `fossil-descriptors-output` publishes, and the shape documents a
+//! program names, put into the database before any query goes looking for them.
 
 // The module is shared by eight test binaries and no binary uses all of it.
 #![allow(dead_code)]
 
-use std::path::Path;
 use std::sync::Arc;
-use std::time::SystemTime;
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{FossilDb, FsError, Provider, SourceFile, System, register_file};
+use fossil_base::{FossilDb, SourceFile, System, register_file};
 
-/// The real filesystem (the CSV/JSON/Turtle sources still read through it) plus
-/// the `ShEx` decoder row.
-#[derive(Debug, Default)]
-pub(crate) struct ShapeHost(NativeSystem);
-
-impl System for ShapeHost {
-    fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
-        self.0.read_file(path)
-    }
-    fn now(&self) -> SystemTime {
-        self.0.now()
-    }
-    fn providers(&self) -> &'static [&'static Provider] {
-        fossil_descriptors_output::PROVIDERS
-    }
-}
-
-/// A database over [`ShapeHost`] holding `program` at `program_path` and every
+/// A database over a host with every provider row, holding `program` at `program_path` and every
 /// `(path, text)` document registered under its own path.
 ///
 /// The registry key the compiler looks a document up under is the path the
@@ -65,7 +32,9 @@ pub(crate) fn db_with_shapes(
     program_path: &str,
     documents: &[(&str, &str)],
 ) -> (FossilDb, SourceFile) {
-    let system: Arc<dyn System> = Arc::new(ShapeHost::default());
+    let system: Arc<dyn System> = Arc::new(NativeSystem::with_providers(
+        fossil_descriptors_output::PROVIDERS,
+    ));
     let mut db = FossilDb::new(system);
     let file = SourceFile::new(&db, program.to_string(), program_path.to_string());
     for (path, text) in documents {

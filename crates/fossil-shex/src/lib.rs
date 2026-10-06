@@ -263,7 +263,7 @@ fn datatype_of(value_expr: Option<&ShapeExpr>) -> Option<Primitive> {
 fn branch_predicates(expr: &TripleExpr, prefixmap: &PrefixMap, out: &mut Vec<String>) {
     match expr {
         TripleExpr::TripleConstraint { predicate, .. } => {
-            if let Some(iri) = resolve_iri_ref(predicate, prefixmap) {
+            if let Ok(iri) = resolve_iri_ref(predicate, prefixmap) {
                 out.push(iri.to_string());
             }
         }
@@ -580,7 +580,13 @@ fn lower_shape_decl(
     errors: &mut Vec<ShExLoweringError>,
 ) -> Option<ShapeBinding> {
     let shape_iri = match &decl.id {
-        ShapeExprLabel::IriRef { value } => resolve_iri_ref(value, prefixmap)?,
+        ShapeExprLabel::IriRef { value } => match resolve_iri_ref(value, prefixmap) {
+            Ok(iri) => iri,
+            Err(e) => {
+                errors.push(e);
+                return None;
+            }
+        },
         ShapeExprLabel::BNode { .. } | ShapeExprLabel::Start => {
             // BNode / Start shape declarations are out of scope: only
             // IRI-identified shapes participate in backward checking.
@@ -678,8 +684,12 @@ fn walk_triple_expr(
             max,
             ..
         } => {
-            let Some(pred_iri) = resolve_iri_ref(predicate, prefixmap) else {
-                return;
+            let pred_iri = match resolve_iri_ref(predicate, prefixmap) {
+                Ok(iri) => iri,
+                Err(e) => {
+                    errors.push(e);
+                    return;
+                }
             };
             out.push(ResolvedConstraint {
                 predicate: pred_iri,
@@ -755,7 +765,9 @@ fn walk_triple_expr(
 /// `TripleExpr`, for reporting purposes.
 fn leading_predicate(expr: &TripleExpr, prefixmap: &PrefixMap) -> Option<IriS> {
     match expr {
-        TripleExpr::TripleConstraint { predicate, .. } => resolve_iri_ref(predicate, prefixmap),
+        TripleExpr::TripleConstraint { predicate, .. } => {
+            resolve_iri_ref(predicate, prefixmap).ok()
+        }
         TripleExpr::EachOf { expressions, .. } | TripleExpr::OneOf { expressions, .. } => {
             expressions
                 .first()
@@ -765,19 +777,18 @@ fn leading_predicate(expr: &TripleExpr, prefixmap: &PrefixMap) -> Option<IriS> {
     }
 }
 
-fn resolve_iri_ref(iri_ref: &IriRef, prefixmap: &PrefixMap) -> Option<IriS> {
+/// The IRI an [`IriRef`] names. A prefix the schema never declared is a
+/// malformed schema — never a guess at what the author meant.
+fn resolve_iri_ref(iri_ref: &IriRef, prefixmap: &PrefixMap) -> Result<IriS, ShExLoweringError> {
     match iri_ref {
-        IriRef::Iri(iri) => Some(iri.clone()),
-        IriRef::Prefixed { prefix, local } => prefixmap
-            .resolve_prefix_local(prefix, local)
-            .ok()
-            .or_else(|| {
-                // Fallback: concat the prefix + local literally so callers
-                // can still see the surface form. Real prefix-resolution
-                // failure is rare in well-formed schemas.
-                let s = format!("{prefix}{local}");
-                Some(IriS::new_unchecked(s.as_str()))
-            }),
+        IriRef::Iri(iri) => Ok(iri.clone()),
+        IriRef::Prefixed { prefix, local } => {
+            prefixmap.resolve_prefix_local(prefix, local).map_err(|_| {
+                ShExLoweringError::MalformedSchema(format!(
+                    "`{prefix}:{local}` uses the prefix `{prefix}:`, which the schema does not declare"
+                ))
+            })
+        }
     }
 }
 
@@ -804,6 +815,19 @@ mod tests {
     use fossil_graph_schema::local_name;
 
     use super::*;
+
+    /// An undeclared prefix is a malformed schema. It used to resolve to the
+    /// prefix and local name glued together without the colon — a wrong IRI the
+    /// rest of the compiler then trusted.
+    #[test]
+    fn an_undeclared_prefix_is_malformed_not_glued() {
+        let iri_ref = IriRef::Prefixed {
+            prefix: "ex".into(),
+            local: "name".into(),
+        };
+        let err = resolve_iri_ref(&iri_ref, &PrefixMap::new()).expect_err("ex: is undeclared");
+        assert!(matches!(err, ShExLoweringError::MalformedSchema(m) if m.contains("`ex:name`")));
+    }
 
     /// The range survives the whole decode, and it is the range of the
     /// PREDICATE — not of the line, not of the shape.

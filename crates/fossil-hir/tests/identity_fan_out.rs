@@ -37,12 +37,10 @@
 //! measurement and a test that hardcodes it goes red for a reason that is not a
 //! regression.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use std::sync::Arc;
 use std::sync::Mutex;
 
-use fossil_base::test_support::{DecodingHost, PERSON_DOCUMENT};
+use fossil_base::test_support::{NativeSystem, PERSON_DOCUMENT};
 use fossil_base::{FossilDb, SourceFile, System};
 use fossil_hir::body::body;
 use fossil_hir::check::typecheck_mapping;
@@ -93,7 +91,7 @@ fn measure(edit: bool) -> Vec<String> {
     // `shape_iri` would be empty and `subject_templates` would skip all ten
     // before reading a body. The measurement would be of nothing — which is
     // exactly why `tests/invalidation_regression.rs`'s fixture cannot carry it.
-    let system: Arc<dyn System> = Arc::new(DecodingHost::default());
+    let system: Arc<dyn System> = Arc::new(NativeSystem::decoding());
     let mut db = FossilDb::with_event_callback(system, callback);
     let file = SourceFile::new(
         &db,

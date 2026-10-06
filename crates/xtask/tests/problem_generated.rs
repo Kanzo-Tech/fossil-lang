@@ -1,19 +1,5 @@
-//! **The checked-in `problem.gen.ts` is what `problem.schema.json` says.**
-//!
-//! The third sibling of `catalogue_generated.rs` and `corpus_generated.rs`, and
-//! it exists for their reason: the TypeScript union is printed from the schema,
-//! so what is left to check is that somebody changed `Problem`, re-blessed the
-//! schema and did not regenerate — or edited the generated file by hand. There
-//! is no CI step for `cargo xtask problem --check`, for the reason `catalogue`
-//! has none: `cargo test` runs this.
-//!
-//! # What this cannot prove
-//!
-//! - **That the schema is current.** `crates/fossil-graph-schema/tests/problem_schema.rs`
-//!   holds the schema to the enum; this holds the TypeScript to the schema.
-//!   Both must be green for the chain to be.
-//! - **That `@fossil-lang/types` uses it well.** `FossilError` and its guard
-//!   are held by that package's own vitest suite.
+//! **The checked-in `problem.schema.json` and `problem.gen.ts` are what
+//! `Problem` says** — `cargo xtask problem --check`, as a test.
 
 use xtask::catalogue::repo_root;
 use xtask::problem;

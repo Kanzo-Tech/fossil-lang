@@ -21,17 +21,16 @@ Optional one-time installs:
 
 ```bash
 cargo install wasm-bindgen-cli --version 0.2.120 --locked
+cargo install wasm-opt --version 0.116.1 --locked   # binaryen 116, as CI pins it
 cargo install cargo-deny --locked
-brew install binaryen   # macOS — for wasm-opt size optimization
 ```
 
 ## Build & test commands
 
 ```bash
-cargo check --workspace --all-targets                        # native, all crates AND their tests
+cargo clippy --workspace --all-targets -- -D warnings        # compile + lint, all crates AND their tests
 cargo test --workspace --no-fail-fast                        # native tests
 cargo fmt --all -- --check                                   # format check
-cargo clippy --workspace --all-targets -- -D warnings        # lint check
 RUSTDOCFLAGS="-D rustdoc::broken_intra_doc_links" \
   cargo doc --workspace --no-deps                            # citations rustdoc can check
 cargo deny check                                             # advisories + licenses + bans
@@ -41,7 +40,7 @@ cargo xtask wasm-check                                       # WASM gate (highes
 CI runs all of these on every PR. See `.github/workflows/ci.yml`.
 
 **The two flags on the first two lines are load-bearing.** Without `--all-targets`,
-`check` does not compile `tests/`, and a signature change that breaks four test
+clippy does not compile `tests/` or `benches/`, and a signature change that breaks four test
 files reads as green — it did, on 2026-08-13. Without `--no-fail-fast`, `test`
 stops at the first failing suite and reports the tests it happened to reach as if
 they were the workspace. (CI omits `--no-fail-fast` deliberately: it wants the
@@ -129,7 +128,7 @@ becomes, parameter by parameter.
 
 `crates/fossil-sinks/fossil.schema.json` is generated too, but from the Rust
 structs of `fossil.json` rather than from a data file: change a field in
-`crates/fossil-sinks/src/manifest.rs`, run `FOSSIL_BLESS=1 cargo test -p
+`crates/fossil-sinks/src/manifest.rs`, run `UPDATE_EXPECT=1 cargo test -p
 fossil-sinks --test schema`, and commit the schema beside it. The test fails on a
 stale one, and it is what a reader outside Rust checks `fossil.json` against —
 `packages/corpus/tests/manifest.test.ts` holds `@fossil-lang/corpus`'s hand-written
@@ -140,11 +139,10 @@ wrote; `crates/xtask/tests/corpus_generated.rs` is its `--check` as a test, and
 also holds the one cross-clause rule (`aligns` belongs to an endpoint) and the two
 sets the roles keep apart.
 
-Add or change a code in `crates/fossil-graph-schema/src/problem.rs`, re-bless its
-schema (`FOSSIL_BLESS=1 cargo test -p fossil-graph-schema --test problem_schema`), run
-`cargo xtask problem`, and commit both: the third generator reads that derived file and
-writes `packages/types/src/problem.gen.ts` — `Code`, `CODES`, `ProblemData`, `TITLES`, and `DETAILS`,
-each `#[error]` translated into the TypeScript that renders it.
+Add or change a code in `crates/fossil-graph-schema/src/problem.rs`, run
+`cargo xtask problem`, and commit what it wrote: `problem.schema.json`, derived from the
+enum, and `packages/types/src/problem.gen.ts` — `Code`, `CODES`, `ProblemData`, `TITLES`,
+`DETAILS` and the help link, each `#[error]` translated into the TypeScript that renders it.
 `cargo xtask problem --check` fails without writing, and
 `crates/xtask/tests/problem_generated.rs` is the same check as a test, so it has no CI
 step for the reason `catalogue --check` has none.

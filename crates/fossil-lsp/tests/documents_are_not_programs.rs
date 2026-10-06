@@ -37,7 +37,6 @@
 //!    checked against it — the report below exists only because the `ShExJ` was
 //!    decoded — and a program with a mistake in it still reports.
 
-#![cfg(not(target_arch = "wasm32"))]
 // `{Users.id}` is a Fossil interpolation hole in a literal program, not a Rust
 // format-string argument.
 #![allow(clippy::literal_string_with_formatting_args)]

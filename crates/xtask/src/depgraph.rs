@@ -1,15 +1,9 @@
 //! The workspace dependency graph, as `cargo metadata` reports it.
 //!
+//! `cargo xtask wasm-check` derives the wasm closure from it, and
 //! `tests/engine_reach.rs` asks which crates link an execution engine
 //! `deny.toml` bans — *which workspace members reach this crate over normal
-//! edges* — and `tests/tokio_placement.rs` reads the member list. It lives in
-//! the library rather than in one of the test binaries because an integration
-//! test is its own crate and cannot `use` its sibling.
-//!
-//! What is deliberately NOT here is the wasm closure. `tests/tokio_placement.rs`
-//! re-derives that one on purpose, from the same inputs `cargo xtask wasm-check`
-//! uses, so that two independent answers to "what is a wasm build" stay honest.
-//! Sharing is for machinery, not for verdicts.
+//! edges*.
 
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::process::Command;
@@ -93,6 +87,96 @@ pub fn reachers(meta: &Value, dependency: &str, edges: Edges) -> BTreeSet<String
     out
 }
 
+/// The workspace crates reachable over normal edges from the cdylib (WASM)
+/// crates, as `metadata(Some("wasm32-unknown-unknown"))` resolves them — so
+/// cargo, not a string match, decides which `cfg`-gated edges a wasm build
+/// has. Nothing here names a crate: a crate a cdylib comes to depend on joins
+/// the gate, and one it stops depending on leaves.
+///
+/// Normal edges only: a dev-dependency is built for a test on the host, never
+/// for wasm32. It put `fossil-introspect` (and `DuckDB` under it) in the gate
+/// the day `fossil-df`'s tests took it.
+///
+/// # Panics
+///
+/// If `meta` is not `cargo metadata --format-version 1` output.
+pub fn wasm_closure(meta: &Value) -> BTreeSet<String> {
+    let ws = workspace_ids(meta);
+    let mut id_name: HashMap<&str, &str> = HashMap::new();
+    let mut queue: VecDeque<&str> = VecDeque::new();
+    for p in meta["packages"].as_array().expect("packages") {
+        let id = p["id"].as_str().expect("package id");
+        if !ws.contains(id) {
+            continue;
+        }
+        id_name.insert(id, p["name"].as_str().expect("package name"));
+        let cdylib = p["targets"].as_array().is_some_and(|ts| {
+            ts.iter().any(|t| {
+                t["crate_types"]
+                    .as_array()
+                    .is_some_and(|cs| cs.iter().any(|c| c.as_str() == Some("cdylib")))
+            })
+        });
+        if cdylib {
+            queue.push_back(id);
+        }
+    }
+    let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
+    for n in meta["resolve"]["nodes"].as_array().expect("resolve.nodes") {
+        let deps = n["deps"].as_array().expect("node deps").iter();
+        adj.insert(
+            n["id"].as_str().expect("node id"),
+            deps.filter(|d| is_normal_edge(d))
+                .filter_map(|d| d["pkg"].as_str())
+                .filter(|d| ws.contains(d))
+                .collect(),
+        );
+    }
+    let mut seen: HashSet<&str> = HashSet::new();
+    while let Some(id) = queue.pop_front() {
+        if seen.insert(id) {
+            queue.extend(adj.get(id).into_iter().flatten().copied());
+        }
+    }
+    seen.iter().map(|id| id_name[id].to_string()).collect()
+}
+
+/// The members of `closure` that depend on `dependency` directly over a normal
+/// edge, in the graph `meta` resolved.
+///
+/// # Panics
+///
+/// If `meta` is not `cargo metadata --format-version 1` output.
+pub fn direct_dependents(
+    meta: &Value,
+    closure: &BTreeSet<String>,
+    dependency: &str,
+) -> BTreeSet<String> {
+    let name_of: HashMap<&str, &str> = meta["packages"]
+        .as_array()
+        .expect("packages")
+        .iter()
+        .map(|p| {
+            (
+                p["id"].as_str().expect("id"),
+                p["name"].as_str().expect("name"),
+            )
+        })
+        .collect();
+    meta["resolve"]["nodes"]
+        .as_array()
+        .expect("resolve.nodes")
+        .iter()
+        .filter(|n| closure.contains(name_of[n["id"].as_str().expect("node id")]))
+        .filter(|n| {
+            n["deps"].as_array().expect("node deps").iter().any(|d| {
+                is_normal_edge(d) && d["pkg"].as_str().map(|p| name_of[p]) == Some(dependency)
+            })
+        })
+        .map(|n| name_of[n["id"].as_str().expect("node id")].to_string())
+        .collect()
+}
+
 /// The package ids of every workspace member.
 ///
 /// # Panics
@@ -123,16 +207,21 @@ pub fn member_names(meta: &Value) -> BTreeSet<String> {
         .collect()
 }
 
-/// `cargo metadata --format-version 1`, run at the repository root.
+/// `cargo metadata --format-version 1`, run at the repository root and, given
+/// a `platform`, resolved for that target only (`--filter-platform`).
 ///
 /// # Panics
 ///
 /// If cargo cannot be run, fails, or emits something that is not the JSON this
 /// module reads — in every case the guard calling this cannot see the workspace
 /// at all, and saying so loudly beats reporting an empty graph as agreement.
-pub fn metadata() -> Value {
-    let out = Command::new(env!("CARGO"))
-        .args(["metadata", "--format-version", "1"])
+pub fn metadata(platform: Option<&str>) -> Value {
+    let mut cmd = Command::new(env!("CARGO"));
+    cmd.args(["metadata", "--format-version", "1"]);
+    if let Some(target) = platform {
+        cmd.args(["--filter-platform", target]);
+    }
+    let out = cmd
         .current_dir(crate::catalogue::repo_root())
         .output()
         .expect("run cargo metadata");

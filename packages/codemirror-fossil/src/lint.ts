@@ -32,6 +32,7 @@ import {
   FossilError,
   helpUrl,
   isFossilError,
+  rowOf,
   type CheckRow,
   type Problem,
 } from '@fossil-lang/types';
@@ -151,17 +152,7 @@ function failureOf(cause: unknown): FossilError {
  * — reports it with the same call rather than a copy of it.
  */
 export function uncheckedRow(uri: string, cause: unknown): CheckRow {
-  const { problem } = failureOf(cause);
-  return {
-    uri,
-    range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
-    severity: 1,
-    code: problem.code,
-    data: problem.data,
-    title: problem.title,
-    message: problem.detail,
-    ...(problem.help === undefined ? {} : { help: problem.help }),
-  } as CheckRow;
+  return rowOf(uri, failureOf(cause).problem);
 }
 
 /** What {@link fossilLinter} calls to get rows. Synchronous or not — the wasm

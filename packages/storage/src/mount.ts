@@ -166,10 +166,10 @@ async function release(engine: Engine, table: Map<string, Held>, keys: readonly 
     if (entry === undefined || --entry.holders > 0) continue;
     table.delete(key);
     clearTimeout(entry.timer);
-    // An install still in flight would put the secret back after the uninstall; one that failed
-    // has already been reported to whoever was waiting on it.
+    // An install still in flight would put the secret back after the uninstall.
     await entry.ready.then(
       () => undefined,
+      // eslint-disable-next-line no-restricted-syntax -- a failed install was reported to whoever waited on it
       () => undefined,
     );
     const { uninstall } = plan(entry.credential, entry.access);

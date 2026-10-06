@@ -11,7 +11,7 @@
  * reads `message` for anything but showing it.
  */
 
-import { CODES, DETAILS, TITLES, type Code, type DetailedCode, type ProblemData } from './problem.gen.js';
+import { CODES, DETAILS, HELP_INDEX, HELP_SITE, TITLES, type Code, type DetailedCode, type ProblemData } from './problem.gen.js';
 
 export { CODES, DETAILS, TITLES, type Code, type DetailedCode, type ProblemData } from './problem.gen.js';
 
@@ -246,17 +246,11 @@ export function attachCause<E>(error: E, failure: unknown): E {
   return error;
 }
 
-/** The published documentation. `fossil_graph_schema::Problem::help_url` builds the same link, and
- *  a test there reads these two constants. */
-const DOCS = 'https://kanzo-tech.github.io/fossil-lang';
-/** The error index within it: a page per code, the code as its route. */
-const INDEX = 'docs/errors';
-
 /**
  * The page that explains `code`. `base` is where the documentation is served — the published site
  * unless a deployment serves its own copy. There is no URL on the wire, because the prefix is the
  * deployment's to choose.
  */
-export function helpUrl(code: Code, base: string = DOCS): string {
-  return `${base.replace(/\/+$/, '')}/${INDEX}/${code}`;
+export function helpUrl(code: Code, base: string = HELP_SITE): string {
+  return `${base.replace(/\/+$/, '')}/${HELP_INDEX}/${code}`;
 }

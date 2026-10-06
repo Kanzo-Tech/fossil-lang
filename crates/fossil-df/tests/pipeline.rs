@@ -11,8 +11,6 @@
 //! `cargo test`'s cwd is the crate root, so the sources are
 //! `tests/fixtures/{users,teams}.csv`.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use std::sync::Arc;
 
 use datafusion::arrow::array::{Array, Int64Array, StringArray};

@@ -11,11 +11,9 @@
 //! zero items and the file proves nothing, which is why
 //! [`no_descriptor_no_columns`] pins that too.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use std::sync::Arc;
 
-use fossil_base::test_support::{DecodingHost, register_inferred};
+use fossil_base::test_support::{NativeSystem, register_inferred};
 use fossil_base::{Catalogue, Files, SourceFile, System};
 use fossil_graph_schema::Primitive;
 use lsp_types::CompletionItemKind;
@@ -57,7 +55,7 @@ impl fossil_base::Db for HostDb {
 fn host() -> HostDb {
     HostDb {
         storage: salsa::Storage::default(),
-        system: Arc::new(DecodingHost::default()),
+        system: Arc::new(NativeSystem::decoding()),
         files: Files::default(),
         catalogue: Catalogue::default(),
     }
@@ -319,15 +317,9 @@ User : Person from users
     );
 }
 
-/// The leading `.` is a RETIRED form — `parser/expr.rs` refuses it by name
-/// (`retired::LEADING_DOT`), because the row has a name and every reference is
-/// qualified. It was nevertheless the trigger the source-field source used, and
-/// two unit tests in `completion.rs` asserted its columns.
-///
-/// Before: 2 FIELD items. After: nothing — there is no receiver to the left of
-/// a leading dot, so there is nothing to be a member of.
+/// A leading `.` has no receiver, so there is nothing to be a member of.
 #[test]
-fn the_retired_leading_dot_offers_nothing() {
+fn a_leading_dot_offers_nothing() {
     const SRC: &str = "\
 users := io.csv(\"users.csv\")
 User : Person from users

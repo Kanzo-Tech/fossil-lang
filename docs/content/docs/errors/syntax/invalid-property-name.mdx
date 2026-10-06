@@ -19,10 +19,9 @@ syntax/invalid-property-name
     predicate IRI the shape declares
 ```
 
-In practice it arrives with a [`syntax/retired-spelling`](/docs/errors/syntax/retired-spelling) on
-the same key. The parser refuses the retired form — a CURIE such as `ex:name`, or an absolute IRI in
-`<…>` — by name, and the lowering then finds the key it was given is not one identifier, and says
-that the property is lost. When there is nothing on the left at all, the message is *this property
+In practice it arrives after a parse error on the same key — a CURIE such as `ex:name`, or an
+absolute IRI in `<…>` — and the lowering then finds the key it was given is not one identifier, and
+says that the property is lost. When there is nothing on the left at all, the message is *this property
 has no name on its left, so it is not written* instead.
 
 ## Why fossil refuses it

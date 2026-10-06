@@ -175,16 +175,12 @@ implementation a third.
 > **If a crate called `base` contains the substrate *and* the file abstraction, it is two crates that
 > have not been separated yet.**
 
-The prose half of that rule is now a test — `crates/fossil-base/tests/substrate_has_no_prose.rs`
-reads `providers.rs` and fails on a string literal with a space in it, because a crate that decides
-nothing about a program has no business composing an English sentence about one.
-
 Two parts have gone. `fossil-locator` is the file abstraction — the rule that says where a written
 path points; `base-db` keeps its VFS in another crate for exactly that reason. And the shape-document
 decode is `fossil_hir::shape_documents`: `base-db` holds *input queries*, and a query that runs a
 decoder over a document to produce a type is not an input, it is the compiler asking a question.
 What stayed in `providers` is the ROW a decoder fills, because a table entry is not a decision about
-a program — and `substrate_has_no_prose.rs` is the test that keeps it from becoming one.
+a program.
 
 **What stayed, and why it is not the same case.** `test_support` is also not compiler logic — its
 own header says so — and lifting it out looks like the identical move. It is not: a helper that

@@ -312,7 +312,7 @@ export async function introspect(
     failure = cause;
   }
   const closed = await Promise.allSettled(
-    // A mount that failed is already a source's problem above, so there is nothing of it to close.
+    // eslint-disable-next-line no-restricted-syntax -- a mount that failed is already a source's problem above, so there is nothing of it to close
     [...mounts.values()].map(async (pending) => (await pending.catch(() => undefined))?.close()),
   );
   const cleanup = closed.filter((c) => c.status === "rejected").map((c) => c.reason as unknown);

@@ -53,10 +53,7 @@ pub enum Token {
     // tiebreaker selects the dedicated keyword on equal-length matches.
     // ───────────────────────────────────────────────────────────────────
     // The list is `grammar.bnf, § RESERVED KEYWORDS`, and
-    // `xtask/tests/grammar_tombstones.rs` holds it against these attributes in
-    // both directions. `prefix` is not here but IS still recognised by shape —
-    // `prefix IDENT :` — in `items::parse_program`, so the diagnostic can name
-    // what to write instead.
+    // `tests/reserved_words.rs` lexes it out of that file.
     #[token("from")]
     KwFrom,
 

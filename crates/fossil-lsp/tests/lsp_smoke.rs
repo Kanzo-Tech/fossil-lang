@@ -12,8 +12,6 @@
 //! draining both pipes, asserting exit 0, parsing the frames — are
 //! `tests/common/mod.rs`, which also records why they are written once.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 mod common;
 
 use common::{did_open, drive, notif, req};

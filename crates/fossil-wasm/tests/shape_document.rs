@@ -20,7 +20,6 @@
 //!      because nothing depended on it.
 //!   4. Editing the PROGRAM does not change what it is checked against.
 
-#![cfg(not(target_arch = "wasm32"))]
 // `{users.id}` is a Fossil interpolation hole in a literal program, not a Rust
 // format-string argument.
 #![allow(clippy::literal_string_with_formatting_args)]

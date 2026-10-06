@@ -26,7 +26,6 @@
 //! is what the writer can produce without holding the unresolved rows, and
 //! holding them is a second copy of the input.
 
-#![cfg(not(target_arch = "wasm32"))]
 #![allow(clippy::literal_string_with_formatting_args)]
 
 use datafusion::prelude::SessionContext;

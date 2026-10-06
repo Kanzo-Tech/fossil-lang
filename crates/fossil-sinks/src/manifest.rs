@@ -26,15 +26,53 @@ use serde::{Deserialize, Serialize};
 
 use crate::generated::ColumnRole;
 
-/// The format a corpus is written in, and what [`Manifest::format`] says.
-///
-/// **Every writer reads this; every assertion spells the literal.** A site
-/// that *produces* a manifest routes through the constant, or changing it here
-/// changes nothing the writer emits; a site that *checks* what came out spells
-/// `fossil/1` by hand, because comparing against this constant passes whatever
-/// it says. `crates/xtask/tests/version_string_is_one_constant.rs` holds the
-/// first half.
+/// The format a corpus is written in.
 pub const FOSSIL_FORMAT: &str = "fossil/1";
+
+/// [`Manifest::format`]: a unit that serialises as [`FOSSIL_FORMAT`] and
+/// deserialises nothing else, so no writer can emit another string and a
+/// reader refuses an unknown format before it reads a byte of Parquet. The
+/// schema says the same thing as a `const`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Format;
+
+impl Serialize for Format {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(FOSSIL_FORMAT)
+    }
+}
+
+impl<'de> Deserialize<'de> for Format {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let format = String::deserialize(deserializer)?;
+        if format == FOSSIL_FORMAT {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::invalid_value(
+                serde::de::Unexpected::Str(&format),
+                &FOSSIL_FORMAT,
+            ))
+        }
+    }
+}
+
+impl JsonSchema for Format {
+    fn is_referenceable() -> bool {
+        false
+    }
+
+    fn schema_name() -> String {
+        "Format".to_owned()
+    }
+
+    fn json_schema(_: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            const_value: Some(FOSSIL_FORMAT.into()),
+            ..Default::default()
+        }
+        .into()
+    }
+}
 
 /// The manifest's path under a corpus's root.
 pub const MANIFEST_FILE: &str = "fossil.json";
@@ -50,8 +88,8 @@ pub const ROW_GROUP_ROWS: usize = 122_880;
 /// The whole of `fossil.json`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Manifest {
-    /// Always [`FOSSIL_FORMAT`] for a corpus this writer produces.
-    pub format: String,
+    /// The format the corpus is written in.
+    pub format: Format,
     /// One per vertex type, in the order the compiled schema lists them.
     pub vertex_tables: Vec<VertexTable>,
     /// One per relation, in the order the compiled schema lists them.
@@ -226,7 +264,7 @@ mod tests {
 
     fn manifest() -> Manifest {
         Manifest {
-            format: FOSSIL_FORMAT.to_string(),
+            format: Format,
             vertex_tables: vec![VertexTable {
                 name: "Person".to_string(),
                 iri: Some("https://example.org/Person".to_string()),
@@ -314,6 +352,13 @@ mod tests {
         json["vertex_tables"][0]["extent"] = serde_json::json!([0, 0, 1, 1]);
         let back: Manifest = serde_json::from_value(json).unwrap();
         assert_eq!(back, manifest());
+    }
+
+    #[test]
+    fn a_reader_refuses_a_format_it_does_not_know() {
+        let mut json = serde_json::to_value(manifest()).unwrap();
+        json["format"] = serde_json::json!("fossil/2");
+        assert!(serde_json::from_value::<Manifest>(json).is_err());
     }
 
     #[test]

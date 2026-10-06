@@ -12,31 +12,12 @@
 //! is not enough: its provider table reads no types, so every program resolves
 //! no shape and every assertion below would fail for the wrong reason.
 
-#![cfg(not(target_arch = "wasm32"))]
-
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::SystemTime;
 
-use fossil_base::{Catalogue, Files, FsError, Provider, SourceFile, System};
+use fossil_base::test_support::NativeSystem;
+use fossil_base::{Catalogue, Files, SourceFile, System};
 use fossil_ide::{NavigationTarget, goto_definition};
-
-/// The test's host `System`: a filesystem plus the `ShEx` decoder row, exactly
-/// as `fossil-lsp`'s `LspSystem` installs it.
-#[derive(Debug, Default)]
-struct HostSystem;
-
-impl System for HostSystem {
-    fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
-        std::fs::read(path).map_err(|e| FsError::Io(e.to_string()))
-    }
-    fn now(&self) -> SystemTime {
-        SystemTime::UNIX_EPOCH
-    }
-    fn providers(&self) -> &'static [&'static Provider] {
-        fossil_descriptors_output::PROVIDERS
-    }
-}
 
 #[salsa::db]
 #[derive(Clone)]
@@ -74,7 +55,9 @@ impl HostDb {
     fn new() -> Self {
         Self {
             storage: salsa::Storage::default(),
-            system: Arc::new(HostSystem),
+            system: Arc::new(NativeSystem::with_providers(
+                fossil_descriptors_output::PROVIDERS,
+            )),
             files: Files::default(),
             catalogue: Catalogue::default(),
         }

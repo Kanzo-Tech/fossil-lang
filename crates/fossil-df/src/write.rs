@@ -33,9 +33,8 @@ use fossil_sinks::generated::{
     EDGE_COLUMNS, ENDPOINT_DST, ENDPOINT_SRC, PAYLOAD_COLUMNS, WriterColumn,
 };
 use fossil_sinks::manifest::{
-    EdgeTable as EdgeEntry, Endpoint, FOSSIL_FORMAT, MANIFEST_FILE, Manifest, Property,
-    ROW_GROUP_ROWS, VertexTable as VertexEntry, data_type_name, edge_path, edge_table_name,
-    vertex_path,
+    EdgeTable as EdgeEntry, Endpoint, Format, MANIFEST_FILE, Manifest, Property, ROW_GROUP_ROWS,
+    VertexTable as VertexEntry, data_type_name, edge_path, edge_table_name, vertex_path,
 };
 use fossil_storage::{Storage, StorageError};
 
@@ -187,7 +186,7 @@ pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Writt
     probe.mark("write edge tables");
 
     let manifest = Manifest {
-        format: FOSSIL_FORMAT.to_string(),
+        format: Format,
         vertex_tables,
         edge_tables,
     };

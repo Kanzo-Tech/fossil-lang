@@ -8,8 +8,6 @@
 //! Persons, not the Org), and produces the W0b vertex shape with deterministic
 //! dense ids.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use datafusion::arrow::array::{Array, StringArray};
 use datafusion::prelude::SessionContext;
 

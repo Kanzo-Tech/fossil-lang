@@ -6,11 +6,9 @@ import init, {
   storageRead as rawRead,
   type InitInput,
 } from '../pkg/fossil_storage_wasm.js';
-import { FossilError, boot, isFossilError, type Access, type Host, type StorageCredential } from '@fossil-lang/types';
+import { FossilError, isFossilError, loader, type Access, type Host, type StorageCredential } from '@fossil-lang/types';
 
 export type { InitInput };
-
-let booted: Promise<unknown> | null = null;
 
 /**
  * Boot the `fossil-storage` module. Every door awaits it with nothing, and the glue finds its
@@ -22,18 +20,7 @@ let booted: Promise<unknown> | null = null;
  * @throws {FossilError} `module/unreachable` when the module could not be fetched within 60 s,
  *   `internal/bug` when it would not instantiate.
  */
-export function initStorage(wasm?: InitInput): Promise<unknown> {
-  if (booted === null) {
-    const pending = boot('fossil_storage_wasm_bg.wasm', () =>
-      init(wasm === undefined ? undefined : { module_or_path: wasm }),
-    );
-    booted = pending;
-    pending.catch(() => {
-      if (booted === pending) booted = null; // forgotten, so the next call boots again
-    });
-  }
-  return booted;
-}
+export const initStorage = loader<InitInput>('fossil_storage_wasm_bg.wasm', init);
 
 /**
  * `call`, with a failure fossil did not raise — a panic is a `RuntimeError: unreachable`, and the

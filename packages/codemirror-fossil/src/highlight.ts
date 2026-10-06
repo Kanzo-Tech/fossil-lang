@@ -101,10 +101,7 @@ interface Mark {
   cls: string;
 }
 
-/**
- * The decoration pass. Exported for the tests, which assert over ranges rather
- * than over a rendered DOM.
- */
+/** The decoration pass: the ranges to paint, before any DOM. */
 export function buildDecorations(
   view: EditorView,
   source: TokenSource,

@@ -219,8 +219,9 @@ impl DiagnosticData {
 /// The keys are the program's own path with the document joined onto it
 /// ([`fossil_hir::documents::registry_key`]), so in an editor they are already
 /// `file://` URIs and this is the identity. A key that is a bare path — what a
-/// test, or a browser host that opened a buffer by name, produces — gets
-/// `file://` in front of it; `None` for a key that is neither.
+/// test, or a browser host that opened a buffer by name, produces — is a path
+/// on the local host, `file:///<path>` (RFC 8089: `file://x` would make `x` a
+/// host); `None` for a key that is neither.
 ///
 /// **This was three functions across the two hosts and they did not agree.**
 /// `fossil-lsp` had one for goto-def (`UriExt::from_str_maybe`) and a second for
@@ -234,10 +235,8 @@ pub fn file_uri(key: &str) -> Option<Uri> {
     use std::str::FromStr as _;
     if key.contains("://") {
         Uri::from_str(key).ok()
-    } else if let Some(rest) = key.strip_prefix('/') {
-        Uri::from_str(&format!("file:///{rest}")).ok()
     } else {
-        Uri::from_str(&format!("file://{key}")).ok()
+        Uri::from_str(&format!("file:///{}", key.trim_start_matches('/'))).ok()
     }
 }
 
@@ -273,5 +272,24 @@ const fn severity(s: Severity) -> DiagnosticSeverity {
         Severity::Error => DiagnosticSeverity::ERROR,
         Severity::Warning => DiagnosticSeverity::WARNING,
         Severity::Info => DiagnosticSeverity::INFORMATION,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::file_uri;
+
+    /// A bare path is a path on the local host, absolute or not: `file://x`
+    /// would name `x` as a host, and the code-action edits and the diagnostics
+    /// once disagreed on exactly this.
+    #[test]
+    fn a_bare_key_is_a_local_path() {
+        let uri = |k| file_uri(k).map(|u| u.as_str().to_owned());
+        assert_eq!(uri("main.fossil").as_deref(), Some("file:///main.fossil"));
+        assert_eq!(
+            uri("/w/main.fossil").as_deref(),
+            Some("file:///w/main.fossil")
+        );
+        assert_eq!(uri("untitled://x").as_deref(), Some("untitled://x"));
     }
 }

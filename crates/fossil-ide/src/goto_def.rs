@@ -150,16 +150,7 @@ pub fn goto_definition(
         return document_targets(db, file, &shape, &Wanted::Predicate { mapping, key });
     }
 
-    // ONE candidate: the token's own text. A shape used to be `ex:Person` —
-    // several leaf tokens under an `IRI_EXPR`, none of which matched the index
-    // entry on its own — so a `name_candidates` walk climbed to the enclosing
-    // node to recover the full surface text. A shape is a bare `IDENT` now
-    // (grammar.bnf, ShapeExpr) and is handled above; what is left here is a
-    // mapping name, where the token under the cursor IS the name.
-    //
-    // A resolution step lived here too: the prefix segment of `ex:Person`,
-    // resolved cross-file to the `prefix ex: <…>` line that declared it. There
-    // are no prefix declarations, so there is nothing to navigate to.
+    // A mapping name: the token under the cursor IS the name.
     let ws = WorkspaceIndex::build(db, files);
     let mut targets = Vec::new();
     for (decl_file, entry) in ws.resolve(token.text()) {
@@ -329,7 +320,7 @@ fn wanted_iri(db: &dyn fossil_base::Db, entry: &TypeEntry, wanted: &Wanted<'_>) 
             // the renamed ones. Splitting the IRI here instead would be a second
             // implementation of `fossil_graph_schema::local_name`, which exists
             // because three copies of that split had already disagreed.
-            let shape = resolve_target_shape(db, *mapping).ok().flatten()?;
+            let shape = resolve_target_shape(db, *mapping)?;
             let (table, _collisions) = shape.short_names(&entry.renames);
             table
                 .iter()
@@ -508,7 +499,7 @@ fn push_unique(targets: &mut Vec<NavigationTarget>, target: NavigationTarget) {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
 

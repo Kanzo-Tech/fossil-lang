@@ -28,3 +28,6 @@ schemars = { workspace = true }
 # `arrow_schema::DataType` is what `data_type_name` spells, and it is depended on ALONE
 # rather than fossil-hir's `Primitive` so the format stays decoupled from the type system.
 arrow-schema = { workspace = true }
+
+[dev-dependencies]
+expect-test = { workspace = true }

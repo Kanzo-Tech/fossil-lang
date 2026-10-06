@@ -83,14 +83,6 @@ pub fn decode_shex(_uri: &str, text: &str) -> Result<OutputShapes, Rejection> {
     }
 }
 
-// `SHEX`, `SHACL` and `PROVIDERS` stood here as hand-written statics. They are
-// generated from `catalogue.bnf` now — `mod generated`, above — and each one's
-// argument moved into that file's `(* … *)` commentary.
-//
-// The generated file writes `decode_shex` and `decode_shacl` as Rust PATHS, so
-// the compiler resolves them. That is the one thing `catalogue_parity.rs`, which
-// this replaces, said it could not prove.
-
 /// Output-side shape descriptor.
 ///
 /// Implementations parse a raw descriptor blob (`ShEx`, future `SHACL`) and

@@ -550,7 +550,7 @@ pub fn modifier_names(modifiers: u32) -> Vec<&'static str> {
         .collect()
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;

@@ -110,14 +110,6 @@ fn field_from_inferred<'db>(
     }
 }
 
-// `RowScope` lived here — the rows of a relation, beside the type system rather
-// than in it. It is `crate::ty::Rows` now, the payload of `TyKind::Relation`,
-// and this module keeps the ALGEBRA that builds one.
-//
-// Two structures described the shape of data in flight and only one of them was
-// a type, which is why `seq.where` had the signature `p("rows", S::String)` and
-// why a `where` predicate was walked for the columns it names and never typed.
-
 /// The scope a mapping's `from` clause puts in the body — see [`Rows`].
 ///
 /// Plain-Rust helper (NOT `#[salsa::tracked]`) — called from within the
@@ -644,14 +636,6 @@ fn right_scope<'db>(
     })
 }
 
-// `check_refs`, `collect_refs`, `Reference` and `binding_list` stood here — a
-// hand-written walk that collected the `ColumnRef`s a condition mentions and
-// asked, per name, whether the scope had it. Every one of those questions is a
-// question `synth` of a `ColumnRef` already asks, against the same scope. What
-// the walk could NOT ask is the other one, and that is the whole finding: it
-// answered «is there a column called `celsius`» and never «and is
-// `Row.celsius > "abc"` a condition».
-
 /// Type one stage's condition, against the rows the pipeline has AT that stage.
 ///
 /// The catalogue row says what the verb takes — `seq.where` is
@@ -1052,7 +1036,7 @@ pub(crate) fn record_from_inferred<'db>(
     Ty::new(db, TyKind::Record(Record::new(db, fields)))
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
@@ -1211,7 +1195,7 @@ mod tests {
         }
 
         let system: Arc<dyn fossil_base::System> =
-            Arc::new(fossil_base::test_support::DecodingHost::default());
+            Arc::new(fossil_base::test_support::NativeSystem::decoding());
         let db = fossil_base::FossilDb::new(system);
         // The two `id`s differ in TYPE, which is the whole point — and that is
         // why the join is on `k` and not on them. `on = Left.id == Right.id`

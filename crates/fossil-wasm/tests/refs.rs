@@ -8,8 +8,6 @@
 //! call panics on native, so we exercise the `refs_native` core — the same
 //! `check` ↔ `check_rows` split this crate uses throughout).
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use fossil_lineage::RefRole;
 use fossil_wasm::refs_native;
 

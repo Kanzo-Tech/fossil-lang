@@ -278,16 +278,7 @@ impl<'db> DefMap<'db> {
             .map(|e| e.span)
     }
 
-    /// The document named by the `schema =` argument of a source, if it named
-    /// one. `fossil-lineage` reports it as a reference and the engine registers
-    /// it; the compiler wants the pair below.
-    #[must_use]
-    pub fn lookup_source_schema(self, db: &'db dyn fossil_base::Db, name: &str) -> Option<SmolStr> {
-        self.lookup_source_schema_binding(db, name)
-            .map(|(_, document)| document)
-    }
-
-    /// The `(provider, document)` pair that argument names —
+    /// The `(provider, document)` pair a source's `schema =` argument names —
     /// `schema = io.shex("x.shex")`.
     ///
     /// The pair, for the reason [`Self::output_shape_binding`] is a pair: the
@@ -437,19 +428,7 @@ impl<'db> DefMap<'db> {
             .and_then(|e| e.shape_error.clone())
     }
 
-    /// The first shape document the file brings in, if any.
-    ///
-    /// This is what a mapping's OUTPUT shape is resolved against when the source
-    /// is a CSV — the case that had nowhere to declare a shape at all until a
-    /// `type` binding gave it one. One document per file for now: a second
-    /// `type … =` is legal and binds its own names, but which document backs the
-    /// output contract is not something any program has had to say yet.
-    #[must_use]
-    pub fn output_shape_document(self, db: &'db dyn fossil_base::Db) -> Option<SmolStr> {
-        self.output_shape_binding(db).map(|(_, document)| document)
-    }
-
-    /// The `(constructor, document)` pair of that same first binding: the
+    /// The `(constructor, document)` pair of the file's first `type` binding: the
     /// constructor selects the registry row and the document is what it is asked
     /// to read. They come back together so no caller can read one and forget the
     /// other.
@@ -659,10 +638,6 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
 
     DefMap::new(db, sources, mappings, types)
 }
-
-// `parse_prefix_decl_node` lived here and read a `PREFIX_DECL`'s `IDENT` and
-// `ABS_IRI` tokens into a `(name, iri)` pair. All three — the node kind and
-// both token kinds — are gone.
 
 /// Extract the bound name from a `SOURCE_DEF` node (the `users` in
 /// `users := io.csv("...")`). The first IDENT child token is the binding name;
@@ -1070,7 +1045,7 @@ pub(crate) struct RenameAttr {
 /// rename belong to one binding rather than to the file.
 ///
 /// **That distinction is load-bearing and it is not decoration.**
-/// [`DefMap::output_shape_document`] returns the document of the FIRST `type`
+/// [`DefMap::output_shape_binding`] returns the document of the FIRST `type`
 /// binding in the file, a `find_map` over all of them; if a `@rename` were
 /// file-scoped it would inherit that flattening and a two-binding program would
 /// silently apply one binding's repair to the other's shape. Scoped to the node,
@@ -1230,7 +1205,7 @@ fn resolve_member_shape_iris(
 // the lookup are one function, which is the only arrangement in which they
 // cannot disagree.
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1326,7 +1301,7 @@ Users : Person from User
         assert_eq!(dm.types(&db).len(), 1);
         assert_eq!(dm.types(&db)[0].name, "Person");
         assert_eq!(
-            dm.output_shape_document(&db).as_deref(),
+            dm.output_shape_binding(&db).map(|(_, d)| d).as_deref(),
             Some("personas.shex")
         );
         assert_eq!(dm.sources(&db).len(), 1);
@@ -1382,7 +1357,12 @@ b := io.parquet(\"b.parquet\")
         let call = dm.lookup_source_call(&db, "u").unwrap();
         assert_eq!(call.constructor.as_deref(), Some("io.csv"));
         assert_eq!(call.uri.as_deref(), Some("u.csv"));
-        assert_eq!(dm.lookup_source_schema(&db, "u").as_deref(), Some("u.shex"));
+        assert_eq!(
+            dm.lookup_source_schema_binding(&db, "u")
+                .map(|(_, d)| d)
+                .as_deref(),
+            Some("u.shex")
+        );
     }
 
     /// **The delimiter reaches the `DefMap`, and only on the row that declares
@@ -1615,7 +1595,7 @@ b := io.parquet(\"b.parquet\")
             Some("https://example.org/Alpha")
         );
         assert_eq!(
-            dm.output_shape_document(&db).as_deref(),
+            dm.output_shape_binding(&db).map(|(_, d)| d).as_deref(),
             Some("two_shapes.shex")
         );
     }
@@ -1670,7 +1650,7 @@ b := io.parquet(\"b.parquet\")
     /// `@rename` reaches the `DefMap`, and it reaches it ADDRESSED: one `type`
     /// line binds several names, and each rename goes to the one it names.
     ///
-    /// Sorting by name and not by file is the point. `output_shape_document` is
+    /// Sorting by name and not by file is the point. `output_shape_binding` is
     /// a `find_map` over the file's bindings — it answers with the FIRST — so a
     /// file-scoped rename table would inherit that flattening and apply one
     /// binding's repair to another binding's shape without a word.

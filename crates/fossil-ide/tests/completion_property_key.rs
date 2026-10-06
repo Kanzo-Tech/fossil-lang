@@ -60,32 +60,12 @@
 //! - **Anything about a real editor.** Every position below is a `(line,
 //!   character)` this file computes; no LSP client is driven.
 
-#![cfg(not(target_arch = "wasm32"))]
-
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::SystemTime;
 
-use fossil_base::{Catalogue, Files, FsError, Provider, SourceFile, System};
+use fossil_base::test_support::NativeSystem;
+use fossil_base::{Catalogue, Files, SourceFile, System};
 use lsp_types::CompletionItemKind;
-
-/// The host's two jobs: read the document off disk, and install the decoder row
-/// that claims `.shex`. `NativeSystem`'s decoder table is the trait default
-/// `&[]`, so a `.shex` it can read is a document nothing decodes.
-#[derive(Debug, Default)]
-struct HostSystem;
-
-impl System for HostSystem {
-    fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
-        std::fs::read(path).map_err(|e| FsError::Io(e.to_string()))
-    }
-    fn now(&self) -> SystemTime {
-        SystemTime::UNIX_EPOCH
-    }
-    fn providers(&self) -> &'static [&'static Provider] {
-        fossil_descriptors_output::PROVIDERS
-    }
-}
 
 #[salsa::db]
 #[derive(Clone)]
@@ -121,7 +101,9 @@ impl fossil_base::Db for HostDb {
 fn host() -> HostDb {
     HostDb {
         storage: salsa::Storage::default(),
-        system: Arc::new(HostSystem),
+        system: Arc::new(NativeSystem::with_providers(
+            fossil_descriptors_output::PROVIDERS,
+        )),
         files: Files::default(),
         catalogue: Catalogue::default(),
     }

@@ -118,6 +118,8 @@ slug = { workspace = true }
 unicode-normalization = { workspace = true }
 
 [dev-dependencies]
+# `tests/programs.rs` keeps each conformance program's artefacts as files.
+expect-test = { workspace = true }
 # `tests/write.rs` reads the corpus back with a second engine: a corpus only
 # one writer can read is not a corpus. `tests/builtin_smoke.rs` binds every
 # stdlib template on it, and `tests/corpus_exec.rs` writes the native half of

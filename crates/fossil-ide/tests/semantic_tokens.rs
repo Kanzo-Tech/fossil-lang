@@ -5,7 +5,6 @@
 //! each with its human-readable legend type name, so the snapshot diffs as a
 //! readable table when the classifier or fixture changes.
 
-#![cfg(not(target_arch = "wasm32"))]
 // The fixture interpolates — `"…/{users.id}"` is LITERAL Fossil source, not a
 // Rust format-string arg.
 #![allow(clippy::literal_string_with_formatting_args)]
@@ -60,5 +59,5 @@ fn render(src: &str) -> String {
 
 #[test]
 fn semantic_tokens_snapshot() {
-    insta::assert_snapshot!(render(FIXTURE));
+    expect_test::expect_file!["snapshots/semantic_tokens_snapshot.txt"].assert_eq(&render(FIXTURE));
 }

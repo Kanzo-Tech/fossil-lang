@@ -56,8 +56,6 @@
 //!   called, not scraped, so this notices a wrong answer; it does not notice a
 //!   right answer arrived at by a silly route.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use std::path::{Path, PathBuf};
 
 use fossil_ide::{legend_modifier_name, legend_type_name, semantic_legend};

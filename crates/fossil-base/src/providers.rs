@@ -56,13 +56,6 @@
 //! those; composing a Fossil compiler error out of it is `fossil_hir::refusals`,
 //! next to the checker that raises it.
 //!
-//! That is not left to a comment: `tests/substrate_has_no_prose.rs` reads this
-//! file **and the module beside it** and fails on a string literal outside `mod tests`
-//! with a space in it. Every literal a catalogue needs — `"csv"`, `"ttl"`,
-//! `"io.{}"` — is one token; a sentence is not. It is a crude rule and it says
-//! so, but it is the rule that would have caught the two functions that just
-//! left.
-//!
 //! # The rows themselves are not written here any more
 //!
 //! `CSV`, `JSON`, `PARQUET`, `RDF`, `DATA` and [`NativeReader`] are **generated
@@ -269,11 +262,6 @@ pub fn claimed(table: &[&'static Provider], uri: &str) -> bool {
 // document from a `type { … }` binding. It is not the same document: `schema =`
 // shapes the INPUT rows and `type { … }` is the OUTPUT contract, and nothing
 // says a program's two ends read one file.
-
-// The four data rows and `DATA` stood here as hand-written statics. They are
-// generated from `catalogue.bnf` now — `mod generated`, above — and the argument
-// each one's doc comment carried moved into that file's `(* … *)` commentary,
-// which is where `catalogue.bnf` says the argument lives.
 
 // ===================================================================== the input
 

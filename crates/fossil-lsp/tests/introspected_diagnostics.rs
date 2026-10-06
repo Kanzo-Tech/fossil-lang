@@ -30,8 +30,6 @@
 //! leaves, because it is a real one and the docblock alone would not keep it
 //! visible.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 mod common;
 
 use std::path::PathBuf;

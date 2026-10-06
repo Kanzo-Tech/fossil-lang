@@ -33,6 +33,7 @@
  */
 import { resolveDocuments } from '@fossil-lang/storage';
 import {
+  rowOf,
   until,
   type Host,
   type Problem,
@@ -163,18 +164,8 @@ export async function openProgram(uri: string, options: OpenProgramOptions): Pro
     async check(next) {
       await settle(next);
       const rows = workspace.check();
-      const failed = unread.map(
-        ({ key, problem }) =>
-          ({
-            uri,
-            range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } },
-            severity: 1,
-            code: problem.code,
-            data: problem.data,
-            title: problem.title,
-            message: `${key}: ${problem.detail}`,
-            ...(problem.help === undefined ? {} : { help: problem.help }),
-          }) as CheckRow,
+      const failed = unread.map(({ key, problem }) =>
+        rowOf(uri, problem, `${key}: ${problem.detail}`),
       );
       return [...failed, ...rows];
     },

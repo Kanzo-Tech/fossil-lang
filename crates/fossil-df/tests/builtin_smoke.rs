@@ -16,10 +16,8 @@
 //! `Conversion` or `Invalid Input` error means `DuckDB` bound the expression and
 //! then disliked the data, which is the template working.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use duckdb::Connection;
-use fossil_hir::stdlib::{FunctionRegistry, LoweringKind, ScalarTy, render_template};
+use fossil_hir::stdlib::{LoweringKind, ScalarTy, render_template, stdlib};
 
 /// A literal of the right SQL type for a parameter, so the template binds.
 ///
@@ -53,7 +51,7 @@ fn is_binding_failure(msg: &str) -> bool {
 #[test]
 fn every_expr_template_binds_on_a_real_duckdb() {
     let conn = Connection::open_in_memory().expect("open in-memory DuckDB");
-    let reg = FunctionRegistry::stdlib_default();
+    let reg = stdlib();
 
     let mut checked = 0usize;
     let mut failures: Vec<String> = Vec::new();
@@ -99,7 +97,7 @@ fn every_expr_template_binds_on_a_real_duckdb() {
     // than the literal `35` it was — that number described a catalogue of 48
     // surface rows and went stale the first time one was deleted, and what this
     // needs to know is that EVERY `Expr` row reached the engine.
-    let expr_rows = FunctionRegistry::stdlib_default()
+    let expr_rows = stdlib()
         .iter()
         .filter(|e| matches!(e.lowering, LoweringKind::Expr(_)))
         .count();
@@ -113,19 +111,6 @@ fn every_expr_template_binds_on_a_real_duckdb() {
          almost nothing"
     );
 }
-
-// `a_validator_returns_its_input_raises_on_bad_input_and_passes_null_through`
-// stood here. It fed each of the four `validate.*` templates a valid value, an
-// invalid one and a NULL, and asserted the shape all five rows of that
-// namespace shared: the value or an error, never a null.
-//
-// The namespace is gone from the language, so the test has no subject. What it
-// proved about DuckDB is not gone, and the test below keeps the load-bearing
-// half of it: `error()` in a `CASE` arm is lazy per row. That is why `validate/`
-// was expressible on this engine at all — and, read the other way, exactly what
-// DataFusion has no spelling for, which is why the rows were deleted rather than
-// carried as a permanent gap. It is kept as the evidence behind that decision,
-// executable rather than recalled.
 
 /// `error()` in a `CASE` arm is lazy PER ROW, not merely per query.
 ///

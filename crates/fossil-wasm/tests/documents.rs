@@ -4,7 +4,6 @@
 //! `resolveDocuments` in `@fossil-lang/types` is the loop over these three
 //! calls; this is the Rust half it drives.
 
-#![cfg(not(target_arch = "wasm32"))]
 // `{users.id}` is a Fossil interpolation hole in a literal program, not a Rust
 // format-string argument.
 #![allow(clippy::literal_string_with_formatting_args)]

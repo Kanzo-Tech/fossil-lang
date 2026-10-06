@@ -71,7 +71,7 @@ impl WorkspaceIndex {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::symbol_index::SymbolKind;

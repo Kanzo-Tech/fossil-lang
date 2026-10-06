@@ -581,10 +581,6 @@ pub enum ScalarTy {
     Date,
     /// `xsd:dateTime`.
     DateTime,
-    // An `Iri` variant stood here and no row in the catalogue used it — a
-    // signature can neither take nor return a reference, because a reference is
-    // to a SHAPE and the catalogue names no shapes. When one does, it will need
-    // to say WHICH, which is not a scalar tag.
     /// `Seq<String>` — the one repeated shape v0.1 needs (`str.split`).
     SeqString,
 }
@@ -758,7 +754,7 @@ impl FunctionRegistry {
     /// If two rows share a name, or if a row repeats a position that is not its
     /// last POSITIONAL one — see [`Arity`].
     #[must_use]
-    pub fn stdlib_default() -> Self {
+    fn stdlib_default() -> Self {
         let mut entries: HashMap<SmolStr, RegistryEntry> = HashMap::new();
         for row in generated::rows() {
             let name = row.name.clone();
@@ -828,19 +824,6 @@ impl FunctionRegistry {
         self.entries.values()
     }
 }
-
-// ── The templates are NOT here any more ────────────────────────
-//
-// `SLUG_TEMPLATE` and `STRIP_HTML_TEMPLATE` stood here as `const`s, each under
-// the fuzzing result that justified its exact text — 16/16 and 0 mismatches
-// over 240,998 inputs for the first, 27/29 and 1,837 over 120,000 for the
-// second. Both the value and the paragraph are in `catalogue.bnf` now, above
-// the row they are about, which is where that file already keeps every argument
-// it makes. Five `VALIDATE_*_TEMPLATE` consts went with the namespace.
-//
-// The two helpers that built this table — `expr(template)` and `L(op)` — went
-// too. They were sugar for writing a `LoweringKind` by hand, and nothing writes
-// one by hand: `crate::stdlib::generated` spells the variant out.
 
 /// Substitute a template's `%N` holes with the caller's rendered arguments.
 ///
@@ -926,5 +909,4 @@ pub fn template_holes(template: &str) -> Vec<usize> {
 }
 
 #[cfg(test)]
-#[cfg(all(test, not(target_arch = "wasm32")))]
 mod tests;

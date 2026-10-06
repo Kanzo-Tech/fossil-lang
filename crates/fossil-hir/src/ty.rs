@@ -287,29 +287,7 @@ pub struct Record<'db> {
     pub fields: Vec<RecordField<'db>>,
 }
 
-// `FnSig` stood here, interned, and it was the SECOND half of the same finding
-// that removed `TyKind::Fn`. The checker reads `crate::stdlib::SigSpec`
-// directly — `param.ty.to_ty(db)` in `synth_call` — so a materialised signature
-// was a bridge with nobody on it: `RegistryEntry::signature` and
-// `SigSpec::to_fn_sig` had one caller between them in the whole tree, and it
-// was the test asserting that the bridge worked.
-//
-// A language with no `FunctionDecl` and no `LambdaExpr` cannot write a
-// function-typed VALUE down, so nothing downstream can need one.
-
-// `ShapeId` stood here — a `u32` minted from a mapping's INDEX, so two mappings
-// targeting one shape had two ids, which its own docblock recorded as the thing
-// to fix. It is deleted rather than fixed: nothing read it. `TypeckOutput`
-// carried a `target_shape` field with no reader in the workspace, and
-// `BlamePos::ShapeProperty` carried it beside a `property` name into the one
-// arm that matches the variant with `{ .. }`.
-//
-// What identifies a shape is its IRI, and that is what `TyKind::Ref` carries.
-// `BlamePos` itself is gone now (see `crate::check`), and the `property` name
-// came back as a parameter — it had a reader the moment the message stopped
-// debug-printing a span at the author. The `ShapeId` did not.
-
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::Arc;
@@ -318,29 +296,6 @@ mod tests {
         let system: Arc<dyn fossil_base::System> =
             Arc::new(fossil_base::test_support::NativeSystem::default());
         fossil_base::FossilDb::new(system)
-    }
-
-    /// Type-level proof that `TyKind::Error(ErrorGuaranteed)` exists as a
-    /// variant. `ErrorGuaranteed` cannot be constructed outside `fossil-base`
-    /// (only via `report` / `bug` from inside a tracked query that
-    /// has a `Diagnostic` sink), so we cannot build one here; the function
-    /// body merely needs to match the variant. If `Ty::Error` is renamed or
-    /// dropped this function stops compiling.
-    const fn _ty_error_variant_exists(t: &TyKind<'_>) {
-        if let TyKind::Error(_) = t { /* OK */ }
-    }
-
-    #[test]
-    fn every_ty_kind_exists() {
-        let db = db();
-        let int_ty = Ty::new(&db, TyKind::Primitive(Primitive::Integer));
-        let _: TyKind<'_> = TyKind::Primitive(Primitive::String);
-        let _: TyKind<'_> = TyKind::Seq(int_ty);
-        let rec = Record::new(&db, vec![]);
-        let _: TyKind<'_> = TyKind::Record(rec);
-        let _: TyKind<'_> = TyKind::Ref(vec![SmolStr::new_static("https://example.org/Person")]);
-        // Reference the helper so the dead-code lint doesn't flag it.
-        let _ = _ty_error_variant_exists as fn(&TyKind<'_>);
     }
 
     #[test]

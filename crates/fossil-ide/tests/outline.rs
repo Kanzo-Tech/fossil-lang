@@ -4,8 +4,6 @@
 //! into a stable `kind name @ start-end` table so the snapshot diffs readably
 //! when the `SymbolIndex` walk or the kind mapping changes.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
@@ -68,5 +66,5 @@ fn render(src: &str) -> String {
 
 #[test]
 fn outline_snapshot() {
-    insta::assert_snapshot!(render(FIXTURE));
+    expect_test::expect_file!["snapshots/outline_snapshot.txt"].assert_eq(&render(FIXTURE));
 }

@@ -147,16 +147,6 @@ export interface SemanticTokenRow {
   modifiers: string[];
 }
 
-// `StdlibClass` and `FossilWorkspace.classification()` lived here — one row per
-// stdlib function carrying `"pure_sql"` or `"native_udf_only"`, so an editor
-// could render the native-only functions as disabled. The Rust side deleted the
-// concept (`crates/fossil-wasm/src/lib.rs`, two tombstones, and
-// `crates/fossil-hir/src/stdlib.rs`): every catalogued function is a pure SQL
-// expression template, so there is nothing to disable. This binding kept calling
-// it, and only type-checked because `pkg/fossil_wasm.d.ts` is a gitignored build
-// output that had not been regenerated since — it declared `classification(): any`
-// while the method it described no longer existed.
-
 /**
  * The primitive lattice, as `fossil-graph-schema` serialises it — the same enum
  * the checker types against, not a set of names it looks up.

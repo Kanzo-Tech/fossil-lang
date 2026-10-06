@@ -1,7 +1,3 @@
----
-source: crates/fossil-hir/tests/diagnostic_corpus.rs
-expression: "run_db_wired_fixture(\"forward_propagation\", \"typo_with_did_you_mean\")"
----
 # mode: Db-wired (production typecheck_mapping query)
 # bucket: forward_propagation
 Error: `naem` is not a field of `users`

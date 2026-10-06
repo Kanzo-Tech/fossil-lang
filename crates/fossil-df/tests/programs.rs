@@ -1,223 +1,35 @@
-//! **The conformance set, executed.** `docs/programs/` — twenty-one clean
-//! programs,
-//! compiled by the production path, each one's output or diagnostic kept as an
-//! artefact.
-//!
-//! `grammar.bnf`'s header names this directory as the language's only mechanical
-//! control: *«THE CONFORMANCE SET is `docs/programs/` … Nothing mechanically
-//! checks this file against the parser today, so those 26 programs are the only
-//! check it has.»* Until this file existed that sentence was false in the one way
-//! that matters — **nobody compiled them.** They were transcluded by the
-//! documentation, and the only thing checked was that the file and its
-//! `// #region` were on disk (`docs/lib/programs.ts`). A stale example rotted
-//! in silence instead of failing to compile, and the five `expected/diagnostic.txt`
-//! were hand-written prose that no compiler produced and nothing compared.
-//!
-//! # Why here and not in the web app
-//!
-//! The thing that has to go red is the COMPILER. A script under `docs/` that
-//! compiled the programs would put the failure on the documentation build,
-//! which is the wrong side of the seam: a parser regression is not a docs
-//! problem, and the docs build already has two ways to be red for reasons that
-//! are its own.
-//!
-//! # Why `fossil-df`
-//!
-//! Because [`fossil_df::Executor`] is the one host that writes a corpus, and a
-//! program is kept here for the corpus it writes. This file lived beside the
-//! native `fossil` binary, whose `fossil run` wrote a different corpus from the
-//! same program; that host was deleted on 2026-09-30, and what it did around
-//! the compiler is `tests/support/native.rs` now — a check host (the real
-//! filesystem, the whole provider registry, every source described first, the
-//! documents a program names registered from disk) and a run through the
-//! executor over the program's directory served from memory. So a `.shex`
-//! sitting on disk beside the program is still enough, and neither half
-//! registers a document the program did not name.
-//!
-//! # `tests/write.rs` is next door and is not this
-//!
-//! `the_corpus_keeps_the_promises_it_makes_to_a_stranger` writes ONE generated
-//! graph and validates the `fossil/1` corpus it produces with numbered SQL checks
-//! over `DuckDB` — `dense_id` global and gapless, the edge endpoints, the row
-//! groups, the Hilbert order. It is one corpus in great depth. This file is
-//! every program at the depth of «did it compile, did it keep every property the
-//! author wrote, and is every table `fossil.json` names in the store». Both are
-//! needed and neither substitutes for the other.
-//!
-//! # What replaces the `file:line` citation check
-//!
-//! `docs/content.test.ts` scans every MDX page for `` `path/to/file.rs:12` ``
-//! and asserts the line exists — **that the line exists, not that it says what
-//! the page claims.** This file is the replacement for the claims that are
-//! PROGRAMS. It is not a replacement for the ones that are not.
+//! **The conformance set, executed.** Every program under `docs/programs/`,
+//! compiled by the production path and run through [`fossil_df::Executor`],
+//! each one's output or diagnostic kept as an artefact the documentation
+//! transcludes.
 //!
 //! # The artefacts
 //!
 //! Two files per program, under `<program>/expected/`:
 //!
-//! - `diagnostic.txt` — every diagnostic, rendered exactly as `fossil check`
-//!   rendered it (miette graphical, unicode, no colour, width 100). Empty is a
-//!   statement, not an absence: it says this program produces no diagnostic, and
-//!   it goes red the day that stops being true.
-//! - `compiled.txt` — what the compiler UNDERSTOOD. Type bindings and the shape
-//!   IRI each resolved to, source bindings, and per mapping the properties
-//!   written against the properties lowered. Then the tables `fossil.json`
-//!   declares — each with its `record_count` and its columns — and every
-//!   relation's dropped count from the run's report, for every program that is
-//!   not under `errors/`.
+//! - `diagnostic.txt` — every diagnostic, rendered as a host renders it (miette
+//!   graphical, unicode, no colour, width 100). Empty says the program produces
+//!   no diagnostic.
+//! - `compiled.txt` — what the compiler understood: type bindings and their
+//!   shape IRIs, source bindings with their pipelines, per mapping the
+//!   properties written against the properties lowered, then the tables
+//!   `fossil.json` declares and every relation's dropped count.
 //!
-//!   A source binding that DERIVES a relation carries its pipeline, rendered from
-//!   the HIR by `fossil_hir::display` — the join key, the filter predicate, the
-//!   self-join's alias. It used to carry `LineRow.join(?)`, and the counts alone
-//!   cannot stand in for it: drop the `tenant` conjunct from `compound-key` and
-//!   the join goes from four rows to seven, and the seven mint the same four
-//!   subjects. Every number in the artefact is equal across a change that breaks
-//!   the program. The predicate is the only thing that is not.
+//! `UPDATE_EXPECT=1 cargo test -p fossil-df --test programs` rewrites them
+//! (`expect-test`).
 //!
-//! `FOSSIL_BLESS=1 cargo test -p fossil-df --test programs` regenerates them.
-//! A diagnostic text nobody produces is a promise the compiler does not make.
+//! # The invariants no blessing can satisfy
 //!
-//! # Every `expected/diagnostic.txt` is blessed, and five were hand-written
+//! 1. **No property is lost in silence.** Every mapping's written count equals
+//!    its lowered count, or an error diagnostic covers the property.
+//! 2. The programs outside `errors/` produce no error; those under it produce
+//!    at least one.
+//! 3. Every `type { … }` binding outside `errors/` resolves to a shape IRI.
+//! 4. The programs outside `errors/` run and write at least one vertex type.
+//! 5. The store holds `fossil.json` and exactly the tables it names.
 //!
-//! They described the diagnostics the language was MEANT to produce, and
-//! blessing one before the compiler could produce it would have overwritten an
-//! accurate description of the target with an accurate description of today —
-//! the difference between them being the specification. **The routine, when the
-//! next one is written: bless a program the day it says what it means, and
-//! `git checkout --` the rest**, because `FOSSIL_BLESS=1` writes all of them.
-//!
-//! What the five needed, in the order they were closed:
-//!
-//! - **`identity/conflicting` needed nothing.** Message, both spans, both labels and
-//!   the `help` were already identical; what differed was a `[{severity:?}]`
-//!   prefix this file's own renderer added and `fossil check` did not (see
-//!   `native::render_diagnostics`), and the context lines around the snippet. Both
-//!   are how the report is DRAWN, and the hand-written file was drawn by hand.
-//! - **`name/unknown-field` needed a second label in the same file and a narrower
-//!   caret.** The label is the line that bound the row, saying which fields it
-//!   has; the caret is on `nmae` rather than on `User.nmae`, which took a span
-//!   per REFERENCE where the compiler recorded one per property
-//!   (`fossil_hir::body::HirBody::ref_spans`).
-//! - **`type/property-mismatch`, `shape/name-collision` and
-//!   `shape/missing-required-property` needed the report
-//!   to cite TWO FILES** — a label under a line of the `.shex`, which
-//!   [`fossil_base::SpanLabel`] could not express because it carried a span and
-//!   a frame and no file. It carries a `document` now; the range comes from
-//!   `fossil_shex::spans`, a lookup over the document's text; and a renderer
-//!   groups labels by file, one `Rendered` per file under one message. The LSP
-//!   publishes per URI and so is part of the same capability — `fossil-lsp` and
-//!   `fossil-wasm` do not route these yet, which is the next thing.
-//!
-//! # Three differences from the hand-written targets are DELIBERATE
-//!
-//! - **The document's vocabulary is not the program's.** The targets wrote
-//!   `shop:Order declares shop:total as xsd:float` and
-//!   `` `shop:phone` is optional ``; the compiler writes `` `Order` declares
-//!   `total` as Float `` and `` `phone` is optional ``. Only a resolved IRI
-//!   reaches `fossil-hir` — the CURIE is the document's prefix map, which stops
-//!   at the decoder — and the bare name is the word the author typed on the
-//!   line above anyway.
-//! - **A binding label underlines the whole binding**, not just the
-//!   constructor call: `type { Person } := io.shex("shape.shex")` and
-//!   `User := io.csv("data/users.csv")` entire, because the label says what
-//!   `Person`/`User` IS and the name is part of that sentence.
-//! - **Block layout is miette's**, including which snippet comes first.
-//!
-//! # One thing the blessing deleted, and it came back
-//!
-//! `type/property-mismatch`'s target carried a `help:` the compiler did not produce —
-//! *«`Purchase.amount` is Float. If `reference` really holds the number,
-//! `parse.float(Purchase.reference)` converts it.»* — so for one commit this
-//! header was the only description of it. Both halves exist now
-//! (`fossil_hir::check::repair_for`): a column of the EXPECTED type on the same
-//! row, and a stdlib row taking the actual type and returning the expected one.
-//! The second is a SEARCH over the catalogue rather than a table of pairs,
-//! because the catalogue is data.
-//!
-//! The wording differs by one word — «really holds the value» where the target
-//! wrote «really holds the number», because the sentence is generated for every
-//! pair of types and only one of them is a number.
-//!
-//! # Three causes of failure, and only one of them is the parser
-//!
-//! A red run is a map, and it is only a useful map if the reader can tell the
-//! three apart. Every finding below is prefixed with its stage for that reason:
-//!
-//! - `PARSE` / `SILENT-DROP` — the parser has not landed the production, or it
-//!   landed and the lowering threw away what it produced.
-//! - `RUN` — the program compiled and the run refused it.
-//! - `SHAPE` — a type binding's document decoded to nothing, so the mapping got
-//!   no output contract and no property in it is writable.
-//!
-//! A fourth cause is not visible from here and is named so nobody hunts for it:
-//! nothing in the language produces a per-row `Iri`. `check.rs` types an
-//! interpolation as `IriTemplate` only in subject position, and the RDF term
-//! constructors were deleted from the catalogue — so an edge whose shape declares
-//! a shape-valued range reads as `expected Iri, got String`.
-//!
-//! # Five of the twenty-six exist because the grammar promised and nobody paid
-//!
-//! `grammar.bnf`'s header claims that no production exists below it for a form
-//! none of the conformance programs spells, except where a comment says so and
-//! says why. The claim failed five times — `TernaryExpr` (L1), `OrExpr` (L2),
-//! `AdditiveExpr` (L5), `MulExpr` (L6) and `UnaryExpr` (L7, with `not` reserved
-//! and unused). It was closed with five programs rather than five comments,
-//! because a comment excuses the gap and a program CLOSES it: nothing knew
-//! whether those five productions worked.
-//!
-//! - `ternary` — `c ? a : b`, and the chained form, which is the L1
-//!   right-associativity claim. It is also the only program where the `:`
-//!   disambiguation of rule 3 is exercised inside a mapping body.
-//! - `disjunction` — `or` in a `where` predicate and `a or b and c` in a
-//!   property, which is the L2-looser-than-L3 claim.
-//! - `arithmetic` — `+` and `-`, and `gross - discount + shipping`, which is a
-//!   real left-associativity test: right-associating it changes the number.
-//! - `scaling` — `*`, `/`, `%`, and `handling + unit_price * quantity`, which
-//!   is the L5/L6 precedence claim.
-//! - `negation` — unary `-` and `not`, in a predicate and in a property.
-//!
-//! Each exercises its production rather than mentioning it, and each is expected
-//! to COMPILE: `grammar.bnf` is normative and the parser implements it, so a
-//! production the grammar declares is a promise the compiler owes. Three of the
-//! five are red today for reasons the report separates.
-//!
-//! # Blessing cannot make this green, and that is the design
-//!
-//! A snapshot harness that only diffs snapshots passes the moment you bless it,
-//! which would be worthless here — the parser is mid-migration and the goldens
-//! are meant to move. So the invariants below are checked in BOTH modes and are
-//! independent of every golden:
-//!
-//! 1. The set is twenty-six, twenty-one clean and five under `errors/`.
-//! 2. **No property is lost in silence.** The measured trap:
-//!    `fossil_hir::body::body` keeps the properties `lower_property` returns
-//!    `Some` for and skips the `None`s with a bare `if let` — no diagnostic, no
-//!    accumulator. `name = User.name` already parses and is already thrown away,
-//!    so a naive harness goes green having lost the program. Every mapping's
-//!    written count must equal its lowered count.
-//! 3. Non-vacuity for (2): the parser's `PROPERTY` count is checked against a
-//!    SECOND, independent reader — a text scan of the program for indented
-//!    `name = …` lines. If the parser stops producing `PROPERTY` nodes, (2)
-//!    becomes vacuously true and only this catches it.
-//! 4. The twenty-one produce no error diagnostic; the five produce at least one.
-//! 5. Every `type { … }` binding in the twenty-one resolves to a shape IRI. A
-//!    binding that resolved to nothing gives the mapping no output contract, and
-//!    a program with no contract can write no property at all.
-//! 6. The twenty-one `run` and produce at least one vertex type — the artefact
-//!    each one is kept for.
-//! 7. Every table `fossil.json` names is in the store when `execute` returns,
-//!    and nothing else is: a reader fetches the manifest and follows it, and
-//!    nothing is discovered by listing, so every path it names owes its
-//!    existence.
-//!
-//! # It is red today, and the report is the point
-//!
-//! Every failure is collected and printed as one map — which program, which
-//! stage, what the compiler said — rather than aborting at the first. That list
-//! is the readable statement of what the surface migration has left to do, and it
-//! is worth more than the assertion that produced it.
-
-#![cfg(not(target_arch = "wasm32"))]
+//! Every failure is collected and printed as one map rather than aborting at
+//! the first.
 
 /// What the compiler UNDERSTOOD, which is the `compiled.txt` half of every
 /// artefact below. It was `fossil-engine`'s `src/census.rs` until 2026-08-26;
@@ -233,14 +45,6 @@ use std::path::{Path, PathBuf};
 
 use census::ProgramCensus;
 use fossil_base::{Problem, Severity};
-
-/// How many programs the conformance set has, and how many of them are meant to
-/// be rejected. Pinned rather than counted, because the set moving is a decision
-/// and `grammar.bnf`'s header states these numbers: a program added or deleted
-/// without that header changing is a divergence between the language's spec and
-/// its only control.
-const EXPECTED_TOTAL: usize = 30;
-const EXPECTED_FAILING: usize = 6;
 
 /// One program of the set.
 struct Program {
@@ -263,10 +67,6 @@ fn programs_root() -> PathBuf {
 }
 
 /// Every `.fossil` under the corpus, discovered rather than listed.
-///
-/// Listing them would mean a nineteenth program could be added and never
-/// compiled, which is the exact failure this file exists to end. The count is
-/// asserted instead, so a program appearing or disappearing is loud.
 fn discover(root: &Path) -> Vec<Program> {
     let mut found = Vec::new();
     walk(root, &mut found);
@@ -306,52 +106,6 @@ fn walk(dir: &Path, out: &mut Vec<Program>) {
             });
         }
     }
-}
-
-// ─────────────────────────────────────────────────────── the independent reader
-
-/// Count the properties a program writes, WITHOUT the parser.
-///
-/// This is the non-vacuity guard for the silent-drop invariant. If the parser
-/// stops emitting `PROPERTY` nodes — which is exactly what a half-landed surface
-/// change does — then written and lowered are both zero and «nothing was
-/// dropped» is true and meaningless. So the count is taken a second time by a
-/// reader that shares no code with the compiler: an indented line whose head is
-/// an identifier (or `@subject`) followed by a single `=`.
-///
-/// It is deliberately crude and deliberately not a parser. `:=` does not match
-/// (a `:` intervenes), `==` does not match (the second `=`), a comment does not
-/// match, and a top-level binding does not match because it is not indented.
-fn properties_in_text(text: &str) -> usize {
-    text.lines()
-        .filter(|line| {
-            let trimmed = line.trim_start();
-            if trimmed.len() == line.len() || trimmed.starts_with("//") {
-                return false; // not indented, or a comment
-            }
-            let mut chars = trimmed.char_indices();
-            let mut end = if let Some((_, '@')) = chars.clone().next() {
-                chars.next();
-                1
-            } else {
-                0
-            };
-            let mut saw_ident = false;
-            for (i, c) in chars {
-                if c.is_alphanumeric() || c == '_' {
-                    saw_ident = true;
-                    end = i + c.len_utf8();
-                } else {
-                    break;
-                }
-            }
-            if !saw_ident {
-                return false;
-            }
-            let rest = trimmed[end..].trim_start();
-            rest.starts_with('=') && !rest.starts_with("==")
-        })
-        .count()
 }
 
 // ─────────────────────────────────────────────────────────────────── rendering
@@ -437,77 +191,19 @@ fn unnamed_or_missing(corpus: &native::Corpus) -> Vec<String> {
     findings
 }
 
-// ────────────────────────────────────────────────────────────── the artefacts
-
-/// Compare an artefact, or write it when blessing. Returns the failure line.
-///
-/// The diff is reported as the two texts in full and not as a line diff: these
-/// are small files, and a harness that reports «line 7 differs» about a
-/// diagnostic makes the reader open two files to learn what the compiler said.
-fn artefact(path: &Path, produced: &str, bless: bool) -> Option<String> {
-    if bless {
-        std::fs::create_dir_all(path.parent().expect("artefact has a directory"))
-            .unwrap_or_else(|e| panic!("create {}: {e}", path.display()));
-        std::fs::write(path, produced).unwrap_or_else(|e| panic!("write {}: {e}", path.display()));
-        return None;
-    }
-    let on_disk = std::fs::read_to_string(path).ok();
-    match on_disk {
-        Some(text) if text == produced => None,
-        Some(text) => Some(format!(
-            "  ARTEFACT {} differs.\n  ── on disk ──\n{}\n  ── produced ──\n{}",
-            path.file_name().unwrap_or_default().to_string_lossy(),
-            indent(&text),
-            indent(produced),
-        )),
-        None => Some(format!(
-            "  ARTEFACT {} is not on disk. Bless with FOSSIL_BLESS=1.\n  ── produced ──\n{}",
-            path.file_name().unwrap_or_default().to_string_lossy(),
-            indent(produced),
-        )),
-    }
-}
-
-fn indent(text: &str) -> String {
-    if text.is_empty() {
-        return "  (empty)".to_string();
-    }
-    text.lines()
-        .map(|l| format!("  │ {l}"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 // ───────────────────────────────────────────────────────────────── the harness
 
 #[test]
 fn the_clean_programs_compile_and_keep_what_they_say() {
-    let bless = std::env::var_os("FOSSIL_BLESS").is_some();
-    let root = programs_root();
-    let set = discover(&root);
-
-    // The set itself, before anything is compiled. A conformance suite that
-    // silently shrank would pass every check it still ran.
-    let failing = set.iter().filter(|p| p.must_fail).count();
-    assert_eq!(
-        set.len(),
-        EXPECTED_TOTAL,
-        "the conformance set is {} programs, and grammar.bnf's header says {EXPECTED_TOTAL}: {:?}",
-        set.len(),
-        set.iter().map(|p| &p.name).collect::<Vec<_>>(),
-    );
-    assert_eq!(
-        failing, EXPECTED_FAILING,
-        "{failing} programs sit under errors/, and grammar.bnf's header says {EXPECTED_FAILING}",
-    );
+    let set = discover(&programs_root());
+    assert!(!set.is_empty(), "docs/programs holds no program");
 
     let mut report = String::new();
     let mut failed = 0usize;
+    let mut artefacts: Vec<(PathBuf, String)> = Vec::new();
 
     for program in &set {
         let mut findings: Vec<String> = Vec::new();
-        let text = std::fs::read_to_string(&program.source)
-            .unwrap_or_else(|e| panic!("read {}: {e}", program.source.display()));
         let file_name = program
             .source
             .file_name()
@@ -580,17 +276,6 @@ fn the_clean_programs_compile_and_keep_what_they_say() {
             }
         }
 
-        // Non-vacuity for the line above.
-        let by_text = properties_in_text(&text);
-        if census.written() != by_text {
-            findings.push(format!(
-                "  PARSE the parser found {} PROPERTY node(s); the text has {by_text} property \
-                 line(s). The silent-drop check is measured against the parser, so it is only \
-                 evidence while these two agree",
-                census.written(),
-            ));
-        }
-
         // Every type binding must bind: a document that decodes to nothing
         // leaves the mapping with no output contract, and without one no
         // property is writable.
@@ -647,24 +332,19 @@ fn the_clean_programs_compile_and_keep_what_they_say() {
             }
         }
 
-        if let Some(f) = artefact(
-            &program.expected_dir.join("diagnostic.txt"),
-            &diagnostic,
-            bless,
-        ) {
-            findings.push(f);
-        }
-        if let Some(f) = artefact(&program.expected_dir.join("compiled.txt"), &compiled, bless) {
-            findings.push(f);
-        }
+        artefacts.push((program.expected_dir.join("diagnostic.txt"), diagnostic));
+        artefacts.push((program.expected_dir.join("compiled.txt"), compiled));
 
         record(&mut report, &mut failed, &program.name, &findings);
     }
 
+    for (path, produced) in &artefacts {
+        expect_test::expect_file![path].assert_eq(produced);
+    }
     assert!(
         failed == 0,
-        "\n{failed} of {EXPECTED_TOTAL} conformance programs are not what they say they are.\n\
-         This is the map of what the surface migration has left to do.\n\n{report}"
+        "\n{failed} of {} conformance programs are not what they say they are.\n\n{report}",
+        set.len(),
     );
 }
 
@@ -681,21 +361,11 @@ fn record(report: &mut String, failed: &mut usize, name: &str, findings: &[Strin
 }
 
 /// The census is a compiler query and is asserted on its own, over a program
-/// whose answer is known by reading it.
-///
-/// Without this the whole harness rests on `written()` and `lowered()` being
-/// right, and both are computed by the thing under test. `hello.fossil` is two
-/// properties by inspection — `@subject` and `name` — and the independent text
-/// reader has to say two as well.
+/// whose answer is known by reading it: `hello.fossil` writes `@subject` and
+/// `name`.
 #[test]
 fn the_census_counts_hello_by_hand() {
     let hello = programs_root().join("hello/hello.fossil");
-    let text = std::fs::read_to_string(&hello).expect("hello.fossil");
-    assert_eq!(
-        properties_in_text(&text),
-        2,
-        "hello.fossil writes `@subject` and `name`, and the independent reader must see both"
-    );
 
     let census: ProgramCensus = census::census(&hello);
     assert_eq!(

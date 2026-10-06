@@ -13,8 +13,6 @@
 //! And `fossil.json` carries what the governance layer reads off a corpus: the
 //! full type IRI per vertex table, and each property's storage type.
 
-#![cfg(not(target_arch = "wasm32"))]
-
 #[path = "support/native.rs"]
 mod native;
 mod support;

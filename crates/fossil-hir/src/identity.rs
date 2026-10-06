@@ -430,7 +430,7 @@ fn identity_form(e: &HirExpr) -> String {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::*;
     use fossil_base::test_support::{PERSON_DOCUMENT, db_with_document};
