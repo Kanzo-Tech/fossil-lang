@@ -173,5 +173,30 @@
         }
       ]
     }
+  ],
+  "property_tables": [
+    {
+      "name": "Person_nickname",
+      "path": "property/Person_nickname.parquet",
+      "source": {
+        "key": "src",
+        "references": "Person"
+      },
+      "record_count": 360,
+      "properties": [
+        {
+          "name": "src",
+          "type": "uint32",
+          "role": "endpoint"
+        },
+        {
+          "name": "nickname",
+          "type": "string",
+          "iri": "https://example.org/nickname",
+          "term_type": "http://www.w3.org/ns/r2rml#Literal",
+          "datatype": "http://www.w3.org/2001/XMLSchema#string"
+        }
+      ]
+    }
   ]
 }

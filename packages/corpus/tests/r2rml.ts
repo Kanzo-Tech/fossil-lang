@@ -1,6 +1,6 @@
 import { Parser, Store, type Term } from 'n3';
 
-import type { Manifest } from '../src/manifest.js';
+import type { Manifest, Property } from '../src/manifest.gen.js';
 
 /**
  * **An R2RML processor for the subset `mapping` writes, over DuckDB** — the test's oracle, and not a
@@ -146,16 +146,28 @@ export async function held(
   typed: Readonly<Record<string, string>>,
 ): Promise<Set<Triple>> {
   const out = new Set<Triple>();
+  /** Each row of `sql` — a `subject` and a `v` — as the triple `p` declares. */
+  const values = async (p: Property, sql: string) => {
+    const datatype = p.datatype ?? typed[p.type];
+    if (p.term_type !== `${RR}IRI` && datatype === undefined) throw new Error(`a ${p.type} column the test did not say the datatype of`);
+    const object = (v: string) => (p.term_type === `${RR}IRI` ? nt.iri(v) : nt.literal(v, datatype!));
+    for (const r of await query(sql)) out.add(`${nt.iri(String(r.subject))} ${nt.iri(p.iri!)} ${object(String(r.v))}`);
+  };
   for (const t of manifest.vertex_tables) {
     for (const r of await query(`SELECT subject FROM ${catalog}."${t.name}"`)) {
       if (t.iri) out.add(`${nt.iri(String(r.subject))} <${RDF_TYPE}> ${nt.iri(t.iri)}`);
     }
     for (const p of t.properties.filter((p) => p.iri !== undefined)) {
-      const datatype = p.datatype ?? typed[p.type];
-      if (p.term_type !== `${RR}IRI` && datatype === undefined) throw new Error(`a ${p.type} column the test did not say the datatype of`);
-      const rows = await query(`SELECT subject, "${p.name}"::VARCHAR AS v FROM ${catalog}."${t.name}" WHERE "${p.name}" IS NOT NULL`);
-      const object = (v: string) => (p.term_type === `${RR}IRI` ? nt.iri(v) : nt.literal(v, datatype!));
-      for (const r of rows) out.add(`${nt.iri(String(r.subject))} ${nt.iri(p.iri!)} ${object(String(r.v))}`);
+      await values(p, `SELECT subject, "${p.name}"::VARCHAR AS v FROM ${catalog}."${t.name}" WHERE "${p.name}" IS NOT NULL`);
+    }
+  }
+  for (const t of manifest.property_tables ?? []) {
+    for (const p of t.properties.filter((p) => p.iri !== undefined)) {
+      await values(
+        p,
+        `SELECT s.subject, e."${p.name}"::VARCHAR AS v FROM ${catalog}."${t.name}" e
+           JOIN ${catalog}."${t.source.references}" s ON e.src = s.dense_id`,
+      );
     }
   }
   for (const e of manifest.edge_tables.filter((e) => e.iri !== undefined)) {

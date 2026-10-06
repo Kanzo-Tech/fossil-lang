@@ -110,11 +110,21 @@ function natural(column, sql) {
   return `${column}::VARCHAR`;
 }
 
+/** The ends a table's manifest entry names, by the field: a relation has two, a property one. */
+const ENDS = { vertex: [], edge: ["source", "destination"], property: ["source"] };
+
 /** The fixed columns of a table, by the fields of its manifest entry that name them. */
 function fixedColumns(table) {
   const e = table.entry;
-  if (table.kind === "vertex") return [e.key, e.identity].filter((c) => typeof c === "string");
-  return [e.source?.key, e.destination?.key].filter((c) => typeof c === "string");
+  const named = table.kind === "vertex" ? [e.key, e.identity] : ENDS[table.kind].map((end) => e[end]?.key);
+  return named.filter((c) => typeof c === "string");
+}
+
+/** The columns a table is ordered by: a vertex's key, a relation's two ends, a property's end and value. */
+function orderColumns(table) {
+  if (table.kind !== "property") return fixedColumns(table).filter((c) => c !== table.entry.identity);
+  const properties = Array.isArray(table.entry.properties) ? table.entry.properties : [];
+  return [...fixedColumns(table), ...properties.filter((p) => p.role === undefined).map((p) => p.name)];
 }
 
 export const GUARDS = [
@@ -124,7 +134,7 @@ export const GUARDS = [
     proves:
       "Every other guard is a count of violations, so an empty corpus satisfies all of them at " +
       "once. This one asserts the manifest declares at least one vertex table, and that every " +
-      "declared table — vertices and edges — holds rows. A table with " +
+      "declared table — vertices, relations and properties — holds rows. A table with " +
       "no rows is a relation a reader creates a view over and draws nothing from, and a writer " +
       "that has nothing to say about a type does not declare it.",
     cannotProve:
@@ -134,12 +144,12 @@ export const GUARDS = [
     run(corpus) {
       const failures = [];
       if (corpus.vertices.length === 0) failures.push("the manifest declares no vertex table");
-      for (const table of [...corpus.vertices, ...corpus.edges]) {
+      for (const table of corpus.tables) {
         if (table.rows === 0n) failures.push(`${table.kind} table ${table.name} has no rows`);
       }
       return result(
         failures,
-        [...corpus.vertices, ...corpus.edges].map(
+        corpus.tables.map(
           (t) => `${t.name}: ${t.rows === null ? "?" : t.rows.toLocaleString("en-US")} rows`,
         ),
       );
@@ -169,7 +179,7 @@ export const GUARDS = [
             `${FORMAT} reader refuses anything else before reading a byte of Parquet`,
         );
       }
-      const tables = [...corpus.vertices, ...corpus.edges];
+      const tables = corpus.tables;
       const seen = new Set();
       for (const table of tables) {
         if (seen.has(table.name)) failures.push(`${table.name} is declared twice`);
@@ -178,11 +188,11 @@ export const GUARDS = [
         else if (!table.exists) failures.push(`${table.name} names ${table.path}, which is not on disk`);
         else if (table.error !== null) failures.push(`${table.path} did not open: ${table.error}`);
       }
-      for (const edge of corpus.edges) {
-        for (const end of ["source", "destination"]) {
-          const references = edge.entry[end]?.references;
+      for (const table of tables) {
+        for (const end of ENDS[table.kind]) {
+          const references = table.entry[end]?.references;
           if (corpus.vertex(references) === undefined) {
-            failures.push(`${edge.name}'s ${end} references ${references}, which is no vertex table`);
+            failures.push(`${table.name}'s ${end} references ${references}, which is no vertex table`);
           }
         }
       }
@@ -201,15 +211,16 @@ export const GUARDS = [
       "Every table opens with `read_parquet` and no extension. Its columns are exactly the " +
       "`properties` its entry declares — no column a reader cannot find in the manifest, no " +
       "property missing from the bytes — and each is stored as a width its declared `type` names. " +
-      "The fixed columns are held to the one width the format fixes: a vertex table's `key` and " +
-      "an edge table's `source.key` and `destination.key` are `UINTEGER`, and `identity` is text.",
+      "The fixed columns are held to the one width the format fixes: a vertex table's `key`, an " +
+      "edge table's `source.key` and `destination.key` and a property table's `source.key` are " +
+      "`UINTEGER`, and `identity` is text.",
     cannotProve:
       "That a column carries what its name suggests. A `type` word this checker has no spelling " +
       "for is reported and not failed — the vocabulary is the writer's.",
     run(corpus) {
       const failures = [];
       const notes = [];
-      for (const table of readable([...corpus.vertices, ...corpus.edges])) {
+      for (const table of readable(corpus.tables)) {
         const properties = Array.isArray(table.entry.properties) ? table.entry.properties : [];
         const declared = new Map(properties.map((p) => [p.name, p.type]));
         for (const [name, type] of declared) {
@@ -235,8 +246,8 @@ export const GUARDS = [
         if (table.kind === "vertex" && fixedColumns(table).length < 2) {
           failures.push(`${table.name} does not name its key and its identity`);
         }
-        if (table.kind === "edge" && fixedColumns(table).length < 2) {
-          failures.push(`${table.name} does not name the key of both its ends`);
+        if (table.kind !== "vertex" && fixedColumns(table).length < ENDS[table.kind].length) {
+          failures.push(`${table.name} does not name the key of each of its ends`);
         }
       }
       return result(failures, notes);
@@ -256,7 +267,7 @@ export const GUARDS = [
       "the same writer produced: both wrong together passes, and only a second writer shows it.",
     run(corpus) {
       const failures = [];
-      for (const table of [...corpus.vertices, ...corpus.edges]) {
+      for (const table of corpus.tables) {
         const declared = table.entry.record_count;
         if (!Number.isSafeInteger(declared) || declared < 0) {
           failures.push(`${table.name} declares no record_count a reader can size a buffer from`);
@@ -311,20 +322,21 @@ export const GUARDS = [
     id: "sorted-by-key",
     title: "Every table is written in the order of its key",
     proves:
-      "A vertex table's rows ascend strictly by `dense_id`, and an edge table's by `(src, dst)`, " +
-      "in file order. That order is what lets DuckDB skip a row group from its footer statistics: " +
-      "an id range, or an edge's source range, is a few row groups rather than all of them.",
+      "A vertex table's rows ascend strictly by `dense_id`, an edge table's by `(src, dst)` and a " +
+      "property table's by `(src, value)`, in file order — strictly, so a relation or a property " +
+      "holds no row twice. That order is what lets DuckDB skip a row group from its footer " +
+      "statistics: an id range, or a source range, is a few row groups rather than all of them.",
     cannotProve:
       "That the row groups are the size the writer was asked for. The order is checked row by row " +
       "and says nothing about where the file is cut.",
     run(corpus) {
       const failures = [];
-      for (const table of readable([...corpus.vertices, ...corpus.edges])) {
-        const keys = fixedColumns(table).filter((c) => c !== table.entry.identity);
+      for (const table of readable(corpus.tables)) {
+        const keys = orderColumns(table);
         if (!keys.every((k) => table.columns.has(k))) continue;
         const [a, b = a] = keys;
         const lag = (c) => `lag(${ident(c)}) OVER (ORDER BY file_row_number)`;
-        const out = table.kind === "vertex" ? "a <= pa" : "a < pa OR (a = pa AND b < pb)";
+        const out = table.kind === "vertex" ? "a <= pa" : "a < pa OR (a = pa AND b <= pb)";
         const bad = scalar(
           `SELECT count(*) FROM (
              SELECT ${ident(a)} AS a, ${ident(b)} AS b, ${lag(a)} AS pa, ${lag(b)} AS pb
@@ -342,24 +354,25 @@ export const GUARDS = [
     title: "Every endpoint is a vertex of the table it references",
     proves:
       "Each edge table's `src` is a `dense_id` of its `source.references` table and its `dst` one " +
-      "of its `destination.references` table. The ids are global, so an endpoint that is a vertex " +
-      "of the WRONG type is in range and wrong — which is why this is a join against the named " +
-      "table and not a range check.",
+      "of its `destination.references` table, and each property table's `src` one of its " +
+      "`source.references` table: a value belongs to a vertex. The ids are global, so an endpoint " +
+      "that is a vertex of the WRONG type is in range and wrong — which is why this is a join " +
+      "against the named table and not a range check.",
     cannotProve:
       "That an endpoint addresses the *right* vertex of that table. A renumbering that permuted two " +
       "ids of one type leaves every endpoint in its table; only the subjects would show it.",
     run(corpus) {
       const failures = [];
-      for (const edge of readable(corpus.edges)) {
-        for (const end of ["source", "destination"]) {
-          const { key, references } = edge.entry[end] ?? {};
+      for (const table of readable(corpus.tables)) {
+        for (const end of ENDS[table.kind]) {
+          const { key, references } = table.entry[end] ?? {};
           const vertex = corpus.vertex(references);
-          if (!vertex || vertex.rows === null || !edge.columns.has(key)) continue;
+          if (!vertex || vertex.rows === null || !table.columns.has(key)) continue;
           const bad = scalar(
-            `SELECT count(*) FROM ${parquet(edge.file)} e
+            `SELECT count(*) FROM ${parquet(table.file)} e
               WHERE NOT EXISTS (SELECT 1 FROM ${parquet(vertex.file)} v WHERE v.${ident(vertex.entry.key)} = e.${ident(key)})`,
           );
-          failures.push(...violations(bad, `${edge.name}: ${key} names no ${references}`));
+          failures.push(...violations(bad, `${table.name}: ${key} names no ${references}`));
         }
       }
       return result(failures);
@@ -410,7 +423,7 @@ export const GUARDS = [
     run(corpus) {
       const failures = [];
       const notes = [];
-      for (const table of readable([...corpus.vertices, ...corpus.edges])) {
+      for (const table of readable(corpus.tables)) {
         const properties = Array.isArray(table.entry.properties) ? table.entry.properties : [];
         for (const p of properties) {
           const sql = table.columns.get(p.name);

@@ -1,7 +1,8 @@
 //! `fossil.json` — the one document a `fossil/1` corpus carries.
 //!
 //! A corpus is this file and Parquet: one table per vertex type under
-//! `vertex/`, one per relation under `edge/`, and `fossil.json` at the root,
+//! `vertex/`, one per relation under `edge/`, one per multi-valued property
+//! under `property/`, and `fossil.json` at the root,
 //! written **last** — its presence is the commit. The structs below are the
 //! format. `fossil-df` builds a [`Manifest`] and serialises it; nothing in the
 //! workspace parses one back, and a reader in another language checks itself
@@ -100,6 +101,10 @@ pub struct Manifest {
     pub vertex_tables: Vec<VertexTable>,
     /// One per relation, in the order the compiled schema lists them.
     pub edge_tables: Vec<EdgeTable>,
+    /// One per multi-valued property, in the order the compiled schema lists
+    /// their types and, inside a type, them. Absent when there is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub property_tables: Vec<PropertyTable>,
 }
 
 /// One vertex type's table.
@@ -145,10 +150,28 @@ pub struct EdgeTable {
     pub properties: Vec<Property>,
 }
 
-/// One end of a relation.
+/// One multi-valued property's table, a row per value: first normal form,
+/// because a cell is one RDF term (R2RML §10.2) and an array is no Core SQL.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PropertyTable {
+    /// `<Type>_<property>`.
+    pub name: String,
+    /// The table's Parquet file, relative to the corpus root.
+    pub path: String,
+    /// The column holding the `dense_id` of the vertex the value belongs to,
+    /// and its table.
+    pub source: Endpoint,
+    /// Rows in the file.
+    pub record_count: u64,
+    /// Every column of the file, in file order: the source's key, then the
+    /// value, which carries the property's IRI and term.
+    pub properties: Vec<Property>,
+}
+
+/// One end of a relation, or of a property's values.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Endpoint {
-    /// The edge table's column.
+    /// The table's column.
     pub key: String,
     /// The vertex table whose `key` it holds.
     pub references: String,
@@ -230,6 +253,18 @@ pub fn edge_table_name(source: &str, label: &str, destination: &str) -> String {
 #[must_use]
 pub fn edge_path(name: &str) -> String {
     format!("edge/{name}.parquet")
+}
+
+/// A multi-valued property's table name: `<Type>_<property>`.
+#[must_use]
+pub fn property_table_name(vertex: &str, property: &str) -> String {
+    format!("{vertex}_{property}")
+}
+
+/// A property table's path: `property/<name>.parquet`.
+#[must_use]
+pub fn property_path(name: &str) -> String {
+    format!("property/{name}.parquet")
 }
 
 /// The manifest's spelling of an Arrow type.
@@ -325,6 +360,19 @@ mod tests {
                     column("dst", "uint32", false),
                 ],
             }],
+            property_tables: vec![PropertyTable {
+                name: property_table_name("Person", "nickname"),
+                path: property_path("Person_nickname"),
+                source: Endpoint {
+                    key: "src".to_string(),
+                    references: "Person".to_string(),
+                },
+                record_count: 4,
+                properties: vec![
+                    column("src", "uint32", false),
+                    column("nickname", "string", false),
+                ],
+            }],
         }
     }
 
@@ -358,6 +406,21 @@ mod tests {
         assert_eq!(knows["source"]["key"], "src");
         assert_eq!(knows["destination"]["references"], "Person");
         assert!(knows.get("iri").is_none(), "an absent IRI is absent");
+        let nickname = &json["property_tables"][0];
+        assert_eq!(nickname["name"], "Person_nickname");
+        assert_eq!(nickname["path"], "property/Person_nickname.parquet");
+        assert_eq!(nickname["source"]["references"], "Person");
+    }
+
+    /// `fossil/1` grows by optional fields only, so a corpus with no
+    /// multi-valued property writes the document it wrote before there were any.
+    #[test]
+    fn no_property_table_is_no_field() {
+        let mut m = manifest();
+        m.property_tables.clear();
+        let json = serde_json::to_value(&m).unwrap();
+        assert!(json.get("property_tables").is_none());
+        assert_eq!(serde_json::from_value::<Manifest>(json).unwrap(), m);
     }
 
     #[test]
@@ -400,6 +463,7 @@ mod tests {
         for column in crate::generated::PAYLOAD_COLUMNS
             .iter()
             .chain(crate::generated::EDGE_COLUMNS)
+            .chain(crate::generated::PROPERTY_COLUMNS)
         {
             let wire = serde_json::to_value(column.role).unwrap();
             assert_eq!(
@@ -420,6 +484,7 @@ mod tests {
         for column in crate::generated::PAYLOAD_COLUMNS
             .iter()
             .chain(crate::generated::EDGE_COLUMNS)
+            .chain(crate::generated::PROPERTY_COLUMNS)
         {
             assert!(
                 spelled.iter().any(|s| s == column.data_type),

@@ -7,7 +7,7 @@ import type { Term } from 'n3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { mapping, open } from '../src/index.js';
-import type { Manifest } from '../src/manifest.js';
+import type { Manifest } from '../src/manifest.gen.js';
 import { duckdb } from './engine.js';
 import { BASE, held, materialise, parse, undelimit } from './r2rml.js';
 
@@ -48,6 +48,7 @@ describe('the mapping, as a graph', () => {
     const asked = [
       ...MANIFEST.vertex_tables.filter((t) => t.iri !== undefined || t.properties.some((p) => p.iri !== undefined)),
       ...MANIFEST.edge_tables.filter((e) => e.iri !== undefined),
+      ...(MANIFEST.property_tables ?? []).filter((t) => t.properties.some((p) => p.iri !== undefined)),
     ];
     expect(maps).toEqual(asked.map((t) => node(t.name)).sort());
   });
@@ -98,13 +99,14 @@ describe('the mapping, as a graph', () => {
       ...MANIFEST,
       vertex_tables: MANIFEST.vertex_tables.map(({ iri: _, ...t }) => ({ ...t, properties: t.properties.map(({ iri: __, ...p }) => p) })),
       edge_tables: MANIFEST.edge_tables.map(({ iri: _, ...e }) => e),
+      property_tables: (MANIFEST.property_tables ?? []).map((t) => ({ ...t, properties: t.properties.map(({ iri: __, ...p }) => p) })),
     };
     const g = parse(mapping(JSON.stringify(bare)));
     expect(g.getSubjects(RDF_TYPE, `${RR}TriplesMap`, null)).toEqual([]);
 
     // A type with no IRI keeps the columns that have one, and its subjects carry no class.
     const [person] = MANIFEST.vertex_tables;
-    const classless = { ...MANIFEST, vertex_tables: [{ ...person!, iri: undefined }], edge_tables: [] };
+    const classless = { ...MANIFEST, vertex_tables: [{ ...person!, iri: undefined }], edge_tables: [], property_tables: [] };
     const c = parse(mapping(JSON.stringify(classless)));
     const subject = c.getObjects(node(person!.name), `${RR}subjectMap`, null)[0]!;
     expect(c.getObjects(subject, `${RR}class`, null)).toEqual([]);
@@ -113,17 +115,38 @@ describe('the mapping, as a graph', () => {
     );
   });
 
-  it('leaves a list column out: one cell would be several literals', () => {
-    const [person] = MANIFEST.vertex_tables;
-    const tags = { name: 'tags', type: 'list<string>', iri: 'https://example.org/tag', nullable: true };
-    const g = parse(mapping(JSON.stringify({ ...MANIFEST, vertex_tables: [{ ...person!, properties: [...person!.properties, tags] }] })));
-    expect(g.getSubjects(`${RR}predicate`, tags.iri, null)).toEqual([]);
-  });
+  it.each((MANIFEST.property_tables ?? []).map((t) => [t.name, t] as const))(
+    'maps property %s: a row per value, src joined to the dense_id of its vertex, the value as declared',
+    (_, t) => {
+      const map = node(t.name);
+      const table = one(map, 'logicalTable');
+      expect(one(table, 'sqlVersion').value).toBe(`${RR}SQL2008`);
+      const from = MANIFEST.vertex_tables.find((v) => v.name === t.source.references)!;
+      const value = t.properties.find((p) => p.role === undefined)!;
+      expect(one(table, 'sqlQuery').value).toBe(
+        [
+          `SELECT s.${q(from.identity)} AS "source", e.${q(value.name)} AS "value"`,
+          `FROM ${q(t.name)} AS e`,
+          `JOIN ${q(from.name)} AS s ON e.${q(t.source.key)} = s.${q(from.key)}`,
+        ].join('\n'),
+      );
+      const subject = one(map, 'subjectMap');
+      expect([column(subject), one(subject, 'termType').value]).toEqual(['source', `${RR}IRI`]);
+      const [pom] = objects(map, 'predicateObjectMap');
+      expect(one(pom!, 'predicate').value).toBe(value.iri);
+      const object = one(pom!, 'objectMap');
+      expect([column(object), objects(object, 'termType')[0]?.value, objects(object, 'datatype')[0]?.value]).toEqual([
+        'value',
+        value.term_type,
+        value.datatype,
+      ]);
+    },
+  );
 
   it('delimits every table and column name, and escapes what Turtle and SQL would not take', () => {
     const [person] = MANIFEST.vertex_tables;
     const odd = { ...person!, name: 'A "quoted" type', properties: [{ name: 'birthYear', type: 'int32', iri: 'https://example.org/born' }] };
-    const g = parse(mapping(JSON.stringify({ ...MANIFEST, vertex_tables: [odd], edge_tables: [] })));
+    const g = parse(mapping(JSON.stringify({ ...MANIFEST, vertex_tables: [odd], edge_tables: [], property_tables: [] })));
     const map = node(odd.name);
     const table = g.getObjects(map, `${RR}logicalTable`, null)[0]!;
     expect(g.getObjects(table, `${RR}tableName`, null)[0]!.value).toBe('"A ""quoted"" type"');
@@ -143,7 +166,7 @@ describe('the mapping, as a graph', () => {
         { name: 'postcode', type: 'string', iri: 'https://example.org/postcode' },
       ],
     };
-    const g = parse(mapping(JSON.stringify({ ...MANIFEST, vertex_tables: [declared], edge_tables: [] })));
+    const g = parse(mapping(JSON.stringify({ ...MANIFEST, vertex_tables: [declared], edge_tables: [], property_tables: [] })));
     const term = (predicate: string) => {
       const pom = g.getSubjects(`${RR}predicate`, predicate, null)[0]!;
       const [o] = g.getObjects(pom, `${RR}objectMap`, null);
@@ -217,6 +240,12 @@ describe('the mapping, executed over names a processor could fold', () => {
         source: { key: 'src', references: 'Person' }, destination: { key: 'dst', references: ODD },
       },
     ],
+    property_tables: [
+      {
+        name: 'Person_nickName', path: 'n', record_count: 2, source: { key: 'src', references: 'Person' },
+        properties: [{ name: 'src', type: 'uint32', role: 'endpoint' }, { name: 'nickName', type: 'string', iri: 'https://example.org/nick' }],
+      },
+    ],
   };
   let query: (sql: string) => Promise<Record<string, unknown>[]>;
 
@@ -230,6 +259,8 @@ describe('the mapping, executed over names a processor could fold', () => {
       `INSERT INTO odd."A ""quoted"" type" VALUES (2, 'https://example.org/engine')`,
       `CREATE TABLE odd."Person_likes_Odd" (src UINTEGER, dst UINTEGER)`,
       `INSERT INTO odd."Person_likes_Odd" VALUES (0, 2)`,
+      `CREATE TABLE odd."Person_nickName" (src UINTEGER, "nickName" VARCHAR)`,
+      `INSERT INTO odd."Person_nickName" VALUES (0, 'Countess'), (0, 'Enchantress')`,
     ]) await query(statement);
   }, 60_000);
 
@@ -246,6 +277,9 @@ describe('the mapping, executed over names a processor could fold', () => {
         // No term declared: R2RML's natural datatype of a BIGINT, which the processor derives.
         `<https://example.org/ada> <https://example.org/rank> "1"^^<${XSD}integer>`,
         '<https://example.org/ada> <https://example.org/likes> <https://example.org/engine>',
+        // A value per row of the property's own table, of its column's natural datatype.
+        `<https://example.org/ada> <https://example.org/nick> "Countess"^^<${XSD}string>`,
+        `<https://example.org/ada> <https://example.org/nick> "Enchantress"^^<${XSD}string>`,
       ].sort(),
     );
   }, 60_000);

@@ -59,11 +59,14 @@ What each table carries:
 - **An edge table** holds one relation. `src` and `dst` are `dense_id`s of the tables its
   `source.references` and `destination.references` name — the same global ids, so an edge between
   two types indexes the same buffer as the vertices do.
+- **A property table** holds one multi-valued property, a row per value, under `property_tables`:
+  `src` is the `dense_id` of the vertex in `source.references` the value belongs to, and the other
+  column is the value. The key is absent when there is none.
 - **Every column the writer emits says what it is** in its `properties` entry — a `role` of
   `address`, `identity` or `endpoint` — and a column of the program's
   carries none, so a reader tells the two apart without a list of names.
 - **Every table is written in the order of its key** — vertices by `dense_id`, edges by
-  `(src, dst)` — in row groups of 122,880 rows. That order is what lets a reader skip row groups
+  `(src, dst)`, properties by `(src, value)` — in row groups of 122,880 rows. That order is what lets a reader skip row groups
   from the footer statistics alone.
 
 ## The reads

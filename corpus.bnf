@@ -57,11 +57,12 @@
    # What is NOT here, on purpose
 
    **File names** (`fossil.json`, `vertex/<Type>.parquet`,
-   `edge/<Src>_<label>_<Dst>.parquet`). They are the manifest's `path`, and the
-   manifest is `crates/fossil-sinks/src/manifest.rs` — its structs are the
-   format, and `fossil.schema.json` beside them is what a reader in another
-   language checks against. A second declaration of them here would be a second
-   source for a fact that already has one. Columns are different: they are named
+   `edge/<Src>_<label>_<Dst>.parquet`, `property/<Type>_<name>.parquet`).
+   They are the manifest's `path`, and the manifest is
+   `crates/fossil-sinks/src/manifest.rs` — its structs are the format, and
+   `fossil.schema.json` beside them is what a reader in another language checks
+   against. A second declaration of them here would be a second source for a
+   fact that already has one. Columns are different: they are named
    in bytes the manifest only lists, which is why they drifted.
 
    # Status
@@ -107,3 +108,13 @@ col subject    = in payload ; type string  ; role identity .
 
 col src = in edge ; type uint32 ; role endpoint ; aligns src .
 col dst = in edge ; type uint32 ; role endpoint ; aligns dst .
+
+(* ---------------------------------------------------------- the properties *)
+(* One table per multi-valued property, a row per value: first normal form,
+   because one cell is one term in R2RML (§10.2 leaves an array
+   implementation-dependent) and an array is no Core SQL. `src` is the vertex
+   the value belongs to; the second column is the program's, named and typed
+   as the property is, and it carries the property's IRI and term. Rows are a
+   set, sorted by `(src, value)`. *)
+
+col src = in property ; type uint32 ; role endpoint ; aligns src .

@@ -1,10 +1,10 @@
 ---
 title: What a corpus is
-description: A graph on disk that outlives the process that wrote it, read by code that was never compiled against it — one fossil.json, a Parquet file per vertex type and one per relation. The artifact is the API.
+description: A graph on disk that outlives the process that wrote it, read by code that was never compiled against it — one fossil.json, a Parquet file per vertex type, one per relation and one per multi-valued property. The artifact is the API.
 ---
 
 A **fossil corpus** is a graph written to disk: a Parquet file per vertex type, a Parquet file per
-relation, and one small JSON manifest that names them. It is read by code that was not compiled
+relation, one per multi-valued property, and one small JSON manifest that names them. It is read by code that was not compiled
 against the code that wrote it.
 
 That last clause is the whole design. A corpus is not a serialisation of somebody's object graph —
@@ -28,6 +28,7 @@ one name known in advance, and it names every other file by its path relative to
   fossil.json                         the manifest, written last
   vertex/<Type>.parquet               one per vertex type
   edge/<Src>_<label>_<Dst>.parquet    one per relation
+  property/<Type>_<name>.parquet      one per multi-valued property
 ```
 
 **`fossil.json` is written last, and its presence is the commit.** A directory holding Parquet and
@@ -62,6 +63,16 @@ the manifest is.
       { "name": "src", "type": "uint32", "role": "endpoint" },
       { "name": "dst", "type": "uint32", "role": "endpoint" }
     ]
+  }],
+  "property_tables": [{
+    "name": "Person_nickname",
+    "path": "property/Person_nickname.parquet",
+    "source": { "key": "src", "references": "Person" },
+    "record_count": 1500000,
+    "properties": [
+      { "name": "src", "type": "uint32", "role": "endpoint" },
+      { "name": "nickname", "type": "string", "iri": "https://example.org/#nickname" }
+    ]
   }]
 }
 ```
@@ -72,20 +83,28 @@ the vertex table it `references`. A table's `name` is what a reader registers it
 unique across the corpus. An edge table's `label` is not: one label can join several pairs of types,
 so `Src_label_Dst` is the name and `label` a field beside it.
 
+**A multi-valued property is a table of its own**, a row per value: `src`, the `dense_id` of the
+vertex the value belongs to, and the value under the property's name, which carries its `iri` and
+term as a vertex column does. It is first normal form because a cell is one RDF term — R2RML maps
+one cell to one term (§10.2) and an array is no Core SQL — and because a relational source already
+spells several values as several rows. A single-valued property stays a column of its vertex table.
+`property_tables` is absent when the program declares no multi-valued property, and a writer
+refuses a program whose table names would collide.
+
 | field | what it says | what a reader does with it before reading Parquet |
 | --- | --- | --- |
 | `format` | `fossil/1` | refuses any other value |
 | `name`, `path` | the table and its file | registers one relation per table |
-| `key`, `source.key`, `destination.key` | `dense_id`, `src`, `dst` | joins edges to vertices without knowing column names |
+| `key`, `source.key`, `destination.key` | `dense_id`, `src`, `dst` | joins edges and properties to vertices without knowing column names |
 | `identity` | `subject` | keys anything held outside the corpus |
 | `record_count` | the rows in the file | sizes buffers, and checks a file it read in full |
 | `properties` | every column, in order, with its type | knows the schema without opening a footer |
 | `properties[].role` | what a column the writer emits IS | tells the writer's columns from the program's without a list of names |
 | `properties[].term_type`, `.datatype` | the RDF term the shape declares for the values | states the column's RDF meaning without re-deriving it |
-| `references` | the vertex table at each end | knows which relations join which types |
+| `references` | the vertex table at each end | knows which relations join which types, and whose values a property holds |
 
 `type` is one of `string`, `bool`, `int8` … `int64`, `uint8` … `uint64`, `float`, `double`, `date`,
-`timestamp`, `time`, `decimal` and `list<…>` — `corpus.bnf`'s spellings, written by
+`timestamp`, `time` and `decimal` — `corpus.bnf`'s spellings, written by
 `crates/fossil-sinks/src/manifest.rs, data_type_name`. The JSON Schema of the whole document is
 `crates/fossil-sinks/fossil.schema.json`. `iri`, `nullable`, `term_type` and `datatype` are
 optional and absent when there is nothing to say.

@@ -67,11 +67,15 @@ export function inspect(root) {
   const list = (key) => (Array.isArray(json[key]) ? json[key] : []);
   const vertices = list("vertex_tables").map((entry) => table(root, "vertex", entry));
   const edges = list("edge_tables").map((entry) => table(root, "edge", entry));
+  const properties = list("property_tables").map((entry) => table(root, "property", entry));
   return {
     root,
     manifest,
     vertices,
     edges,
+    properties,
+    /** Every declared table: vertices, relations, multi-valued properties, in manifest order. */
+    tables: [...vertices, ...edges, ...properties],
     /** Every Parquet file under the root, named or not. */
     onDisk: parquetFiles(root),
     /** A vertex table by name, or `undefined`. */
