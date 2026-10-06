@@ -29,13 +29,14 @@ const close = await open('demo', { engine, url });         // a corpus at a URL
 //   "<name>"."Person"            a view per table
 //   "<name>".fossil_tables       table_name, kind, iri, path, rows, first_id, source, destination
 //   "<name>".fossil_columns      table_name, column_name, ordinal, type, role, iri, nullable
+//   "<name>".triples             s_k, s_v, p, o_k, o_v, o_d, o_l — the corpus as RDF
 
 await close();
 ```
 
 `open` reads `fossil.json` through the engine, refuses any `format` but `fossil/1` before it reads a
-byte of Parquet, creates one view per table and the manifest as two relations, and answers the
-function that detaches them. Two opens of one name share the catalog; the last to close detaches it.
+byte of Parquet, creates one view per table, the manifest as two relations and the corpus as triples, and
+answers the function that detaches them. Two opens of one name share the catalog; the last to close detaches it.
 
 **`fossil_tables`** is one row per table in manifest order. A vertex table's ids are
 `first_id … first_id + rows − 1`; an edge table's `source` and `destination` name the vertex tables
@@ -51,18 +52,16 @@ no WASM.
 
 ## Its RDF meaning
 
-```ts
-import { mapping } from '@fossil-lang/corpus';
+`"<name>".triples` is the corpus as RDF, a row per triple: each vertex's `subject` as an IRI with its
+type's class, a literal per column with an IRI — the term its shape declared, else the natural one of
+R2RML §10.2 — and each relation's two subjects, joined through `src`/`dst` and the `dense_id` of the
+tables they reference. What has no IRI is not mapped. A SHACL engine validates it as it stands:
 
-const turtle = mapping(fossilJsonText);   // an R2RML mapping, in Turtle
+```ts
+const report = await shapes.validateTable({ table: `"${job}".triples`, engine });   // rudof
 ```
 
-`mapping` is a pure function of `fossil.json`: each vertex type a triples map over its table (the
-`subject` as an IRI, the type's class, a literal per column with an IRI), each relation a triples map
-over an `rr:sqlQuery` in Core SQL 2008 that joins `src`/`dst` to the `dense_id` of the tables they
-reference and takes their subjects. What has no IRI is not mapped. Every name is a delimited
-identifier, unqualified: resolve it against the database you attached the corpus to. Any R2RML
-processor then reads the corpus as RDF — `/docs/format/reading/rdf`.
+The columns and the rules are `/docs/format/reading/rdf`.
 
 ## Reading a corpus without this package
 

@@ -2,9 +2,10 @@
  * @fossil-lang/corpus — attach a `fossil/1` corpus to the host's engine.
  *
  * A corpus is `fossil.json` and one Parquet file per table: one per vertex type, one per relation.
- * `open` reads the manifest, creates a view per table and two relations of the manifest itself, and
- * answers the function that detaches them. Everything after that is SQL — Mosaic's, the host's —
- * over `"<name>"."<Table>"`, `"<name>".fossil_tables` and `"<name>".fossil_columns`.
+ * `open` reads the manifest, creates a view per table, two relations of the manifest itself and the
+ * corpus as RDF, and answers the function that detaches them. Everything after that is SQL —
+ * Mosaic's, the host's — over `"<name>"."<Table>"`, `"<name>".fossil_tables`,
+ * `"<name>".fossil_columns` and `"<name>".triples`.
  *
  * ```ts
  * import { open } from '@fossil-lang/corpus';
@@ -14,16 +15,14 @@
  * await close();
  * ```
  *
- * `mapping` answers the same manifest's RDF meaning as an R2RML mapping in Turtle — a pure function of
- * `fossil.json`'s text, for a SHACL engine, a triplestore or any R2RML processor to read the corpus as
- * RDF with no fossil code (`/docs/format/reading/rdf`).
+ * `triples` is the corpus's RDF meaning, one row per triple, for a SHACL engine or any reader of
+ * triples to read it with no fossil code (`/docs/format/reading/rdf`).
  *
  * It links no engine, decodes no Parquet and loads no WASM: DuckDB-WASM in a browser is the host's,
  * and it prunes row groups from the footers. `/docs/design/one-door` has why the door is this small.
  */
 
 export { open } from './open.js';
-export { mapping } from './mapping.js';
 export { FOSSIL_FORMAT } from './manifest.js';
 
 export type { Close, OpenOptions } from './open.js';

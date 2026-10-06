@@ -113,7 +113,7 @@ optional and absent when there is nothing to say.
 carries it as the standard IRIs: `term_type` is R2RML's `rr:IRI` or `rr:Literal`, and `datatype`
 the datatype IRI the document wrote — `xsd:gYear` stays `xsd:gYear` whatever the column's `type`.
 A column whose shape declares none carries neither, and its RDF meaning is
-[R2RML's default](/docs/format/reading/rdf): a literal of its natural datatype.
+[the natural literal](/docs/format/reading/rdf) of its `type`, R2RML's default.
 
 **`role` says what a column the writer emits IS**: `address` (`dense_id`), `identity` (`subject`)
 and `endpoint` (`src`, `dst`). They are `corpus.bnf`'s roles, and the writer reads them from there.

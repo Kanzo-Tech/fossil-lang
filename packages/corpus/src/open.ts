@@ -8,14 +8,19 @@ import { FossilError, attachCause, type Engine, type Host } from '@fossil-lang/t
 import type { Manifest } from './manifest.gen.js';
 import { parseManifest, tablesIn } from './manifest.js';
 import { ident, lit, query } from './sql.js';
+import { triplesOf } from './triples.js';
 
 /** The file every open reads first. */
 const ENTRY_POINT = 'fossil.json';
 
-/** The relations the manifest becomes, beside the tables' views, and the SQL of each. */
-const CATALOG_VIEWS: Readonly<Record<string, (manifest: Manifest) => string>> = {
+/**
+ * The relations the manifest becomes, beside the tables' views, and the SQL of each — given the
+ * manifest, and the name of a table's view.
+ */
+const CATALOG_VIEWS: Readonly<Record<string, (manifest: Manifest, relation: (table: string) => string) => string>> = {
   fossil_tables: tablesOf,
   fossil_columns: columnsOf,
+  triples: triplesOf,
 };
 
 /** What {@link open} takes: the engine, and where the corpus is — a job under its host, or a URL. */
@@ -51,8 +56,9 @@ const holders = new WeakMap<object, Map<string, number>>();
 
 /**
  * **Attach a corpus to the engine as the catalog `name`**: a view per table — `"<name>"."Person"` —
- * and the manifest as two relations, `"<name>".fossil_tables` and `"<name>".fossil_columns`. Read it
- * with SQL — Mosaic's, the host's — and call what comes back to detach it.
+ * the manifest as two relations, `"<name>".fossil_tables` and `"<name>".fossil_columns`, and the
+ * corpus as RDF, `"<name>".triples`. Read it with SQL — Mosaic's, the host's — and call what comes
+ * back to detach it.
  *
  * ```ts
  * const close = await open(job, { engine, host });          // a job's corpus, under its credential
@@ -66,12 +72,14 @@ const holders = new WeakMap<object, Map<string, number>>();
  * `source` the one its `src` does — a row per value of a multi-valued property, whose IRI is its
  * value column's. `fossil_columns(table_name, column_name, ordinal, type, role, iri,
  * nullable)` — one row per column, `role` the writer's (`address`, `identity`, `endpoint`) and null
- * on a program's column.
+ * on a program's column. `triples(s_k, s_v, p, o_k, o_v, o_d, o_l)` — one row per RDF triple, each
+ * term as its kind (`I` or `L`), its IRI or lexical form, its datatype and language
+ * (`/docs/format/reading/rdf`): what a SHACL engine validates.
  *
  * @throws {FossilError} before any Parquet is read: `corpus/unreadable` when `fossil.json` does not
  *   read, `corpus/not-json`, `corpus/unsupported-format` for a format other than `fossil/1`,
- *   `corpus/duplicate-table` when it names one table twice or a table `fossil_tables` /
- *   `fossil_columns`; `corpus/not-a-location` for a URL carrying a query or a fragment;
+ *   `corpus/duplicate-table` when it names one table twice or a table `fossil_tables`,
+ *   `fossil_columns` or `triples`; `corpus/not-a-location` for a URL carrying a query or a fragment;
  *   `storage/ambiguous-prefix` for a job vended more than one prefix; `api/invalid-argument` without
  *   an `engine`, or without exactly one of `host` and `url`; `engine/failed` when the engine refuses
  *   a view; for a job, what `mount` throws — `storage/host-silent` among them.
@@ -141,7 +149,7 @@ export async function open(name: string, options: OpenOptions): Promise<Close> {
       );
     }
     for (const [view, sql] of Object.entries(CATALOG_VIEWS)) {
-      await query(engine, `CREATE OR REPLACE VIEW ${relation(view)} AS ${sql(manifest)}`, signal);
+      await query(engine, `CREATE OR REPLACE VIEW ${relation(view)} AS ${sql(manifest, relation)}`, signal);
     }
 
     let closed = false;

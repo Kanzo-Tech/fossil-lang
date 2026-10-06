@@ -182,9 +182,9 @@ green and wrong.
 A property a shape declares `*` or `+` is **a table of its own, a row per value** — `src`, the
 vertex's address, and the value — and the vertex row carries none of it. It is first normal form,
 and it is chosen because it is the only form the mapping standard reads: R2RML §10.2 makes one cell
-one term, and an array column is SQL feature S091, outside the Core SQL 2008 that `rr:SQL2008`
-declares. A property table becomes RDF through the same joined query a relation does, so the corpus
-has one shape of mapping for both.
+one term, and an array column is SQL feature S091, outside Core SQL 2008. A property table becomes
+[RDF](/docs/format/reading/rdf) through the same join a relation does, so `triples` has one shape
+for both.
 
 It is also the form both sources already arrive in. A relational source spells "many" as repeated
 rows, which a vertex row can only hold by keeping one of them; RDF arrives as a list, which no term

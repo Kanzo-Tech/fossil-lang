@@ -115,7 +115,8 @@ in-edge.
 
 `@fossil-lang/corpus` is that recipe and nothing more: `packages/corpus/src/open.ts, open` reads
 `fossil.json` and creates the views on the host's engine, under a catalog it is given, with the
-manifest beside them as two relations — `fossil_tables` and `fossil_columns`.
+manifest beside them as two relations — `fossil_tables` and `fossil_columns` — and the corpus as
+[RDF](/docs/format/reading/rdf), `triples`.
 
 ```ts
 import { open } from '@fossil-lang/corpus';

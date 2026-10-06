@@ -47,12 +47,12 @@ const fossil = (code: string, data?: Record<string, unknown>) =>
   expect.objectContaining({ name: 'FossilError', code, ...(data === undefined ? {} : { data: expect.objectContaining(data) }) });
 
 describe('open', () => {
-  it('attaches a view per table and the manifest as two relations, under the name it was given', async () => {
+  it('attaches a view per table, the manifest as two relations and the corpus as triples, under the name it was given', async () => {
     const close = await open('conformance', { engine, url: CORPUS });
     const views = await query(
       `SELECT table_name AS t FROM information_schema.tables WHERE table_catalog = 'conformance' ORDER BY t`,
     );
-    expect(views.map((r) => r.t)).toEqual([...TABLES.map((t) => t.name), 'fossil_columns', 'fossil_tables'].sort());
+    expect(views.map((r) => r.t)).toEqual([...TABLES.map((t) => t.name), 'fossil_columns', 'fossil_tables', 'triples'].sort());
 
     const tables = await query(`SELECT * FROM conformance.fossil_tables`);
     expect(tables.map((r) => r.table_name)).toEqual(TABLES.map((t) => t.name));
@@ -111,11 +111,12 @@ describe('open', () => {
     );
   });
 
-  it('ignores a key it does not know, and an empty corpus is two empty relations', async () => {
+  it('ignores a key it does not know, and an empty corpus is three empty relations', async () => {
     const dir = manifestOnly('extra', JSON.stringify({ ...MANIFEST, vertex_tables: [], edge_tables: [], property_tables: [], extent: [0, 0, 1, 1] }));
     const close = await open('extra', { engine, url: dir });
     expect(await query('SELECT * FROM extra.fossil_tables')).toEqual([]);
     expect(await query('SELECT * FROM extra.fossil_columns')).toEqual([]);
+    expect(await query('SELECT * FROM extra.triples')).toEqual([]);
     await close();
   });
 
@@ -124,6 +125,8 @@ describe('open', () => {
     await expect(open('twice', { engine, url: twice })).rejects.toThrow(fossil('corpus/duplicate-table', { table: 'Person' }));
     const reserved = manifestOnly('reserved', JSON.stringify({ ...MANIFEST, edge_tables: [{ ...MANIFEST.edge_tables[0], name: 'fossil_tables' }] }));
     await expect(open('reserved', { engine, url: reserved })).rejects.toThrow(fossil('corpus/duplicate-table', { table: 'fossil_tables' }));
+    const triples = manifestOnly('triples', JSON.stringify({ ...MANIFEST, edge_tables: [{ ...MANIFEST.edge_tables[0], name: 'triples' }] }));
+    await expect(open('triples', { engine, url: triples })).rejects.toThrow(fossil('corpus/duplicate-table', { table: 'triples' }));
     expect(await catalogs()).not.toContain('twice');
   });
 
