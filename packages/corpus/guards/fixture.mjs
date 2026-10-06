@@ -95,16 +95,18 @@ export function write(dir, { count = 70_000, orders, tags = 16 } = {}) {
   csv(at("tagged"), "src,dst", tagged);
 
   const P = (name, type, extra = {}) => ({ name, type, ...extra });
+  // The term a shape would declare: a datatype the column's type does not imply, as a shape says it.
+  const literal = (local) => ({ term_type: "http://www.w3.org/ns/r2rml#Literal", datatype: `http://www.w3.org/2001/XMLSchema#${local}` });
   const writer = [P("dense_id", "uint32", { role: "address" }), P("subject", "string", { role: "identity" })];
   const head = "dense_id::UINTEGER AS dense_id, subject::VARCHAR AS subject";
   const vertexTables = [
     {
       name: "Person", iri: `${BASE}Person`, rows: count, sql: `${head}, birth_year::INTEGER AS birth_year, postcode::VARCHAR AS postcode`,
-      properties: [...writer, P("birth_year", "int32", { iri: `${BASE}birthYear`, nullable: true }), P("postcode", "string", { iri: `${BASE}postcode` })],
+      properties: [...writer, P("birth_year", "int32", { iri: `${BASE}birthYear`, ...literal("gYear"), nullable: true }), P("postcode", "string", { iri: `${BASE}postcode` })],
     },
     {
       name: "Order", iri: `${BASE}Order`, rows: orders, sql: `${head}, amount::DOUBLE AS amount`,
-      properties: [...writer, P("amount", "double", { iri: `${BASE}amount` })],
+      properties: [...writer, P("amount", "double", { iri: `${BASE}amount`, ...literal("decimal") })],
     },
     {
       name: "Tag", iri: `${BASE}Tag`, rows: tags, sql: `${head}, name::VARCHAR AS name`,

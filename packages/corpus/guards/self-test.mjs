@@ -67,6 +67,9 @@ function manifest(dir, edit) {
   writeFileSync(path, JSON.stringify(json, null, 2));
 }
 
+/** A Person property of a parsed manifest, by name. */
+const property = (m, name) => m.vertex_tables.find((t) => t.name === "Person").properties.find((p) => p.name === name);
+
 /** Which guards fail on the corpus at `dir`. */
 function failing(dir) {
   return runAll(inspect(dir))
@@ -126,6 +129,10 @@ try {
                             UNION ALL SELECT * FROM m WHERE src <> (SELECT min(src) FROM m) ORDER BY src, dst`)],
     ["identity-is-the-subject", "two vertices given one subject", (dir) =>
       rewrite(person(dir), "SELECT * REPLACE (CASE WHEN dense_id = 1 THEN (SELECT subject FROM m WHERE dense_id = 0) ELSE subject END AS subject) FROM m ORDER BY dense_id")],
+    ["declared-term", "a year column declared xsd:date", (dir) =>
+      manifest(dir, (m) => (property(m, "birth_year").datatype = "http://www.w3.org/2001/XMLSchema#date"))],
+    ["declared-term", "a postcode column declared an IRI", (dir) =>
+      manifest(dir, (m) => (property(m, "postcode").term_type = "http://www.w3.org/ns/r2rml#IRI"))],
   ];
 
   for (const [id, what, mutate] of MUTATIONS) {
