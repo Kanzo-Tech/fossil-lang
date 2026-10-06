@@ -9,7 +9,7 @@
  *    `read_parquet` and the engine does the rest.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -20,6 +20,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { query as duck } from '../guards/duck.mjs';
 import { ROW_GROUP_ROWS, write } from '../guards/fixture.mjs';
 import { open, type Close } from '../src/index.js';
+import type { Manifest } from '../src/manifest.js';
 import { duckdb } from '../tests/engine.js';
 
 /** Four row groups of `Person` at 122,880 rows each, the last one partial. */
@@ -46,7 +47,10 @@ afterAll(async () => {
 describe('open, then SQL', () => {
   it('reads every table back at its rows', async () => {
     const tables = await rows('SELECT table_name AS t, rows::BIGINT AS n FROM big.fossil_tables');
-    expect(tables.length).toBe(6);
+    const manifest = JSON.parse(readFileSync(join(dir, 'fossil.json'), 'utf8')) as Manifest;
+    expect(tables.map((r) => r.t)).toEqual(
+      [...manifest.vertex_tables, ...manifest.edge_tables, ...(manifest.property_tables ?? [])].map((t) => t.name),
+    );
     for (const { t, n } of tables) {
       const [read] = await rows(`SELECT count(*)::BIGINT AS n FROM big."${String(t)}"`);
       expect(read!.n, String(t)).toBe(n);
