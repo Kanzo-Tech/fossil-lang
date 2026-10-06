@@ -6,7 +6,7 @@
 //!
 //! The hover bridge:
 //!
-//! - [`position`]: LSP `(line, character)` → byte offset → `SyntaxToken` /
+//! - [`mod@position`]: LSP `(line, character)` → byte offset → `SyntaxToken` /
 //!   `SyntaxNode`, over rust-analyzer's `line-index`, memoised per file by
 //!   [`position::line_index`].
 //! - [`hover()`]: walks position → enclosing PROPERTY → enclosing MAPPING →

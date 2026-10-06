@@ -36,15 +36,6 @@
 //! `fossil_hir::body` is what checks them. Everything else in the table above
 //! is the specification verbatim.
 //!
-//! # What this parser REFUSES, by name
-//!
-//! Six spellings the grammar retired are recognised on purpose rather than
-//! left to fall through the recovery arms, because the parser knows what was
-//! written and what replaces it. They are written down in [`diag::retired`]:
-//! `prefix ex: <…>`, the CURIE `ex:name`, the `<…>` absolute IRI, a leading `.`,
-//! the backtick and `|>`. A refusal that says `expected IDENT, found SHAPE_SEP`
-//! throws away both halves of that.
-//!
 //! Expressions are the Pratt sub-parser in [`expr`]; its own header carries the
 //! accounting for `|>`.
 

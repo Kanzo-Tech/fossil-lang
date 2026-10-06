@@ -41,7 +41,7 @@
 //!   `Setter` (`set_text`), which BUMPS THE REVISION — the real cancellation
 //!   trigger (NOT a fictional `db.cancel_pending()`) — then republishes.
 //! - `textDocument/didClose` → forgets the buffer and publishes an empty list.
-//! - `textDocument/hover` → [`fossil_ide::hover`] (the
+//! - `textDocument/hover` → [`fossil_ide::hover()`] (the
 //!   target-side `ShEx` type is reachable whenever the program names its output
 //!   document — the editor supplies a filesystem, not a contract).
 //! - `textDocument/definition` → [`fossil_ide::goto_definition`] → `Location`s.
@@ -105,7 +105,7 @@ use lsp_types::{
 /// name, and the table of introspected input schemas. The LSP COMPILES
 /// programs, so it installs the same rows the native engine does: without them
 /// every program checks against no output contract, and the target-side halves
-/// of [`fossil_ide::hover`] / [`fossil_ide::completions`] go
+/// of [`fossil_ide::hover()`] / [`fossil_ide::completions`] go
 /// quietly empty for exactly the programs that declare a shape.
 ///
 /// It replaced `fossil_base::test_support::NativeSystem`, whose decoder table is the trait
@@ -181,7 +181,7 @@ fn local_path(key: &str) -> Option<PathBuf> {
 ///
 /// A `#[salsa::db]` struct carrying the Salsa runtime, the host [`System`] and
 /// the file registry. The target shape reaches
-/// [`fossil_ide::hover`] / [`fossil_ide::completions`] because
+/// [`fossil_ide::hover()`] / [`fossil_ide::completions`] because
 /// the PROGRAM names its output document and this host REGISTERS it — as a
 /// Salsa input, so an edit to the document re-checks the programs that read it.
 #[salsa::db]
@@ -504,7 +504,7 @@ pub fn handle_request(state: &LspState, req: Request) -> Response {
     }
 }
 
-/// `textDocument/hover` → [`fossil_ide::hover`] (target-aware
+/// `textDocument/hover` → [`fossil_ide::hover()`] (target-aware
 /// whenever the program names an output document). Renders Markdown with a
 /// UTF-16 range.
 fn handle_hover(state: &LspState, req: Request) -> Response {

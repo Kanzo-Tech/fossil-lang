@@ -102,10 +102,9 @@ pub struct ResolvedConstraint {
     /// The predicate IRI (after prefix resolution).
     pub predicate: IriS,
     /// The datatype the `valueExpr` narrows the value to —
-    /// [`PropertyConstraint::datatype`]'s contract, see [`datatype_of`].
+    /// [`PropertyConstraint::datatype`]'s contract.
     pub datatype: Option<Primitive>,
-    /// The destination shape IRIs — [`PropertyConstraint::targets`], see
-    /// [`edge_targets`].
+    /// The destination shape IRIs — [`PropertyConstraint::targets`].
     pub targets: Vec<String>,
     /// How many values the predicate may carry, decoded from `ShEx`'s
     /// `(min, max)` integer encoding by [`occurs_from_shex`].

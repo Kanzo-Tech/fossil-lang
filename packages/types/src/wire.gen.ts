@@ -179,10 +179,10 @@ export interface GrantPlan {
  * What is under the cursor, rendered — the payload of `textDocument/hover` with the LSP envelope
  * taken off.
  *
- * `markdown` is `fossil_ide::hover`'s: a ```` ```fossil ```` fence, the source-side type and where
- * it came from, and — when the program names an output document that resolves — a second block
- * with the type the shape demands of that predicate. `range` is UTF-16, because a JS host counts in
- * UTF-16 and LSP does too.
+ * `markdown` is `fossil_ide::hover()`'s: a ```` ```fossil ```` fence, the source-side type and
+ * where it came from, and — when the program names an output document that resolves — a second
+ * block with the type the shape demands of that predicate. `range` is UTF-16, because a JS host
+ * counts in UTF-16 and LSP does too.
  */
 export interface HoverRow {
   markdown: string;
