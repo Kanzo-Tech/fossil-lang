@@ -27,14 +27,15 @@ use datafusion::parquet::basic::{Compression, Encoding, ZstdLevel};
 use datafusion::parquet::errors::ParquetError;
 use datafusion::parquet::file::properties::WriterProperties;
 use datafusion::parquet::schema::types::ColumnPath;
-use fossil_graph_schema::{Failure, NodeType, Problem};
+use fossil_graph_schema::{Failure, NodeType, Problem, Term};
 use fossil_sinks::generated::{
     ColumnRole, EDGE_COLUMNS, ENDPOINT_DST, ENDPOINT_SRC, PAYLOAD_ADDRESS, PAYLOAD_COLUMNS,
     PAYLOAD_IDENTITY, WriterColumn,
 };
 use fossil_sinks::manifest::{
     EdgeTable as EdgeEntry, Endpoint, Format, MANIFEST_FILE, Manifest, Property, ROW_GROUP_ROWS,
-    VertexTable as VertexEntry, data_type_name, edge_path, edge_table_name, vertex_path,
+    RR_IRI, RR_LITERAL, VertexTable as VertexEntry, data_type_name, edge_path, edge_table_name,
+    vertex_path,
 };
 use fossil_storage::{Storage, StorageError};
 
@@ -219,6 +220,8 @@ fn fixed(column: &WriterColumn) -> Property {
         name: column.name.to_string(),
         data_type: column.data_type.to_string(),
         iri: None,
+        term_type: None,
+        datatype: None,
         nullable: false,
         role: Some(column.role),
     }
@@ -281,17 +284,26 @@ fn vertex_parquet(
     let mut properties: Vec<Property> = PAYLOAD_COLUMNS.iter().map(fixed).collect();
     // The type is the column's, as written: `properties` describes the file a
     // reader opens, and the checker's belief about a column the executor never
-    // introspected is not what the bytes hold. The IRI is the shape's.
-    let program = |name: &str, arrow: &DataType| Property {
-        name: name.to_string(),
-        data_type: data_type_name(arrow),
-        iri: node
-            .properties
-            .iter()
-            .find(|p| p.name == name)
-            .and_then(|p| p.iri.clone()),
-        nullable: true,
-        role: None,
+    // introspected is not what the bytes hold. The IRI and the term are the
+    // shape's, copied as it declared them.
+    let program = |name: &str, arrow: &DataType| {
+        let declared = node.properties.iter().find(|p| p.name == name);
+        let term = declared.and_then(|p| p.term.as_ref());
+        Property {
+            name: name.to_string(),
+            data_type: data_type_name(arrow),
+            iri: declared.and_then(|p| p.iri.clone()),
+            term_type: term.map(|t| match t {
+                Term::Iri => RR_IRI.to_string(),
+                Term::Literal(_) => RR_LITERAL.to_string(),
+            }),
+            datatype: term.and_then(|t| match t {
+                Term::Iri => None,
+                Term::Literal(datatype) => datatype.clone(),
+            }),
+            nullable: true,
+            role: None,
+        }
     };
 
     let Some(first) = batches.first() else {

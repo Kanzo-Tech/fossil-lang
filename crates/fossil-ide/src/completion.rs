@@ -529,7 +529,12 @@ fn shape_property_completions(
         def_map(db, mapping.file(db)).renames_for_shape(db, &iri)
     });
     let (table, _collisions) = shape.short_names(&renames);
-    for (name, predicate) in table {
+    for fossil_hir::shapes::Predicate {
+        name,
+        iri: predicate,
+        ..
+    } in table
+    {
         let ty_str = shape
             .constraint_for(&predicate)
             .and_then(|c| c.value_ty)

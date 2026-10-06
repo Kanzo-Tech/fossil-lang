@@ -81,13 +81,20 @@ so `Src_label_Dst` is the name and `label` a field beside it.
 | `record_count` | the rows in the file | sizes buffers, and checks a file it read in full |
 | `properties` | every column, in order, with its type | knows the schema without opening a footer |
 | `properties[].role` | what a column the writer emits IS | tells the writer's columns from the program's without a list of names |
+| `properties[].term_type`, `.datatype` | the RDF term the shape declares for the values | states the column's RDF meaning without re-deriving it |
 | `references` | the vertex table at each end | knows which relations join which types |
 
 `type` is one of `string`, `bool`, `int8` … `int64`, `uint8` … `uint64`, `float`, `double`, `date`,
 `timestamp`, `time`, `decimal` and `list<…>` — `corpus.bnf`'s spellings, written by
 `crates/fossil-sinks/src/manifest.rs, data_type_name`. The JSON Schema of the whole document is
-`crates/fossil-sinks/fossil.schema.json`. `iri` and `nullable` are
+`crates/fossil-sinks/fossil.schema.json`. `iri`, `nullable`, `term_type` and `datatype` are
 optional and absent when there is nothing to say.
+
+**`term_type` and `datatype` are the shape's, verbatim.** A column whose shape declares a term
+carries it as the standard IRIs: `term_type` is R2RML's `rr:IRI` or `rr:Literal`, and `datatype`
+the datatype IRI the document wrote — `xsd:gYear` stays `xsd:gYear` whatever the column's `type`.
+A column whose shape declares none carries neither, and its RDF meaning is
+[R2RML's default](/docs/format/reading/rdf): a literal of its natural datatype.
 
 **`role` says what a column the writer emits IS**: `address` (`dense_id`), `identity` (`subject`)
 and `endpoint` (`src`, `dst`). They are `corpus.bnf`'s roles, and the writer reads them from there.

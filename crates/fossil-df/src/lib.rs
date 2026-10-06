@@ -534,6 +534,7 @@ fn node_property(db: &dyn fossil_base::Db, prop: &VProp<'_>) -> NodeProp {
         name: prop.name.to_string(),
         datatype: inner_primitive(db, prop.ty).unwrap_or(Primitive::String),
         iri: prop.rdf_uri.as_ref().map(ToString::to_string),
+        term: prop.term.clone(),
         cardinality: if prop.single_valued {
             Cardinality::Single
         } else {

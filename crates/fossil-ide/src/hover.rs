@@ -201,8 +201,8 @@ fn resolve_hover_target<'db>(
         output
             .predicates(db)
             .iter()
-            .find(|(short, _)| *short == name)
-            .map(|(_, iri)| iri.to_string())
+            .find(|p| p.name == name)
+            .map(|p| p.iri.to_string())
     });
 
     let r = property_node.text_range();

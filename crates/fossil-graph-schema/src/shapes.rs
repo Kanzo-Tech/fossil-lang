@@ -38,7 +38,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Cardinality, EdgeType, GraphSchema, NodeType, Primitive, Property, Span};
+use crate::{Cardinality, EdgeType, GraphSchema, NodeType, Primitive, Property, Span, Term};
 
 /// The local name of an IRI — the substring after the last `#` or `/`.
 ///
@@ -219,40 +219,13 @@ pub struct PropertyConstraint {
     /// The full predicate IRI, fully resolved. [`local_name`] derives from it
     /// the bare name the program writes.
     pub predicate: String,
-    /// The value's datatype, or `None` when **the document did not narrow the
-    /// value type**.
-    ///
-    /// A decoder writes:
-    /// - `Some(p)` for a literal narrowed to an XSD datatype in the lattice
-    ///   (`Primitive::from_xsd_iri`);
-    /// - `Some(Primitive::AnyUri)` for an IRI-valued node that is *not* a
-    ///   reference to another shape (`ShEx` `nodeKind IRI`) — an opaque IRI
-    ///   column, not an edge;
-    /// - `None` for everything else, including an XSD datatype **outside** the
-    ///   lattice.
-    ///
-    /// `None` becomes [`Primitive::String`] in
-    /// [`to_graph_schema`](OutputShapes::to_graph_schema) — the permissive
-    /// walking-skeleton column. The `Option` exists so that a consumer that
-    /// wants to *diagnose* an un-narrowed property can still tell the two apart,
-    /// which a bare `Primitive::String` cannot.
-    ///
-    /// # The checker agrees, and once did not
-    ///
-    /// `None` means "the document did not narrow the value type" — that is the
-    /// contract, and the type checker reads it that way. The two disagreed
-    /// once: `check.rs` resolved a missing expectation with
-    /// `unwrap_or_else(|| Ty::new(db, TyKind::Iri))`, the NARROWEST type in the
-    /// lattice, so a constraint the document declined to narrow rejected a
-    /// String. The choice was made in favour of this field's own reading —
-    /// `check.rs`'s `compatible` now short-circuits on
-    /// `expected.is_none_or(|e| subtypes(db, actual, e))`, so an absent
-    /// expectation accepts anything.
-    ///
-    /// Keep the two in step. `Some` narrows and `None` does not, and a default
-    /// reintroduced on the `fossil-hir` side would silently make this field
-    /// mean the opposite of what it says.
-    pub datatype: Option<Primitive>,
+    /// The RDF term the document declares for the value, verbatim, or `None`
+    /// when it declares none. A decoder writes [`Term::Iri`] for an IRI-valued
+    /// node that is *not* a reference to another shape (`ShEx` `IRI`,
+    /// `sh:nodeKind sh:IRI`) — an opaque IRI column, not an edge — and
+    /// [`Term::Literal`] for a literal, with the datatype IRI as written.
+    /// [`Self::datatype`] is what the checker reads of it.
+    pub term: Option<Term>,
     /// Destination shape IRIs. Empty means a literal (or opaque-IRI) property
     /// that stays a column on the node type.
     ///
@@ -280,6 +253,42 @@ pub struct PropertyConstraint {
     /// `fossil_shex::spans`, which is a lookup over text and explains at length
     /// why that is not a second parser.
     pub span: Option<Span>,
+}
+
+impl PropertyConstraint {
+    /// The value's datatype, or `None` when **the document did not narrow the
+    /// value type**.
+    ///
+    /// It is the [`term`](Self::term)'s [`Term::primitive`]: `Some(p)` for a
+    /// literal narrowed to an XSD datatype in the lattice,
+    /// `Some(Primitive::AnyUri)` for an IRI, and `None` for everything else,
+    /// including an XSD datatype **outside** the lattice.
+    ///
+    /// `None` becomes [`Primitive::String`] in
+    /// [`to_graph_schema`](OutputShapes::to_graph_schema) — the permissive
+    /// walking-skeleton column. The `Option` exists so that a consumer that
+    /// wants to *diagnose* an un-narrowed property can still tell the two apart,
+    /// which a bare `Primitive::String` cannot.
+    ///
+    /// # The checker agrees, and once did not
+    ///
+    /// `None` means "the document did not narrow the value type" — that is the
+    /// contract, and the type checker reads it that way. The two disagreed
+    /// once: `check.rs` resolved a missing expectation with
+    /// `unwrap_or_else(|| Ty::new(db, TyKind::Iri))`, the NARROWEST type in the
+    /// lattice, so a constraint the document declined to narrow rejected a
+    /// String. The choice was made in favour of this field's own reading —
+    /// `check.rs`'s `compatible` now short-circuits on
+    /// `expected.is_none_or(|e| subtypes(db, actual, e))`, so an absent
+    /// expectation accepts anything.
+    ///
+    /// Keep the two in step. `Some` narrows and `None` does not, and a default
+    /// reintroduced on the `fossil-hir` side would silently make this method
+    /// mean the opposite of what it says.
+    #[must_use]
+    pub fn datatype(&self) -> Option<Primitive> {
+        self.term.as_ref().and_then(Term::primitive)
+    }
 }
 
 /// How many values a property may carry — the rich form. [`Cardinality`] is its
@@ -463,8 +472,9 @@ impl OutputShapes {
                         // permissive walking-skeleton default the `ShEx`
                         // lowering already applied to every `valueExpr` it could
                         // not read.
-                        datatype: c.datatype.unwrap_or(Primitive::String),
+                        datatype: c.datatype().unwrap_or(Primitive::String),
                         iri: Some(c.predicate.clone()),
+                        term: c.term.clone(),
                         cardinality,
                     });
                 } else {
@@ -496,7 +506,7 @@ mod tests {
     fn prop(predicate: &str, datatype: Option<Primitive>, occurs: Occurs) -> PropertyConstraint {
         PropertyConstraint {
             predicate: predicate.into(),
-            datatype,
+            term: datatype.map(|p| Term::Literal(Some(p.to_xsd_iri().into()))),
             targets: Vec::new(),
             occurs,
             span: None,
@@ -506,7 +516,7 @@ mod tests {
     fn edge(predicate: &str, targets: &[&str], occurs: Occurs) -> PropertyConstraint {
         PropertyConstraint {
             predicate: predicate.into(),
-            datatype: None,
+            term: None,
             targets: targets.iter().map(|t| (*t).to_string()).collect(),
             occurs,
             span: None,

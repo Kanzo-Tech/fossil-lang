@@ -225,8 +225,8 @@ fn document_targets(
             let Some(iri) = typecheck_mapping(db, mapping).ok().and_then(|out| {
                 out.predicates(db)
                     .iter()
-                    .find(|(short, _)| short.as_str() == key.as_str())
-                    .map(|(_, iri)| iri.clone())
+                    .find(|p| p.name.as_str() == key.as_str())
+                    .map(|p| p.iri.clone())
             }) else {
                 return Vec::new();
             };

@@ -90,7 +90,7 @@ use expect_test::expect_file;
 use fossil_base::register_document;
 use fossil_base::test_support::new_db;
 use fossil_base::{Db, Diagnostic, SourceFile};
-use fossil_graph_schema::{Occurs, Primitive, PropertyConstraint, Rejection, Shape};
+use fossil_graph_schema::{Occurs, Primitive, PropertyConstraint, Rejection, Shape, Term};
 use fossil_hir::body::body;
 use fossil_hir::def_map::def_map;
 use fossil_hir::shapes::ResolvedShape;
@@ -287,7 +287,7 @@ fn run_db_wired_fixture(bucket: &str, name: &str) -> String {
 fn constraint(predicate: &str, datatype: Option<Primitive>, occurs: Occurs) -> PropertyConstraint {
     PropertyConstraint {
         predicate: predicate.to_string(),
-        datatype,
+        term: datatype.map(|p: Primitive| Term::Literal(Some(p.to_xsd_iri().into()))),
         targets: Vec::new(),
         occurs,
         // A test fixture, not a document: no text to point into.

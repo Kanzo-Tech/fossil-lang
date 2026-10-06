@@ -97,6 +97,11 @@ pub struct Property {
     /// metadata. `None` for a non-RDF graph.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iri: Option<String>,
+    /// The RDF term the shape declares for the values, verbatim — what a
+    /// mapping states as `rr:termType` / `rr:datatype`. `None` where no shape
+    /// declared one, including every property of an inferred schema.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub term: Option<Term>,
     /// Single- vs multi-valued (drives dedup vs keep-all in a materializer).
     pub cardinality: Cardinality,
 }
@@ -117,6 +122,35 @@ pub struct EdgeType {
     pub destination: String,
     /// Single- vs multi-valued (at most one edge per source vs keep-all).
     pub cardinality: Cardinality,
+}
+
+/// The RDF term a shape document declares for a property's values, **as the
+/// document states it** — `ShEx` `IRI` / `LITERAL` / a datatype, SHACL
+/// `sh:nodeKind` / `sh:datatype`. It is the RDF border's fact, and [`Primitive`]
+/// is the type checker's: [`Term::primitive`] is the one reading of the first
+/// as the second, and nothing reads back the other way, so `xsd:decimal` stays
+/// `xsd:decimal` in a mapping however the lattice folds it.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Term {
+    /// An IRI.
+    Iri,
+    /// A literal, of the datatype IRI exactly as declared; `None` for a literal
+    /// the document did not give a datatype.
+    Literal(Option<String>),
+}
+
+impl Term {
+    /// The lattice reading of the term: an IRI is [`Primitive::AnyUri`], a
+    /// literal is its datatype's [`Primitive::from_xsd_iri`], and a literal
+    /// with no datatype, or one outside the lattice, narrows nothing.
+    #[must_use]
+    pub fn primitive(&self) -> Option<Primitive> {
+        match self {
+            Self::Iri => Some(Primitive::AnyUri),
+            Self::Literal(datatype) => datatype.as_deref().and_then(Primitive::from_xsd_iri),
+        }
+    }
 }
 
 /// The canonical datatype lattice — format-neutral, and **the same enum the type
@@ -275,6 +309,7 @@ mod tests {
                         name: "name".into(),
                         datatype: Primitive::String,
                         iri: Some("https://example.org/name".into()),
+                        term: None,
                         cardinality: Cardinality::Single,
                     }],
                 },
@@ -285,6 +320,7 @@ mod tests {
                         name: "total".into(),
                         datatype: Primitive::Integer,
                         iri: Some("https://example.org/total".into()),
+                        term: None,
                         cardinality: Cardinality::Single,
                     }],
                 },

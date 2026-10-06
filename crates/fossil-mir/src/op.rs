@@ -33,6 +33,7 @@
 //!   [`crate::graph::MirGraph::ops`] in topological order. Two-input ops carry
 //!   two indices.
 
+use fossil_graph_schema::Term;
 use fossil_hir::BinOp;
 use fossil_hir::Ty;
 use fossil_hir::UnOp;
@@ -326,6 +327,9 @@ pub struct VProp<'db> {
     pub value: Expr<'db>,
     pub ty: Ty<'db>,
     pub rdf_uri: Option<SmolStr>,
+    /// The RDF term the target shape declares for the values, which the writer
+    /// copies into `fossil.json`.
+    pub term: Option<Term>,
     pub single_valued: bool,
 }
 

@@ -50,7 +50,7 @@ use crate::lower::{
     BinOp, HirExpr, HirProperty, InterpolationPart, PropertyKey, UnOp, lower_to_hir,
 };
 use crate::provenance::{ExprTypeEntry, ExprTypes, Provenance, ProvenanceKind};
-use crate::shapes::{NameCollision, ResolvedShape, resolve_target_shape};
+use crate::shapes::{NameCollision, Predicate, ResolvedShape, resolve_target_shape};
 use crate::spans::{Spans, mapping_header_span, spans};
 use crate::ty::display::render_ty_kind;
 use fossil_graph_schema::{Occurs, Primitive, Rejection};
@@ -66,16 +66,18 @@ pub struct TypeckOutput<'db> {
     #[returns(copy)]
     pub source_row: Option<Ty<'db>>,
     /// The target shape's predicates by the short name a body writes —
-    /// `("name", "http://xmlns.com/foaf/0.1/name")` — in declaration order.
+    /// `name` for `http://xmlns.com/foaf/0.1/name` — with the RDF term the
+    /// document declares, in declaration order.
     ///
     /// **This is how `fossil-mir` gets its IRI back.** It used to strip one out
     /// of `PropertyKey::PrefixedName`, which the CURIE put there; a bare key
     /// severs that supply and the document is the only thing that knows. MIR
     /// already reads `typecheck_mapping` for the source row, so the IRI arrives
-    /// through a seam that exists, as a pair of strings — no shape vocabulary,
-    /// no descriptor, and nothing of what `0e6898d` cut comes back.
+    /// through a seam that exists — no descriptor, and nothing of what
+    /// `0e6898d` cut comes back. The term rides along for the writer, which
+    /// copies it into `fossil.json`.
     #[returns(ref)]
-    pub predicates: Vec<(SmolStr, SmolStr)>,
+    pub predicates: Vec<Predicate>,
 }
 
 /// The ONE Salsa-tracked checker entry per mapping.
@@ -280,7 +282,7 @@ pub struct Checker<'db> {
     pub(crate) resolved_shape: Option<ResolvedShape<'db>>,
     /// The target shape's predicates by short name — what a bare property key
     /// resolves against.
-    pub(crate) predicates: Vec<(SmolStr, SmolStr)>,
+    pub(crate) predicates: Vec<Predicate>,
     /// The `@rename`s written above the binding that introduced this mapping's
     /// shape, as `(predicate IRI, the name to write instead)`. `predicates`
     /// above is this already applied; the table itself is kept because
@@ -404,11 +406,11 @@ impl Checker<'_> {
 
     /// The predicate IRI a bare key names, or a diagnostic saying it names none.
     fn resolve_predicate(&mut self, expr_id: ExprId, name: &SmolStr) -> Option<SmolStr> {
-        if let Some((_, iri)) = self.predicates.iter().find(|(n, _)| n == name) {
+        if let Some(Predicate { iri, .. }) = self.predicates.iter().find(|p| p.name == *name) {
             return Some(iri.clone());
         }
         let db = self.expr.db;
-        let candidates: Vec<&str> = self.predicates.iter().map(|(n, _)| n.as_str()).collect();
+        let candidates: Vec<&str> = self.predicates.iter().map(|p| p.name.as_str()).collect();
         let suggestion = did_you_mean(name.as_str(), candidates.iter().copied());
         let mut d = Diagnostic::new(
             Severity::Error,

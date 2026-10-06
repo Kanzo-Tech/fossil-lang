@@ -54,14 +54,14 @@ no WASM.
 ```ts
 import { mapping } from '@fossil-lang/corpus';
 
-const turtle = mapping(fossilJsonText);   // an RML mapping (RML-Core, RML-IO, RML-LV), in Turtle
+const turtle = mapping(fossilJsonText);   // an R2RML mapping, in Turtle
 ```
 
 `mapping` is a pure function of `fossil.json`: each vertex type a triples map over its table (the
 `subject` as an IRI, the type's class, a literal per column with an IRI), each relation a triples map
-over a logical view that joins `src`/`dst` to the `dense_id` of the tables they reference and takes
-their subjects. What has no IRI is not mapped. Table names are unqualified, reached through one
-`rml:Source`, `<#corpus>`, that you describe as the catalog you attached the corpus to. Any RML
+over an `rr:sqlQuery` in Core SQL 2008 that joins `src`/`dst` to the `dense_id` of the tables they
+reference and takes their subjects. What has no IRI is not mapped. Every name is a delimited
+identifier, unqualified: resolve it against the database you attached the corpus to. Any R2RML
 processor then reads the corpus as RDF — `/docs/format/reading/rdf`.
 
 ## Reading a corpus without this package

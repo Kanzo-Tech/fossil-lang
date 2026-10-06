@@ -426,6 +426,7 @@ async fn a_joined_relation_feeds_the_vertex_it_emits() {
                     value: col("users", "name"),
                     ty: string_ty,
                     rdf_uri: Some(SmolStr::new_static("https://example.org/name")),
+                    term: None,
                     single_valued: true,
                 },
                 VProp {
@@ -433,6 +434,7 @@ async fn a_joined_relation_feeds_the_vertex_it_emits() {
                     value: col("teams", "team"),
                     ty: string_ty,
                     rdf_uri: Some(SmolStr::new_static("https://example.org/team")),
+                    term: None,
                     single_valued: true,
                 },
             ],

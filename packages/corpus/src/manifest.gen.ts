@@ -84,6 +84,11 @@ export interface Manifest {
  */
 export interface Property {
   /**
+   * The literal datatype the shape declares, as the IRI it wrote — a mapping's `rr:datatype`.
+   * Absent where it declares none.
+   */
+  datatype?: string;
+  /**
    * The predicate IRI the program mapped it from, when there is one.
    */
   iri?: string;
@@ -100,6 +105,13 @@ export interface Property {
    * the roles it means rather than the names it remembers. Absent on a column of the program's.
    */
   role?: ColumnRole;
+  /**
+   * The RDF term type the shape declares for the values, as R2RML's IRI — `RR_IRI` or
+   * `RR_LITERAL` — which a mapping states as `rr:termType`. Absent where no shape declares one,
+   * and a reader then takes R2RML's default: a literal of the column's natural datatype (R2RML
+   * §10.2).
+   */
+  term_type?: string;
   /**
    * Its type, in the spelling `data_type_name` writes.
    */

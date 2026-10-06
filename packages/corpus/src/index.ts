@@ -14,8 +14,8 @@
  * await close();
  * ```
  *
- * `mapping` answers the same manifest's RDF meaning as an RML mapping in Turtle — a pure function of
- * `fossil.json`'s text, for a SHACL engine, a triplestore or any RML processor to read the corpus as
+ * `mapping` answers the same manifest's RDF meaning as an R2RML mapping in Turtle — a pure function of
+ * `fossil.json`'s text, for a SHACL engine, a triplestore or any R2RML processor to read the corpus as
  * RDF with no fossil code (`/docs/format/reading/rdf`).
  *
  * It links no engine, decodes no Parquet and loads no WASM: DuckDB-WASM in a browser is the host's,

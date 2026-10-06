@@ -141,6 +141,10 @@
         "type"
       ],
       "properties": {
+        "datatype": {
+          "description": "The literal datatype the shape declares, as the IRI it wrote — a mapping's `rr:datatype`. Absent where it declares none.",
+          "type": "string"
+        },
         "iri": {
           "description": "The predicate IRI the program mapped it from, when there is one.",
           "type": "string"
@@ -160,6 +164,10 @@
               "$ref": "#/definitions/ColumnRole"
             }
           ]
+        },
+        "term_type": {
+          "description": "The RDF term type the shape declares for the values, as R2RML's IRI — [`RR_IRI`] or [`RR_LITERAL`] — which a mapping states as `rr:termType`. Absent where no shape declares one, and a reader then takes R2RML's default: a literal of the column's natural datatype (R2RML §10.2).",
+          "type": "string"
         },
         "type": {
           "description": "Its type, in the spelling [`data_type_name`] writes.",

@@ -66,8 +66,8 @@ pub mod spans;
 use std::collections::HashMap;
 
 use fossil_graph_schema::{
-    GraphSchema, Occurs, OutputShapes, Primitive, PropertyConstraint, Rejection, Renames,
-    Shape as OutputShape,
+    GraphSchema, Occurs, OutputShapes, PropertyConstraint, Rejection, Renames,
+    Shape as OutputShape, Term,
 };
 use prefixmap::{IriRef, PrefixMap};
 use rudof_iri::IriS;
@@ -101,9 +101,9 @@ pub struct ShapeBinding {
 pub struct ResolvedConstraint {
     /// The predicate IRI (after prefix resolution).
     pub predicate: IriS,
-    /// The datatype the `valueExpr` narrows the value to —
-    /// [`PropertyConstraint::datatype`]'s contract.
-    pub datatype: Option<Primitive>,
+    /// The RDF term the `valueExpr` declares — [`PropertyConstraint::term`]'s
+    /// contract.
+    pub term: Option<Term>,
     /// The destination shape IRIs — [`PropertyConstraint::targets`].
     pub targets: Vec<String>,
     /// How many values the predicate may carry, decoded from `ShEx`'s
@@ -180,33 +180,26 @@ fn edge_targets(
         .collect()
 }
 
-/// The datatype a constraint's `valueExpr` narrows the value to, or `None` when
-/// **the document did not narrow it** — `PropertyConstraint::datatype`'s
-/// contract.
-///
-/// `Some(p)` for a typed literal whose datatype IRI is in the XSD lattice;
-/// `Some(Primitive::AnyUri)` for a `nodeKind IRI` node, which is an opaque
-/// IRI-valued column and not an edge; `None` for everything else, **including an
-/// XSD datatype outside the lattice**.
-///
-/// `None` becomes `Primitive::String` in `OutputShapes::to_graph_schema`, which
-/// is exactly what the `Primitive`-valued predecessor of this function returned
-/// for those cases — the permissive walking-skeleton column. The `Option` is
-/// what lets a consumer tell "the document said `String`" from "the document
-/// said nothing", which a bare `Primitive::String` cannot.
-fn datatype_of(
+/// The RDF term a constraint's `valueExpr` declares —
+/// `PropertyConstraint::term`'s contract. A datatype is a literal of that IRI,
+/// resolved through the document's prefixes; `LITERAL` a literal with none;
+/// and `IRI` an IRI: an opaque IRI-valued column, not an edge. Anything else
+/// declares no term.
+fn term_of(
     value_expr: Option<&ShapeExpr>,
     prefixmap: &PrefixMap,
-) -> Result<Option<Primitive>, ShExLoweringError> {
+) -> Result<Option<Term>, ShExLoweringError> {
     let Some(ShapeExpr::NodeConstraint(nc)) = value_expr else {
         return Ok(None);
     };
-    match nc.datatype() {
-        Some(dt) => Ok(Primitive::from_xsd_iri(
-            resolve_iri_ref(&dt, prefixmap)?.as_str(),
-        )),
-        None => Ok(matches!(nc.node_kind(), Some(NodeKind::Iri)).then_some(Primitive::AnyUri)),
-    }
+    Ok(match (nc.datatype(), nc.node_kind()) {
+        (Some(dt), _) => Some(Term::Literal(Some(
+            resolve_iri_ref(&dt, prefixmap)?.to_string(),
+        ))),
+        (None, Some(NodeKind::Iri)) => Some(Term::Iri),
+        (None, Some(NodeKind::Literal)) => Some(Term::Literal(None)),
+        _ => None,
+    })
 }
 
 /// The predicate IRIs a single `OneOf` branch constrains, in order.
@@ -401,7 +394,7 @@ impl ShExDescriptor {
                     .iter()
                     .map(|c| PropertyConstraint {
                         predicate: c.predicate.to_string(),
-                        datatype: c.datatype,
+                        term: c.term.clone(),
                         targets: c.targets.clone(),
                         occurs: c.cardinality,
                         // The spellings are rudof's, via `qualify`, so nothing
@@ -647,11 +640,9 @@ fn walk_triple_expr(
                 }
             };
             let value = value_expr.as_deref();
-            let (datatype, targets) = match (
-                datatype_of(value, prefixmap),
-                edge_targets(value, prefixmap),
-            ) {
-                (Ok(datatype), Ok(targets)) => (datatype, targets),
+            let (term, targets) = match (term_of(value, prefixmap), edge_targets(value, prefixmap))
+            {
+                (Ok(term), Ok(targets)) => (term, targets),
                 (Err(e), _) | (_, Err(e)) => {
                     errors.push(e);
                     return;
@@ -659,7 +650,7 @@ fn walk_triple_expr(
             };
             out.push(ResolvedConstraint {
                 predicate: pred_iri,
-                datatype,
+                term,
                 targets,
                 cardinality: occurs_from_shex(*min, *max),
             });
@@ -789,6 +780,7 @@ mod tests {
     use fossil_graph_schema::local_name;
 
     use super::*;
+    use fossil_graph_schema::Primitive;
 
     /// An undeclared prefix is a malformed schema. It used to resolve to the
     /// prefix and local name glued together without the colon — a wrong IRI the
@@ -1376,19 +1368,26 @@ shop:Order {
         };
 
         assert_eq!(
-            by_predicate("total").datatype,
+            by_predicate("total").datatype(),
             Some(Primitive::Integer),
             "a datatype the lattice recognises"
         );
         assert_eq!(
-            by_predicate("code").datatype,
+            by_predicate("code").datatype(),
             None,
             "xsd:hexBinary is a real XSD datatype OUTSIDE the lattice, and \
              `None` is how that is said"
         );
-        assert_eq!(by_predicate("note").datatype, None, "no valueExpr at all");
         assert_eq!(
-            by_predicate("homepage").datatype,
+            by_predicate("code").term,
+            Some(Term::Literal(Some(
+                "http://www.w3.org/2001/XMLSchema#hexBinary".into()
+            ))),
+            "the term keeps the datatype the lattice cannot read, verbatim"
+        );
+        assert_eq!(by_predicate("note").datatype(), None, "no valueExpr at all");
+        assert_eq!(
+            by_predicate("homepage").datatype(),
             Some(Primitive::AnyUri),
             "`nodeKind IRI` is an opaque IRI column — narrowed, but not an edge"
         );
@@ -1577,10 +1576,23 @@ shop:Order {
             .expect("schema parses")
             .to_graph_schema(&Renames::default());
 
+        // The term the document declares, verbatim, beside the lattice's reading.
+        let xsd = |local: &str| {
+            Some(Term::Literal(Some(format!(
+                "http://www.w3.org/2001/XMLSchema#{local}"
+            ))))
+        };
+        let term = |name: &str| match name {
+            "total" => xsd("integer"),
+            "code" => xsd("hexBinary"),
+            "homepage" => Some(Term::Iri),
+            _ => None,
+        };
         let prop = |name: &str, datatype: Primitive, iri: &str, cardinality| Property {
             name: name.into(),
             datatype,
             iri: Some(iri.into()),
+            term: term(name),
             cardinality,
         };
         let edge = |label: &str, iri: &str, destination: &str, cardinality| EdgeType {
