@@ -90,10 +90,9 @@ expression in an attribute argument. These are the languages, and the control ex
 
 | source | what it settles |
 | --- | --- |
-| **RML — RML-Core, RML-IO and RML-LV**, the W3C KG-Construct Community Group's drafts | The vocabulary [`mapping`](/docs/format/reading/rdf) writes. RML-Core is R2RML's term maps under `http://w3id.org/rml/`; RML-IO's `rml:SQL2008Table` reference formulation reads a table as `SELECT * FROM {table}`, which is why the iterator is a delimited identifier; RML-LV's `rml:LogicalView` with `rml:innerJoin` and `rml:joinCondition` is how a relation reaches the subjects of the two tables its ends reference without SQL in a string. |
-| **R2RML**, W3C Recommendation 2012 | The relational-to-RDF mapping RML generalises, and two things taken from it: the **natural mapping** of SQL types to XSD datatypes — every integer `xsd:integer`, every float `xsd:double` — and **delimited identifiers**, as the W3C RDB2RDF test cases spell `"\"Student\""`. Its `rr:sqlQuery` view is what was not taken ([discarded](/docs/design/discarded#the-corpus-as-rdf)). |
-| **RMLio's MappingLoom** | The RML processor the mapping is written to be read by: RML-Core, RML-IO and RML-LV in one engine, which is what makes the LogicalView join executable rather than only declared. |
-| **Ontop** | The virtual-graph reading of the same idea: a mapping over tables that stay where they are, the triples produced at query time. It reads R2RML, which is the reversal condition on the R2RML row of [discarded](/docs/design/discarded#the-corpus-as-rdf). |
+| **R2RML**, W3C Recommendation 2012 | The vocabulary [`mapping`](/docs/format/reading/rdf) writes, and three things it settles: the **natural mapping** of SQL types to XSD datatypes (§10.2) — every integer `xsd:integer`, every float `xsd:double`; **delimited identifiers**, as the W3C RDB2RDF test cases spell `"\"Student\""`; and the `rr:sqlQuery` logical table declared `rr:SQL2008`, Core SQL 2008, which §5.2 makes a derived table — how a relation reaches the subjects of the two tables its ends reference. |
+| **RML — RML-Core, RML-IO and RML-LV**, the W3C KG-Construct Community Group's drafts | The generalisation of R2RML that was not taken: its logical views state the join in RDF, but they are a draft with few implementations ([discarded](/docs/design/discarded#the-corpus-as-rdf)). |
+| **Ontop** | The virtual-graph reading of the same idea: a mapping over tables that stay where they are, the triples produced at query time. It reads R2RML natively, and its split is the one taken here: the producer publishes the mapping, the consumer unfolds it into queries over its own engine. |
 
 ## The backend
 

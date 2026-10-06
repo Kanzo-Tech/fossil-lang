@@ -1,14 +1,14 @@
 ---
-title: Its RDF meaning, in RML
-description: What a corpus means as RDF, stated once in the W3C KG-Construct vocabulary — an RML mapping that mapping() answers from fossil.json, so a SHACL engine, a triplestore or any RML processor reads the corpus with no fossil code.
+title: Its RDF meaning, in R2RML
+description: What a corpus means as RDF, stated once in the W3C Recommendation for relational data as RDF — an R2RML mapping that mapping() answers from fossil.json, so a SHACL engine, a triplestore or any R2RML processor reads the corpus with no fossil code.
 ---
 
 A corpus is a property graph in Parquet, and its meaning as RDF is in the manifest already: a vertex
 table's `iri` is a class and its `identity` column the subject, a column's `iri` is a predicate, and
 an edge table's `iri` is a predicate between the subjects its two ends reference. **`mapping` states
-that meaning once, as an [RML](https://w3id.org/rml/) mapping** — RML-Core, RML-IO and RML-LV — so
-that a reader who wants triples runs an RML processor over the tables instead of re-deriving the
-interpretation.
+that meaning once, as an [R2RML](https://www.w3.org/TR/r2rml/) mapping** — the W3C Recommendation
+for relational data as RDF — so that a reader who wants triples runs an R2RML processor over the
+tables instead of re-deriving the interpretation.
 
 ```ts
 import { mapping } from '@fossil-lang/corpus';
@@ -23,95 +23,67 @@ the mapping is what they mean.
 
 ## What each part means
 
-**A vertex type is a `rml:TriplesMap` over its table.** The subject is the `identity` column, as an
+**A vertex type is a `rr:TriplesMap` over its table.** The subject is the `identity` column, as an
 IRI, of class `iri`. Each column with an `iri` is a predicate-object map whose object is the column,
 as a literal of the column's datatype.
 
 ```turtle
-<#table/Person> a rml:LogicalSource ;
-  rml:source <#corpus> ;
-  rml:referenceFormulation rml:SQL2008Table ;
-  rml:iterator "\"Person\"" .
-
-<#map/Person> a rml:TriplesMap ;
-  rml:logicalSource <#table/Person> ;
-  rml:subjectMap [ rml:reference "subject" ; rml:termType rml:IRI ; rml:class <https://example.org/Person> ] ;
-  rml:predicateObjectMap [ rml:predicate <https://example.org/birthYear> ; rml:objectMap [
-    rml:reference "birth_year" ; rml:termType rml:Literal ; rml:datatype xsd:integer ] ] .
+<#map/Person> a rr:TriplesMap ;
+  rr:logicalTable [ rr:tableName "\"Person\"" ] ;
+  rr:subjectMap [ rr:column "\"subject\"" ; rr:termType rr:IRI ; rr:class <https://example.org/Person> ] ;
+  rr:predicateObjectMap [ rr:predicate <https://example.org/birthYear> ; rr:objectMap [
+    rr:column "\"birth_year\"" ; rr:termType rr:Literal ; rr:datatype xsd:integer ] ] .
 ```
 
-**A relation is a `rml:TriplesMap` over a `rml:LogicalView`.** The view is the edge table, inner-joined
+**A relation is a `rr:TriplesMap` over an `rr:sqlQuery`.** The query is the edge table, inner-joined
 at each end to the vertex table its key `references`: `src` to the source's `dense_id`, `dst` to the
-destination's, each join taking that table's `subject`. The subject of a triple is the source's
-subject, the predicate is the relation's `iri`, and the object is the destination's subject as an IRI.
-`dense_id` is an [address and never an identity](/docs/format/conventions/identity), so it is joined
-through and never emitted.
+destination's, answering each one's `subject` as `source` and `destination`. The subject of a triple
+is the source's subject, the predicate is the relation's `iri`, and the object is the destination's
+subject as an IRI. `dense_id` is an [address and never an identity](/docs/format/conventions/identity),
+so it is joined through and never emitted.
 
 ```turtle
-<#view/Order> a rml:LogicalView ;
-  rml:viewOn <#table/Order> ;
-  rml:field [ a rml:ExpressionField ; rml:fieldName "dense_id" ; rml:reference "dense_id" ] ;
-  rml:field [ a rml:ExpressionField ; rml:fieldName "subject" ; rml:reference "subject" ] .
-
-<#view/Order_placedBy_Person> a rml:LogicalView ;
-  rml:viewOn <#table/Order_placedBy_Person> ;
-  rml:field [ a rml:ExpressionField ; rml:fieldName "src" ; rml:reference "src" ] ;
-  rml:field [ a rml:ExpressionField ; rml:fieldName "dst" ; rml:reference "dst" ] ;
-  rml:innerJoin [
-    rml:parentLogicalView <#view/Order> ;
-    rml:joinCondition [ rml:child "src" ; rml:parent "dense_id" ] ;
-    rml:field [ a rml:ExpressionField ; rml:fieldName "source" ; rml:reference "subject" ]
-  ] ;
-  rml:innerJoin [
-    rml:parentLogicalView <#view/Person> ;
-    rml:joinCondition [ rml:child "dst" ; rml:parent "dense_id" ] ;
-    rml:field [ a rml:ExpressionField ; rml:fieldName "destination" ; rml:reference "subject" ]
-  ] .
-
-<#map/Order_placedBy_Person> a rml:TriplesMap ;
-  rml:logicalSource <#view/Order_placedBy_Person> ;
-  rml:subjectMap [ rml:reference "source" ; rml:termType rml:IRI ] ;
-  rml:predicateObjectMap [ rml:predicate <https://example.org/placedBy> ;
-    rml:objectMap [ rml:reference "destination" ; rml:termType rml:IRI ] ] .
+<#map/Order_placedBy_Person> a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """SELECT s."subject" AS "source", d."subject" AS "destination"
+FROM "Order_placedBy_Person" AS e
+JOIN "Order" AS s ON e."src" = s."dense_id"
+JOIN "Person" AS d ON e."dst" = d."dense_id\"""" ; rr:sqlVersion rr:SQL2008 ] ;
+  rr:subjectMap [ rr:column "\"source\"" ; rr:termType rr:IRI ] ;
+  rr:predicateObjectMap [ rr:predicate <https://example.org/placedBy> ;
+    rr:objectMap [ rr:column "\"destination\"" ; rr:termType rr:IRI ] ] .
 ```
 
-The view is RML-LV and not SQL: the join is stated in the mapping's own vocabulary, so a processor
-plans it on whatever engine it holds and the mapping carries no dialect.
+The query is declared `rr:SQL2008`, R2RML's identifier for Core SQL 2008 (ISO/IEC 9075): it is
+standard SQL and no engine's dialect, and it is always this one form — two inner joins of delimited
+identifiers. R2RML §5.2 makes it a derived table, so a processor runs it as it stands.
 
 ## The rules
 
 - **What has no IRI is not mapped.** A column without an `iri` has no predicate map; a relation
-  without one has no triples map; a vertex type without one has subjects with no `rml:class`, and a
+  without one has no triples map; a vertex type without one has subjects with no `rr:class`, and a
   type with neither an IRI nor a column that has one has no triples map at all. Nothing is invented:
   there is no default namespace a missing IRI falls back to.
 - **A `list<…>` column is not mapped.** One cell would be several literals, which no term map
   produces.
-- **The datatype is the column's type word's**, by R2RML's natural mapping of SQL types: every
-  integer width is `xsd:integer`, `float` and `double` are `xsd:double`, and `decimal`, `bool`,
+- **The datatype is the column's type word's**, by R2RML's natural mapping of SQL types (§10.2):
+  every integer width is `xsd:integer`, `float` and `double` are `xsd:double`, and `decimal`, `bool`,
   `date`, `time`, `timestamp`, `string` and `binary` are `xsd:decimal`, `xsd:boolean`, `xsd:date`,
-  `xsd:time`, `xsd:dateTime`, `xsd:string` and `xsd:hexBinary`. They are the IRIs
-  `crates/fossil-graph-schema/src/lib.rs, Primitive` gives each primitive, so a shape that says
-  `xsd:integer` meets a column stored `int32`.
-- **Table names are unqualified.** A logical source is a table by the name the manifest gives it,
-  with no catalog or schema in front: each consumer resolves it against wherever it attached the
-  corpus. Every logical source reaches it through one `rml:Source`, `<#corpus>`, which the mapping
-  leaves undescribed — the consumer says where the catalog is by describing that node (a
-  `d2rq:Database`, say).
-- **The iterator is SQL and the references are names.** RML-IO reads an `rml:SQL2008Table`
-  iterator into `SELECT * FROM {table}`, so the table name is a delimited identifier — `"Person"`, case
-  kept, a `"` doubled. A reference names a column of what that statement answers, or a field of a
-  view, and is the name as it is.
-- **The mapping's own nodes are relative IRIs** — `<#map/…>`, `<#table/…>`, `<#view/…>` and
-  `<#corpus>` — resolved against wherever the document is kept. They are never subjects of the
-  triples it produces.
+  `xsd:time`, `xsd:dateTime`, `xsd:string` and `xsd:hexBinary`.
+- **Every name is a delimited identifier, unqualified.** `rr:tableName`, `rr:column` and every name
+  in a query is written `"Person"`, case kept, a `"` doubled — so every processor reads it the same
+  way and none folds `birthYear` to upper case. No catalog or schema is in front of a table: R2RML
+  leaves the connection to the processor, and each consumer resolves the names against wherever it
+  attached the corpus.
+- **The mapping's own nodes are relative IRIs** — `<#map/…>` — resolved against wherever the document
+  is kept. They are never subjects of the triples it produces.
 
 ## How it is held
 
 `packages/corpus/tests/mapping.test.ts` parses the Turtle as a graph and holds it against the
 manifest — every type, column and relation with an IRI mapped, nothing without one, each relation's
-join on the right keys of the right tables — and holds the datatype table against the type words
-`crates/fossil-sinks/src/manifest.rs, data_type_name` spells. Then it runs the mapping:
-`packages/corpus/tests/rml.ts, materialise` is an RML processor for the constructs the mapping
+query joining the right keys of the right tables — and holds the datatype table against the type
+words `crates/fossil-sinks/src/manifest.rs, data_type_name` spells. Then it runs the mapping:
+`packages/corpus/tests/r2rml.ts, materialise` is an R2RML processor for the constructs the mapping
 uses, over DuckDB, and the triples it makes of the checked-in corpus are compared with the triples a
 second query, written against the manifest, says the corpus holds. `integration/round-trip.test.ts`
 does the same over a corpus the executor writes, with an edge between two types.

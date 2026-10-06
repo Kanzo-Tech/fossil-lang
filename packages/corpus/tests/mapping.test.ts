@@ -10,110 +10,86 @@ import { mapping, open } from '../src/index.js';
 import { DATATYPES } from '../src/mapping.js';
 import type { Manifest } from '../src/manifest.js';
 import { duckdb } from './engine.js';
-import { BASE, held, materialise, parse } from './rml.js';
+import { BASE, held, materialise, parse, undelimit } from './r2rml.js';
 
 /**
- * `mapping` — the corpus's RDF meaning, as RML. Three claims, each held against something that is not
- * the code under test:
+ * `mapping` — the corpus's RDF meaning, as R2RML. Three claims, each held against something that is
+ * not the code under test:
  *
- * 1. **It is RML a parser reads**, and it maps exactly what the manifest gives an IRI — every type,
+ * 1. **It is R2RML a parser reads**, and it maps exactly what the manifest gives an IRI — every type,
  *    column and relation that has one, nothing that has none — read back as a graph, not as text.
  * 2. **Its datatypes cover every type word the writer spells**, read out of the Rust that spells them.
- * 3. **It means the corpus**: the triples an RML processor makes of it over the checked-in corpus are
- *    the triples a second query, written here against the manifest, says the corpus holds.
+ * 3. **It means the corpus**: the triples an R2RML processor makes of it over the checked-in corpus
+ *    are the triples a second query, written here against the manifest, says the corpus holds.
  */
 
-const RML = 'http://w3id.org/rml/';
+const RR = 'http://www.w3.org/ns/r2rml#';
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 const XSD = 'http://www.w3.org/2001/XMLSchema#';
 const CORPUS = fileURLToPath(new URL('../conformance/corpus', import.meta.url));
 const TEXT = readFileSync(join(CORPUS, 'fossil.json'), 'utf8');
 const MANIFEST = JSON.parse(TEXT) as Manifest;
-const node = (kind: string, name: string): string => `${BASE}#${kind}/${encodeURIComponent(name)}`;
+const node = (name: string): string => `${BASE}#map/${encodeURIComponent(name)}`;
+const q = (name: string): string => `"${name.replace(/"/g, '""')}"`;
 
 describe('the mapping, as a graph', () => {
   const graph = parse(mapping(TEXT));
-  const objects = (s: Term | string, p: string): Term[] => graph.getObjects(s, RML + p, null);
+  const objects = (s: Term | string, p: string): Term[] => graph.getObjects(s, RR + p, null);
   const one = (s: Term | string, p: string): Term => {
     const all = objects(s, p);
-    expect(all, `${typeof s === 'string' ? s : s.value} rml:${p}`).toHaveLength(1);
+    expect(all, `${typeof s === 'string' ? s : s.value} rr:${p}`).toHaveLength(1);
     return all[0]!;
   };
-  /** The table name a logical source iterates, undelimited. */
-  const table = (source: Term): string => {
-    expect(one(source, 'referenceFormulation').value).toBe(`${RML}SQL2008Table`);
-    expect(one(source, 'source').value).toBe(`${BASE}#corpus`);
-    return JSON.parse(one(source, 'iterator').value) as string;
-  };
-  const fieldsOf = (owner: Term): Record<string, string> =>
-    Object.fromEntries(objects(owner, 'field').map((f) => [one(f, 'fieldName').value, one(f, 'reference').value]));
+  /** The column a term map reads, undelimited. */
+  const column = (map: Term): string => undelimit(one(map, 'column').value);
 
   it('is Turtle, and every triples map is one the manifest asks for', () => {
-    const maps = graph.getSubjects(RDF_TYPE, `${RML}TriplesMap`, null).map((m) => m.value).sort();
+    const maps = graph.getSubjects(RDF_TYPE, `${RR}TriplesMap`, null).map((m) => m.value).sort();
     const asked = [
       ...MANIFEST.vertex_tables.filter((t) => t.iri !== undefined || t.properties.some((p) => p.iri !== undefined)),
       ...MANIFEST.edge_tables.filter((e) => e.iri !== undefined),
     ];
-    expect(maps).toEqual(asked.map((t) => node('map', t.name)).sort());
+    expect(maps).toEqual(asked.map((t) => node(t.name)).sort());
   });
 
   it.each(MANIFEST.vertex_tables.map((t) => [t.name, t] as const))('maps vertex type %s: its class, and each column with an IRI', (_, t) => {
-    const map = node('map', t.name);
-    expect(table(one(map, 'logicalSource'))).toBe(t.name);
+    const map = node(t.name);
+    expect(undelimit(one(one(map, 'logicalTable'), 'tableName').value)).toBe(t.name);
     const subject = one(map, 'subjectMap');
-    expect(one(subject, 'reference').value).toBe(t.identity);
-    expect(one(subject, 'termType').value).toBe(`${RML}IRI`);
+    expect(column(subject)).toBe(t.identity);
+    expect(one(subject, 'termType').value).toBe(`${RR}IRI`);
     expect(one(subject, 'class').value).toBe(t.iri);
     const poms = objects(map, 'predicateObjectMap').map((pom) => {
       const o = one(pom, 'objectMap');
-      return [one(pom, 'predicate').value, one(o, 'reference').value, one(o, 'termType').value, one(o, 'datatype').value];
+      return [one(pom, 'predicate').value, column(o), one(o, 'termType').value, one(o, 'datatype').value];
     });
     expect(poms).toEqual(
-      t.properties.filter((p) => p.iri !== undefined).map((p) => [p.iri, p.name, `${RML}Literal`, DATATYPES[p.type]]),
+      t.properties.filter((p) => p.iri !== undefined).map((p) => [p.iri, p.name, `${RR}Literal`, DATATYPES[p.type]]),
     );
   });
 
   it.each(MANIFEST.edge_tables.map((t) => [t.name, t] as const))(
     'maps relation %s: src and dst joined to the dense_id of the tables they reference, subject to subject',
     (_, e) => {
-      const map = node('map', e.name);
-      const view = one(map, 'logicalSource');
-      expect(graph.getQuads(view, RDF_TYPE, `${RML}LogicalView`, null)).toHaveLength(1);
-      expect(table(one(view, 'viewOn'))).toBe(e.name);
-      expect(fieldsOf(view)).toEqual({ [e.source.key]: e.source.key, [e.destination.key]: e.destination.key });
-
-      const joins = objects(view, 'innerJoin').map((j) => {
-        const parent = one(j, 'parentLogicalView');
-        const condition = one(j, 'joinCondition');
-        return {
-          child: one(condition, 'child').value,
-          parentTable: table(one(parent, 'viewOn')),
-          parent: one(condition, 'parent').value,
-          parentFields: fieldsOf(parent),
-          fields: fieldsOf(j),
-        };
-      });
-      const end = (key: string, references: string, as: string) => {
-        const v = MANIFEST.vertex_tables.find((t) => t.name === references)!;
-        return {
-          child: key,
-          parentTable: references,
-          parent: v.key,
-          parentFields: { [v.key]: v.key, [v.identity]: v.identity },
-          fields: { [as]: v.identity },
-        };
-      };
-      expect(joins).toEqual([
-        end(e.source.key, e.source.references, 'source'),
-        end(e.destination.key, e.destination.references, 'destination'),
-      ]);
+      const map = node(e.name);
+      const table = one(map, 'logicalTable');
+      expect(one(table, 'sqlVersion').value).toBe(`${RR}SQL2008`);
+      const [from, to] = [e.source.references, e.destination.references].map((n) => MANIFEST.vertex_tables.find((t) => t.name === n)!);
+      expect(one(table, 'sqlQuery').value).toBe(
+        [
+          `SELECT s.${q(from!.identity)} AS "source", d.${q(to!.identity)} AS "destination"`,
+          `FROM ${q(e.name)} AS e`,
+          `JOIN ${q(from!.name)} AS s ON e.${q(e.source.key)} = s.${q(from!.key)}`,
+          `JOIN ${q(to!.name)} AS d ON e.${q(e.destination.key)} = d.${q(to!.key)}`,
+        ].join('\n'),
+      );
 
       const subject = one(map, 'subjectMap');
-      expect([one(subject, 'reference').value, one(subject, 'termType').value]).toEqual(['source', `${RML}IRI`]);
+      expect([column(subject), one(subject, 'termType').value]).toEqual(['source', `${RR}IRI`]);
       const [pom] = objects(map, 'predicateObjectMap');
       expect(one(pom!, 'predicate').value).toBe(e.iri);
       const object = one(pom!, 'objectMap');
-      expect([one(object, 'reference').value, one(object, 'termType').value]).toEqual(['destination', `${RML}IRI`]);
+      expect([column(object), one(object, 'termType').value]).toEqual(['destination', `${RR}IRI`]);
     },
   );
 
@@ -124,16 +100,15 @@ describe('the mapping, as a graph', () => {
       edge_tables: MANIFEST.edge_tables.map(({ iri: _, ...e }) => e),
     };
     const g = parse(mapping(JSON.stringify(bare)));
-    expect(g.getSubjects(RDF_TYPE, `${RML}TriplesMap`, null)).toEqual([]);
-    expect(g.getSubjects(RDF_TYPE, `${RML}LogicalSource`, null)).toEqual([]);
+    expect(g.getSubjects(RDF_TYPE, `${RR}TriplesMap`, null)).toEqual([]);
 
     // A type with no IRI keeps the columns that have one, and its subjects carry no class.
     const [person] = MANIFEST.vertex_tables;
     const classless = { ...MANIFEST, vertex_tables: [{ ...person!, iri: undefined }], edge_tables: [] };
     const c = parse(mapping(JSON.stringify(classless)));
-    const subject = c.getObjects(node('map', person!.name), `${RML}subjectMap`, null)[0]!;
-    expect(c.getObjects(subject, `${RML}class`, null)).toEqual([]);
-    expect(c.getObjects(node('map', person!.name), `${RML}predicateObjectMap`, null)).toHaveLength(
+    const subject = c.getObjects(node(person!.name), `${RR}subjectMap`, null)[0]!;
+    expect(c.getObjects(subject, `${RR}class`, null)).toEqual([]);
+    expect(c.getObjects(node(person!.name), `${RR}predicateObjectMap`, null)).toHaveLength(
       person!.properties.filter((p) => p.iri !== undefined).length,
     );
   });
@@ -142,15 +117,20 @@ describe('the mapping, as a graph', () => {
     const [person] = MANIFEST.vertex_tables;
     const tags = { name: 'tags', type: 'list<string>', iri: 'https://example.org/tag', nullable: true };
     const g = parse(mapping(JSON.stringify({ ...MANIFEST, vertex_tables: [{ ...person!, properties: [...person!.properties, tags] }] })));
-    expect(g.getSubjects(`${RML}predicate`, tags.iri, null)).toEqual([]);
+    expect(g.getSubjects(`${RR}predicate`, tags.iri, null)).toEqual([]);
   });
 
-  it('delimits a table name in its iterator, and escapes what Turtle and SQL would not take', () => {
+  it('delimits every table and column name, and escapes what Turtle and SQL would not take', () => {
     const [person] = MANIFEST.vertex_tables;
-    const odd = { ...person!, name: 'A "quoted" type' };
+    const odd = { ...person!, name: 'A "quoted" type', properties: [{ name: 'birthYear', type: 'int32', iri: 'https://example.org/born' }] };
     const g = parse(mapping(JSON.stringify({ ...MANIFEST, vertex_tables: [odd], edge_tables: [] })));
-    const source = g.getObjects(node('map', odd.name), `${RML}logicalSource`, null)[0]!;
-    expect(g.getObjects(source, `${RML}iterator`, null)[0]!.value).toBe('"A ""quoted"" type"');
+    const map = node(odd.name);
+    const table = g.getObjects(map, `${RR}logicalTable`, null)[0]!;
+    expect(g.getObjects(table, `${RR}tableName`, null)[0]!.value).toBe('"A ""quoted"" type"');
+    const [pom] = g.getObjects(map, `${RR}predicateObjectMap`, null);
+    const object = g.getObjects(pom!, `${RR}objectMap`, null)[0]!;
+    // Delimited, so case is kept: an R2RML processor does not fold `birthYear` to upper case.
+    expect(g.getObjects(object, `${RR}column`, null)[0]!.value).toBe('"birthYear"');
   });
 
   it('refuses a format it does not read, as open does', () => {
