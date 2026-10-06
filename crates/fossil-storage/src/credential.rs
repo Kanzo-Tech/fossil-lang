@@ -641,11 +641,14 @@ mod tests {
         ))
         .expect("grant");
         let sql = grant.install_sql(Access::Read).expect("sql");
+        // The statement carries the secret, so a failure names what is wrong
+        // and never prints it.
+        assert!(sql.contains("URL_STYLE 'vhost'"), "no virtual-hosted style");
+        assert!(!sql.contains("ENDPOINT"), "an endpoint nobody vended");
         assert!(
-            sql.contains("URL_STYLE 'vhost'") && !sql.contains("ENDPOINT"),
-            "{sql}"
+            !sql.contains("SESSION_TOKEN"),
+            "a session token nobody vended"
         );
-        assert!(!sql.contains("SESSION_TOKEN"), "{sql}");
     }
 
     #[test]
