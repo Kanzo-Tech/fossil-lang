@@ -460,7 +460,11 @@ mod tests {
             "{ A, B } := io.rdf(\"g.ttl\", schema = io.shex(\"s.shex\"))\n",
             &HashMap::new(),
         );
-        assert_eq!(sources.len(), 2, "one source per destructured binding");
+        let data = sources
+            .iter()
+            .filter(|i| i.role == fossil_lineage::Role::Data)
+            .count();
+        assert_eq!(data, 2, "one data input per destructured binding");
 
         let system = NativeSystem::default();
         pre_introspect_and_register(&system, &sources);

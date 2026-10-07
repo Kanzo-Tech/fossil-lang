@@ -42,8 +42,8 @@ export interface CompletionItem {
 export type CompletionKind = 'function' | 'field';
 
 /**
- * One diagnostic row in the `WasmWorkspace::check` return array: the workspace's own shape, not the
- * LSP wire's (`lsp_types::Diagnostic`).
+ * One diagnostic row in the `WasmWorkspace::diagnostics` return array: the workspace's own shape,
+ * not the LSP wire's (`lsp_types::Diagnostic`).
  *
  * `diagnostics()` is one flat array across every open file, so each row carries the `uri` the host
  * opened its buffer under. Everything else is projected from the rendering an editor is shown, so
@@ -136,7 +136,7 @@ export interface EdgeDrops {
 }
 
 /**
- * One format fossil reads — Arrow's `FileFormat`, DuckDB's `FORMAT`: its short name, the file
+ * One format fossil reads — Arrow's `FileFormat`, `DuckDB`'s `FORMAT`: its short name, the file
  * extensions it reads, and how it can be used. A host lists these so its UI can offer the
  * constructors and filter files by extension.
  */
@@ -251,8 +251,8 @@ export interface InferredDescriptor {
  * One input a program reads — `Input` in `@fossil-lang/types`, and the one answer to «what does
  * this program read»: the editor's, the introspecting host's and the executor's.
  *
- * The name is OpenLineage's `RunEvent.inputs[]` and PROV's `prov:used`, and not LSP's `references`,
- * which are the usages of a symbol.
+ * The name is `OpenLineage`'s `RunEvent.inputs[]` and PROV's `prov:used`, and not LSP's
+ * `references`, which are the usages of a symbol.
  */
 export interface Input {
   /**

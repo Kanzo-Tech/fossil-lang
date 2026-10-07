@@ -175,7 +175,7 @@ impl FossilWorkspace {
     }
 
     /// Native-reachable completion — the pure-Rust half of
-    /// [`crate::WasmWorkspace::completions`].
+    /// [`crate::WasmWorkspace::completion`].
     ///
     /// An unknown handle is an empty list rather than an error: a completion
     /// request racing a `closeFile` is a normal thing for an editor to do, and
@@ -229,7 +229,7 @@ impl FossilWorkspace {
     }
 
     /// Native-reachable goto-definition — the pure-Rust half of
-    /// [`crate::WasmWorkspace::goto_definition`].
+    /// [`crate::WasmWorkspace::definition`].
     ///
     /// Empty when the handle is unknown, when nothing is under the cursor, and
     /// when the thing under it has no definition anywhere in the open set —

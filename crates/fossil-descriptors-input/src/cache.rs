@@ -65,7 +65,7 @@ impl DescriptorCache {
         self.table.lock().ok()?.get(uri).cloned()
     }
 
-    /// Register `descriptor` under its own [`InferredDescriptor::uri`],
+    /// Register `descriptor` under its own [`InferredDescriptor::key`],
     /// replacing any previous entry, and count the introspection that
     /// produced it.
     pub fn insert(&self, descriptor: InferredDescriptor) {

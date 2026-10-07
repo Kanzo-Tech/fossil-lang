@@ -39,7 +39,7 @@ pub enum Role {
 /// answer to «what does this program read»: the editor's, the introspecting
 /// host's and the executor's.
 ///
-/// The name is OpenLineage's `RunEvent.inputs[]` and PROV's `prov:used`, and not
+/// The name is `OpenLineage`'s `RunEvent.inputs[]` and PROV's `prov:used`, and not
 /// LSP's `references`, which are the usages of a symbol.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Input {
@@ -119,7 +119,7 @@ pub enum FormatKind {
     Both,
 }
 
-/// One format fossil reads — Arrow's `FileFormat`, DuckDB's `FORMAT`: its short
+/// One format fossil reads — Arrow's `FileFormat`, `DuckDB`'s `FORMAT`: its short
 /// name, the file extensions it reads, and how it can be used. A host lists
 /// these so its UI can offer the constructors and filter files by extension.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

@@ -935,7 +935,7 @@ struct Undescribed {
     help: Option<String>,
 }
 
-/// One diagnostic row in the [`WasmWorkspace::check`] return array: the
+/// One diagnostic row in the [`WasmWorkspace::diagnostics`] return array: the
 /// workspace's own shape, not the LSP wire's (`lsp_types::Diagnostic`).
 ///
 /// `diagnostics()` is one flat array across every open file, so each row carries the
