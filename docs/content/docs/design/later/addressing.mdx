@@ -488,7 +488,7 @@ chose, and the arithmetic above is what that freedom costs a reader who guesses 
 So the composition ships as code, in `@fossil-lang/corpus`, reading the manifest and nothing else:
 
 ```ts
-const corpus = await open('/bench/1000000', { manifestFiles });
+const corpus = await attach('/bench/1000000', { manifestFiles });
 const { vertexUrls, edgeUrls, complete, gaps } = corpus.tilesFor({ tiles, directions: ['src'] });
 ```
 

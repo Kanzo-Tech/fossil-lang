@@ -75,6 +75,13 @@
         "source"
       ],
       "properties": {
+        "derived_from": {
+          "description": "The sources the table's rows were derived from — PROV-O's `prov:wasDerivedFrom` — each as the program wrote it (`@conn/path`, or a path), never the location it resolved to. Sorted. Absent when there is none.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "destination": {
           "description": "The column holding the destination vertex's `dense_id`, and its table.",
           "allOf": [
@@ -193,6 +200,13 @@
         "source"
       ],
       "properties": {
+        "derived_from": {
+          "description": "The sources the table's rows were derived from — PROV-O's `prov:wasDerivedFrom` — each as the program wrote it (`@conn/path`, or a path), never the location it resolved to. Sorted. Absent when there is none.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "name": {
           "description": "`<Type>_<property>`.",
           "type": "string"
@@ -236,6 +250,13 @@
         "record_count"
       ],
       "properties": {
+        "derived_from": {
+          "description": "The sources the table's rows were derived from — PROV-O's `prov:wasDerivedFrom` — each as the program wrote it (`@conn/path`, or a path), never the location it resolved to. Sorted. Absent when there is none.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "identity": {
           "description": "The identity column: `subject`, unique within the table.",
           "type": "string"

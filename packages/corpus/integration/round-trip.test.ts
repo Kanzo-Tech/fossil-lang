@@ -7,13 +7,14 @@
  * `@fossil-lang/corpus` on DuckDB-WASM, read with plain SQL, and the guards run over the same
  * directory:
  *
- * 1. every table `fossil_tables` lists reads back at its `rows`;
+ * 1. every table `fossil_tables` lists reads back at its `record_count`;
  * 2. each vertex table is the `dense_id` range `fossil_tables` gives it, and every edge's ends fall
  *    in the ranges of the tables it names;
  * 3. `guards/check.mjs` passes on what the writer wrote;
  * 4. every column the writer emits says what it IS — its `role` in `fossil_columns` — and a
  *    program's column says nothing;
- * 5. `triples` of what the writer wrote is the RDF the corpus holds — the vertices' classes and
+ * 5. each table's `derived_from` is the sources the program wrote, as it wrote them, through a join;
+ * 6. `triples` of what the writer wrote is the RDF the corpus holds — the vertices' classes and
  *    literals, and `buyer` joined subject to subject across two types.
  *
  * The writer compresses every page with ZSTD, so (1) is also the proof that DuckDB-WASM reads it.
@@ -29,7 +30,7 @@ import { Worker } from 'node:worker_threads';
 import type { Engine } from '@fossil-lang/types';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { open, type Close } from '../src/index.js';
+import { attach, type Attachment } from '../src/index.js';
 import type { Manifest } from '../src/manifest.js';
 import { duckdb } from '../tests/engine.js';
 import { held, read } from '../tests/rdf.js';
@@ -45,7 +46,7 @@ const dir = join(scratch, 'corpus');
 let origin: { port: number; close: () => Promise<number> };
 let engine: Engine;
 let uninstall: (() => Promise<number>) | undefined;
-let close: Close | undefined;
+let corpus: Attachment | undefined;
 let rows: (sql: string) => Promise<Record<string, unknown>[]>;
 
 /**
@@ -102,19 +103,19 @@ beforeAll(async () => {
   uninstall = installSyncXhr();
   ({ engine, query: rows } = await duckdb());
   await engine.query('LOAD httpfs');
-  close = await open('shop', { engine, url: `http://127.0.0.1:${origin.port}/` });
+  corpus = await attach('shop', { engine, url: `http://127.0.0.1:${origin.port}/` });
 }, 300_000);
 
 afterAll(async () => {
-  await close?.();
+  await corpus?.detach();
   await origin?.close();
   await uninstall?.();
   rmSync(scratch, { recursive: true, force: true });
 });
 
 describe('executor → HTTP → corpus', () => {
-  it('reads every table back at its rows', async () => {
-    const tables = await rows('SELECT table_name AS t, rows::BIGINT AS n FROM shop.fossil_tables');
+  it('reads every table back at its record_count', async () => {
+    const tables = await rows('SELECT table_name AS t, record_count::BIGINT AS n FROM shop.fossil_tables');
     expect(tables.map((r) => r.t).sort()).toEqual(['Order', 'Order_buyer_Person', 'Person']);
     for (const { t, n } of tables) {
       expect(n, String(t)).toBeGreaterThan(0n);
@@ -125,7 +126,7 @@ describe('executor → HTTP → corpus', () => {
   }, 120_000);
 
   it('holds each vertex table to its range, and each edge to the tables it names', async () => {
-    const vertices = await rows(`SELECT table_name AS t, first_id::BIGINT AS first, rows::BIGINT AS n FROM shop.fossil_tables WHERE kind = 'vertex'`);
+    const vertices = await rows(`SELECT table_name AS t, first_id::BIGINT AS first, record_count::BIGINT AS n FROM shop.fossil_tables WHERE kind = 'vertex'`);
     expect(vertices.map((r) => r.first)).toEqual([0n, vertices[0]!.n]);
     for (const { t, first, n } of vertices) {
       const [range] = await rows(`SELECT min(dense_id)::BIGINT AS lo, max(dense_id)::BIGINT AS hi FROM shop."${String(t)}"`);
@@ -134,18 +135,27 @@ describe('executor → HTTP → corpus', () => {
     const [outside] = await rows(
       `SELECT count(*)::BIGINT AS n FROM shop."Order_buyer_Person" e, shop.fossil_tables s, shop.fossil_tables d
         WHERE s.table_name = 'Order' AND d.table_name = 'Person'
-          AND (e.src NOT BETWEEN s.first_id AND s.first_id + s.rows - 1 OR e.dst NOT BETWEEN d.first_id AND d.first_id + d.rows - 1)`,
+          AND (e.src NOT BETWEEN s.first_id AND s.first_id + s.record_count - 1 OR e.dst NOT BETWEEN d.first_id AND d.first_id + d.record_count - 1)`,
     );
     expect(outside!.n).toBe(0n);
   }, 120_000);
 
   it('says what each writer column IS, and nothing of a program’s', async () => {
-    const columns = await rows('SELECT table_name AS t, column_name AS c, role FROM shop.fossil_columns ORDER BY t, ordinal');
+    const columns = await rows('SELECT table_name AS t, column_name AS c, role FROM shop.fossil_columns ORDER BY t, ordinal_position');
     const roles = (t: string) => Object.fromEntries(columns.filter((r) => r.t === t && r.role !== null).map((r) => [r.c, r.role]));
     expect(roles('Person')).toEqual({ dense_id: 'address', subject: 'identity' });
     expect(roles('Order')).toEqual({ dense_id: 'address', subject: 'identity' });
     expect(roles('Order_buyer_Person')).toEqual({ src: 'endpoint', dst: 'endpoint' });
     expect(columns.filter((r) => r.t === 'Person' && r.role === null).length).toBeGreaterThan(0);
+  });
+
+  it('names the sources each table was derived from as the program wrote them, through the join', async () => {
+    const tables = await rows('SELECT table_name AS t, derived_from FROM shop.fossil_tables ORDER BY t');
+    expect(tables.map((r) => [r.t, Array.from(r.derived_from as Iterable<unknown>, String)])).toEqual([
+      ['Order', ['data/orders.csv', 'data/users.csv']],
+      ['Order_buyer_Person', ['data/orders.csv', 'data/users.csv']],
+      ['Person', ['data/users.csv']],
+    ]);
   });
 
   it('means, as RDF, what it holds: its triples are the corpus’s', async () => {

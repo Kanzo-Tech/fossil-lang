@@ -541,7 +541,7 @@ describe("every workspace citation names a file that is there", () => {
   });
 
   it("reads items out of a cited file", () => {
-    expect(workspaceItemsOf("packages/corpus/src/open.ts").has("open")).toBe(true);
+    expect(workspaceItemsOf("packages/corpus/src/attach.ts").has("attach")).toBe(true);
   });
 
   it.each(workspaceCitations)("$where cites $id", ({ path, anchor }) => {
@@ -1140,7 +1140,7 @@ describe("every bare call in a ts block names something a package exports", () =
   });
 
   it("reads exports out of a package entry point", () => {
-    expect(exportedNamesOf(join(PACKAGES_ROOT, "corpus/src/index.ts"), true).has("open")).toBe(true);
+    expect(exportedNamesOf(join(PACKAGES_ROOT, "corpus/src/index.ts"), true).has("attach")).toBe(true);
     expect(packageExports.size).toBeGreaterThan(50);
   });
 

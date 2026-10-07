@@ -113,20 +113,20 @@ in-edge.
 
 ## The same read through the package
 
-`@fossil-lang/corpus` is that recipe and nothing more: `packages/corpus/src/open.ts, open` reads
+`@fossil-lang/corpus` is that recipe and nothing more: `packages/corpus/src/attach.ts, attach` reads
 `fossil.json` and creates the views on the host's engine, under a catalog it is given, with the
 manifest beside them as two relations — `fossil_tables` and `fossil_columns` — and the corpus as
 [RDF](/docs/format/reading/rdf), `triples`.
 
 ```ts
-import { open } from '@fossil-lang/corpus';
-const close = await open('kg', { engine, url: 'https://cdn.example.org/kg/2026-08' });
-// SELECT table_name, rows, first_id FROM "kg".fossil_tables WHERE kind = 'vertex'
+import { attach } from '@fossil-lang/corpus';
+const corpus = await attach('kg', { engine, url: 'https://cdn.example.org/kg/2026-08' });
+// SELECT table_name, record_count, first_id FROM "kg".fossil_tables WHERE kind = 'vertex'
 // SELECT dense_id, subject FROM "kg"."Person" WHERE subject = 'https://example.org/person/7'
-// and calling `close` detaches the catalog
+// and `corpus.detach()` detaches the catalog
 ```
 
 The one capability a host brings is an `Engine`: SQL in, Arrow-shaped columns out, and an
-`AbortSignal` that interrupts the running statement. Every read after `open` is the host's own SQL.
+`AbortSignal` that interrupts the running statement. Every read after `attach` is the host's own SQL.
 The package decodes no Parquet and links no engine: bundling a decoder would make it a driver, and
 the engine already prunes row groups off the footer statistics.

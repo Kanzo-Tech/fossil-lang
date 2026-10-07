@@ -2,17 +2,16 @@
  * @fossil-lang/corpus — attach a `fossil/1` corpus to the host's engine.
  *
  * A corpus is `fossil.json` and one Parquet file per table: one per vertex type, one per relation.
- * `open` reads the manifest, creates a view per table, two relations of the manifest itself and the
- * corpus as RDF, and answers the function that detaches them. Everything after that is SQL —
+ * `attach` reads the manifest, creates a view per table, two relations of the manifest itself and the
+ * corpus as RDF, and answers the attachment that detaches them. Everything after that is SQL —
  * Mosaic's, the host's — over `"<name>"."<Table>"`, `"<name>".fossil_tables`,
  * `"<name>".fossil_columns` and `"<name>".triples`.
  *
  * ```ts
- * import { open } from '@fossil-lang/corpus';
+ * import { attach } from '@fossil-lang/corpus';
  *
- * const close = await open(job, { engine, host });
+ * await using corpus = await attach(job, { engine, host });
  * // SELECT * FROM "<job>".fossil_tables WHERE kind = 'vertex'
- * await close();
  * ```
  *
  * `triples` is the corpus's RDF meaning, one row per triple, for a SHACL engine or any reader of
@@ -22,7 +21,7 @@
  * and it prunes row groups from the footers. `/docs/design/one-door` has why the door is this small.
  */
 
-export { open } from './open.js';
+export { attach } from './attach.js';
 export { FOSSIL_FORMAT } from './manifest.js';
 
-export type { Close, OpenOptions } from './open.js';
+export type { Attachment, AttachOptions } from './attach.js';

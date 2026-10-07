@@ -198,6 +198,51 @@ per name. The writer refuses that run as `corpus/duplicate-table` before a byte 
 would reverse that is a naming scheme with no collision at all, which needs a separator no property
 name can hold; there is none in a format whose names are a shape's.
 
+## A table says what it was derived from
+
+Each table of `fossil.json` carries `derived_from`: the sources its rows were derived from, which is
+PROV-O's `prov:wasDerivedFrom` from the table to each source, with the `was` dropped as snake_case
+drops it. The writer does not recompute it: `crates/fossil-df/src/plan.rs, derived_from` walks the
+MIR DAG from the relation an emit reads back to every `Op::Source` it reaches — the same walk
+`plan_relation` already plans — and the union is taken where the mappings of one type, or of one
+relation, already merge. A property table's is the union over the mappings that write that property.
+`fossil_tables.derived_from` is the same list as a `VARCHAR[]`.
+
+**The value is the source's key as the program wrote it** — `@lake/people.csv`, or `users.csv` —
+which is `ProgramSource.key` and the key an inferred descriptor is registered under. It is never the
+location the key resolved to: a location carries a storage prefix the corpus must not leak, and
+repointing a connection must not change a corpus that read the same data.
+
+It is table-level and nothing finer. OpenLineage's run event states the same fact a level up, as a
+job's `inputs`; column-level lineage, its `ColumnLineageDatasetFacet`, is the next step and would
+need the `ColRef`s behind each property. Both are [discarded for now](/docs/design/discarded#the-corpus),
+with what brings each back.
+
+**What would reverse it.** A reader that needs to know *which column* came from where — an audit
+that must trace one property to one source column. Then the field grows a column-level shape beside
+the table's, and the table's stays.
+
+## The reader's relations are named as SQL already names them
+
+`fossil_columns` is spelled as `information_schema.columns` and DuckDB's `duckdb_columns()` spell
+the same facts: `ordinal_position`, `data_type`, and `is_nullable` as a `BOOLEAN`, as
+`duckdb_columns()` has it. `fossil_tables` counts rows as `record_count`, which is `fossil.json`'s
+own field and Iceberg's `data_file.record_count`. Each was a third, shorter spelling beside DuckDB's
+and the manifest's (`rows`, `ordinal`, `type`, `nullable`), and a SQL reader can now guess a column
+without opening [/docs/format](/docs/format). `kind` and `table_name` stay: `vertex`, `edge` and
+`property` are not `information_schema.tables.table_type` values, and `table_name` already is the
+standard's.
+
+`triples` names a term's parts as SPARQL 1.1 Query Results JSON names them (§3.2.2) — `type`,
+`value`, `datatype` and the language — under the `s_`, `p` and `o_` prefixes: `s_type`, `s_value`,
+`p`, `o_type`, `o_value`, `o_datatype`, `o_lang`. Those are the names an RDF reader already knows.
+The values stay `I` and `L`; SPARQL's `uri` and `literal` would rewrite every comparison a consumer
+makes for no fact it lacks.
+
+**What would reverse it.** A consumer whose engine fixes other names for the same facts and cannot
+alias a column — then that consumer's names are the argument, and these move with it. Brevity does
+not: it is what the old names had, and it was the only thing.
+
 ## What a corpus can carry, and where the format lives
 
 Vertex and edge tables of values, and one graph: there are no quads and nowhere to put a graph

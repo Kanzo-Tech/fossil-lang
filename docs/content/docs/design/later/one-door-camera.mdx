@@ -14,7 +14,7 @@ addressing, the door and a renderer's source contract — and sew them together 
 There was one door, and a camera went through it in three calls:
 
 ```ts
-const corpus = await open(url, { engine });
+const corpus = await attach(url, { engine });
 const set = corpus.tileMatrix('Person');                 // every zoom, every tile, its rows and box
 const scan = corpus.scan({ type: 'Person', select });    // bound once per filter, not per camera move
 const batches = await scan.read(visible);                // a batch per tile address

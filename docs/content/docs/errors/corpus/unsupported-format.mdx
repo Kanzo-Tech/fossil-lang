@@ -16,7 +16,7 @@ https://data.example/graphs/people/fossil.json declares format fossil/2, and thi
 
 A host sees `data: { path, format }`. `format` is the declared string, or the JSON of whatever was
 there instead — `undefined` when the field is missing, as it is for any JSON that is not a manifest.
-It is thrown by `parseManifest`, inside `open`, before any view is created.
+It is thrown by `parseManifest`, inside `attach`, before any view is created.
 
 ## Why fossil refuses it
 
@@ -32,4 +32,4 @@ incompatible corpus can be stopped instead of misread.
 - **A newer format**: upgrade `@fossil-lang/corpus` to a release that reads it, or rewrite the corpus
   with a writer that produces `fossil/1`.
 - **No format at all** (`format` is `undefined`): the location serves some other JSON file. Point
-  `open` at a corpus root whose `fossil.json` the fossil writer produced.
+  `attach` at a corpus root whose `fossil.json` the fossil writer produced.

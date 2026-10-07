@@ -1,35 +1,38 @@
 ---
 title: Its RDF meaning, as triples
-description: What a corpus means as RDF, stated once as one relation of triples that open() attaches beside the tables, so a SHACL engine, a triplestore loader or any reader of triples reads the corpus with plain SQL and no fossil code.
+description: What a corpus means as RDF, stated once as one relation of triples that attach() attaches beside the tables, so a SHACL engine, a triplestore loader or any reader of triples reads the corpus with plain SQL and no fossil code.
 ---
 
 A corpus is a property graph in Parquet, and its meaning as RDF is in the manifest already: a vertex
 table's `iri` is a class and its `identity` column the subject, a column's `iri` is a predicate, and
-an edge table's `iri` is a predicate between the subjects its two ends reference. **`open` states
+an edge table's `iri` is a predicate between the subjects its two ends reference. **`attach` states
 that meaning once, as the relation `"<name>".triples`** — one row per RDF triple, a view over the
 tables beside them — so that a reader who wants triples selects them instead of re-deriving the
 interpretation.
 
 ```ts
-const close = await open(job, { engine, host });
+await using corpus = await attach(job, { engine, host });
 await engine.query(`SELECT * FROM "${job}".triples`);   // what a SHACL engine validates
 ```
 
 | column | what it holds |
 | --- | --- |
-| `s_k`, `s_v` | the subject's kind, always `I`, and its IRI |
+| `s_type`, `s_value` | the subject's type, always `I`, and its IRI |
 | `p` | the predicate IRI |
-| `o_k` | the object's kind: `I` for an IRI, `L` for a literal |
-| `o_v` | the object's IRI, or its lexical form |
-| `o_d` | a literal's datatype IRI, and `''` for an IRI |
-| `o_l` | a literal's language tag, and `''`: a corpus states none |
+| `o_type` | the object's type: `I` for an IRI, `L` for a literal |
+| `o_value` | the object's IRI, or its lexical form |
+| `o_datatype` | a literal's datatype IRI, and `''` for an IRI |
+| `o_lang` | a literal's language tag, and `''`: a corpus states none |
+
+The suffixes are SPARQL 1.1 Query Results JSON's names for a term's parts (§3.2.2): `type`,
+`value`, `datatype` and the language.
 
 Every column is `VARCHAR` and none is null, so a reader compares terms with `=` and never with
 `IS NOT DISTINCT FROM`. `packages/corpus/src/triples.ts, triplesOf` is a pure function of
 `fossil.json`: the same manifest answers the same view, and it reads no Parquet until the view is
 read. The relation is not a file of the corpus and `fossil.json` does not name one: the corpus carries
 the IRIs, and the triples are what they mean. `triples` is therefore a name no table may have, as
-`fossil_tables` and `fossil_columns` are, and `open` refuses a manifest that uses it with
+`fossil_tables` and `fossil_columns` are, and `attach` refuses a manifest that uses it with
 `corpus/duplicate-table`.
 
 ## What each part means

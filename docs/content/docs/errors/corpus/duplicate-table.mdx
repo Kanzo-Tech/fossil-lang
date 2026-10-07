@@ -3,7 +3,7 @@ title: A table is declared twice
 description: "`corpus/duplicate-table` — the manifest lists two tables with the same `name`, across its vertex and edge tables."
 ---
 
-Every table in `fossil.json` — vertex and edge alike — has a `name`, and `open` found two with the
+Every table in `fossil.json` — vertex and edge alike — has a `name`, and `attach` found two with the
 same one:
 
 ```json
@@ -18,12 +18,12 @@ same one:
 the corpus declares Person twice
 ```
 
-A host sees `data: { table }`. It is thrown by `open` while it indexes the manifest, before it attaches
+A host sees `data: { table }`. It is thrown by `attach` while it indexes the manifest, before it attaches
 anything to the engine.
 
 ## Why fossil refuses it
 
-A table's name is its address everywhere after `open`. Each table becomes one view, named after it,
+A table's name is its address everywhere after `attach`. Each table becomes one view, named after it,
 in the corpus's catalog, and every read names the table by that name. Vertex and edge tables share
 the one namespace — with `fossil_tables` and `fossil_columns`, the manifest's own two — so two entries
 with one name could only be one view over one of the two files, and a read meant for the other would

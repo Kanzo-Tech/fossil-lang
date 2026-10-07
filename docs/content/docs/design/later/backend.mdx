@@ -54,11 +54,11 @@ This is everything that crosses. `Engine` and `Host` are `@fossil-lang/types`' o
 the SQL pair are the verbs' generated shapes, unchanged.
 
 ```ts
-declare function open(url: string, options: OpenOptions & { engine: Engine; sql: 'allowed' }): Promise<SqlCorpus>;
-declare function open(url: string, options: OpenOptions & { engine: Engine }): Promise<Corpus>;
-declare function open(job: string, options: OpenOptions & { engine: Engine; host: Host; sql: 'allowed' }): Promise<SqlCorpus>;
-declare function open(job: string, options: OpenOptions & { engine: Engine; host: Host }): Promise<Corpus>;
-interface OpenOptions {
+declare function attach(url: string, options: AttachOptions & { engine: Engine; sql: 'allowed' }): Promise<SqlCorpus>;
+declare function attach(url: string, options: AttachOptions & { engine: Engine }): Promise<Corpus>;
+declare function attach(job: string, options: AttachOptions & { engine: Engine; host: Host; sql: 'allowed' }): Promise<SqlCorpus>;
+declare function attach(job: string, options: AttachOptions & { engine: Engine; host: Host }): Promise<Corpus>;
+interface AttachOptions {
   engine: Engine;
   host?: Host;
   sql?: 'withheld' | 'allowed';
@@ -247,7 +247,7 @@ with one referent, and a cell row grows a pair per channel, each naming its own.
 
 | Iceberg | fossil | taken or departed, and why |
 | --- | --- | --- |
-| `Catalog.load_table`, `StaticTable.from_metadata(metadata_location)` | `open(url, { engine })`, `open(job, { engine, host })` | **Taken.** A corpus has no catalog service, so the URL case is the static table; the job case reuses what [storage access](/docs/design/prior-art#storage-access) already took from the REST catalog — a vended credential scoped to one prefix. |
+| `Catalog.load_table`, `StaticTable.from_metadata(metadata_location)` | `attach(url, { engine })`, `attach(job, { engine, host })` | **Taken.** A corpus has no catalog service, so the URL case is the static table; the job case reuses what [storage access](/docs/design/prior-art#storage-access) already took from the REST catalog — a vended credential scoped to one prefix. |
 | `Table.schema()` | `corpus.types` | **Taken**, read off the bytes at `open` for the reason `ac1801d4:packages/corpus/src/open.ts, open` gives: the manifest declares three properties against seven columns on disk. |
 | `Table.scan(row_filter, selected_fields, case_sensitive, snapshot_id, options, limit)` | `corpus.scan({ type, filter, select })` | **Departs twice.** No `snapshot_id`: a corpus is written once and never appended to, so there is one snapshot and nothing to name. **No `limit`**: a task is a tile, and a tile holds at most `tileRows` rows by construction, so every read is bounded by its address rather than by a clause. No zoom and no box either, though a camera always has both: a scan is planned once over every zoom, and which of its tasks a camera sees is the view's cull against the boxes `tileMatrix` publishes. |
 | `EqualTo`, `In`, `IsNull`, `And`, `Or`, `Not`; `UnboundPredicate.bind(schema)`, `rewrite_not` | `Filter`, bound in `scan()` | **Taken**, including the timing: an unknown column is an error at bind, before anything is planned, and a `not` is pushed to the leaves as `rewrite_not` does. Spelled as JSON rather than classes so it crosses a worker boundary as it is. `StartsWith` and `IsNaN` are left out until something asks, and NaN is Iceberg's: not a literal, and matched by no comparison — the rendered SQL says `NOT isnan(x)` beside `x > v`, because DuckDB orders NaN above every number. Nulls are SQL's. |

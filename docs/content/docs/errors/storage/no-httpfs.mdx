@@ -13,7 +13,7 @@ the engine cannot read remote storage: its httpfs extension is not loaded
 
 A host sees a `FossilError` with empty `data` and the help *fossil reads s3:// through a scoped
 secret, and the host's engine loads httpfs before handing it over*. It is thrown by `mount` — so by
-`open(job, { engine, host })`, and by introspection for a source under a connection — the first time
+`attach(job, { engine, host })`, and by introspection for a source under a connection — the first time
 a given engine is asked to install an S3 secret. fossil checks with
 `SELECT loaded FROM duckdb_extensions() WHERE extension_name = 'httpfs'`, and remembers an engine
 that passed.

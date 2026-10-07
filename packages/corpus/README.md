@@ -20,27 +20,29 @@ not a picture: where a vertex is drawn is the view's choice.
 ## The door
 
 ```ts
-import { open } from '@fossil-lang/corpus';
+import { attach } from '@fossil-lang/corpus';
 
-const close = await open(job, { engine, host });           // a job's corpus, under the credential host vends
-const close = await open('demo', { engine, url });         // a corpus at a URL
+await using corpus = await attach(job, { engine, host });     // a job's corpus, under the credential host vends
+const other = await attach('demo', { engine, url });          // a corpus at a URL
 
 // everything else is SQL, over the catalog named by the first argument:
 //   "<name>"."Person"            a view per table
-//   "<name>".fossil_tables       table_name, kind, iri, path, rows, first_id, source, destination
-//   "<name>".fossil_columns      table_name, column_name, ordinal, type, role, iri, nullable
-//   "<name>".triples             s_k, s_v, p, o_k, o_v, o_d, o_l — the corpus as RDF
+//   "<name>".fossil_tables       table_name, kind, iri, path, record_count, first_id, source, destination, derived_from
+//   "<name>".fossil_columns      table_name, column_name, ordinal_position, data_type, role, iri, is_nullable
+//   "<name>".triples             s_type, s_value, p, o_type, o_value, o_datatype, o_lang — the corpus as RDF
 
-await close();
+await other.detach();             // `await using` detaches `corpus` when the block ends
 ```
 
-`open` reads `fossil.json` through the engine, refuses any `format` but `fossil/1` before it reads a
+`attach` reads `fossil.json` through the engine, refuses any `format` but `fossil/1` before it reads a
 byte of Parquet, creates one view per table, the manifest as two relations and the corpus as triples, and
-answers the function that detaches them. Two opens of one name share the catalog; the last to close detaches it.
+answers an `Attachment` — `name`, `detach()` and `[Symbol.asyncDispose]` — that detaches them. Two
+attachments of one name share the catalog; the last to detach takes it.
 
 **`fossil_tables`** is one row per table in manifest order. A vertex table's ids are
-`first_id … first_id + rows − 1`; an edge table's `source` and `destination` name the vertex tables
-its `src` and `dst` point into.
+`first_id … first_id + record_count − 1`; an edge table's `source` and `destination` name the vertex
+tables its `src` and `dst` point into; `derived_from` is the sources the table was derived from, each
+as the program wrote it.
 
 **`fossil_columns`** says what each column the writer emits IS: `role` is `address` (`dense_id`),
 `identity` (`subject`) or `endpoint` (`src`, `dst`), from `corpus.bnf`, and `NULL` on a program's
