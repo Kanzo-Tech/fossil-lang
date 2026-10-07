@@ -34,10 +34,10 @@ tracing = { workspace = true }
 fossil-base = { path = "../fossil-base" }
 # The `@conn`/relative-path rule, which used to be a module of `fossil-base`.
 # It depends on nothing, so this edge costs a `std::path` join and no build time.
-fossil-locator = { path = "../fossil-locator" }
+fossil-location = { path = "../fossil-location" }
 fossil-hir = { path = "../fossil-hir" }
 fossil-mir = { path = "../fossil-mir" }
-# `program_sources` — the one list of what a program reads, which every host
+# `inputs` — the one list of what a program reads, which every host
 # introspects and the executor routes.
 fossil-lineage = { path = "../fossil-lineage" }
 # The format: `fossil.json`'s structs and the writer's fixed columns. WASM-clean.
@@ -132,7 +132,7 @@ async-trait = { workspace = true }
 fossil-base = { path = "../fossil-base", features = ["test-support"] }
 # `tests/pipeline.rs` builds a `SourceAnchor` itself — a regular dependency is
 # invisible to an integration test, which links the crate plus its dev deps only.
-fossil-locator = { path = "../fossil-locator" }
+fossil-location = { path = "../fossil-location" }
 # Dev-only: the tests drive the async executor on a current-thread runtime. The
 # library holds no tokio at all — the browser drives it from JS's event loop.
 tokio = { workspace = true }

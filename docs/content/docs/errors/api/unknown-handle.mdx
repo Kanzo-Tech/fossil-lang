@@ -3,14 +3,16 @@ title: The handle names nothing
 description: "`api/unknown-handle` — a workspace call was given a file handle that was closed, or never issued by this workspace."
 ---
 
-`FossilWorkspace.open_file` answers a `FileHandle`, and the calls about one file — `update_file`,
-`close_file`, `diagnostics_for`, `missingDocuments`, `sources` — take it back. A handle that was
+The workspace under `openProgram` — the glue's `FossilWorkspace`, which `@fossil-lang/wasm` does not
+export — answers a `FileHandle` from `openFile`, and the calls about one file — `updateFile`,
+`closeFile`, `missingDocuments`, `inputs` and the position queries — take it back. A `FossilProgram`
+holds exactly one, so a host reaches this code only through the glue. A handle that was
 already closed, or that this workspace never issued, names nothing:
 
 ```ts
-const h = ws.open_file('a.fossil', text);
-ws.close_file(h);
-ws.close_file(h);
+const h = ws.openFile('a.fossil', text);
+ws.closeFile(h);
+ws.closeFile(h);
 // FossilError api/unknown-handle
 // the handle names nothing: it was dropped, or never issued
 ```
@@ -30,6 +32,6 @@ reads and there is no disk to fall back to. The handle is what dies.
 
 ## How to repair it
 
-- **Open the file again** with `open_file` and use the new handle; a closed handle is never reused.
-- **Keep one handle per open file** on the host side, and drop it from that map when `close_file`
+- **Open the file again** with `openFile` and use the new handle; a closed handle is never reused.
+- **Keep one handle per open file** on the host side, and drop it from that map when `closeFile`
   returns. A second close of the same file is the most common way here.

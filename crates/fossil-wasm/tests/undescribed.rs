@@ -5,7 +5,7 @@
 //! and `FossilProgram.registerIntrospection` hands both halves over; this is the
 //! Rust half the second one drives.
 
-use fossil_wasm::{CheckRow, FossilWorkspace};
+use fossil_wasm::{Diagnostic, FossilWorkspace};
 use lsp_types::{DiagnosticSeverity, Position};
 
 const PROGRAM: &str = "\
@@ -18,7 +18,7 @@ orders := io.csv(\"@lake/orders.csv\")
 /// TypeScript `Problem`, `title` and `detail` included, as a host passes it.
 const NOT_FOUND: &str = r#"{
   "code": "source/not-found",
-  "data": { "locator": "s3://lake/users.csv" },
+  "data": { "location": "s3://lake/users.csv" },
   "title": "A source names no file",
   "detail": "the source `s3://lake/users.csv` names no file",
   "severity": "error",
@@ -26,19 +26,19 @@ const NOT_FOUND: &str = r#"{
 }"#;
 
 const ORDERS_DESCRIPTOR: &str = r#"{
-  "uri": "@lake/orders.csv",
+  "key": "@lake/orders.csv",
   "columns": [{ "name": "id", "primitive": "string" }],
-  "freshness_token": ""
+  "etag": ""
 }"#;
 
 const USERS_DESCRIPTOR: &str = r#"{
-  "uri": "@lake/users.csv",
+  "key": "@lake/users.csv",
   "columns": [{ "name": "id", "primitive": "string" }],
-  "freshness_token": ""
+  "etag": ""
 }"#;
 
-fn undescribed_rows(ws: &FossilWorkspace) -> Vec<CheckRow> {
-    ws.check_rows()
+fn undescribed_rows(ws: &FossilWorkspace) -> Vec<Diagnostic> {
+    ws.diagnostic_rows()
         .into_iter()
         .filter(|r| r.code == "source/not-found")
         .collect()
@@ -65,7 +65,7 @@ fn a_source_that_could_not_be_described_is_one_row_at_its_call() {
     assert_eq!(row.range.start, Position::new(0, 9), "starts at `io.csv`");
     assert_eq!(row.range.end, Position::new(0, 34), "ends after the call");
     assert_eq!(row.detail.title, "A source names no file");
-    assert_eq!(row.detail.data["locator"], "s3://lake/users.csv");
+    assert_eq!(row.detail.data["location"], "s3://lake/users.csv");
     assert_eq!(
         row.detail.help.as_deref(),
         Some("check the path under the connection")

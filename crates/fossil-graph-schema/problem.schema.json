@@ -2603,12 +2603,12 @@
         },
         "data": {
           "properties": {
-            "locator": {
+            "location": {
               "type": "string"
             }
           },
           "required": [
-            "locator"
+            "location"
           ],
           "type": "object"
         }
@@ -2619,7 +2619,7 @@
       ],
       "title": "A source names no file",
       "type": "object",
-      "x-detail": "\"the source `{locator}` names no file\""
+      "x-detail": "\"the source `{location}` names no file\""
     },
     {
       "description": "A source's bytes are not UTF-8 text.",
@@ -2632,12 +2632,12 @@
         },
         "data": {
           "properties": {
-            "locator": {
+            "location": {
               "type": "string"
             }
           },
           "required": [
-            "locator"
+            "location"
           ],
           "type": "object"
         }
@@ -2648,7 +2648,7 @@
       ],
       "title": "A source is not UTF-8",
       "type": "object",
-      "x-detail": "\"the source `{locator}` is not UTF-8\""
+      "x-detail": "\"the source `{location}` is not UTF-8\""
     },
     {
       "description": "A source's bytes did not parse in the format the program named.",
@@ -2661,12 +2661,12 @@
         },
         "data": {
           "properties": {
-            "locator": {
+            "location": {
               "type": "string"
             }
           },
           "required": [
-            "locator"
+            "location"
           ],
           "type": "object"
         }
@@ -2677,7 +2677,7 @@
       ],
       "title": "A source does not parse",
       "type": "object",
-      "x-detail": "\"the source `{locator}` does not parse\""
+      "x-detail": "\"the source `{location}` does not parse\""
     },
     {
       "description": "The query engine failed; its own error is the cause.",
@@ -2829,7 +2829,7 @@
       "x-detail": "\"{scope} vends {count} prefixes, and one was expected\""
     },
     {
-      "description": "A locator outside every prefix a credential was vended for.",
+      "description": "A location outside every prefix a credential was vended for.",
       "properties": {
         "code": {
           "enum": [
@@ -2839,7 +2839,7 @@
         },
         "data": {
           "properties": {
-            "locator": {
+            "location": {
               "type": "string"
             },
             "prefix": {
@@ -2847,7 +2847,7 @@
             }
           },
           "required": [
-            "locator",
+            "location",
             "prefix"
           ],
           "type": "object"
@@ -2859,7 +2859,7 @@
       ],
       "title": "Outside the vended prefix",
       "type": "object",
-      "x-detail": "\"{locator} lies outside {prefix}\""
+      "x-detail": "\"{location} lies outside {prefix}\""
     },
     {
       "description": "A vended credential fossil cannot read: a missing or malformed key, or a prefix that is not a directory.",
@@ -2899,7 +2899,7 @@
       "x-detail": "\"the credential for {prefix} is malformed: `{key}` {reason}\""
     },
     {
-      "description": "A locator no kind of store fossil reads can route.",
+      "description": "A location no kind of store fossil reads can route.",
       "properties": {
         "code": {
           "enum": [
@@ -2909,12 +2909,12 @@
         },
         "data": {
           "properties": {
-            "locator": {
+            "location": {
               "type": "string"
             }
           },
           "required": [
-            "locator"
+            "location"
           ],
           "type": "object"
         }
@@ -2923,9 +2923,9 @@
         "code",
         "data"
       ],
-      "title": "No store routes this locator",
+      "title": "No store routes this location",
       "type": "object",
-      "x-detail": "\"{locator} has no route: fossil reads s3://bucket/… and \\\n         abfss://container@account.dfs.core.windows.net/… through a vended credential, and \\\n         http(s) without one\""
+      "x-detail": "\"{location} has no route: fossil reads s3://bucket/… and \\\n         abfss://container@account.dfs.core.windows.net/… through a vended credential, and \\\n         http(s) without one\""
     },
     {
       "description": "A store answered with an error; the store's error is the cause.",
@@ -2938,12 +2938,12 @@
         },
         "data": {
           "properties": {
-            "locator": {
+            "location": {
               "type": "string"
             }
           },
           "required": [
-            "locator"
+            "location"
           ],
           "type": "object"
         }
@@ -2954,7 +2954,7 @@
       ],
       "title": "A store could not be reached",
       "type": "object",
-      "x-detail": "\"{locator} could not be reached\""
+      "x-detail": "\"{location} could not be reached\""
     },
     {
       "description": "The engine a host handed over cannot read remote storage.",
@@ -3057,12 +3057,12 @@
               "minimum": 0.0,
               "type": "integer"
             },
-            "locator": {
+            "location": {
               "type": "string"
             }
           },
           "required": [
-            "locator"
+            "location"
           ],
           "type": "object"
         }
@@ -3073,7 +3073,7 @@
       ],
       "title": "A module could not be loaded",
       "type": "object",
-      "x-detail": "\"{locator} could not be loaded\""
+      "x-detail": "\"{location} could not be loaded\""
     },
     {
       "description": "A corpus whose manifest could not be read; the reader's error is the cause.",

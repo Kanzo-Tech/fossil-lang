@@ -3,7 +3,8 @@
  */
 
 import { mount } from '@fossil-lang/storage';
-import { FossilError, attachCause, type Engine, type Host } from '@fossil-lang/types';
+import { FossilError, type Engine, type Host } from '@fossil-lang/types';
+import { attachCause } from '@fossil-lang/types/internal';
 
 import type { Manifest } from './manifest.gen.js';
 import { parseManifest, tablesIn } from './manifest.js';

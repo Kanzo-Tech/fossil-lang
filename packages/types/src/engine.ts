@@ -6,7 +6,8 @@
  * and satisfies this structurally. It is the database, not the reader: fossil puts a vended
  * credential into it as a scoped `CREATE SECRET` and names `s3://…` in SQL, so a credential never
  * reaches SQL text, an error message, a query-cache key or a view definition, and it rotates under
- * a view that stays. `lend` and `drop` are for what a secret cannot reach — an Azure file, which
+ * a view that stays. `registerFiles` and `dropFiles`, named for DuckDB-WASM's `registerFileURL` and
+ * `dropFiles`, are for what a secret cannot reach — an Azure file, which
  * DuckDB-WASM has no extension for, and bytes the page already holds.
  *
  * **A host should cache Parquet metadata** — `SET parquet_metadata_cache = true`, once, when it
@@ -41,9 +42,9 @@ export interface Engine {
    * replaces the lease behind the name — DuckDB-WASM's `registerFileURL` refuses a second URL
    * for a name, so this is the engine's to reconcile and never the caller's.
    */
-  lend(files: Record<string, string>): Promise<void>;
+  registerFiles(files: Record<string, string>): Promise<void>;
   /** Forget the names. A name the engine does not hold is ignored. */
-  drop(names: readonly string[]): Promise<void>;
+  dropFiles(names: readonly string[]): Promise<void>;
 }
 
 /**
@@ -54,14 +55,14 @@ export interface Table {
   readonly numRows: number;
   readonly schema: { readonly fields: readonly { readonly name: string }[] };
   /** One column by name, or `null` when the answer has none of that name. */
-  getChild(name: string): Column | null;
+  getChild(name: string): Vector | null;
 }
 
 /**
- * One column of a {@link Table}. `get` answers `null` for a null; `toArray` is the column's own
- * array — a typed array for a fixed-width type, in which a null reads as that type's zero.
+ * One column of a {@link Table}, the part of apache-arrow's `Vector` fossil reads. `get` answers
+ * `null` for a null; `toArray` is the column's own array — a typed array for a fixed-width type, in which a null reads as that type's zero.
  */
-export interface Column {
+export interface Vector {
   readonly length: number;
   get(index: number): unknown;
   toArray(): ArrayLike<unknown>;

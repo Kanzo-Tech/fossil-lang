@@ -24,8 +24,8 @@
 //!
 //! So the editor introspects exactly what it can `stat`, which is all
 //! `fossil_introspect::pre_introspect_and_register` ever reads. That is a local file that exists right
-//! now; a remote locator, a path that does not exist yet, and a half-typed one
-//! are all the same answer, and it is the answer `freshness_token` already
+//! now; a remote location, a path that does not exist yet, and a half-typed one
+//! are all the same answer, and it is the answer `etag` already
 //! gave. [`a_remote_source_is_not_introspected_by_the_editor`] pins the gap that
 //! leaves, because it is a real one and the docblock alone would not keep it
 //! visible.

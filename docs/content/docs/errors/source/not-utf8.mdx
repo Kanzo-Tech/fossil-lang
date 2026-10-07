@@ -13,7 +13,7 @@ A program reads an RDF graph with `io.rdf`, and the bytes fetched for it are not
 the source `https://data.example.com/people.ttl` is not UTF-8
 ```
 
-`data.locator` is the location fossil resolved and read — after a connection alias such as
+`data.location` is the location fossil resolved and read — after a connection alias such as
 `@bucket/people.ttl` has been resolved — and the cause is the decoder's own error, which says at
 which byte the text stopped being valid.
 
@@ -33,5 +33,5 @@ the file, before the engine has run anything. How a source is bound is in
 
 - **Re-encode the file as UTF-8.** A Turtle file exported in Latin-1 or UTF-16 is the usual cause;
   `iconv -f latin1 -t utf-8` converts one.
-- **Check that the locator is the file you meant.** A compressed file, or an HTML error page served
-  in place of the data, is not UTF-8 Turtle either; the locator in the message is what was fetched.
+- **Check that the location is the file you meant.** A compressed file, or an HTML error page served
+  in place of the data, is not UTF-8 Turtle either; the location in the message is what was fetched.

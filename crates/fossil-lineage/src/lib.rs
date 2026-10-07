@@ -1,14 +1,14 @@
-//! Source lineage + provider introspection — the parse-only "what does this
-//! program reference?" and "what sources does fossil support?" surface.
+//! Inputs + formats — the parse-only "what does this program read?" and "what
+//! formats does fossil read?" surface.
 //!
 //! One implementation for every host — the browser `fossil-wasm` (over its
 //! in-memory `WasmDb`) and any native one over a file-backed db. The host
 //! injects only its own [`fossil_base::Db`] + program text; the logic — parse →
-//! source headers → typed refs — is identical and pure (no I/O, no `DuckDB`),
+//! source headers → inputs — is identical and pure (no I/O, no `DuckDB`),
 //! so it is WASM-clean.
 //!
-//! [`providers`] is a projection of [`fossil_base::providers`] and
-//! [`source_refs`] walks the def map, so its content is the language's. What
+//! [`formats`] is a projection of [`fossil_base::providers`] and
+//! [`inputs`] walks the def map, so its content is the language's. What
 //! keeps it out of `fossil-hir` is the other end: these are the shapes a HOST
 //! reads — serde JSON natively, `serde-wasm-bindgen` values in the
 //! browser — and `fossil-hir` answers to the compiler, not to a host.
@@ -24,138 +24,93 @@ use fossil_base::{Db, SourceFile};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// The position a reference plays in an `io.*` source constructor.
+/// The position an input plays in a program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum RefRole {
-    /// The positional data URI (`io.rdf("…")`).
+pub enum Role {
+    /// The positional data URI of an `io.*` source constructor (`io.csv("…")`).
     Data,
-    /// The `schema = io.shex("…")` argument (a shape document).
+    /// A shape document: `type { … } := io.shex("…")`, or a source's
+    /// `schema = io.shex("…")`.
     Schema,
 }
 
-/// One external reference a program makes. `connection` is the `@conn` alias the
-/// reference targets (`Some("cpi")` for `@cpi/graph.ttl`), or `None` for a direct
-/// URL / local path. `path` is the remainder after the alias (or the whole
-/// locator when there is no alias). This is the program's TYPED lineage — a host
-/// derives a job's connection set from the distinct `connection`s, never from a
-/// regex over the script text.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct SourceRefInfo {
-    /// The `@conn` alias this reference targets; absent for a direct URL/path.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub connection: Option<String>,
-    /// The path within the connection, or the whole locator when unaliased.
-    pub path: String,
-    /// Where this reference appears in the source constructor.
-    pub role: RefRole,
-}
-
-/// Parse-only typed lineage: every external reference a program makes — its
-/// data URIs and `schema =` arguments — each tagged with the `@conn` alias it
-/// targets (or `None` for a direct URL/path). The host reads this to derive a
-/// job's connection set without scanning script text.
+/// One input a program reads — `Input` in `@fossil-lang/types`, and the one
+/// answer to «what does this program read»: the editor's, the introspecting
+/// host's and the executor's.
 ///
-/// A destructuring `{ A, B } := io.rdf(uri, schema = io.shex("x.shex"))` expands to one
-/// [`fossil_hir::def_map::SourceEntry`] per member sharing the same uri +
-/// schema, so identical refs are de-duplicated — a job's lineage is the
-/// DISTINCT `(data, schema)` it reads.
-#[must_use]
-pub fn source_refs(db: &dyn Db, file: SourceFile) -> Vec<SourceRefInfo> {
-    let def_map = fossil_hir::def_map::def_map(db, file);
-    let mut refs: Vec<SourceRefInfo> = Vec::new();
-    for s in def_map.sources(db) {
-        if let Some(uri) = s.uri.as_deref() {
-            let r = parse_ref(uri, RefRole::Data);
-            if !refs.contains(&r) {
-                refs.push(r);
-            }
-        }
-        if let Some(schema) = s.schema_arg.as_deref() {
-            let r = parse_ref(schema, RefRole::Schema);
-            if !refs.contains(&r) {
-                refs.push(r);
-            }
-        }
-    }
-    refs
-}
-
-/// Split a raw reference into its `@conn` alias + path, or `None` + the whole
-/// locator. Reports the ALIAS, not the resolved URL — resolution is the host's
-/// data-plane job (`@conn` → `{base}/path`), kept out of fossil's semantics.
-fn parse_ref(raw: &str, role: RefRole) -> SourceRefInfo {
-    match fossil_locator::split_alias(raw) {
-        Some((conn, path)) => SourceRefInfo {
-            connection: Some(conn.to_string()),
-            path: path.to_string(),
-            role,
-        },
-        None => SourceRefInfo {
-            connection: None,
-            path: raw.to_string(),
-            role,
-        },
-    }
-}
-
-/// A data source a program reads, as fossil resolved it — `ProgramSource` in
-/// `@fossil-lang/types`.
+/// The name is OpenLineage's `RunEvent.inputs[]` and PROV's `prov:used`, and not
+/// LSP's `references`, which are the usages of a symbol.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct ProgramSource {
-    /// The binding the source is read into (`users` in `users := io.csv(…)`).
-    pub binding: String,
-    /// The URI as the program wrote it — what an inferred descriptor is keyed by.
+pub struct Input {
+    /// What the program reads it as.
+    pub role: Role,
+    /// The reference as the program wrote it — what an inferred descriptor is
+    /// keyed by, and what survives a connection being repointed.
     pub key: String,
-    /// `key` through [`fossil_locator::SourceAnchor`]: what a host signs and reads.
-    pub locator: String,
-    /// The connection the locator lies under, when it was written `@name/…`.
+    /// `key` through [`fossil_location::SourceAnchor`]: what a host signs and reads.
+    pub location: String,
+    /// The connection the location lies under, when it was written `@name/…`
+    /// and the connection map has that name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection: Option<String>,
-    /// The catalogue row the constructor names (`csv`), which chooses the reader.
-    pub format: String,
-    /// The reader option the binding wrote (`delimiter = "|"`), verbatim.
+    /// The binding a data input is read into (`users` in `users := io.csv(…)`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub binding: Option<String>,
+    /// The catalogue row a data input's constructor names (`csv`), which
+    /// chooses the reader.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    /// The reader option a data input's binding wrote (`delimiter = "|"`), verbatim.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub option: Option<String>,
 }
 
-/// Every source binding in `file` whose constructor names a row the host
-/// installs, one per binding: a destructured `{ A, B } := io.rdf(…)` is two.
+/// Every input `file` reads: one per source binding whose constructor names a
+/// row the host installs — a destructured `{ A, B } := io.rdf(…)` is two — then
+/// each distinct shape document it names.
 ///
-/// `connections` expands `@conn` aliases in the locator only; the key is what
+/// `connections` expands `@conn` aliases in the location only; the key is what
 /// the program wrote, so the descriptor a host registers under it survives a
 /// connection being repointed.
 #[allow(clippy::implicit_hasher)] // `SourceAnchor` takes the std map.
 #[must_use]
-pub fn program_sources(
-    db: &dyn Db,
-    file: SourceFile,
-    connections: &HashMap<String, String>,
-) -> Vec<ProgramSource> {
-    let dir = fossil_locator::program_dir(file.path(db));
-    let anchor = fossil_locator::SourceAnchor::new(&dir, connections);
-    fossil_hir::def_map::def_map(db, file)
+pub fn inputs(db: &dyn Db, file: SourceFile, connections: &HashMap<String, String>) -> Vec<Input> {
+    let dir = fossil_location::program_dir(file.path(db));
+    let anchor = fossil_location::SourceAnchor::new(&dir, connections);
+    let read = |role, key: &str| Input {
+        role,
+        key: key.to_string(),
+        location: anchor.location(key),
+        connection: anchor.connection(key),
+        binding: None,
+        format: None,
+        option: None,
+    };
+    let data = fossil_hir::def_map::def_map(db, file)
         .sources(db)
         .iter()
         .filter_map(|s| {
             let uri = s.uri.as_deref()?;
             let row = fossil_base::provider(db.system().providers(), s.constructor.as_deref()?)?;
-            Some(ProgramSource {
-                binding: s.name.to_string(),
-                key: uri.to_string(),
-                locator: anchor.locator(uri),
-                connection: anchor.connection(uri),
-                format: row.name.to_string(),
+            Some(Input {
+                binding: Some(s.name.to_string()),
+                format: Some(row.name.to_string()),
                 option: s.delimiter.as_ref().map(ToString::to_string),
+                ..read(Role::Data, uri)
             })
         })
+        .collect::<Vec<_>>();
+    let schemas = fossil_hir::documents::documents_named(db, file);
+    data.into_iter()
+        .chain(schemas.iter().map(|d| read(Role::Schema, d)))
         .collect()
 }
 
-/// What a provider can appear as in a program.
+/// What a format can appear as in a program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
-pub enum ProviderKind {
+pub enum FormatKind {
     /// Only defines a type (e.g. a schema descriptor).
     Schema,
     /// Loads data (the `io.*` source constructors).
@@ -164,25 +119,25 @@ pub enum ProviderKind {
     Both,
 }
 
-/// One data-source provider fossil exposes: its short name, the file extensions
-/// it reads, and how it can be used. A host lists these so its UI can offer the
-/// constructors and filter files by extension.
+/// One format fossil reads — Arrow's `FileFormat`, DuckDB's `FORMAT`: its short
+/// name, the file extensions it reads, and how it can be used. A host lists
+/// these so its UI can offer the constructors and filter files by extension.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct ProviderInfo {
-    /// Short provider name (e.g. `csv`, `json`, `parquet`).
+pub struct Format {
+    /// Short name (e.g. `csv`, `json`, `parquet`) — what [`Input::format`] holds.
     pub name: String,
-    /// File extensions this provider reads (no leading dot).
+    /// File extensions it reads (no leading dot).
     pub extensions: Vec<String>,
-    /// Whether the provider defines a type, loads data, or both.
-    pub kind: ProviderKind,
+    /// Whether it defines a type, loads data, or both.
+    pub kind: FormatKind,
 }
 
-/// The providers a host installs, projected onto the wire contract. Sorted for
+/// The provider rows a host installs, projected onto the wire as formats. Sorted for
 /// a deterministic order (the registry's own order is priority, not display).
 ///
-/// # `ProviderKind` stops being a constant
+/// # `FormatKind` stops being a constant
 ///
-/// This function wrote `ProviderKind::Data` on every row, and the wire contract
+/// This function wrote `FormatKind::Data` on every row, and the wire contract
 /// has carried `Schema` and `Both` since it was written with nothing ever
 /// producing either — the shape of the answer was right and the data behind it
 /// was half a table. Since ruling 13 the row declares its capabilities, so the
@@ -193,34 +148,34 @@ pub struct ProviderInfo {
 /// the host's to install — `fossil_descriptors_output::PROVIDERS` for a host
 /// that compiles, `fossil_base::providers::DATA` for one that does not.
 #[must_use]
-pub fn providers(table: &[&'static fossil_base::Provider]) -> Vec<ProviderInfo> {
+pub fn formats(table: &[&'static fossil_base::Provider]) -> Vec<Format> {
     use fossil_base::Capability;
 
-    let mut providers: Vec<ProviderInfo> = table
+    let mut formats: Vec<Format> = table
         .iter()
-        .map(|p| ProviderInfo {
+        .map(|p| Format {
             name: p.name.to_string(),
             extensions: p.extensions.iter().map(|e| (*e).to_string()).collect(),
             kind: match (
                 p.provides(Capability::ReadRows),
                 p.provides(Capability::ReadTypes),
             ) {
-                (true, true) => ProviderKind::Both,
-                (false, true) => ProviderKind::Schema,
-                _ => ProviderKind::Data,
+                (true, true) => FormatKind::Both,
+                (false, true) => FormatKind::Schema,
+                _ => FormatKind::Data,
             },
         })
         .collect();
-    providers.sort_by(|a, b| a.name.cmp(&b.name));
-    providers
+    formats.sort_by(|a, b| a.name.cmp(&b.name));
+    formats
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{ProgramSource, ProviderKind, program_sources, providers};
+    use super::{FormatKind, Input, Role, formats, inputs};
 
     #[test]
-    fn a_source_keeps_what_the_program_wrote_and_resolves_where_it_is_read() {
+    fn an_input_keeps_what_the_program_wrote_and_resolves_where_it_is_read() {
         let db = fossil_base::test_support::new_db();
         let file = fossil_base::SourceFile::new(
             &db,
@@ -232,22 +187,24 @@ mod tests {
         let connections =
             std::collections::HashMap::from([("lake".to_string(), "s3://bucket/".to_string())]);
         assert_eq!(
-            program_sources(&db, file, &connections),
+            inputs(&db, file, &connections),
             [
-                ProgramSource {
-                    binding: "users".to_string(),
+                Input {
+                    role: Role::Data,
                     key: "@lake/users.csv".to_string(),
-                    locator: "s3://bucket/users.csv".to_string(),
+                    location: "s3://bucket/users.csv".to_string(),
                     connection: Some("lake".to_string()),
-                    format: "csv".to_string(),
+                    binding: Some("users".to_string()),
+                    format: Some("csv".to_string()),
                     option: Some("|".to_string()),
                 },
-                ProgramSource {
-                    binding: "orders".to_string(),
+                Input {
+                    role: Role::Data,
                     key: "orders.parquet".to_string(),
-                    locator: "a/orders.parquet".to_string(),
+                    location: "a/orders.parquet".to_string(),
                     connection: None,
-                    format: "parquet".to_string(),
+                    binding: Some("orders".to_string()),
+                    format: Some("parquet".to_string()),
                     option: None,
                 },
             ]
@@ -255,27 +212,54 @@ mod tests {
     }
 
     #[test]
+    fn a_shape_document_is_an_input_once() {
+        let db = fossil_base::test_support::new_db();
+        let file = fossil_base::SourceFile::new(
+            &db,
+            "type { P } := io.shex(\"@lake/x.shex\")\n\
+             { A, B } := io.rdf(\"g.ttl\", schema = io.shex(\"@lake/x.shex\"))\n"
+                .to_string(),
+            "prog.fossil".to_string(),
+        );
+        let connections =
+            std::collections::HashMap::from([("lake".to_string(), "s3://bucket/".to_string())]);
+        let schemas: Vec<Input> = inputs(&db, file, &connections)
+            .into_iter()
+            .filter(|i| i.role == Role::Schema)
+            .collect();
+        assert_eq!(
+            schemas,
+            [Input {
+                role: Role::Schema,
+                key: "@lake/x.shex".to_string(),
+                location: "s3://bucket/x.shex".to_string(),
+                connection: Some("lake".to_string()),
+                binding: None,
+                format: None,
+                option: None,
+            }]
+        );
+    }
+
+    #[test]
     fn providers_are_sorted_nonempty_and_include_csv() {
-        let p = providers(fossil_base::providers::DATA);
-        assert!(!p.is_empty(), "the source registry must expose providers");
+        let p = formats(fossil_base::providers::DATA);
+        assert!(!p.is_empty(), "the source registry must expose formats");
         let mut sorted = p.clone();
         sorted.sort_by(|a, b| a.name.cmp(&b.name));
         assert_eq!(
             p, sorted,
-            "providers must be deterministically sorted by name"
+            "formats must be deterministically sorted by name"
         );
         let names: Vec<&str> = p.iter().map(|x| x.name.as_str()).collect();
+        assert!(names.contains(&"csv"), "csv must be present: {names:?}");
         assert!(
-            names.contains(&"csv"),
-            "csv provider must be present: {names:?}"
-        );
-        assert!(
-            p.iter().all(|x| x.kind == ProviderKind::Data),
+            p.iter().all(|x| x.kind == FormatKind::Data),
             "the default table reads data and nothing else"
         );
     }
 
-    /// `ProviderKind::Schema` had no producer at all until the registry
+    /// `FormatKind::Schema` had no producer at all until the registry
     /// collapsed: the wire contract described three cases and the data behind it
     /// was half a table. A row that reads types comes out `Schema`.
     #[test]
@@ -293,10 +277,10 @@ mod tests {
             reads_types: Some(decode_lines),
         };
 
-        let p = providers(&[&fossil_base::providers::CSV, &ROW]);
+        let p = formats(&[&fossil_base::providers::CSV, &ROW]);
         assert_eq!(p[0].name, "csv");
-        assert_eq!(p[0].kind, ProviderKind::Data);
+        assert_eq!(p[0].kind, FormatKind::Data);
         assert_eq!(p[1].name, "shex");
-        assert_eq!(p[1].kind, ProviderKind::Schema);
+        assert_eq!(p[1].kind, FormatKind::Schema);
     }
 }

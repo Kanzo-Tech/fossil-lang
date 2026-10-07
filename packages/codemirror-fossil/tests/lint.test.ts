@@ -1,20 +1,16 @@
 /**
- * `CheckRow` → CodeMirror `Diagnostic`. The interesting cases are the ones where
+ * fossil's `Diagnostic` → CodeMirror's. The interesting cases are the ones where
  * the row and the document disagree, because that is not an edge case — it is
  * every keystroke between a check being requested and its answer arriving.
  */
 import { forEachDiagnostic, forceLinting } from '@codemirror/lint';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
-import { FossilError, TITLES, type CheckRow, type CheckRowBase, type Problem } from '@fossil-lang/types';
+import { FossilError, TITLES, type Diagnostic, type Problem } from '@fossil-lang/types';
+import type { DiagnosticBase } from '@fossil-lang/types/internal';
 import { describe, expect, it } from 'vitest';
 
-import {
-  fossilLinter,
-  toDiagnostics,
-  uncheckedRow,
-  type CheckSource,
-} from '../src/lint.js';
+import { fossilLinter, toDiagnostics, uncheckedDiagnostic } from '../src/lint.js';
 
 const URI = 'hello.fossil';
 
@@ -26,7 +22,7 @@ function state(doc = DOC): EditorState {
   return EditorState.create({ doc });
 }
 
-function row(over: Partial<CheckRowBase> = {}): CheckRow {
+function row(over: Partial<DiagnosticBase> = {}): Diagnostic {
   return {
     uri: URI,
     range: { start: { line: 3, character: 14 }, end: { line: 3, character: 18 } },
@@ -36,7 +32,7 @@ function row(over: Partial<CheckRowBase> = {}): CheckRow {
     title: 'Internal error',
     message: 'unknown column `nmae`',
     ...over,
-  } as CheckRow;
+  } as Diagnostic;
 }
 
 describe('toDiagnostics', () => {
@@ -153,8 +149,10 @@ describe('a failure, as a diagnostic', () => {
   };
 
   it('shows a refused check by its code, and one fossil did not raise as internal/bug', async () => {
-    const lint = async (source: CheckSource): Promise<string[]> => {
-      const view = new EditorView({ state: EditorState.create({ doc: DOC, extensions: fossilLinter(source, { uri: URI, delay: 0 }) }) });
+    const lint = async (diagnostics: () => Promise<Diagnostic[]>): Promise<string[]> => {
+      const view = new EditorView({
+        state: EditorState.create({ doc: DOC, extensions: fossilLinter({ uri: URI, diagnostics }, { delay: 0 }) }),
+      });
       forceLinting(view);
       await new Promise((settle) => setTimeout(settle, 50));
       const messages: string[] = [];
@@ -166,13 +164,12 @@ describe('a failure, as a diagnostic', () => {
     expect((await lint(() => Promise.reject(new TypeError('worker died'))))[0]).toContain('[internal/bug]');
   });
 
-  it('hands a refused check to onDiagnostics as its one row, so the host need not wrap check', async () => {
-    const batches: (readonly CheckRow[])[] = [];
+  it('hands a refused check to onDiagnostics as its one diagnostic, so the host need not wrap it', async () => {
+    const batches: (readonly Diagnostic[])[] = [];
     const view = new EditorView({
       state: EditorState.create({
         doc: DOC,
-        extensions: fossilLinter(() => Promise.reject(FossilError.from(unread)), {
-          uri: URI,
+        extensions: fossilLinter({ uri: URI, diagnostics: () => Promise.reject(FossilError.from(unread)) }, {
           delay: 0,
           onDiagnostics: (rows) => batches.push(rows),
         }),
@@ -181,14 +178,14 @@ describe('a failure, as a diagnostic', () => {
     forceLinting(view);
     await new Promise((settle) => setTimeout(settle, 50));
     view.destroy();
-    expect(batches).toEqual([[uncheckedRow(URI, FossilError.from(unread))]]);
+    expect(batches).toEqual([[uncheckedDiagnostic(URI, FossilError.from(unread))]]);
   });
 });
 
-describe('uncheckedRow', () => {
+describe('uncheckedDiagnostic', () => {
   it('is the failure by its code, on the first character of the buffer', () => {
     const failure = FossilError.of('api/busy', {} as never);
-    const row = uncheckedRow(URI, failure);
+    const row = uncheckedDiagnostic(URI, failure);
     expect(row).toMatchObject({
       uri: URI,
       range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
@@ -200,7 +197,7 @@ describe('uncheckedRow', () => {
   });
 
   it('is internal/bug for a failure fossil did not raise', () => {
-    const row = uncheckedRow(URI, new Error('the wasm did not download'));
+    const row = uncheckedDiagnostic(URI, new Error('the wasm did not download'));
     expect(row.code).toBe('internal/bug');
     expect(row.severity).toBe(1);
   });

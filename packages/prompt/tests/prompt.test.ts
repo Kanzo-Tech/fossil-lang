@@ -8,12 +8,13 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Host } from '@fossil-lang/types';
 import { initFossilWasm, openProgram } from '@fossil-lang/wasm';
 
-import { EXAMPLE, FORBIDDEN, FOSSIL_PROMPT, NAMES } from '../src/index.js';
-import { GRAMMAR_DIGEST, SURFACE } from '../src/surface.js';
+import { FOSSIL_PROMPT } from '../src/index.js';
+import { NAMES } from '../src/catalogue.generated.js';
+import { EXAMPLE, FORBIDDEN, GRAMMAR_DIGEST, SURFACE } from '../src/surface.js';
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const PROGRAMS = join(ROOT, 'docs/programs');
@@ -79,28 +80,28 @@ describe('every form the prompt calls gone is refused by the checker', () => {
   // A shape and a source the preamble names, so an error is the forbidden form's and not a
   // missing document's: the control below checks clean against the same two.
   const SHAPE = 'PREFIX ex: <http://example.org/>\nPREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\nex:Person { ex:name xsd:string }\n';
-  // No connection to read through: the shape is registered as the host already holds it.
+  // No connection to read through: the program lives at a public URL, so the shape beside it is a
+  // public GET, which the stubbed `fetch` answers.
   const host: Host = { connections: async () => ({}), credentials: async () => [] };
 
   const errors = async (text: string): Promise<string[]> => {
-    const program = await openProgram('forbidden.fossil', { host });
+    const program = await openProgram('https://prompt.test/forbidden.fossil', { host, text });
     try {
-      program.workspace.registerDocument('person.shex', SHAPE);
       program.registerIntrospection({
         descriptors: [
           {
-            uri: 'users.csv',
+            key: 'users.csv',
             columns: [
               { name: 'id', primitive: 'string' },
               { name: 'name', primitive: 'string' },
               { name: 'age', primitive: 'integer' },
             ],
-            freshness_token: '',
+            etag: '',
           },
         ],
         undescribed: [],
       });
-      return (await program.check(text)).filter((r) => r.severity === 1).map((r) => r.message);
+      return (await program.diagnostics()).filter((r) => r.severity === 1).map((r) => r.message);
     } finally {
       program.close();
     }
@@ -109,7 +110,26 @@ describe('every form the prompt calls gone is refused by the checker', () => {
   beforeAll(async () => {
     const wasm = fileURLToPath(new URL('../../wasm/pkg/fossil_wasm_bg.wasm', import.meta.url));
     await initFossilWasm(await readFile(wasm));
+    // The storage module boots itself by `fetch`ing its own `.wasm`, which Node cannot do for `file://`.
+    const storage = await readFile(fileURLToPath(new URL('../../storage/pkg/fossil_storage_wasm_bg.wasm', import.meta.url)));
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith('fossil_storage_wasm_bg.wasm')) return new Response(storage, { headers: { 'content-type': 'application/wasm' } });
+      // `object_store` reads a GET's `content-length`, `last-modified` and `etag`.
+      const response =
+        url === 'https://prompt.test/person.shex'
+          ? new Response(SHAPE, {
+              headers: {
+                'content-length': String(new TextEncoder().encode(SHAPE).length),
+                'last-modified': 'Tue, 29 Sep 2026 08:00:00 GMT',
+                etag: '"e"',
+              },
+            })
+          : new Response('', { status: 404 });
+      return Object.defineProperty(response, 'url', { value: url });
+    });
   });
+  afterAll(() => vi.unstubAllGlobals());
 
   it('control: the preamble alone, and with a well-formed mapping, checks clean', async () => {
     expect(await errors(CONTROL.split('People')[0]!)).toEqual([]);

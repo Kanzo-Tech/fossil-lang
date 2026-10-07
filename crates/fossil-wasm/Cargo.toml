@@ -48,12 +48,12 @@ smol_str = { workspace = true }
 # `Failure` is what every call here refuses with, and `js` the one function
 # that throws it as a `FossilError` — shared by the three wasm crates.
 fossil-graph-schema = { path = "../fossil-graph-schema", features = ["js"] }
-# `fossil_lineage::source_refs` is what the test-reachable `refs_native` core
-# calls to report a program's source bindings. WASM-clean: its own deps are
+# `fossil_lineage::inputs` is what the test-reachable `inputs_native` core
+# calls to report what a program reads. WASM-clean: its own deps are
 # fossil-hir + salsa + smol_str, all already inside the WASM gate, and it pulls
 # no native UDF crate.
 fossil-lineage = { path = "../fossil-lineage" }
-# The `check()` method converts byte-offset spans to UTF-16 LSP ranges via
+# The `diagnostics()` method converts byte-offset spans to UTF-16 LSP ranges via
 # `fossil_ide::LineIndex` (the rust-analyzer model). fossil-ide is inside the
 # WASM gate — wasm32-clean by construction. Wiring this dep lets `check()`
 # return the same range shape the native LSP publishes.

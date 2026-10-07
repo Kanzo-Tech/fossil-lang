@@ -2,7 +2,7 @@
 #
 # `csv_program_runs_through_the_in_memory_source_seam` and
 # `at_conn_source_alias_resolves_through_the_ref_map` need only `ex:Person`;
-# `program_sources_lists_each_distinct_source_with_its_format` also needs
+# `inputs_list_each_distinct_source_with_its_format` also needs
 # `ex:Order`, whose `placedBy` is a shape-ref (an edge).
 #
 # Every program there names it, and the test registers it under the key

@@ -1,7 +1,7 @@
 /**
  * Lexer token NAME, and semantic-token kind NAME, → `@lezer/highlight` tag.
  *
- * A token's name is `Token`, generated from the lexer's enum, so a key here that
+ * A token's name is `TokenKind`, generated from the lexer's enum, so a key here that
  * the lexer does not have fails the type-check.
  *
  * ## What is deliberately not coloured
@@ -11,11 +11,11 @@
  * is how they are painted over this table. Painting every identifier one colour
  * here would be a guess the overlay has to undo.
  */
-import type { Token } from '@fossil-lang/types';
+import type { TokenKind } from '@fossil-lang/types';
 import { tags, type Tag } from '@lezer/highlight';
 
 /** The map. A token it does not name is plain text. */
-export const TAG_BY_NAME: Readonly<Partial<Record<Token, Tag>>> = {
+export const TAG_BY_NAME: Readonly<Partial<Record<TokenKind, Tag>>> = {
   // Trivia. `Whitespace` and `Newline` are absent on purpose: the lexer keeps
   // them so the indent pass can see them, and a decoration over a space is a
   // range CodeMirror has to maintain for no visible result.

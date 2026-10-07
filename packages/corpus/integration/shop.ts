@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
-import { FossilExecutor, initFossilExecutor, type ExecutorResult } from '@fossil-lang/executor';
+import { initFossilExecutor, run, type CorpusFile } from '@fossil-lang/executor';
+import type { RunReport } from '@fossil-lang/types';
 
 const PROGRAM = new URL('../../../docs/programs/shop/', import.meta.url);
 
@@ -20,20 +21,18 @@ function sources(people: number): { users: string; orders: string } {
  * `docs/programs/shop/shop.fossil` run through `@fossil-lang/executor` — the only host that writes a
  * corpus — in this process, over `people` generated users. Answers what the run wrote.
  */
-export async function runShop(people: number): Promise<ExecutorResult> {
+export async function runShop(people: number): Promise<{ report: RunReport; files: CorpusFile[] }> {
   const wasm = createRequire(import.meta.url).resolve('@fossil-lang/executor/pkg/fossil_df_wasm_bg.wasm');
   await initFossilExecutor(readFileSync(wasm));
   const base = 'https://local.test/shop/';
-  const exec = new FossilExecutor(readFileSync(new URL('shop.fossil', PROGRAM), 'utf8'), `${base}shop.fossil`);
-  try {
-    for (const d of exec.missingDocuments()) {
-      exec.registerDocument(d.key, readFileSync(new URL(d.locator.slice(base.length), PROGRAM), 'utf8'));
-    }
-    const { users, orders } = sources(people);
-    const bytes: Record<string, Uint8Array> = {};
-    for (const s of exec.sources()) bytes[s.locator] = new TextEncoder().encode(s.locator.endsWith('users.csv') ? users : orders);
-    return await exec.runInMemory(bytes, 'memory://shop');
-  } finally {
-    exec.free();
-  }
+  const { users, orders } = sources(people);
+  const encode = (text: string) => new TextEncoder().encode(text);
+  return run(readFileSync(new URL('shop.fossil', PROGRAM), 'utf8'), {
+    files: {
+      [`${base}shop.shex`]: readFileSync(new URL('shop.shex', PROGRAM)),
+      [`${base}data/users.csv`]: encode(users),
+      [`${base}data/orders.csv`]: encode(orders),
+    },
+    path: `${base}shop.fossil`,
+  });
 }

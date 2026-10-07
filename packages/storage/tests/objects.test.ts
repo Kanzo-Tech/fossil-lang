@@ -2,9 +2,11 @@ import './boot.js';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { FossilError, isFossilError, type DocumentWorkspace, type MissingDocument, type Problem } from '@fossil-lang/types';
+import { FossilError, isFossilError, type Problem } from '@fossil-lang/types';
+import type { DocumentWorkspace, MissingDocument } from '@fossil-lang/types/internal';
 
-import { read, resolveDocuments } from '../src/index.js';
+import { resolveDocuments } from '../src/index.js';
+import { read } from '../src/objects.js';
 import { countingHost, s3 } from './fixtures.js';
 
 const LAKE = 's3://b/lake/';
@@ -40,8 +42,8 @@ describe('read', () => {
     const seen = fakeFetch({ '/b/lake/a.csv': 'a', '/b/lake/b.csv': 'b' });
     const { host, asks } = countingHost(() => [s3(LAKE, 'K')]);
     const out = await read(host, [
-      { locator: `${LAKE}a.csv`, connection: 'lake' },
-      { locator: `${LAKE}b.csv`, connection: 'lake' },
+      { location: `${LAKE}a.csv`, connection: 'lake' },
+      { location: `${LAKE}b.csv`, connection: 'lake' },
     ]);
     expect(out.map((r) => (r.ok ? new TextDecoder().decode(r.bytes) : r.problem.code))).toEqual(['a', 'b']);
     expect(asks).toEqual([{ scope: { connection: 'lake' }, access: 'read' }]);
@@ -53,9 +55,9 @@ describe('read', () => {
   it('reads a public URL as it is, and refuses a bare path with no connection', async () => {
     fakeFetch({ '/shapes/p.shex': 'shape' });
     const { host, asks } = countingHost(() => []);
-    const [pub, bare] = await read(host, [{ locator: 'https://x.test/shapes/p.shex' }, { locator: 'p.shex' }]);
+    const [pub, bare] = await read(host, [{ location: 'https://x.test/shapes/p.shex' }, { location: 'p.shex' }]);
     expect(pub).toEqual({ ok: true, bytes: new TextEncoder().encode('shape') });
-    expect(bare).toMatchObject({ ok: false, problem: { code: 'storage/no-route', data: { locator: 'p.shex' } } });
+    expect(bare).toMatchObject({ ok: false, problem: { code: 'storage/no-route', data: { location: 'p.shex' } } });
     expect(asks).toEqual([]);
   });
 
@@ -63,16 +65,16 @@ describe('read', () => {
     const seen = fakeFetch({});
     const { host } = countingHost(() => [s3(LAKE, 'K')]);
     const [missing, outside] = await read(host, [
-      { locator: `${LAKE}gone.csv`, connection: 'lake' },
-      { locator: 's3://b/other/x.csv', connection: 'lake' },
+      { location: `${LAKE}gone.csv`, connection: 'lake' },
+      { location: 's3://b/other/x.csv', connection: 'lake' },
     ]);
     expect(missing).toMatchObject({
       ok: false,
-      problem: { code: 'storage/unreachable', data: { locator: `${LAKE}gone.csv` }, cause: { name: expect.any(String) } },
+      problem: { code: 'storage/unreachable', data: { location: `${LAKE}gone.csv` }, cause: { name: expect.any(String) } },
     });
     expect(outside).toMatchObject({
       ok: false,
-      problem: { code: 'storage/outside-prefix', data: { locator: 's3://b/other/x.csv' } },
+      problem: { code: 'storage/outside-prefix', data: { location: 's3://b/other/x.csv' } },
     });
     expect(seen.map((r) => r.url)).toEqual(['http://localhost:9000/b/lake/gone.csv']);
   });
@@ -83,7 +85,7 @@ describe('a host that refuses in its own vocabulary', () => {
     throw thrown;
   }).host;
   const causeOf = async (thrown: unknown) => {
-    const [result] = await read(refusing(thrown), [{ locator: `${LAKE}a.csv`, connection: 'lake' }]);
+    const [result] = await read(refusing(thrown), [{ location: `${LAKE}a.csv`, connection: 'lake' }]);
     if (result!.ok) throw new Error('the read was refused, and answered bytes');
     return result!.problem;
   };
@@ -138,10 +140,10 @@ describe('resolveDocuments', () => {
     fakeFetch({ '/b/lake/a.shex': 'A', '/b/lake/b.shex': 'B' });
     const { host } = countingHost(() => [s3(LAKE, 'K')]);
     const ws = new Workspace({
-      '': [{ key: '@lake/a.shex', locator: `${LAKE}a.shex`, connection: 'lake' }],
+      '': [{ key: '@lake/a.shex', location: `${LAKE}a.shex`, connection: 'lake' }],
       '@lake/a.shex': [
-        { key: '@lake/b.shex', locator: `${LAKE}b.shex`, connection: 'lake' },
-        { key: '@lake/c.shex', locator: `${LAKE}c.shex`, connection: 'lake' },
+        { key: '@lake/b.shex', location: `${LAKE}b.shex`, connection: 'lake' },
+        { key: '@lake/c.shex', location: `${LAKE}c.shex`, connection: 'lake' },
       ],
     });
     const out = await resolveDocuments(ws, host);
@@ -149,9 +151,9 @@ describe('resolveDocuments', () => {
     expect(out.unread).toEqual([
       {
         key: '@lake/c.shex',
-        locator: `${LAKE}c.shex`,
+        location: `${LAKE}c.shex`,
         connection: 'lake',
-        problem: expect.objectContaining({ code: 'storage/unreachable', data: { locator: `${LAKE}c.shex` } }),
+        problem: expect.objectContaining({ code: 'storage/unreachable', data: { location: `${LAKE}c.shex` } }),
       },
     ]);
     expect(ws.registered.get('@lake/b.shex')).toBe('B');

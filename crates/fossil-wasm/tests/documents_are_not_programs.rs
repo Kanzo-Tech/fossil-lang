@@ -46,7 +46,7 @@
 // format-string argument.
 #![allow(clippy::literal_string_with_formatting_args)]
 
-use fossil_wasm::{CheckRow, FossilWorkspace};
+use fossil_wasm::{Diagnostic, FossilWorkspace};
 
 /// The program of `shape_document.rs`, naming its output document.
 const PROGRAM: &str = "\
@@ -85,16 +85,16 @@ const DEMANDS_INTEGER: &str = r#"{
 /// The descriptor the browser would have pushed after a `DESCRIBE`. Without it
 /// `users.name` has no type and the shape has nothing to disagree with.
 const USERS_DESCRIPTOR: &str = r#"{
-  "uri": "users.csv",
+  "key": "users.csv",
   "columns": [
     { "name": "id", "primitive": "string" },
     { "name": "name", "primitive": "string" }
   ],
-  "freshness_token": ""
+  "etag": ""
 }"#;
 
-fn rows_for(ws: &FossilWorkspace, uri: &str) -> Vec<CheckRow> {
-    ws.check_rows()
+fn rows_for(ws: &FossilWorkspace, uri: &str) -> Vec<Diagnostic> {
+    ws.diagnostic_rows()
         .into_iter()
         .filter(|r| r.uri == uri)
         .collect()

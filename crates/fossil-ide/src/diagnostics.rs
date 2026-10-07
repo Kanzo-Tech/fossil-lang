@@ -5,7 +5,7 @@
 //! places cost three defects in nine days:
 //!
 //! - `d.labels` was dropped on the floor by `fossil-lsp`'s `to_lsp_diagnostic`
-//!   and by `fossil-wasm`'s `to_check_row`, so a report whose whole content is a
+//!   and by `fossil-wasm`'s `to_diagnostic`, so a report whose whole content is a
 //!   RELATION between two places arrived as one squiggle with no second half.
 //!   Both were found separately and fixed separately.
 //! - The [`fossil_base::claimed`] guard — a `.shex` buffer is an INPUT and is not
@@ -162,7 +162,7 @@ pub fn lsp_diagnostic(
 }
 
 /// What a diagnostic says beside its code and its message: LSP's `data`, and
-/// the same fields on `fossil-wasm`'s `CheckRow`.
+/// the same fields on `fossil-wasm`'s `Diagnostic`.
 ///
 /// Serialized camelCase, every optional absent rather than `null`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]

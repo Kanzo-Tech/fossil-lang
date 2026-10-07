@@ -12,7 +12,7 @@ await open('https://data.example/graphs/people/', { engine });
 // https://data.example/graphs/people/fossil.json could not be read
 ```
 
-A host sees `data: { path }`, the full locator `open` asked the engine for — the location it was given
+A host sees `data: { path }`, the full location `open` asked the engine for — the location it was given
 with `fossil.json` appended, or, for a job, the name the mounted prefix gives that file. When the
 engine threw, its error is the `cause`; when the read returned no row there is none.
 

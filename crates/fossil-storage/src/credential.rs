@@ -83,7 +83,7 @@ pub enum StorageError {
     #[error("a vended prefix names a directory and ends in `/`: {0:?}")]
     Prefix(String),
     /// No kind of store fossil reads routes it: a vended prefix of another
-    /// scheme, or a locator no credential covers that is not public `http(s)`.
+    /// scheme, or a location no credential covers that is not public `http(s)`.
     #[error(
         "{0:?} has no route: fossil reads s3://bucket/… and \
          abfss://container@account.dfs.core.windows.net/… through a vended credential, and \
@@ -99,8 +99,8 @@ pub enum StorageError {
         what: &'static str,
         value: String,
     },
-    #[error("{locator} lies outside {prefix}, the prefix the credential was vended for")]
-    Outside { locator: String, prefix: String },
+    #[error("{location} lies outside {prefix}, the prefix the credential was vended for")]
+    Outside { location: String, prefix: String },
     /// The host's own rejection, kept whole.
     #[error("the host refused {scope}: {cause}")]
     HostRefused {
@@ -115,18 +115,18 @@ pub enum StorageError {
     NoCredential { scope: String, access: &'static str },
     /// A store answered with an error, kept whole.
     #[cfg(feature = "object-store")]
-    #[error("{locator}: {source}")]
+    #[error("{location}: {source}")]
     Io {
-        locator: String,
+        location: String,
         #[source]
         source: Box<object_store::Error>,
     },
     /// A multipart upload failed, and aborting it failed too: its parts stay
     /// in the bucket.
     #[cfg(feature = "object-store")]
-    #[error("{locator}: {source}, and the upload could not be aborted: {abort}")]
+    #[error("{location}: {source}, and the upload could not be aborted: {abort}")]
     Orphaned {
-        locator: String,
+        location: String,
         #[source]
         source: Box<object_store::Error>,
         abort: Box<object_store::Error>,
@@ -148,7 +148,7 @@ impl From<StorageError> for Failure {
                 "prefix".to_string(),
                 "names a directory and must end in `/`".to_string(),
             ),
-            StorageError::Store(locator) => Self::new(Problem::NoRoute { locator }),
+            StorageError::Store(location) => Self::new(Problem::NoRoute { location }),
             StorageError::Missing { prefix, key } => {
                 malformed(prefix, key, "is missing".to_string())
             }
@@ -158,8 +158,8 @@ impl From<StorageError> for Failure {
                 what,
                 value,
             } => malformed(prefix, key, format!("is not {what}: {value:?}")),
-            StorageError::Outside { locator, prefix } => {
-                Self::new(Problem::OutsidePrefix { locator, prefix })
+            StorageError::Outside { location, prefix } => {
+                Self::new(Problem::OutsidePrefix { location, prefix })
             }
             StorageError::HostRefused { scope, cause } => {
                 Self::new(Problem::HostRefused { scope }).caused_by(cause)
@@ -172,15 +172,15 @@ impl From<StorageError> for Failure {
                 access: access.to_string(),
             }),
             #[cfg(feature = "object-store")]
-            StorageError::Io { locator, source } => {
-                Self::new(Problem::Unreachable { locator }).caused_by(*source)
+            StorageError::Io { location, source } => {
+                Self::new(Problem::Unreachable { location }).caused_by(*source)
             }
             #[cfg(feature = "object-store")]
             StorageError::Orphaned {
-                locator,
+                location,
                 source,
                 abort,
-            } => Self::new(Problem::Unreachable { locator })
+            } => Self::new(Problem::Unreachable { location })
                 .caused_by(*source)
                 .with_help(format!(
                     "the upload could not be aborted either, so its parts stay in the bucket until a lifecycle rule removes them: {abort}"
@@ -385,9 +385,9 @@ pub struct GrantPlan {
     pub expires_at_ms: Option<u64>,
 }
 
-/// What SQL calls a locator under a credential.
+/// What SQL calls a location under a credential.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
-pub struct LocatorName {
+pub struct LocationName {
     /// The name a statement reads.
     pub name: String,
     /// The URL the engine lends `name` to; absent when the name is readable as
@@ -412,10 +412,10 @@ impl Grant {
     ///
     /// # Errors
     /// As [`Self::name`].
-    pub fn locator_name(&self, locator: &str) -> Result<LocatorName, StorageError> {
-        Ok(LocatorName {
-            name: self.name(locator)?,
-            lend: self.lend(locator)?,
+    pub fn location_name(&self, location: &str) -> Result<LocationName, StorageError> {
+        Ok(LocationName {
+            name: self.name(location)?,
+            lend: self.lend(location)?,
         })
     }
 
@@ -500,16 +500,16 @@ impl Grant {
             .then(|| format!("DROP SECRET IF EXISTS {}", self.secret_name(access)))
     }
 
-    /// What SQL calls `locator`: the locator itself where a secret covers it,
+    /// What SQL calls `location`: the location itself where a secret covers it,
     /// and a scheme-less name the engine lends where none can.
     ///
     /// # Errors
-    /// [`StorageError::Outside`] when `locator` is not under the prefix — a
+    /// [`StorageError::Outside`] when `location` is not under the prefix — a
     /// read that no secret covers would go out anonymously.
-    pub fn name(&self, locator: &str) -> Result<String, StorageError> {
-        let rest = self.within(locator)?;
+    pub fn name(&self, location: &str) -> Result<String, StorageError> {
+        let rest = self.within(location)?;
         Ok(match &self.store {
-            Store::S3(_) => locator.to_string(),
+            Store::S3(_) => location.to_string(),
             Store::Azure {
                 account,
                 container,
@@ -524,19 +524,19 @@ impl Grant {
     ///
     /// # Errors
     /// As [`Self::name`].
-    pub fn lend(&self, locator: &str) -> Result<Option<String>, StorageError> {
-        let rest = self.within(locator)?;
+    pub fn lend(&self, location: &str) -> Result<Option<String>, StorageError> {
+        let rest = self.within(location)?;
         Ok(match &self.store {
             Store::S3(_) => None,
             Store::Azure { .. } => Some(self.azure_url(rest)),
         })
     }
 
-    fn within<'l>(&self, locator: &'l str) -> Result<&'l str, StorageError> {
-        locator
+    fn within<'l>(&self, location: &'l str) -> Result<&'l str, StorageError> {
+        location
             .strip_prefix(&self.prefix)
             .ok_or_else(|| StorageError::Outside {
-                locator: locator.to_string(),
+                location: location.to_string(),
                 prefix: self.prefix.clone(),
             })
     }
@@ -671,13 +671,13 @@ mod tests {
         assert_eq!(grant.expires_at_ms(), Some(42));
         assert_eq!(grant.install_sql(Access::Read), None);
         assert_eq!(grant.uninstall_sql(Access::Read), None);
-        let locator = "abfss://lake@acct.dfs.core.windows.net/raw/a b.csv";
+        let location = "abfss://lake@acct.dfs.core.windows.net/raw/a b.csv";
         assert_eq!(
-            grant.name(locator).expect("name"),
+            grant.name(location).expect("name"),
             "azure/acct/lake/raw/a b.csv"
         );
         assert_eq!(
-            grant.lend(locator).expect("lend").as_deref(),
+            grant.lend(location).expect("lend").as_deref(),
             Some("https://acct.blob.core.windows.net/lake/raw/a%20b.csv?sv=2025&sr=d&sig=a%2Bb")
         );
     }

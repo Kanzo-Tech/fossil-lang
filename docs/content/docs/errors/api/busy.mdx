@@ -3,19 +3,19 @@ title: Another call is running
 description: "`api/busy` — a call reached a workspace or executor while another call on the same object was still running."
 ---
 
-A `FossilWorkspace` or a `FossilExecutor` handles one call at a time where a call changes it. A call
-that arrives while another is still inside the object — typically an async `run` not yet settled, or
-a callback that calls back in — is refused rather than run on top of it:
+The workspace under an open program and the executor under a `run` each handle one call at a time
+where a call changes it. A call that arrives while another is still inside the object — a callback
+that calls back in, typically — is refused rather than run on top of it:
 
 ```text
 `registerDocument` was called while another call is running
 ```
 
 A host sees `data: { call }`, the method that was refused, spelled as the binding names it
-(`update_file`, `setConnections`, `run`, …). From the workspace in `@fossil-lang/wasm` it carries the
+(`updateFile`, `setConnections`, `run`, …). From the workspace in `@fossil-lang/wasm` it carries the
 help *coalesce edits (an LSP client debounces `didChange` rather than sending one per keystroke) and
 retry — the workspace is still usable*. From the executor in `@fossil-lang/executor` it is raised by
-`setConnections` and `registerDocument` while a `run` or `runInMemory` holds the program.
+`setConnections` and `registerDocument` while a run holds the program.
 
 ## Why fossil refuses it
 
@@ -33,7 +33,6 @@ instead of changing the program under it.
 
 ## How to repair it
 
-- **Wait for the call in flight.** Await a `run` before registering documents or changing
-  connections; serialise calls on one object.
+- **Wait for the call in flight.** Serialise calls on one program.
 - **In an editor, coalesce edits** instead of sending one update per keystroke, and retry the refused
   call. Nothing needs to be rebuilt: the workspace is intact.

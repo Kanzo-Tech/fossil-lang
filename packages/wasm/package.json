@@ -1,7 +1,7 @@
 {
   "name": "@fossil-lang/wasm",
   "version": "0.0.0-development",
-  "description": "JS/TS wrapper around the fossil-wasm wasm-bindgen artifacts (--target web). Exposes initFossilWasm + tokenize + openProgram + FossilWorkspace class for downstream @fossil-lang/* packages.",
+  "description": "The fossil compiler front end in the browser, over the fossil-wasm wasm-bindgen artifacts (--target web): openProgram for an editor, inputs for what a program reads, formats and formatFor.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

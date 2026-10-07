@@ -49,26 +49,26 @@ Node that is a short script beside the three files:
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as module from 'node:module';
-import { initFossilExecutor, FossilExecutor } from '@fossil-lang/executor';
+import { initFossilExecutor, run } from '@fossil-lang/executor';
 
 const require = module.createRequire(import.meta.url);
+// Node only: its `fetch` cannot read the module beside the package, so it is handed the bytes.
 await initFossilExecutor(await fs.readFile(require.resolve('@fossil-lang/executor/pkg/fossil_df_wasm_bg.wasm')));
 
-// Where the program lives, as a URL: what it names relatively resolves beside it.
+// Where the program lives, as a URL: what it names relatively resolves beside it, and `files`
+// holds each document and source under the location it resolves to.
 const base = 'https://local.test/hello/';
-const exec = new FossilExecutor(await fs.readFile('hello.fossil', 'utf8'), `${base}hello.fossil`);
-for (const doc of exec.missingDocuments()) {
-  exec.registerDocument(doc.key, await fs.readFile(doc.locator.slice(base.length), 'utf8'));
-}
-const sources: Record<string, Uint8Array> = {};
-for (const source of exec.sources()) sources[source.uri] = await fs.readFile(source.uri.slice(base.length));
-
-const { files } = await exec.runInMemory(sources, 'memory://hello');
+const { files } = await run(await fs.readFile('hello.fossil', 'utf8'), {
+  files: {
+    [`${base}hello.shex`]: await fs.readFile('hello.shex'),
+    [`${base}data/people.csv`]: await fs.readFile('data/people.csv'),
+  },
+  path: `${base}hello.fossil`,
+});
 for (const file of files) {
   await fs.mkdir(path.join('out', path.dirname(file.path)), { recursive: true });
   await fs.writeFile(path.join('out', file.path), file.bytes);
 }
-exec.free();
 ```
 
 `packages/executor/tests/execute.test.ts` runs this script against `docs/programs/hello`. Under
@@ -76,7 +76,7 @@ exec.free();
 type — here `vertex/Person.parquet`, three `Person` rows in it, one per row of `people.csv`.
 
 A host that owns storage — a server, or a browser tab with credentials to a bucket — calls `run`
-instead, and the corpus is written straight into the prefix the host vends.
+with `{ host, job }` instead, and the corpus is written straight into the prefix the host vends.
 [What you produce](/docs/book/what-you-produce) and [the corpus format](/docs/format) say what the
 files hold.
 

@@ -7,10 +7,12 @@ import './boot.js';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { HOST_MS, isFossilError, type DocumentWorkspace, type Engine, type Host } from '@fossil-lang/types';
+import { HOST_MS, isFossilError, type Engine, type Host } from '@fossil-lang/types';
+import type { DocumentWorkspace } from '@fossil-lang/types/internal';
 
-import { mount, read, resolveDocuments } from '../src/index.js';
-import { RENEW_BEFORE_MS } from '@fossil-lang/types';
+import { mount, resolveDocuments } from '../src/index.js';
+import { read } from '../src/objects.js';
+import { RENEW_BEFORE_MS } from '@fossil-lang/types/internal';
 import { countingHost, recordingEngine, s3, table } from './fixtures.js';
 
 const JOB = 's3://keasy-dev/output/job-1/';
@@ -53,7 +55,7 @@ describe('a host that never answers', () => {
   });
 
   it('answers storage/host-silent for each target a read could not get a credential for — the Rust deadline', async () => {
-    const outcome = read(silentHost, [{ locator: `${JOB}a.csv`, connection: 'lake' }]);
+    const outcome = read(silentHost, [{ location: `${JOB}a.csv`, connection: 'lake' }]);
     await vi.advanceTimersByTimeAsync(HOST_MS);
     const [result] = await outcome;
     expect(result).toMatchObject({ ok: false, problem: { code: 'storage/host-silent', data: { after: HOST_MS } } });
@@ -73,7 +75,7 @@ describe('a store that never answers', () => {
   it('is storage/unreachable after 30 s on wasm32, where object_store applies no timeout', async () => {
     vi.stubGlobal('fetch', vi.fn(never));
     const { host } = countingHost(() => [s3(JOB, 'K')]);
-    const outcome = read(host, [{ locator: `${JOB}a.csv`, connection: 'lake' }]);
+    const outcome = read(host, [{ location: `${JOB}a.csv`, connection: 'lake' }]);
     await vi.advanceTimersByTimeAsync(30_000);
     const [result] = await outcome;
     expect(result).toMatchObject({ ok: false, problem: { code: 'storage/unreachable' } });
@@ -85,7 +87,7 @@ describe('a store that never answers', () => {
     );
     vi.stubGlobal('fetch', fetch);
     const { host } = countingHost(() => [s3(JOB, 'K')]);
-    const [result] = await read(host, [{ locator: `${JOB}a.csv`, connection: 'lake' }]);
+    const [result] = await read(host, [{ location: `${JOB}a.csv`, connection: 'lake' }]);
     expect(result).toMatchObject({ ok: false, problem: { code: 'storage/unreachable' } });
     expect(fetch).toHaveBeenCalledTimes(1);
   });
@@ -120,8 +122,8 @@ describe('a cleanup that fails', () => {
         if (sql.startsWith('CREATE')) throw refusal;
         throw dropFailed;
       },
-      lend: async () => {},
-      drop: async () => {},
+      registerFiles: async () => {},
+      dropFiles: async () => {},
     };
     const { host } = countingHost(() => [s3(JOB, 'A')]);
     const e = await mount(engine, host, { job: 'job-1' }, 'read').catch((x: unknown) => x);
@@ -141,8 +143,8 @@ describe('a cleanup that fails', () => {
         }
         return table('Success', []);
       },
-      lend: async () => {},
-      drop: async () => {},
+      registerFiles: async () => {},
+      dropFiles: async () => {},
     };
     const { host } = countingHost(() => [s3('s3://b/one/', 'A'), s3('s3://b/two/', 'B')]);
     const m = await mount(engine, host, { connection: 'lake' }, 'read');

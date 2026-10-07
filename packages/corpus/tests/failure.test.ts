@@ -35,8 +35,8 @@ function scripted(manifest: string, fails: (sql: string) => boolean = () => fals
       if (fails(text)) throw new Error(`refused: ${text.split(' ')[0]}`);
       return answer(text.includes('read_text') ? [manifest] : []);
     },
-    lend: async () => {},
-    async drop(names) {
+    registerFiles: async () => {},
+    async dropFiles(names) {
       dropped.push([...names]);
     },
   };
@@ -86,7 +86,7 @@ describe('open, when something fails', () => {
     const { engine } = scripted('not json');
     const failing: Engine = {
       ...engine,
-      drop: async () => {
+      dropFiles: async () => {
         throw new Error('drop failed');
       },
     };

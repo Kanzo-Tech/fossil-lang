@@ -10,7 +10,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
-import { initFossilExecutor, FossilExecutor } from '../src/index.js';
+import { initFossilExecutor, run } from '../src/index.js';
 
 // The header names are BARE and bound positionally by the `type { … }` line
 // against `graph.shex`; every property key is the last segment of a predicate
@@ -58,70 +58,39 @@ beforeAll(async () => {
   await initFossilExecutor(bytes);
 });
 
-/** `PROGRAM` compiled, with the one document it names registered. */
-function compiled(): FossilExecutor {
-  const exec = new FossilExecutor(PROGRAM);
-  for (const d of exec.missingDocuments()) exec.registerDocument(d.key, SHEX);
-  return exec;
+/** Where `PROGRAM` lives, so `graph.shex` resolves beside it. */
+const PATH = 'https://data.example.com/prog.fossil';
+
+/** The program's document and both its sources, by location. */
+async function files(): Promise<Record<string, Uint8Array>> {
+  return {
+    'https://data.example.com/graph.shex': new TextEncoder().encode(SHEX),
+    'https://data.example.com/users.csv': await fixture('users.csv'),
+    'https://data.example.com/orders.csv': await fixture('orders.csv'),
+  };
 }
 
-describe('FossilExecutor', () => {
-  it('reports the document the program names until it is registered', () => {
-    const exec = new FossilExecutor(PROGRAM);
-    try {
-      exec.setConnections({ vocab: 'https://shapes.example.com' });
-      expect(exec.missingDocuments()).toEqual([{ key: 'graph.shex', locator: 'graph.shex' }]);
-      exec.registerDocument('graph.shex', SHEX);
-      expect(exec.missingDocuments()).toEqual([]);
-    } finally {
-      exec.free();
-    }
+describe('run over files', () => {
+  it('refuses a document the files do not hold, by its key', async () => {
+    const { 'https://data.example.com/graph.shex': _, ...rest } = await files();
+    await expect(run(PROGRAM, { files: rest, path: PATH })).rejects.toThrow(
+      expect.objectContaining({ name: 'FossilError', code: 'document/unread', data: { documents: ['https://data.example.com/graph.shex'] } }),
+    );
   });
 
-  it('enumerates the program sources', () => {
-    const exec = compiled();
-    try {
-      const srcs = exec.sources();
-      expect(srcs.map((s) => s.locator).sort()).toEqual([
-        'https://data.example.com/orders.csv',
-        'https://data.example.com/users.csv',
-      ]);
-      expect(srcs.every((s) => s.format === 'csv')).toBe(true);
-    } finally {
-      exec.free();
-    }
-  });
-
-  it('refuses to run in memory over a source it does not hold', async () => {
-    const exec = compiled();
-    try {
-      await expect(
-        exec.runInMemory({ 'https://data.example.com/users.csv': await fixture('users.csv') }, 's3://jobs/run-1'),
-      ).rejects.toThrow(
-        expect.objectContaining({
-          name: 'FossilError',
-          code: 'source/not-found',
-          data: { locator: 'https://data.example.com/orders.csv' },
-        }),
-      );
-    } finally {
-      exec.free();
-    }
+  it('refuses a source the files do not hold', async () => {
+    const { 'https://data.example.com/orders.csv': _, ...rest } = await files();
+    await expect(run(PROGRAM, { files: rest, path: PATH })).rejects.toThrow(
+      expect.objectContaining({
+        name: 'FossilError',
+        code: 'source/not-found',
+        data: { location: 'https://data.example.com/orders.csv' },
+      }),
+    );
   });
 
   it('runs the full vertex+edge path in wasm and emits valid Parquet', async () => {
-    const sources = {
-      'https://data.example.com/users.csv': await fixture('users.csv'),
-      'https://data.example.com/orders.csv': await fixture('orders.csv'),
-    };
-
-    const exec = compiled();
-    let result;
-    try {
-      result = await exec.runInMemory(sources, 's3://jobs/run-1');
-    } finally {
-      exec.free();
-    }
+    const result = await run(PROGRAM, { files: await files(), path: PATH });
 
     // One Parquet per vertex type and per relation, and the manifest — and
     // nothing else. Nothing on the Rust side sees the wasm build's tree; this
@@ -160,32 +129,21 @@ describe('FossilExecutor', () => {
       expect(paths).toContain(t.path);
     }
 
-    expect(result.report.dest).toBe('s3://jobs/run-1/');
+    expect(result.report.location).toBe('memory://corpus/');
     // Every order names a real person, so nothing dangled — and `0` is stated.
     expect(result.report.dropped).toEqual([{ table: 'Order_placedBy_Person', dropped: 0 }]);
   });
 
   // The getting-started page's script, as a test: a program located at a URL names its data and
-  // its shape relative to itself, and the host reads each by the locator fossil resolved.
+  // its shape relative to itself, and the host reads each by the location fossil resolved.
   it('resolves the relative sources of a program located at a URL', async () => {
     const dir = new URL('../../../docs/programs/hello/', import.meta.url);
     const base = 'https://local.test/hello/';
-    const local = (locator: string) => new URL(locator.slice(base.length), dir);
-    const exec = new FossilExecutor(
-      await readFile(new URL('hello.fossil', dir), 'utf8'),
-      `${base}hello.fossil`,
-    );
-    let result;
-    try {
-      for (const d of exec.missingDocuments()) {
-        exec.registerDocument(d.key, await readFile(local(d.locator), 'utf8'));
-      }
-      const sources: Record<string, Uint8Array> = {};
-      for (const s of exec.sources()) sources[s.locator] = new Uint8Array(await readFile(local(s.locator)));
-      result = await exec.runInMemory(sources, 'memory://hello');
-    } finally {
-      exec.free();
-    }
+    const read = async (name: string) => new Uint8Array(await readFile(new URL(name, dir)));
+    const result = await run(await readFile(new URL('hello.fossil', dir), 'utf8'), {
+      files: { [`${base}hello.shex`]: await read('hello.shex'), [`${base}data/people.csv`]: await read('data/people.csv') },
+      path: `${base}hello.fossil`,
+    });
     expect(result.files.map((f) => f.path).sort()).toEqual(['fossil.json', 'vertex/Person.parquet']);
   });
 
@@ -195,7 +153,7 @@ describe('FossilExecutor', () => {
   // microtask and never settled. The Rust mirror is `execute_core.rs`
   // `a_union_of_two_mappings_runs_with_no_tokio_runtime`.
   it('runs a union of two mappings of one type to completion', async () => {
-    const exec = new FossilExecutor(
+    const result = await run(
       [
         'type { Person, Order } := io.shex("graph.shex")',
         '',
@@ -210,17 +168,14 @@ describe('FossilExecutor', () => {
         '    name = users.name',
         '',
       ].join('\n'),
+      {
+        files: {
+          'https://data.example.com/graph.shex': new TextEncoder().encode(SHEX),
+          'https://data.example.com/users.csv': await fixture('users.csv'),
+        },
+        path: PATH,
+      },
     );
-    let result;
-    try {
-      for (const d of exec.missingDocuments()) exec.registerDocument(d.key, SHEX);
-      result = await exec.runInMemory(
-        { 'https://data.example.com/users.csv': await fixture('users.csv') },
-        's3://jobs/union',
-      );
-    } finally {
-      exec.free();
-    }
     const manifest = JSON.parse(
       new TextDecoder().decode(result.files.find((f) => f.path === 'fossil.json')!.bytes),
     );

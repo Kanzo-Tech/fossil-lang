@@ -775,7 +775,7 @@ mod tests {
                 // Keyed by the URI the binding names, not by `u` —
                 // so the program below has to declare the binding for the
                 // completion to find anything.
-                uri: "u.csv".into(),
+                key: "u.csv".into(),
                 columns: vec![
                     InferredColumn {
                         name: "name".into(),
@@ -786,7 +786,7 @@ mod tests {
                         primitive: Primitive::Integer,
                     },
                 ],
-                freshness_token: String::new(),
+                etag: String::new(),
             });
         let src = "u := io.csv(\"u.csv\")\nUser : Person from u\n    name = u.\n";
         let f = file(&db, src);

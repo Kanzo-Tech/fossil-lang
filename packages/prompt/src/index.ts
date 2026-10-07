@@ -16,11 +16,8 @@
  * `catalogue.bnf`, the example is a conformance program, and the prose is pinned to
  * `grammar.bnf`. See `./surface.ts` for what holds each part.
  */
-import { LIBRARY, NAMES } from './catalogue.generated.js';
-import { EXAMPLE, FORBIDDEN, SURFACE, type ForbiddenForm } from './surface.js';
-
-export { EXAMPLE, FORBIDDEN, LIBRARY, NAMES };
-export type { ForbiddenForm };
+import { LIBRARY } from './catalogue.generated.js';
+import { FORBIDDEN, SURFACE } from './surface.js';
 
 /** The forbidden forms, as the prompt states them. */
 const FORBIDDEN_SECTION = [

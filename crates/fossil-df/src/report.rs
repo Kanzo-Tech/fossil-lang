@@ -1,7 +1,7 @@
 //! What a run tells its caller: the two facts the corpus cannot hold about
 //! itself.
 //!
-//! **The manifest is not here.** It is `<dest>/fossil.json`, written last, and
+//! **The manifest is not here.** It is `<location>fossil.json`, written last, and
 //! a host that wants to know what it just produced reads it — or opens the
 //! corpus, which reads it. The report used to carry the whole manifest a second
 //! time, and before that a `RunStatus` that restated seven of its nine fields
@@ -10,7 +10,7 @@
 //!
 //! What remains is what the bytes cannot say:
 //!
-//! [`RunReport::dest`] — the caller chose it, and a corpus does not know where
+//! [`RunReport::location`] — the caller chose it, and a corpus does not know where
 //! it is.
 //!
 //! [`RunReport::dropped`] — how many rows of each relation's input did not
@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct RunReport {
     /// The prefix the corpus was written under, `fossil.json` at its root.
-    pub dest: String,
+    pub location: String,
     /// One entry per relation, in the order `fossil.json` lists its edge
     /// tables.
     pub dropped: Vec<EdgeDrops>,

@@ -1,47 +1,93 @@
 /**
- * A run, end to end in the browser: read the documents the program names, run the mapping on
- * DataFusion-WASM, write the `fossil/1` corpus under the job.
+ * A run, end to end: read the documents the program names, run the mapping on DataFusion-WASM,
+ * write the `fossil/1` corpus. One door, and the destination is data — `object_store`'s `InMemory`
+ * beside a cloud store behind one trait:
  *
- * Every byte goes through `object_store` stores built from credentials the host vends — `read`
- * per connection the program names, `write` on the job. `DataFusion` reads a source through its
- * store by range requests, and the output is written through the job's, in parts when large.
+ * - `{ host, job }` reads every byte through `object_store` stores built from the credentials the
+ *   host vends — `read` per connection the program names, `write` on the job — and writes under
+ *   the job's prefix. `DataFusion` reads a source by range requests, not whole.
+ * - `{ files, path }` reads every document and source from `files`, by the location fossil
+ *   resolves it to, and answers the corpus as bytes: the run a host with no storage — Node, a
+ *   build script — makes.
  *
- * **Reporting the outcome is the host's.** A run answers its report or throws its `FossilError`;
- * what the host records about a job — and how long it keeps trying to — is its own lifecycle, and
- * keasy's runner is where it lives.
+ * **Reporting the outcome is the host's.** A run answers or throws its `FossilError`; what the host
+ * records about a job — and how long it keeps trying to — is its own lifecycle.
  */
+import { FossilExecutor } from '../pkg/fossil_df_wasm.js';
 import { resolveDocuments } from '@fossil-lang/storage';
-import {
-  FossilError,
-  isFossilError,
-  type Host,
-  type Related,
-  type RunReport,
-  type UnreadDocument,
-} from '@fossil-lang/types';
+import { FossilError, isFossilError, type Host, type RunReport } from '@fossil-lang/types';
+import { until, type MissingDocument, type Related, type UnreadDocument } from '@fossil-lang/types/internal';
 
-import { FossilExecutor } from './client.js';
+import { initFossilExecutor } from './load.js';
 
-/** Where a run reads and writes: the host that vends its credentials, and the job it writes for. */
-export interface RunOptions {
-  host: Host;
-  /** The job the output is written for — `{ job }` is the scope `write` is vended on. */
-  job: string;
-  /** Stops the run; it rejects with the signal's reason. */
-  signal?: AbortSignal;
+/** One file of the written corpus: a path relative to its root + its encoded bytes. */
+export interface CorpusFile {
+  /** `fossil.json`, `vertex/<Type>.parquet` or `edge/<Src>_<label>_<Dst>.parquet`. */
+  path: string;
+  bytes: Uint8Array;
 }
 
+/** Where a run reads and writes. */
+export type RunOptions = (
+  | {
+      /** The host that vends the credentials of every read and of the write. */
+      host: Host;
+      /** The job the output is written for — `{ job }` is the scope `write` is vended on. */
+      job: string;
+    }
+  | {
+      /** Every document and source the program reads, as bytes, by its location. */
+      files: Readonly<Record<string, Uint8Array>>;
+      /** Where the program lives — a URL such as `https://corpus.invalid/hello.fossil` — so the
+       *  relative documents and sources it names resolve beside it. */
+      path: string;
+    }
+) & {
+  /** Stops the run; it rejects with the signal's reason. */
+  signal?: AbortSignal;
+};
+
+/** Where an in-memory run writes; `RunReport.location` names it. */
+const MEMORY = 'memory://corpus/';
+
 /**
- * Run a fossil mapping in the browser and write its corpus under the job: the report — where it
- * wrote, what the edge joins dropped — or the `FossilError` that stopped it. A document or source
- * that could not be read is `document/unread`; a failure fossil did not raise — a panic — is
- * `internal/bug`, the original kept as its cause; a stopped run rejects with the signal's reason.
+ * Run a fossil mapping and write its corpus: the report — where it wrote, what the edge joins
+ * dropped — and, run over `files`, the corpus itself. Boots the executor module itself.
  *
- * `initFossilExecutor` must have resolved first.
+ * Rejects with a `FossilError`: `document/unread` for a document that could not be read;
+ * `run/over-budget` for a run that needed more than the executor's 2 GiB, decided while the graph
+ * executes, so nothing has been written; `internal/bug` for a failure fossil did not raise — a
+ * panic — the original kept as its cause. A stopped run rejects with the signal's reason, and
+ * since `fossil.json` is written last it leaves no corpus.
  */
-export async function run(program: string, { host, job, signal }: RunOptions): Promise<RunReport> {
+export function run(program: string, options: RunOptions & { host: Host }): Promise<RunReport>;
+export function run(
+  program: string,
+  options: RunOptions & { files: Readonly<Record<string, Uint8Array>> },
+): Promise<{ report: RunReport; files: CorpusFile[] }>;
+export async function run(
+  program: string,
+  options: RunOptions,
+): Promise<RunReport | { report: RunReport; files: CorpusFile[] }> {
+  const { signal } = options;
   try {
-    return await execute(program, host, job, signal);
+    await until(initFossilExecutor(), signal);
+    const exec = new FossilExecutor(program, 'files' in options ? options.path : undefined);
+    try {
+      if ('host' in options) {
+        const { unread } = await resolveDocuments(exec, options.host, { signal });
+        if (unread.length > 0) throw unreadable(unread);
+        return (await exec.run(options.host, options.job, signal)) as RunReport;
+      }
+      const unread = registerFrom(exec, options.files);
+      if (unread.length > 0) throw unreadable(unread);
+      return (await until(exec.runInMemory(options.files, MEMORY), signal)) as {
+        report: RunReport;
+        files: CorpusFile[];
+      };
+    } finally {
+      exec.free();
+    }
   } catch (e) {
     if (signal?.aborted && e === signal.reason) throw e;
     if (isFossilError(e)) throw e;
@@ -49,14 +95,24 @@ export async function run(program: string, { host, job, signal }: RunOptions): P
   }
 }
 
-async function execute(program: string, host: Host, job: string, signal: AbortSignal | undefined): Promise<RunReport> {
-  const exec = new FossilExecutor(program);
-  try {
-    const { unread } = await resolveDocuments(exec, host, { signal });
-    if (unread.length > 0) throw unreadable(unread);
-    return await exec.run(host, job, signal);
-  } finally {
-    exec.free();
+/** `resolveDocuments` over bytes in hand: every document the program names, read from `files`
+ *  until nothing new is missing, and the ones `files` does not hold. */
+function registerFrom(exec: FossilExecutor, files: Readonly<Record<string, Uint8Array>>): UnreadDocument[] {
+  const decoder = new TextDecoder();
+  const unread: UnreadDocument[] = [];
+  for (;;) {
+    const missing = (exec.missingDocuments() as MissingDocument[]).filter(
+      (d) => !unread.some((u) => u.key === d.key),
+    );
+    if (missing.length === 0) return unread;
+    for (const d of missing) {
+      const bytes = files[d.location];
+      if (bytes === undefined) {
+        unread.push({ ...d, problem: FossilError.of('source/not-found', { location: d.location }).problem });
+      } else {
+        exec.registerDocument(d.key, decoder.decode(bytes));
+      }
+    }
   }
 }
 
@@ -67,7 +123,6 @@ async function execute(program: string, host: Host, job: string, signal: AbortSi
  */
 function unreadable(unread: readonly UnreadDocument[]): FossilError<'document/unread'> {
   const documents = unread.map((d) => d.key);
-  const detail = `${documents.length} document(s) could not be read: ${documents.join(', ')}`;
   if (unread.length === 1) return FossilError.of('document/unread', { documents }, { cause: unread[0]!.problem });
   return FossilError.of('document/unread', { documents }, {
     cause: new AggregateError(

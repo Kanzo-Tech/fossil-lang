@@ -50,7 +50,7 @@ fn users_row(db: &dyn fossil_base::Db) -> Ty<'_> {
     crate::infer::record_from_inferred(
         db,
         &InferredDescriptor {
-            uri: "users.csv".into(),
+            key: "users.csv".into(),
             columns: vec![
                 InferredColumn {
                     name: "id".into(),
@@ -65,7 +65,7 @@ fn users_row(db: &dyn fossil_base::Db) -> Ty<'_> {
                     primitive: Primitive::Integer,
                 },
             ],
-            freshness_token: String::new(),
+            etag: String::new(),
         },
     )
 }

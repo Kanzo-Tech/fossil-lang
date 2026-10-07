@@ -1,7 +1,7 @@
 {
   "name": "@fossil-lang/types",
   "version": "0.0.0-development",
-  "description": "The host contract every @fossil-lang package touches storage through — Host, StorageCredential, Access, Scope — the Engine, the shared editor types, and FossilError: the one error every package throws, with the generated catalogue of codes.",
+  "description": "The host contract every @fossil-lang package touches storage through — Host, StorageCredential, Access, Scope — the Engine, the editor's wire rows, and FossilError: the one error every package throws, with the generated catalogue of codes. `./internal` is what the packages share among themselves, with no semver promise.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -19,6 +19,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./internal": {
+      "types": "./dist/internal.d.ts",
+      "import": "./dist/internal.js"
     }
   },
   "files": [

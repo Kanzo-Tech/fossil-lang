@@ -11,7 +11,7 @@
 use std::collections::HashMap;
 
 use fossil_hir::documents::MissingDocument;
-use fossil_lineage::ProgramSource;
+use fossil_lineage::{Input, Role};
 use fossil_wasm::FossilWorkspace;
 
 const PROGRAM: &str = "\
@@ -47,12 +47,12 @@ const DEMANDS_INTEGER: &str = r#"{
 }"#;
 
 const USERS_DESCRIPTOR: &str = r#"{
-  "uri": "@lake/users.csv",
+  "key": "@lake/users.csv",
   "columns": [
     { "name": "id", "primitive": "string" },
     { "name": "name", "primitive": "string" }
   ],
-  "freshness_token": ""
+  "etag": ""
 }"#;
 
 fn connections() -> HashMap<String, String> {
@@ -66,7 +66,7 @@ fn connections() -> HashMap<String, String> {
 }
 
 fn violates_contract(ws: &FossilWorkspace) -> bool {
-    ws.check_rows()
+    ws.diagnostic_rows()
         .iter()
         .any(|r| r.code == "type/property-mismatch" && r.detail.data["expected"] == "Integer")
 }
@@ -84,7 +84,7 @@ fn registering_what_is_missing_under_its_key_is_what_the_checker_reads() {
         missing,
         [MissingDocument {
             key: "@vocab/person.shex".to_string(),
-            locator: "https://minio.example/shapes/person.shex".to_string(),
+            location: "https://minio.example/shapes/person.shex".to_string(),
             connection: Some("vocab".to_string()),
         }]
     );
@@ -102,14 +102,14 @@ fn registering_what_is_missing_under_its_key_is_what_the_checker_reads() {
     );
 }
 
-/// The map reaches locators and never keys, so repointing a connection leaves
+/// The map reaches locations and never keys, so repointing a connection leaves
 /// a registered document registered.
 #[test]
-fn a_connection_map_moves_the_locator_and_not_the_key() {
+fn a_connection_map_moves_the_location_and_not_the_key() {
     let mut ws = FossilWorkspace::new();
     let program = ws.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
     let unmapped = ws.missing_documents_native(program).expect("open");
-    assert_eq!(unmapped[0].locator, "@vocab/person.shex");
+    assert_eq!(unmapped[0].location, "@vocab/person.shex");
 
     ws.set_connections_native(connections());
     let mapped = ws.missing_documents_native(program).expect("open");
@@ -144,28 +144,39 @@ fn opening_a_program_registers_no_document_and_an_open_buffer_is_not_missing() {
 }
 
 #[test]
-fn sources_are_keyed_as_written_and_located_through_the_map() {
+fn inputs_are_keyed_as_written_and_located_through_the_map() {
     let mut ws = FossilWorkspace::new();
     ws.set_connections_native(connections());
     let program = ws.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
+    let inputs = ws.inputs_native(program).expect("open handle");
     assert_eq!(
-        ws.sources_native(program).expect("open handle"),
-        [ProgramSource {
-            binding: "users".to_string(),
+        inputs
+            .iter()
+            .filter(|i| i.role == Role::Data)
+            .collect::<Vec<_>>(),
+        [&Input {
+            role: Role::Data,
+            binding: Some("users".to_string()),
             key: "@lake/users.csv".to_string(),
-            locator: "s3://lake/users.csv".to_string(),
+            location: "s3://lake/users.csv".to_string(),
             connection: Some("lake".to_string()),
-            format: "csv".to_string(),
+            format: Some("csv".to_string()),
             option: Some("|".to_string()),
         }]
     );
+    let schema: Vec<&str> = inputs
+        .iter()
+        .filter(|i| i.role == Role::Schema)
+        .map(|i| i.key.as_str())
+        .collect();
+    assert_eq!(schema, ["@vocab/person.shex"]);
 }
 
 #[test]
-fn an_unknown_handle_has_no_documents_and_no_sources() {
+fn an_unknown_handle_has_no_documents_and_no_inputs() {
     let mut ws = FossilWorkspace::new();
     let handle = ws.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
     ws.close_file_native(handle).expect("open");
     assert!(ws.missing_documents_native(handle).is_none());
-    assert!(ws.sources_native(handle).is_none());
+    assert!(ws.inputs_native(handle).is_none());
 }

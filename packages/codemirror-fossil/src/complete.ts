@@ -34,17 +34,10 @@ import {
 } from '@codemirror/autocomplete';
 import { EditorState, type Extension } from '@codemirror/state';
 
-import type { CompletionKind, CompletionRow } from '@fossil-lang/types';
+import type { CompletionItem, CompletionKind } from '@fossil-lang/types';
+import type { FossilProgram } from '@fossil-lang/wasm';
 
 import { positionOf } from './positions.js';
-
-/** What {@link fossilCompletion} calls. Takes the text for the same reason
- *  {@link CheckSource} does — see the note in `hover.ts`. */
-export type CompletionRowSource = (
-  text: string,
-  line: number,
-  character: number,
-) => readonly CompletionRow[] | Promise<readonly CompletionRow[]>;
 
 /**
  * LSP kind name → the vocabulary CodeMirror draws an icon for.
@@ -64,26 +57,25 @@ const CM_TYPE: Readonly<Record<CompletionKind, string>> = {
  *  CodeMirror filters on `label` and inserts it, so `label` is what the author
  *  types — the spelling, `"Person.id"` — and the column's own name is what the
  *  list shows. */
-export function toCompletion(row: CompletionRow): Completion {
+export function toCompletion(row: CompletionItem): Completion {
   const type = row.kind === undefined ? undefined : CM_TYPE[row.kind];
   return {
-    label: row.insert,
-    ...(row.insert === row.label ? {} : { displayLabel: row.label }),
+    label: row.insertText,
+    ...(row.insertText === row.label ? {} : { displayLabel: row.label }),
     ...(type === undefined ? {} : { type }),
     ...(row.detail === '' ? {} : { detail: row.detail }),
   };
 }
 
 /**
- * The completion source, for a host that already configures `autocompletion()`
- * and wants to place this itself.
+ * The completion source.
  *
  * `from` is the start of the word being typed, so CodeMirror replaces the
  * partial token rather than inserting beside it. `explicit` requests (Ctrl-Space
  * on empty space) are answered too — the compiler returns the whole catalogue
  * there, spelled in full, which is exactly what an explicit request is for.
  */
-export function fossilCompletionSource(source: CompletionRowSource) {
+export function fossilCompletionSource(program: Pick<FossilProgram, 'completion'>) {
   return async (context: CompletionContext): Promise<CompletionResult | null> => {
     // A member may be quoted (`KnowsRow."Person.i`), and the quoted part is
     // the word too: its dots are the name's, not receivers.
@@ -93,9 +85,9 @@ export function fossilCompletionSource(source: CompletionRowSource) {
     // catalogue, which is what an explicit request is for.
     if (!context.explicit && (word === null || word.from === word.to)) return null;
     const { line, character } = positionOf(context.state, context.pos);
-    let rows: readonly CompletionRow[];
+    let rows: readonly CompletionItem[];
     try {
-      rows = await source(context.state.doc.toString(), line, character);
+      rows = program.completion(line, character);
     } catch {
       // A refused completion shows as no list. The linter is where a refusal
       // becomes visible text; a popup that says "the workspace is busy" over
@@ -118,8 +110,8 @@ export function fossilCompletionSource(source: CompletionRowSource) {
  * The completion extension: the source, plus `autocompletion()` for a host that
  * has not installed it.
  */
-export function fossilCompletion(source: CompletionRowSource): Extension {
-  const completionSource = fossilCompletionSource(source);
+export function fossilCompletion(program: Pick<FossilProgram, 'completion'>): Extension {
+  const completionSource = fossilCompletionSource(program);
   return [
     EditorState.languageData.of(() => [{ autocomplete: completionSource }]),
     autocompletion(),

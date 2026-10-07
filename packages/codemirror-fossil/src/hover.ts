@@ -8,16 +8,6 @@
  * written to. Two ends of a program, in one tooltip, because
  * [both ends are types](/docs/design/types).
  *
- * ## Why the source takes the text
- *
- * The same reason {@link CheckSource} does. The wasm workspace answers about the
- * text of the last `updateFile`, and hover fires on mouse-move while the checker
- * is debounced — so a source that only took `(line, character)` would let a host
- * ask about text it had not pushed, and get a range one keystroke wrong. Passing
- * the text makes the push and the query one step. The host still decides whether
- * that push costs anything: comparing against what it last sent and skipping the
- * call makes the common case a string comparison.
- *
  * ## The Markdown
  *
  * `fossil_ide::hover`'s output uses exactly three constructs — a fenced
@@ -30,17 +20,10 @@
 import { EditorView, hoverTooltip, type Tooltip } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
 
-import type { HoverRow } from '@fossil-lang/types';
+import type { Hover } from '@fossil-lang/types';
+import type { FossilProgram } from '@fossil-lang/wasm';
 
 import { positionOf, rangeOf } from './positions.js';
-
-/** What {@link fossilHover} calls. Synchronous or not — the wasm surface is
- *  synchronous, a host driving a Worker is not, and both belong here. */
-export type HoverSource = (
-  text: string,
-  line: number,
-  character: number,
-) => HoverRow | null | Promise<HoverRow | null>;
 
 /** Options for {@link fossilHover}. */
 export interface HoverOptions {
@@ -127,14 +110,14 @@ const hoverBaseTheme = EditorView.baseTheme({
  * The tooltip is anchored to the range the compiler reported rather than to the
  * pointer, so hovering anywhere in `User.name` underlines all of `User.name`.
  */
-export function fossilHover(source: HoverSource, options: HoverOptions = {}): Extension {
+export function fossilHover(program: Pick<FossilProgram, 'hover'>, options: HoverOptions = {}): Extension {
   const render = options.render ?? renderMarkdown;
   return [hoverBaseTheme, hoverTooltip(
     async (view, pos): Promise<Tooltip | null> => {
       const { line, character } = positionOf(view.state, pos);
-      let row: HoverRow | null;
+      let row: Hover | null;
       try {
-        row = await source(view.state.doc.toString(), line, character);
+        row = program.hover(line, character);
       } catch {
         // A refused hover is not worth a tooltip saying so — unlike a refused
         // check, which is the linter's whole output and shows up as a

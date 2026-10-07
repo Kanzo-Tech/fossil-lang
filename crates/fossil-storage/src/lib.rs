@@ -34,7 +34,7 @@ mod js;
 mod store;
 
 pub use credential::{
-    Access, Grant, GrantPlan, LocatorName, StorageCredential, StorageError, covering,
+    Access, Grant, GrantPlan, LocationName, StorageCredential, StorageError, covering,
 };
 #[cfg(feature = "js")]
 pub use js::JsHost;

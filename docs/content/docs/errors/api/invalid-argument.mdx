@@ -24,9 +24,9 @@ that refusal is the `cause`. The places that raise it:
 | `open` (`@fossil-lang/corpus`) | `host` | exactly one of host and url |
 | `setConnections` (workspace and executor) | `connections` | an object of `{ name: baseUrl }` |
 | `registerInferredDescriptor` | `descriptorJson` | an InferredDescriptor as JSON |
-| `runInMemory` | `sources`, `dest` | an object of `{ [url]: Uint8Array }` keyed by URL; a URL |
+| `runInMemory` | `files`, `dest` | an object of `{ [url]: Uint8Array }` keyed by URL; a URL |
 | `storageGrant`, `storageName` | `credential`, `access` | a StorageCredential; `read` or `write` |
-| `storageRead` | `targets` | an array of `{ locator, connection? }` |
+| `storageRead` | `targets` | an array of `{ location, connection? }` |
 
 ## Why fossil refuses it
 

@@ -1,13 +1,13 @@
 /**
  * `referenceTo` (`@fossil-lang/types`) against the expansion it inverts: the Rust in
- * `fossil-locator`, reached through `FossilWorkspace.sources`. A reference written for a locator
- * must come back out of the compiler as that locator.
+ * `fossil-location`, reached through `inputs`. A reference written for a location
+ * must come back out of the compiler as that location.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { referenceTo } from '@fossil-lang/types';
-import { initFossilWasm, FossilWorkspace } from '../src/index.js';
+import { initFossilWasm, inputs } from '../src/index.js';
 
 beforeAll(async () => {
   await initFossilWasm(await readFile(fileURLToPath(new URL('../pkg/fossil_wasm_bg.wasm', import.meta.url))));
@@ -21,20 +21,14 @@ const CONNECTIONS = {
 };
 
 /** What the compiler reads each reference as, in order. */
-function locators(references: readonly string[]): string[] {
-  const ws = new FossilWorkspace();
-  try {
-    ws.setConnections(CONNECTIONS);
-    const program = references.map((r, i) => `s${i} := io.csv(${JSON.stringify(r)})`).join('\n');
-    const handle = ws.openFile('prog.fossil', `${program}\n`);
-    return ws.sources(handle).map((s) => s.locator);
-  } finally {
-    ws.free();
-  }
+async function locations(references: readonly string[]): Promise<string[]> {
+  const program = references.map((r, i) => `s${i} := io.csv(${JSON.stringify(r)})`).join('\n');
+  const host = { connections: async () => CONNECTIONS, credentials: async () => [] };
+  return (await inputs(`${program}\n`, { host })).map((s) => s.location);
 }
 
 describe('referenceTo, through the Rust expansion', () => {
-  it('writes a reference the compiler expands back into the locator', () => {
+  it('writes a reference the compiler expands back into the location', async () => {
     const wanted = [
       's3://lake/in/users.csv',
       's3://lake/in/2024/q1.csv',
@@ -45,6 +39,6 @@ describe('referenceTo, through the Rust expansion', () => {
     ];
     const references = wanted.map((l) => referenceTo(l, CONNECTIONS));
     expect(references.slice(0, 5).every((r) => r.startsWith('@'))).toBe(true);
-    expect(locators(references)).toEqual(wanted);
+    expect(await locations(references)).toEqual(wanted);
   });
 });

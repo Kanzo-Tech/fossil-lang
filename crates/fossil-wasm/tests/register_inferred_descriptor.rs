@@ -14,7 +14,7 @@ use fossil_wasm::FossilWorkspace;
 
 fn sample_descriptor_json(uri: &str) -> String {
     format!(
-        r#"{{"uri":"{uri}","columns":[{{"name":"id","primitive":"integer"}},{{"name":"name","primitive":"string"}}],"freshness_token":""}}"#
+        r#"{{"key":"{uri}","columns":[{{"name":"id","primitive":"integer"}},{{"name":"name","primitive":"string"}}],"etag":""}}"#
     )
 }
 
@@ -26,7 +26,7 @@ fn register_inferred_descriptor_parses_and_stores() {
     let got = ws
         .inferred_descriptor_native("users.csv")
         .expect("registered descriptor present");
-    assert_eq!(got.uri.as_str(), "users.csv");
+    assert_eq!(got.key.as_str(), "users.csv");
     assert_eq!(got.columns.len(), 2);
     assert_eq!(got.columns[0].name.as_str(), "id");
     assert_eq!(got.columns[0].primitive, Primitive::Integer);
@@ -39,14 +39,15 @@ fn register_inferred_descriptor_overwrites_on_duplicate_uri() {
     let mut ws = FossilWorkspace::new();
     ws.register_inferred_descriptor_native(&sample_descriptor_json("users.csv"))
         .expect("first ok");
-    let second = r#"{"uri":"users.csv","columns":[{"name":"id","primitive":"integer"}],"freshness_token":"h2"}"#;
+    let second =
+        r#"{"key":"users.csv","columns":[{"name":"id","primitive":"integer"}],"etag":"h2"}"#;
     ws.register_inferred_descriptor_native(second)
         .expect("second ok");
     let got = ws
         .inferred_descriptor_native("users.csv")
         .expect("present after re-register");
     assert_eq!(got.columns.len(), 1);
-    assert_eq!(got.freshness_token, "h2");
+    assert_eq!(got.etag, "h2");
 }
 
 #[test]
@@ -65,7 +66,7 @@ fn register_inferred_descriptor_rejects_malformed_json() {
 #[test]
 fn register_inferred_descriptor_rejects_missing_required_fields() {
     let mut ws = FossilWorkspace::new();
-    let result = ws.register_inferred_descriptor_native(r#"{"uri":"users.csv"}"#);
+    let result = ws.register_inferred_descriptor_native(r#"{"key":"users.csv"}"#);
     assert!(result.is_err(), "missing `columns` field should err");
 }
 
@@ -83,13 +84,13 @@ fn distinct_uris_register_independently() {
     ws.register_inferred_descriptor_native(&sample_descriptor_json("users.csv"))
         .expect("users ok");
     ws.register_inferred_descriptor_native(
-        r#"{"uri":"products.csv","columns":[{"name":"sku","primitive":"string"}],"freshness_token":""}"#,
+        r#"{"key":"products.csv","columns":[{"name":"sku","primitive":"string"}],"etag":""}"#,
     )
     .expect("products ok");
     assert!(ws.inferred_descriptor_native("users.csv").is_some());
     let products = ws
         .inferred_descriptor_native("products.csv")
         .expect("present");
-    assert_eq!(products.uri.as_str(), "products.csv");
+    assert_eq!(products.key.as_str(), "products.csv");
     assert_eq!(products.columns[0].name.as_str(), "sku");
 }

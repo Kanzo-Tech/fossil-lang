@@ -98,7 +98,7 @@ fn register_users(db: &dyn fossil_base::Db) {
         panic!("the host keeps no descriptor table");
     };
     cache.insert(InferredDescriptor {
-        uri: "users.csv".into(),
+        key: "users.csv".into(),
         columns: vec![
             InferredColumn {
                 name: "id".into(),
@@ -109,7 +109,7 @@ fn register_users(db: &dyn fossil_base::Db) {
                 primitive: Primitive::Integer,
             },
         ],
-        freshness_token: String::new(),
+        etag: String::new(),
     });
 }
 
@@ -180,8 +180,8 @@ User : Person from users
     // The host's half: the shape document is a Salsa input, so it has to be in
     // the database before any query goes looking for it. The `users` row came
     // in through the descriptor cache above — the input side has not moved.
-    fossil_hir::documents::register_missing_documents(&mut db, file, &|_, locator| {
-        std::fs::read_to_string(locator).ok()
+    fossil_hir::documents::register_missing_documents(&mut db, file, &|_, location| {
+        std::fs::read_to_string(location).ok()
     });
     (db, file)
 }

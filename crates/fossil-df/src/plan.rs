@@ -23,7 +23,7 @@ use datafusion::prelude::{DataFrame, SessionContext};
 use fossil_hir::BinOp;
 use fossil_mir::{AggFn, Expr, JoinKind, JoinSide, Op};
 
-use fossil_locator::SourceAnchor;
+use fossil_location::SourceAnchor;
 
 use crate::{read_source, render};
 
@@ -86,7 +86,7 @@ async fn build(
             binding,
             ..
         } => qualify(
-            read_source(ctx, &anchor.locator(uri), format, binding).await?,
+            read_source(ctx, &anchor.location(uri), format, binding).await?,
             binding,
         ),
         // `where(User.age >= 18)`: the predicate is a MIR expression like any

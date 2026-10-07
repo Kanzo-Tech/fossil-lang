@@ -28,7 +28,7 @@
 //! # Sans-IO
 //!
 //! [`missing_documents`] reports what is missing and reads nothing; the host
-//! fetches each [`MissingDocument::locator`] however it can — a disk, a signed
+//! fetches each [`MissingDocument::location`] however it can — a disk, a signed
 //! URL — and hands the text back through [`fossil_base::register_document`]
 //! under [`MissingDocument::key`]. A host that reads synchronously has
 //! [`register_missing_documents`], which is that loop and nothing else.
@@ -76,10 +76,10 @@ pub fn documents_named(db: &dyn Db, file: SourceFile) -> Vec<SmolStr> {
 }
 
 /// The key a document is registered and looked up under: the reference the
-/// program wrote, put through [`fossil_locator::SourceAnchor`] — the one
+/// program wrote, put through [`fossil_location::SourceAnchor`] — the one
 /// resolution rule.
 ///
-/// It is a KEY and not a locator. The LSP's file paths are `file://` URIs, so
+/// It is a KEY and not a location. The LSP's file paths are `file://` URIs, so
 /// the key for `prog.fossil`'s `person.shex` is `file:///…/person.shex` — a
 /// string no filesystem will open, and the right thing to key by anyway, since
 /// the editor's own `didOpen` for that document arrives under the same URI.
@@ -91,8 +91,8 @@ pub fn documents_named(db: &dyn Db, file: SourceFile) -> Vec<SmolStr> {
 /// that is the whole of what a hand-rolled `parent().join()` got wrong.
 #[must_use]
 pub fn registry_key(db: &dyn Db, file: SourceFile, document: &str) -> String {
-    let dir = fossil_locator::program_dir(file.path(db));
-    fossil_locator::SourceAnchor::beside(&dir).locator(document)
+    let dir = fossil_location::program_dir(file.path(db));
+    fossil_location::SourceAnchor::beside(&dir).location(document)
 }
 
 /// A document a program names that the database does not hold yet.
@@ -102,17 +102,17 @@ pub struct MissingDocument {
     /// connection map, so repointing a connection never invalidates a query.
     pub key: String,
     /// Where it is fetched from: the same reference through the connection map.
-    pub locator: String,
-    /// The connection the locator lies under, when it was written `@name/…`.
+    pub location: String,
+    /// The connection the location lies under, when it was written `@name/…`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub connection: Option<String>,
 }
 
 /// Every document `file` names that is not registered yet, with the key it
-/// goes under and the locator it is fetched from.
+/// goes under and the location it is fetched from.
 ///
-/// `connections` expands `@conn` aliases in the locator only. The program's
-/// directory comes from `file`, so the key and the locator cannot be anchored
+/// `connections` expands `@conn` aliases in the location only. The program's
+/// directory comes from `file`, so the key and the location cannot be anchored
 /// against two different places.
 #[allow(clippy::implicit_hasher)] // `SourceAnchor` takes the std map.
 #[must_use]
@@ -121,15 +121,15 @@ pub fn missing_documents(
     file: SourceFile,
     connections: &HashMap<String, String>,
 ) -> Vec<MissingDocument> {
-    let dir = fossil_locator::program_dir(file.path(db));
-    let anchor = fossil_locator::SourceAnchor::new(&dir, connections);
+    let dir = fossil_location::program_dir(file.path(db));
+    let anchor = fossil_location::SourceAnchor::new(&dir, connections);
     documents_named(db, file)
         .into_iter()
         .filter_map(|document| {
             let key = registry_key(db, file, &document);
             file_at(db, &key).is_none().then(|| MissingDocument {
                 key,
-                locator: anchor.locator(&document),
+                location: anchor.location(&document),
                 connection: anchor.connection(&document),
             })
         })
@@ -137,7 +137,7 @@ pub fn missing_documents(
 }
 
 /// [`missing_documents`] read synchronously and registered — the loop for a
-/// host with no connection map, so each locator is its key.
+/// host with no connection map, so each location is its key.
 ///
 /// `read` answers `None` for a document it cannot produce, and that document
 /// stays unregistered: the checker's diagnostic has the span, this loop does
@@ -153,7 +153,7 @@ pub fn register_missing_documents(
     // Read first, register second: registering takes the database exclusively.
     let pending: Vec<(String, String)> = missing_documents(&*db, file, &HashMap::new())
         .into_iter()
-        .filter_map(|missing| read(&*db, &missing.locator).map(|text| (missing.key, text)))
+        .filter_map(|missing| read(&*db, &missing.location).map(|text| (missing.key, text)))
         .collect();
     for (key, text) in &pending {
         register_document(db, key, text);
@@ -219,7 +219,7 @@ mod tests {
 
     /// **The case the hand-rolled key got wrong.** `parent().join()` produced
     /// `/programs/s3://bucket/person.shex`; a reference that already carries a
-    /// scheme is already a locator and is anchored to nothing.
+    /// scheme is already a location and is anchored to nothing.
     #[test]
     fn a_document_named_by_url_keys_by_the_url() {
         let db = new_db();
@@ -259,23 +259,23 @@ mod tests {
     }
 
     #[test]
-    fn without_a_connection_map_the_locator_is_the_key() {
+    fn without_a_connection_map_the_location_is_the_key() {
         let db = new_db();
         let file = program(&db, "a/prog.fossil", "shapes/person.shex");
         assert_eq!(
             missing_documents(&db, file, &HashMap::new()),
             [MissingDocument {
                 key: "a/shapes/person.shex".to_string(),
-                locator: "a/shapes/person.shex".to_string(),
+                location: "a/shapes/person.shex".to_string(),
                 connection: None,
             }]
         );
     }
 
-    /// The map reaches the locator and never the key: the key is what the
+    /// The map reaches the location and never the key: the key is what the
     /// program wrote, so repointing `warehouse` invalidates nothing.
     #[test]
-    fn a_connection_expands_the_locator_and_leaves_the_key_as_written() {
+    fn a_connection_expands_the_location_and_leaves_the_key_as_written() {
         let db = new_db();
         let file = program(&db, "a/prog.fossil", "@warehouse/shapes/person.shex");
         assert_eq!(
@@ -286,7 +286,7 @@ mod tests {
             ),
             [MissingDocument {
                 key: "@warehouse/shapes/person.shex".to_string(),
-                locator: "s3://bucket/base/shapes/person.shex".to_string(),
+                location: "s3://bucket/base/shapes/person.shex".to_string(),
                 connection: Some("warehouse".to_string()),
             }]
         );
@@ -297,7 +297,7 @@ mod tests {
         let db = new_db();
         let file = program(&db, "a/prog.fossil", "@warehouse/person.shex");
         let missing = missing_documents(&db, file, &connections(&[("lake", "s3://lake")]));
-        assert_eq!(missing[0].locator, "@warehouse/person.shex");
+        assert_eq!(missing[0].location, "@warehouse/person.shex");
         assert_eq!(missing[0].key, "@warehouse/person.shex");
     }
 
@@ -316,7 +316,7 @@ mod tests {
         let file = program(&db, "a/prog.fossil", "@warehouse/person.shex");
         let conns = connections(&[("warehouse", "https://w.example")]);
         for missing in missing_documents(&db, file, &conns) {
-            assert_eq!(missing.locator, "https://w.example/person.shex");
+            assert_eq!(missing.location, "https://w.example/person.shex");
             register_document(&mut db, &missing.key, PERSON_DOCUMENT);
         }
         assert!(resolves_target_shape(&db, file));

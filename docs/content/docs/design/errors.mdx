@@ -52,8 +52,8 @@ What else is lost on the way, each one a place where structure existed and was f
 
 **Compile diagnostics are the better half, and still have no identity.** `Diagnostic`
 (`crates/fossil-base/src/diagnostic.rs, Diagnostic`) is structured — severity, span and frame, labels,
-`help`, `suggestion_source`, `did_you_mean` — and reaches JavaScript as data, not as a throw: `check()`
-answers `CheckRow[]` (`crates/fossil-wasm/src/lib.rs, CheckRow`). But a `CheckRow` at `8d6114a3` was
+`help`, `suggestion_source`, `did_you_mean` — and reaches JavaScript as data, not as a throw:
+`diagnostics()` answers the wire's `Diagnostic[]` (`crates/fossil-wasm/src/lib.rs, Diagnostic`). But that row — `CheckRow` at `8d6114a3` — was
 `{ uri, range, severity, message, related }`: `help` was appended to `message` as a `\nhelp:` line,
 `did_you_mean` and `suggestion_source` were dropped, and there was no code.
 The `Diagnostic` that `packages/types/src/diagnostic.ts` declared had `code?` and `source?`, and nothing
@@ -216,7 +216,7 @@ interface Related { code; data; title; detail; severity; help?; span? }  // a pr
 type Problem = { [C in Code]: ProblemBase & { code: C; data: ProblemData[C] } }[Code];
 ```
 
-A compile diagnostic is the same problem plus where. `CheckRow` carries `code`, `title`, `data`
+A compile diagnostic is the same problem plus where. The wire's `Diagnostic` carries `code`, `title`, `data`
 (typed by `code`, as `Problem`'s is) and `help` beside where — `uri`, `range`, the labels as `related`
 — and the two structured repairs, `didYouMean` (a range and a replacement) and `suggestion` (fossil
 source). It keeps the LSP's spelling of the rest, because it is the LSP diagnostic `lsp_diagnostic`
@@ -428,10 +428,10 @@ Each step is one branch, one merge, and leaves every gate green; each names what
    `CompletePayload.error` is `problem`.
 4. **The error index.** Pages for the run, storage, corpus and API codes, the six fixture pages
    renamed, and the codes-to-pages suite. *Gate:* the docs build.
-5. **Compile diagnostics.** `Diagnostic.problem`; `CheckRow` and the LSP `Diagnostic` gain `code`,
+5. **Compile diagnostics.** `Diagnostic.problem`; the wire row and the LSP `Diagnostic` gain `code`,
    `title`, `data`, `help`, `didYouMean`, `suggestion`; the six blessed `diagnostic.txt` are re-blessed
    with the code; the eight Rust tests and two TypeScript tests that match message text assert the variant; the remaining
-   compile pages. *Breaking:* `CheckRow.message` no longer carries a `\nhelp:` line — `help` is its own
+   compile pages. *Breaking:* the row's `message` no longer carries a `\nhelp:` line — `help` is its own
    field.
 6. **keasy**, on its own branch after 3 and again after 5: the `Problem` view, the registry, the stored
    run problem, the five silent paths. *Gate:* keasy's own.

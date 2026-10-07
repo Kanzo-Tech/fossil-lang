@@ -49,8 +49,8 @@ fn object(fields: &[(&str, JsValue)]) -> Result<JsValue, Failure> {
 
 // The types the signatures below name, from the one place they are declared.
 #[wasm_bindgen(typescript_custom_section)]
-const WIRE_TYPES: &str =
-    "import type { Access, GrantPlan, LocatorName } from '@fossil-lang/types';";
+const WIRE_TYPES: &str = "import type { Access } from '@fossil-lang/types';\n\
+    import type { GrantPlan, LocationName } from '@fossil-lang/types/internal';";
 
 fn to_js(value: &impl serde::Serialize) -> Result<JsValue, Failure> {
     serde_wasm_bindgen::to_value(value).map_err(|e| bug("serialising an answer", e))
@@ -70,25 +70,25 @@ pub fn storage_grant(
     Ok(to_js(&grant.plan(access))?)
 }
 
-/// The [`fossil_storage::LocatorName`] of `locator` under the credential.
+/// The [`fossil_storage::LocationName`] of `location` under the credential.
 ///
 /// # Errors
-/// A `FossilError` — `storage/outside-prefix` when `locator` lies outside the
+/// A `FossilError` — `storage/outside-prefix` when `location` lies outside the
 /// credential's prefix.
-#[wasm_bindgen(js_name = storageName, unchecked_return_type = "LocatorName")]
-pub fn storage_name(credential: JsValue, locator: &str) -> Result<JsValue, JsValue> {
+#[wasm_bindgen(js_name = storageName, unchecked_return_type = "LocationName")]
+pub fn storage_name(credential: JsValue, location: &str) -> Result<JsValue, JsValue> {
     let named = grant(credential)?
-        .locator_name(locator)
+        .location_name(location)
         .map_err(Failure::from)?;
     Ok(to_js(&named)?)
 }
 
-/// The prefix, of `prefixes`, whose credential covers `locator` — the longest one
+/// The prefix, of `prefixes`, whose credential covers `location` — the longest one
 /// covering it, by [`fossil_storage::covering`]; `undefined` when none does.
 #[wasm_bindgen(js_name = storageCovering)]
 #[must_use]
-pub fn storage_covering(prefixes: Vec<String>, locator: &str) -> Option<String> {
-    fossil_storage::covering(prefixes, String::as_str, locator)
+pub fn storage_covering(prefixes: Vec<String>, location: &str) -> Option<String> {
+    fossil_storage::covering(prefixes, String::as_str, location)
 }
 
 /// `[{ ok: true, bytes } | { ok: false, problem }]` — each target's bytes, in
@@ -100,18 +100,18 @@ pub fn storage_covering(prefixes: Vec<String>, locator: &str) -> Option<String> 
 ///
 /// # Errors
 /// A `FossilError`, `api/invalid-argument`, when `targets` is not an array of
-/// `{ locator, connection? }`.
+/// `{ location, connection? }`.
 #[wasm_bindgen(js_name = storageRead)]
 pub async fn storage_read(host: JsValue, targets: JsValue) -> Result<JsValue, JsValue> {
     #[derive(serde::Deserialize)]
     struct Target {
-        locator: String,
+        location: String,
         connection: Option<String>,
     }
     let targets: Vec<Target> = serde_wasm_bindgen::from_value(targets).map_err(|e| {
         invalid_argument(
             "targets",
-            "an array of { locator, connection? }",
+            "an array of { location, connection? }",
             Some(e.into()),
         )
     })?;
@@ -120,7 +120,7 @@ pub async fn storage_read(host: JsValue, targets: JsValue) -> Result<JsValue, Js
     for target in &targets {
         refused.push(
             storage
-                .route(&target.locator, target.connection.as_deref())
+                .route(&target.location, target.connection.as_deref())
                 .await
                 .err()
                 .map(Failure::from),
@@ -130,7 +130,7 @@ pub async fn storage_read(host: JsValue, targets: JsValue) -> Result<JsValue, Js
     for (target, refused) in targets.iter().zip(refused) {
         let result = match refused {
             Some(failure) => Err(failure),
-            None => storage.get(&target.locator).await.map_err(Failure::from),
+            None => storage.get(&target.location).await.map_err(Failure::from),
         };
         out.push(&match result {
             Ok(bytes) => object(&[

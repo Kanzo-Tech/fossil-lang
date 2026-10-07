@@ -30,7 +30,7 @@ use std::collections::HashSet;
 
 use fossil_base::System;
 use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
-use fossil_lineage::ProgramSource;
+use fossil_lineage::Input;
 use smol_str::SmolStr;
 
 pub mod generated;
@@ -63,11 +63,11 @@ fn native_reader(format: &str) -> Option<fossil_base::NativeReader> {
 /// file restored with both its old `mtime` and its exact old length.
 ///
 /// Returns `""` for anything this host cannot `stat` — an `http(s)://` or
-/// `s3://` locator, or a path that does not exist. An empty token is never
+/// `s3://` location, or a path that does not exist. An empty token is never
 /// fresh ([`fossil_descriptors_input::DescriptorCache::is_fresh`]), so those are
 /// re-introspected on every compile. That is the honest answer for an object we
 /// would have to make a network round trip to interrogate.
-fn freshness_token(resolved: &str) -> String {
+fn etag(resolved: &str) -> String {
     let Ok(meta) = std::fs::metadata(resolved) else {
         return String::new();
     };
@@ -86,12 +86,12 @@ fn freshness_token(resolved: &str) -> String {
 }
 
 /// Register an [`InferredDescriptor`] on `system`'s cache for every native
-/// source in `sources`, BEFORE typecheck — keyed by [`ProgramSource::key`],
-/// what the program wrote, and read from [`ProgramSource::locator`]. One
+/// source in `sources`, BEFORE typecheck — keyed by [`Input::key`],
+/// what the program wrote, and read from [`Input::location`]. One
 /// `DESCRIBE` per key: two bindings over one file are one descriptor.
 ///
 /// A source whose cached descriptor still carries the current
-/// `freshness_token` is skipped — no `DESCRIBE`, no read. That is where the
+/// `etag` is skipped — no `DESCRIBE`, no read. That is where the
 /// cost is: programs are small and sources are not, so the introspection is
 /// the expensive half of a compile and it is the half that rarely needs doing
 /// twice.
@@ -103,11 +103,11 @@ fn freshness_token(resolved: &str) -> String {
 /// right now. `fossil-lsp`'s `main_loop` is one sequential loop over one
 /// channel, so a `didOpen` blocked on `s3://` is not one slow file — it is
 /// hover and completion dead in every other buffer for as long as the read
-/// takes. The discriminator is [`freshness_token`] and not a scheme test,
-/// because a locator this host cannot `stat` is exactly one whose freshness it
+/// takes. The discriminator is [`etag`] and not a scheme test,
+/// because a location this host cannot `stat` is exactly one whose freshness it
 /// cannot establish — which also covers a relative path that does not exist
 /// yet, and the half-typed one a keystroke produces on the way to it.
-pub fn pre_introspect_and_register(system: &dyn System, sources: &[ProgramSource]) {
+pub fn pre_introspect_and_register(system: &dyn System, sources: &[Input]) {
     let Some(cache) = system.descriptors() else {
         tracing::debug!("host keeps no descriptor cache; skipping pre-introspection");
         return;
@@ -119,10 +119,10 @@ pub fn pre_introspect_and_register(system: &dyn System, sources: &[ProgramSource
     let mut seen = HashSet::new();
 
     for source in sources {
-        let ProgramSource {
+        let Input {
             binding,
             key,
-            locator,
+            location,
             format,
             option,
             ..
@@ -130,21 +130,22 @@ pub fn pre_introspect_and_register(system: &dyn System, sources: &[ProgramSource
         // The constructor chooses the reader: a JSON array read as CSV
         // introspects to one column named `[`. A materialised row (`io.rdf`)
         // takes its schema from its shape and has nothing to DESCRIBE.
-        let Some(native) = native_reader(format) else {
+        let (Some(binding), Some(native)) = (binding, format.as_deref().and_then(native_reader))
+        else {
             continue;
         };
         if !seen.insert(key.as_str()) {
             continue;
         }
-        let token = freshness_token(locator);
-        // An empty token means this host could not `stat` the locator — a
+        let token = etag(location);
+        // An empty token means this host could not `stat` the location — a
         // scheme it does not own, or a path that is not there. It is checked
         // BEFORE `is_fresh`: an empty token is never fresh, so without this the
         // editor would open a connection and attempt the read on every single
         // keystroke.
         if token.is_empty() {
             tracing::debug!(
-                "`{locator}` is not a file this host can stat; not reading it from here"
+                "`{location}` is not a file this host can stat; not reading it from here"
             );
             continue;
         }
@@ -179,7 +180,7 @@ pub fn pre_introspect_and_register(system: &dyn System, sources: &[ProgramSource
             }
             _ => String::new(),
         };
-        let escaped_path = locator.replace('\'', "''");
+        let escaped_path = location.replace('\'', "''");
         let sql = format!("DESCRIBE SELECT * FROM {reader}('{escaped_path}'{args})");
         let mut stmt = match conn.prepare(&sql) {
             Ok(s) => s,
@@ -203,9 +204,9 @@ pub fn pre_introspect_and_register(system: &dyn System, sources: &[ProgramSource
             }
         };
         cache.insert(InferredDescriptor {
-            uri: SmolStr::from(key.as_str()),
+            key: SmolStr::from(key.as_str()),
             columns: cols,
-            freshness_token: token,
+            etag: token,
         });
         tracing::debug!("introspected `{key}` for source `{binding}`");
     }
@@ -220,20 +221,16 @@ mod tests {
     use std::path::Path;
     use std::sync::Arc;
 
-    /// What `fossil_lineage::program_sources` reports for `program` written at
+    /// What `fossil_lineage::inputs` reports for `program` written at
     /// `dir/prog.fossil` — the list every host introspects.
-    fn sources_of(
-        dir: &Path,
-        program: &str,
-        connections: &HashMap<String, String>,
-    ) -> Vec<ProgramSource> {
+    fn sources_of(dir: &Path, program: &str, connections: &HashMap<String, String>) -> Vec<Input> {
         let db = fossil_base::FossilDb::new(Arc::new(NativeSystem::default()));
         let file = fossil_base::SourceFile::new(
             &db,
             program.to_string(),
             dir.join("prog.fossil").to_string_lossy().into_owned(),
         );
-        fossil_lineage::program_sources(&db, file, connections)
+        fossil_lineage::inputs(&db, file, connections)
     }
 
     /// Every spelling `DuckDB` has for an instant maps to an instant.
@@ -393,7 +390,7 @@ mod tests {
     /// A source this host cannot `stat` is skipped — and, crucially, skipped
     /// AGAIN on the next call.
     ///
-    /// The second half is the one with teeth. An unreachable locator has an
+    /// The second half is the one with teeth. An unreachable location has an
     /// empty freshness token and an empty token is never fresh, so reading it
     /// would open a connection and attempt the read on every call — ruinous
     /// for an editor, where "every call" is every keystroke. `registrations()` cannot see it — a failed
@@ -476,9 +473,9 @@ mod tests {
     /// trusted. The assertion is on the token, since the DESCRIBE of an
     /// unreachable URL fails and registers nothing.
     #[test]
-    fn a_locator_that_cannot_be_stat_ed_yields_no_token() {
-        assert_eq!(freshness_token("https://example.org/users.csv"), "");
-        assert_eq!(freshness_token("/nonexistent/users.csv"), "");
+    fn a_location_that_cannot_be_stat_ed_yields_no_token() {
+        assert_eq!(etag("https://example.org/users.csv"), "");
+        assert_eq!(etag("/nonexistent/users.csv"), "");
     }
 
     #[test]
@@ -487,11 +484,11 @@ mod tests {
         let csv = dir.path().join("u.csv");
         std::fs::write(&csv, "id\n1\n").expect("write");
         let path = csv.to_string_lossy().into_owned();
-        let first = freshness_token(&path);
+        let first = etag(&path);
         assert!(!first.is_empty(), "a local file has a token");
-        assert_eq!(first, freshness_token(&path), "and it is stable");
+        assert_eq!(first, etag(&path), "and it is stable");
 
         std::fs::write(&csv, "id,name\n1,ada\n").expect("rewrite");
-        assert_ne!(first, freshness_token(&path));
+        assert_ne!(first, etag(&path));
     }
 }

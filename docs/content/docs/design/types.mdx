@@ -124,7 +124,7 @@ covariance of `Optional` and of `Seq`, and `Integer <: Float`, all in
   [the row algebra](/docs/design/algebra), above any shape and reachable by a program that names no
   shape at all. Typing the whole predicate as `Bool` is the general form, and is [not what to build
   first](/docs/design/discarded).
-- **Which freshness token the descriptor cache uses.** mtime and size from one `stat` today; a host
+- **Which `etag` the descriptor cache uses.** mtime and size from one `stat` today; a host
   with a strong `ETag` writes that instead, and one that cannot cheaply tell writes `""`, which
   reads as *never fresh*. A content hash is ruled out either way: it reads the whole source to
   decide whether to read the source.

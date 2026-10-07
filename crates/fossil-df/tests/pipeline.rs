@@ -31,8 +31,8 @@ use fossil_mir::{Expr, JoinKind, JoinSide, Op, ProjectedColumn, SinkRef, SourceF
 /// working directory. It is spelled out rather than defaulted because the whole
 /// point of `SourceAnchor` is that no caller resolves a path without saying
 /// what it is resolved against.
-fn anchor() -> fossil_locator::SourceAnchor<'static> {
-    fossil_locator::SourceAnchor::beside(std::path::Path::new(""))
+fn anchor() -> fossil_location::SourceAnchor<'static> {
+    fossil_location::SourceAnchor::beside(std::path::Path::new(""))
 }
 use smol_str::SmolStr;
 

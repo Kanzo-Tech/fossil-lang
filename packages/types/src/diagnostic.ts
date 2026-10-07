@@ -1,23 +1,25 @@
 /**
- * A compile diagnostic as the wasm workspace returns it — `CheckRowBase`, with `data` typed by
- * `code`. A problem, like `Problem`, and where it is.
+ * A compile diagnostic as the wasm workspace returns it — `DiagnosticBase`, with `data` typed by
+ * `code`. LSP's `Diagnostic`, and a problem like `Problem`: what went wrong, and where.
  */
 
 import type { Problem } from './error.js';
 import type { Code, ProblemData } from './problem.gen.js';
-import type { CheckRowBase } from './wire.gen.js';
+import type { DiagnosticBase } from './wire.gen.js';
+
+export type { DiagnosticBase };
 
 /** One diagnostic, discriminated by `code`: narrowing on the code narrows `data`. */
-export type CheckRow<C extends Code = Code> = {
-  [K in C]: Omit<CheckRowBase, 'code' | 'data'> & { code: K; data: ProblemData[K] };
+export type Diagnostic<C extends Code = Code> = {
+  [K in C]: Omit<DiagnosticBase, 'code' | 'data'> & { code: K; data: ProblemData[K] };
 }[C];
 
 /**
- * A problem that has no place in the text, as the row a host counts: on the first character of
- * `uri`. Every row built from a {@link Problem} rather than by the workspace is this one, so a
- * failed check and an unreadable document are drawn alike.
+ * A problem that has no place in the text, as the diagnostic a host counts: on the first character
+ * of `uri`. Every diagnostic built from a {@link Problem} rather than by the workspace is this one,
+ * so a failed check and an unreadable document are drawn alike.
  */
-export function rowOf(uri: string, problem: Problem, message: string = problem.detail): CheckRow {
+export function diagnosticOf(uri: string, problem: Problem, message: string = problem.detail): Diagnostic {
   return {
     uri,
     range: { start: { line: 0, character: 0 }, end: { line: 0, character: 1 } },
@@ -27,5 +29,5 @@ export function rowOf(uri: string, problem: Problem, message: string = problem.d
     title: problem.title,
     message,
     ...(problem.help === undefined ? {} : { help: problem.help }),
-  } as CheckRow;
+  } as Diagnostic;
 }

@@ -119,7 +119,7 @@ API changes.
 ```
 crates/
   fossil-base/             Salsa Db trait + System abstraction (thin Db, fat System)
-  fossil-locator/          the ONE rule turning a written reference into something a reader can
+  fossil-location/         the ONE rule turning a written reference into something a reader can
                            open — `@conn`, scheme, absolute, else the program's directory; never
                            the cwd. It was a module of `fossil-base` and is not one now: a
                            substrate «doesn't know about file paths». It depends on NOTHING and
@@ -157,15 +157,15 @@ crates/
                            --workspace` is the list, and `crates/xtask/tests/engine_reach.rs`
                            holds it against `deny.toml`. Native by that edge, without a
                            tripwire of its own. Which sources it
-                           DESCRIBEs is `fossil_lineage::program_sources` — the list the
-                           browser's `sources()` returns — so it links the compiler front-end,
+                           DESCRIBEs is `fossil_lineage::inputs` — the list the
+                           browser's `inputs()` returns — so it links the compiler front-end,
                            as every host does
   fossil-graph-schema/     the canonical graph-schema — the shared substrate contract — and the
                            error catalogue: `Problem`, `Failure`, and (feature `js`) the one
                            function every wasm crate throws a failure through
   fossil-ide/              hover, completion, goto-def + the symbol/prefix/workspace indexes
   fossil-lsp/              LSP server via lsp-server  [NATIVE-ONLY]
-  fossil-wasm/             WASM host shim (FossilWorkspace API + the tokenizer the editor reuses)
+  fossil-wasm/             WASM host shim (the workspace under `openProgram` + the tokenizer)
   fossil-df-wasm/          `fossil_df::Executor` exposed to JS — the only host that writes a
                            corpus, in the browser and in Node. There is no native CLI: it
                            was deleted on 2026-09-30 (`/docs/design/discarded` says what
@@ -195,7 +195,7 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            is not a graph: the thing that draws one is `@kanzo-tech/graph`, the
                            one view layer, in kanzo-ui
   executor/                the datafusion-wasm executor — the one writer of a corpus. A run
-                           answers `{ dest, dropped }`; what it wrote is `<dest>fossil.json`
+                           answers `{ location, dropped }`; what it wrote is `<location>fossil.json`
   types/                   Host — `connections()` + `credentials(scope, access)`, each handed
                            `{ signal }` — the one host contract, and StorageCredential (Iceberg
                            REST's, verbatim); the Engine. And two runtime halves: `FossilError`
@@ -209,17 +209,16 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   storage/                 how every package reaches storage from a vended credential, over
                            `fossil-storage-wasm`: `mount` (scoped DuckDB secret renewed at
                            expires−5min, refcounted per prefix; Azure lent file by file),
-                           `read` (an `object_store` GET), and `resolveDocuments`.
+                           and `resolveDocuments`.
                            No host ever signs a URL for fossil
   codemirror-fossil/       the fossil language layer for CodeMirror 6, and it is EXTENSIONS
-                           and not an editor. FIVE of them, not two: highlighting from
-                           `tokenize()`, squiggles from `check()` through
-                           `@codemirror/lint`, and hover / completion / goto-definition
-                           over the three position queries `FossilWorkspace` grew. The
-                           two that stay OUT are semantic tokens (only the native
-                           `fossil-lsp` serves them) and code actions (the two quick fixes hang
-                           off a structured diagnostic the `CheckRow` wire shape
-                           flattens); `src/index.ts` says so. A package of this name was deleted in
+                           and not an editor, behind ONE door: `fossil(program, options)`.
+                           A view plugin pushes the text through `program.update`, then
+                           highlighting from `tokenize()` + `semanticTokens()`, squiggles
+                           from `diagnostics()` through `@codemirror/lint`, and hover /
+                           completion / goto-definition over position-only queries. Code
+                           actions stay OUT (the two quick fixes hang off a structured
+                           diagnostic the `Diagnostic` wire shape flattens). A package of this name was deleted in
                            `873cbc0` and it is not restored — the old one hard-copied the
                            lexer's DISCRIMINANTS into a TS enum, which was wrong in nine
                            places by the time it went. This one keys on the NAMES the wasm

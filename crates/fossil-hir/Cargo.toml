@@ -19,7 +19,7 @@ workspace = true
 fossil-base = { path = "../fossil-base" }
 # The `@conn`/relative-path rule, which used to be a module of `fossil-base`.
 # It depends on nothing, so this edge costs a `std::path` join and no build time.
-fossil-locator = { path = "../fossil-locator" }
+fossil-location = { path = "../fossil-location" }
 fossil-syntax = { path = "../fossil-syntax" }
 # The checker consumes the input descriptor via this path dep.
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
