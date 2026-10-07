@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -92,19 +92,16 @@ describe('attach', () => {
   );
 
   it('lists the sources each table was derived from, as the manifest names them', async () => {
-    const [person, knows] = [MANIFEST.vertex_tables[0]!, MANIFEST.edge_tables[0]!];
-    const dir = manifestOnly('lineage', JSON.stringify({
-      ...MANIFEST,
-      vertex_tables: [{ ...person, derived_from: ['@lake/people.csv', 'tags.csv'] }],
-      edge_tables: [{ ...knows, source: { ...knows.source, references: person.name }, destination: { ...knows.destination, references: person.name } }],
-      property_tables: [],
-    }));
+    const dir = join(scratch, 'lineage');
+    cpSync(CORPUS, dir, { recursive: true });
+    const [person, ...others] = MANIFEST.vertex_tables;
+    const sources = ['@lake/people.csv', 'tags.csv'];
+    writeFileSync(join(dir, 'fossil.json'), JSON.stringify({ ...MANIFEST, vertex_tables: [{ ...person!, derived_from: sources }, ...others] }));
     const corpus = await attach('lineage', { engine, url: dir });
     const tables = await query(`SELECT table_name, derived_from FROM lineage.fossil_tables`);
-    expect(tables.map((r) => [r.table_name, Array.from(r.derived_from as Iterable<unknown>, String)])).toEqual([
-      [person.name, ['@lake/people.csv', 'tags.csv']],
-      [knows.name, []],
-    ]);
+    expect(tables.map((r) => [r.table_name, Array.from(r.derived_from as Iterable<unknown>, String)])).toEqual(
+      TABLES.map((t) => [t.name, t.name === person!.name ? sources : []]),
+    );
     await corpus.detach();
   });
 
