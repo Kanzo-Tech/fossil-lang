@@ -13,7 +13,7 @@ the host did not answer job 3 within 30000 ms
 
 A host sees `data: { scope, after }`: `scope` names the request as [`storage/host-refused`](/docs/errors/storage/host-refused)
 does — `job <id>`, `connection <name>` or `its connections` — and
-`after` is the deadline in milliseconds. It is thrown by `mount` (so `open(job, …)` and
+`after` is the deadline in milliseconds. It is thrown by `mount` (so `attach(job, …)` and
 introspection), by `resolveDocuments` and by `openProgram`'s `check`; a storage read and a run answer
 it from the Rust side, as each affected file's `problem` or as the run's failure.
 

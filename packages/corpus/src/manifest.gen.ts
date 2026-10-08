@@ -14,6 +14,12 @@ export type ColumnRole = 'address' | 'identity' | 'endpoint';
  */
 export interface EdgeTable {
   /**
+   * The sources the table's rows were derived from — PROV-O's `prov:wasDerivedFrom` — each as
+   * the program wrote it (`@conn/path`, or a path), never the location it resolved to. Sorted.
+   * Absent when there is none.
+   */
+  derived_from?: string[];
+  /**
    * The column holding the destination vertex's `dense_id`, and its table.
    */
   destination: Endpoint;
@@ -129,6 +135,12 @@ export interface Property {
  */
 export interface PropertyTable {
   /**
+   * The sources the table's rows were derived from — PROV-O's `prov:wasDerivedFrom` — each as
+   * the program wrote it (`@conn/path`, or a path), never the location it resolved to. Sorted.
+   * Absent when there is none.
+   */
+  derived_from?: string[];
+  /**
    * `<Type>_<property>`.
    */
   name: string;
@@ -155,6 +167,12 @@ export interface PropertyTable {
  * One vertex type's table.
  */
 export interface VertexTable {
+  /**
+   * The sources the table's rows were derived from — PROV-O's `prov:wasDerivedFrom` — each as
+   * the program wrote it (`@conn/path`, or a path), never the location it resolved to. Sorted.
+   * Absent when there is none.
+   */
+  derived_from?: string[];
   /**
    * The identity column: `subject`, unique within the table.
    */

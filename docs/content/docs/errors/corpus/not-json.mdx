@@ -3,7 +3,7 @@ title: The manifest is not JSON
 description: "`corpus/not-json` — the file at the corpus's `fossil.json` was read, and its text does not parse as JSON."
 ---
 
-`open` read `fossil.json` and handed its text to `JSON.parse`, which refused it. One way to get here
+`attach` read `fossil.json` and handed its text to `JSON.parse`, which refused it. One way to get here
 is a directory written by an older writer, whose index was YAML:
 
 ```text
@@ -16,7 +16,7 @@ https://data.example/graphs/people/fossil.json is not JSON
 ```
 
 A host sees `data: { path }`, the locator that was read, and the parser's `SyntaxError` as `cause`.
-It is thrown by `parseManifest` in `@fossil-lang/corpus`, which `open` calls once, before any view is
+It is thrown by `parseManifest` in `@fossil-lang/corpus`, which `attach` calls once, before any view is
 created.
 
 ## Why fossil refuses it

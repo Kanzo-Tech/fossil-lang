@@ -53,6 +53,14 @@ async fn same_type_from_two_sources_merges_into_one_table() {
     );
     let person = &graph.vertices[0];
     assert_eq!(person.label, "Person");
+    assert_eq!(
+        person.derived_from,
+        [
+            "tests/fixtures/people_extra.csv",
+            "tests/fixtures/users.csv"
+        ],
+        "a merged table is derived from every mapping's source"
+    );
 
     // 5 distinct subjects (person/3 deduped across the two sources), dense 0..4.
     let total: usize = person

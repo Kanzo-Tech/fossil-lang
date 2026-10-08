@@ -2,7 +2,7 @@
  * A corpus large enough to have several row groups per table, written by the guards' own fixture
  * with the `duckdb` binary and read back through `src/` on DuckDB-WASM:
  *
- * 1. **`open`, then SQL**: every table `fossil_tables` lists reads back as many rows as it says.
+ * 1. **`attach`, then SQL**: every table `fossil_tables` lists reads back as many rows as it says.
  * 2. **A `dense_id` range prunes.** DuckDB-WASM's own file statistics say which bytes of the file
  *    were read, and a range of ids reads the row groups whose footer statistics overlap it and no
  *    others — fewer than the file has. Nothing in `src/` computes that set: the view is
@@ -19,7 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { query as duck } from '../guards/duck.mjs';
 import { ROW_GROUP_ROWS, write } from '../guards/fixture.mjs';
-import { open, type Close } from '../src/index.js';
+import { attach, type Attachment } from '../src/index.js';
 import type { Manifest } from '../src/manifest.js';
 import { duckdb } from '../tests/engine.js';
 
@@ -30,23 +30,23 @@ const scratch = mkdtempSync(join(tmpdir(), 'fossil-integration-'));
 const dir = join(scratch, 'corpus');
 let db: DuckDBBindings;
 let engine: Engine;
-let close: Close | undefined;
+let corpus: Attachment | undefined;
 let rows: (sql: string) => Promise<Record<string, unknown>[]>;
 
 beforeAll(async () => {
   write(dir, { count: PEOPLE });
   ({ db, engine, query: rows } = await duckdb(join(scratch, 'spill')));
-  close = await open('big', { engine, url: dir });
+  corpus = await attach('big', { engine, url: dir });
 }, 300_000);
 
 afterAll(async () => {
-  await close?.();
+  await corpus?.detach();
   rmSync(scratch, { recursive: true, force: true });
 });
 
-describe('open, then SQL', () => {
-  it('reads every table back at its rows', async () => {
-    const tables = await rows('SELECT table_name AS t, rows::BIGINT AS n FROM big.fossil_tables');
+describe('attach, then SQL', () => {
+  it('reads every table back at its record_count', async () => {
+    const tables = await rows('SELECT table_name AS t, record_count::BIGINT AS n FROM big.fossil_tables');
     const manifest = JSON.parse(readFileSync(join(dir, 'fossil.json'), 'utf8')) as Manifest;
     expect(tables.map((r) => r.t)).toEqual(
       [...manifest.vertex_tables, ...manifest.edge_tables, ...(manifest.property_tables ?? [])].map((t) => t.name),

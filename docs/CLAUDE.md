@@ -40,8 +40,8 @@ holds of a corpus or it does not, and what says which is `packages/corpus/guards
 adverb. Where something is genuinely undecided, write it as a **design question** naming what would
 settle it — which is not the same as a gap.
 
-Numbers there come from measuring, not from memory. The door is `open`, which answers the function
-that closes it, and every read after it is the host's SQL; `fossil-http` has never existed. When a number
+Numbers there come from measuring, not from memory. The door is `attach`, which answers the attachment
+that detaches it, and every read after it is the host's SQL; `fossil-http` has never existed. When a number
 and a document disagree, read the code — this repository has now cashed that lesson roughly a dozen
 times in one sitting.
 

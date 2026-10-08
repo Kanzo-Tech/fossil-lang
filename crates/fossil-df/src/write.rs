@@ -172,13 +172,13 @@ pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Writt
             key: PAYLOAD_ADDRESS.to_string(),
             identity: PAYLOAD_IDENTITY.to_string(),
             record_count: rows(batches),
+            derived_from: vertex.map(|v| v.derived_from.clone()).unwrap_or_default(),
             properties,
         });
 
         for property in multi(node) {
-            let batches = vertex
-                .and_then(|v| v.properties.iter().find(|p| p.name == property))
-                .map_or(empty.as_slice(), |p| p.batches.as_slice());
+            let values = vertex.and_then(|v| v.properties.iter().find(|p| p.name == property));
+            let batches = values.map_or(empty.as_slice(), |p| p.batches.as_slice());
             let name = property_table_name(&node.label, &property);
             let path = property_path(&name);
             let (bytes, value) = property_parquet(node, &property, batches)?;
@@ -191,6 +191,7 @@ pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Writt
                     references: node.label.clone(),
                 },
                 record_count: rows(batches),
+                derived_from: values.map(|p| p.derived_from.clone()).unwrap_or_default(),
                 properties: PROPERTY_COLUMNS
                     .iter()
                     .map(fixed)
@@ -232,6 +233,7 @@ pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Writt
                 references: edge.destination.clone(),
             },
             record_count: rows(batches),
+            derived_from: table.map(|t| t.derived_from.clone()).unwrap_or_default(),
             properties: EDGE_COLUMNS.iter().map(fixed).collect(),
         });
         dropped.push(EdgeDrops {

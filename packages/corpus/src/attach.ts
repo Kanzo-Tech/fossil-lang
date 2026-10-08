@@ -1,5 +1,6 @@
 /**
- * The door: a corpus attached to the host's engine under a name, and the function that detaches it.
+ * The door: a corpus attached to the host's engine under a name — DuckDB's `ATTACH … AS name` — and
+ * the handle that detaches it.
  */
 
 import { mount } from '@fossil-lang/storage';
@@ -10,7 +11,7 @@ import { parseManifest, tablesIn } from './manifest.js';
 import { ident, lit, query } from './sql.js';
 import { triplesOf } from './triples.js';
 
-/** The file every open reads first. */
+/** The file every attach reads first. */
 const ENTRY_POINT = 'fossil.json';
 
 /**
@@ -23,58 +24,74 @@ const CATALOG_VIEWS: Readonly<Record<string, (manifest: Manifest, relation: (tab
   triples: triplesOf,
 };
 
-/** What {@link open} takes: the engine, and where the corpus is — a job under its host, or a URL. */
-export interface OpenOptions {
+/** What {@link attach} takes: the engine, and where the corpus is — a job under its host, or a URL. */
+export interface AttachOptions {
   /**
    * The page's engine — `@fossil-lang/types`' `Engine`, DuckDB-WASM in a browser. `fossil.json` is
    * read through it and the views are created in it; every later read is the host's own SQL.
    */
   engine: Engine;
   /**
-   * What vends the job's credential. With it, the name {@link open} is given is the job: the corpus
+   * What vends the job's credential. With it, the name {@link attach} is given is the job: the corpus
    * is the one prefix the host vends `read` on for `{ job }`, kept fresh by `@fossil-lang/storage`
-   * until the corpus is closed.
+   * until the corpus is detached.
    */
   host?: Host;
   /** A corpus at a URL, for a caller with no host — public, or the local filesystem in Node. */
   url?: string;
   /**
-   * Stops the open: it rejects with the signal's reason, and what it had made — a mount, a catalog —
-   * is given back. It reaches the host's credential request and every statement the open runs.
+   * Stops the attach: it rejects with the signal's reason, and what it had made — a mount, a catalog —
+   * is given back. It reaches the host's credential request and every statement the attach runs.
    */
   signal?: AbortSignal;
 }
 
-/** Gives back what {@link open} took: the catalog, once no other open of the name holds it, and the credential. */
-export type Close = () => Promise<void>;
+/**
+ * A corpus attached by {@link attach}: the catalog it is attached as, and how to give it back —
+ * `detach()`, or `await using`, which calls it.
+ */
+export interface Attachment {
+  /** The catalog: `"<name>".fossil_tables`. */
+  readonly name: string;
+  /**
+   * Gives back what {@link attach} took: the catalog, once no other attachment of the name holds it,
+   * and the credential. A second call does nothing.
+   */
+  detach(): Promise<void>;
+  /** {@link Attachment.detach}, for `await using`. */
+  [Symbol.asyncDispose](): Promise<void>;
+}
 
 /**
- * How many open corpora hold each catalog, per engine: two opens of one name share its views, and
- * the first to close must not take them from the second.
+ * How many attachments hold each catalog, per engine: two attaches of one name share its views, and
+ * the first to detach must not take them from the second.
  */
 const holders = new WeakMap<object, Map<string, number>>();
 
 /**
  * **Attach a corpus to the engine as the catalog `name`**: a view per table — `"<name>"."Person"` —
  * the manifest as two relations, `"<name>".fossil_tables` and `"<name>".fossil_columns`, and the
- * corpus as RDF, `"<name>".triples`. Read it with SQL — Mosaic's, the host's — and call what comes
- * back to detach it.
+ * corpus as RDF, `"<name>".triples`. Read it with SQL — Mosaic's, the host's — and detach what comes
+ * back.
  *
  * ```ts
- * const close = await open(job, { engine, host });          // a job's corpus, under its credential
- * const close = await open('demo', { engine, url });        // a corpus at a URL
+ * await using corpus = await attach(job, { engine, host });   // a job's corpus, under its credential
+ * const corpus = await attach('demo', { engine, url });       // a corpus at a URL
+ * await corpus.detach();
  * ```
  *
- * `fossil_tables(table_name, kind, iri, path, rows, first_id, source, destination)` — one row per
- * table, in manifest order; `kind` is `vertex`, `edge` or `property`; `path` is its file under the
- * corpus root; a vertex table's `dense_id`s are `first_id … first_id + rows − 1`; an edge table's
- * `source`/`destination` name the vertex tables its `src`/`dst` point into, and a property table's
- * `source` the one its `src` does — a row per value of a multi-valued property, whose IRI is its
- * value column's. `fossil_columns(table_name, column_name, ordinal, type, role, iri,
- * nullable)` — one row per column, `role` the writer's (`address`, `identity`, `endpoint`) and null
- * on a program's column. `triples(s_k, s_v, p, o_k, o_v, o_d, o_l)` — one row per RDF triple, each
- * term as its kind (`I` or `L`), its IRI or lexical form, its datatype and language
- * (`/docs/format/reading/rdf`): what a SHACL engine validates.
+ * `fossil_tables(table_name, kind, iri, path, record_count, first_id, source, destination,
+ * derived_from)` — one row per table, in manifest order; `kind` is `vertex`, `edge` or `property`;
+ * `path` is its file under the corpus root; a vertex table's `dense_id`s are `first_id … first_id +
+ * record_count − 1`; an edge table's `source`/`destination` name the vertex tables its `src`/`dst`
+ * point into, and a property table's `source` the one its `src` does — a row per value of a
+ * multi-valued property, whose IRI is its value column's; `derived_from` is the sources the table was
+ * derived from, each as the program wrote it. `fossil_columns(table_name, column_name,
+ * ordinal_position, data_type, role, iri, is_nullable)` — one row per column, `role` the writer's
+ * (`address`, `identity`, `endpoint`) and null on a program's column. `triples(s_type, s_value, p,
+ * o_type, o_value, o_datatype, o_lang)` — one row per RDF triple, each term as its type (`I` or `L`),
+ * its IRI or lexical form, its datatype and language (`/docs/format/reading/rdf`): what a SHACL
+ * engine validates.
  *
  * @throws {FossilError} before any Parquet is read: `corpus/unreadable` when `fossil.json` does not
  *   read, `corpus/not-json`, `corpus/unsupported-format` for a format other than `fossil/1`,
@@ -84,20 +101,20 @@ const holders = new WeakMap<object, Map<string, number>>();
  *   an `engine`, or without exactly one of `host` and `url`; `engine/failed` when the engine refuses
  *   a view; for a job, what `mount` throws — `storage/host-silent` among them.
  */
-export async function open(name: string, options: OpenOptions): Promise<Close> {
+export async function attach(name: string, options: AttachOptions): Promise<Attachment> {
   const { engine, host, url, signal } = options;
   if (typeof engine?.query !== 'function') {
     throw FossilError.of(
       'api/invalid-argument',
       { argument: 'engine', expected: 'an Engine' },
-      { help: 'open() needs { engine } and either { host } for a job or { url } for a corpus at a URL' },
+      { help: 'attach() needs { engine } and either { host } for a job or { url } for a corpus at a URL' },
     );
   }
   if ((host === undefined) === (url === undefined)) {
     throw FossilError.of('api/invalid-argument', { argument: 'host', expected: 'exactly one of host and url' });
   }
 
-  // What SQL calls each file of the corpus, and what closing gives back. A job's files are lent
+  // What SQL calls each file of the corpus, and what detaching gives back. A job's files are lent
   // under the host's credential — an Azure file one by one — and a URL's are named as they are.
   let names: (paths: readonly string[]) => Promise<string[]>;
   let release = async (): Promise<void> => {};
@@ -152,12 +169,13 @@ export async function open(name: string, options: OpenOptions): Promise<Close> {
       await query(engine, `CREATE OR REPLACE VIEW ${relation(view)} AS ${sql(manifest, relation)}`, signal);
     }
 
-    let closed = false;
-    return async () => {
-      if (closed) return;
-      closed = true;
+    let detachedOnce = false;
+    const detach = async (): Promise<void> => {
+      if (detachedOnce) return;
+      detachedOnce = true;
       await detached(release);
     };
+    return { name, detach, [Symbol.asyncDispose]: detach };
   } catch (cause) {
     try {
       if (counted) await detached(release);
@@ -169,7 +187,7 @@ export async function open(name: string, options: OpenOptions): Promise<Close> {
   }
 
   /**
-   * Give this open's hold on the catalog back — the last holder detaches it — and then `after`, which
+   * Give this attachment's hold on the catalog back — the last holder detaches it — and then `after`, which
    * runs whether or not the detach did. Two failures are one: the detach's, the release's attached.
    */
   async function detached(after: () => Promise<void>): Promise<void> {
@@ -214,6 +232,9 @@ async function read(engine: Engine, where: string, signal?: AbortSignal): Promis
 /** A SQL literal, or `NULL`. */
 const opt = (value: string | undefined): string => (value === undefined ? 'NULL' : lit(value));
 
+/** A `VARCHAR[]` literal of the values, `[]` for none. */
+const list = (values: readonly string[] | undefined): string => `[${(values ?? []).map(lit).join(', ')}]::VARCHAR[]`;
+
 /**
  * The rows of a relation as a `SELECT`, its columns typed even when there are none — a `VALUES` with
  * no row is not SQL, and a column of nulls only would have no type.
@@ -231,21 +252,23 @@ function tablesOf(manifest: Manifest): string {
   let first = 0;
   const rows = [
     ...manifest.vertex_tables.map((t) => {
-      const row = [lit(t.name), `'vertex'`, opt(t.iri), lit(t.path), String(t.record_count), String(first), 'NULL', 'NULL'];
+      const row = [lit(t.name), `'vertex'`, opt(t.iri), lit(t.path), String(t.record_count), String(first), 'NULL', 'NULL', list(t.derived_from)];
       first += t.record_count;
       return row;
     }),
     ...manifest.edge_tables.map((t) => [
       lit(t.name), `'edge'`, opt(t.iri), lit(t.path), String(t.record_count), 'NULL', lit(t.source.references), lit(t.destination.references),
+      list(t.derived_from),
     ]),
     ...(manifest.property_tables ?? []).map((t) => [
       lit(t.name), `'property'`, 'NULL', lit(t.path), String(t.record_count), 'NULL', lit(t.source.references), 'NULL',
+      list(t.derived_from),
     ]),
   ];
   return relationOf(
     [
-      ['table_name', 'VARCHAR'], ['kind', 'VARCHAR'], ['iri', 'VARCHAR'], ['path', 'VARCHAR'], ['rows', 'UBIGINT'],
-      ['first_id', 'UBIGINT'], ['source', 'VARCHAR'], ['destination', 'VARCHAR'],
+      ['table_name', 'VARCHAR'], ['kind', 'VARCHAR'], ['iri', 'VARCHAR'], ['path', 'VARCHAR'], ['record_count', 'UBIGINT'],
+      ['first_id', 'UBIGINT'], ['source', 'VARCHAR'], ['destination', 'VARCHAR'], ['derived_from', 'VARCHAR[]'],
     ],
     rows,
   );
@@ -260,8 +283,8 @@ function columnsOf(manifest: Manifest): string {
   );
   return relationOf(
     [
-      ['table_name', 'VARCHAR'], ['column_name', 'VARCHAR'], ['ordinal', 'INTEGER'], ['type', 'VARCHAR'],
-      ['role', 'VARCHAR'], ['iri', 'VARCHAR'], ['nullable', 'BOOLEAN'],
+      ['table_name', 'VARCHAR'], ['column_name', 'VARCHAR'], ['ordinal_position', 'INTEGER'], ['data_type', 'VARCHAR'],
+      ['role', 'VARCHAR'], ['iri', 'VARCHAR'], ['is_nullable', 'BOOLEAN'],
     ],
     rows,
   );

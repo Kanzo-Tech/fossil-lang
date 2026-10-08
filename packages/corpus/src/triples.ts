@@ -5,7 +5,7 @@
  * The meaning was always in the manifest: a vertex table has a class IRI and an identity column, a
  * column may carry a predicate IRI and the term its shape declared, an edge table has a predicate IRI
  * and the two vertex tables its endpoints reference. This states it once, as SQL over the views
- * `open` made. `/docs/format/reading/rdf` is the specification of what comes out.
+ * `attach` made. `/docs/format/reading/rdf` is the specification of what comes out.
  */
 
 import type { Manifest, Property, PropertyTable, VertexTable } from './manifest.gen.js';
@@ -16,11 +16,12 @@ const RR_IRI = 'http://www.w3.org/ns/r2rml#IRI';
 const XSD = 'http://www.w3.org/2001/XMLSchema#';
 
 /**
- * The columns of the relation, in order: subject kind (`I`) and IRI, the predicate IRI, then the
- * object's kind (`I` or `L`), IRI or lexical form, datatype IRI (`''` for an IRI) and language tag
- * (`''`; a corpus states none).
+ * The columns of the relation, in order, named as SPARQL 1.1 Query Results JSON names a term's
+ * members (§3.2.2): the subject's type (`I`) and value (its IRI), the predicate IRI, then the
+ * object's type (`I` or `L`), value (IRI or lexical form), datatype IRI (`''` for an IRI) and
+ * language tag (`''`; a corpus states none).
  */
-export const TRIPLES_COLUMNS = ['s_k', 's_v', 'p', 'o_k', 'o_v', 'o_d', 'o_l'] as const;
+export const TRIPLES_COLUMNS = ['s_type', 's_value', 'p', 'o_type', 'o_value', 'o_datatype', 'o_lang'] as const;
 
 const has = (iri: string | undefined): iri is string => iri !== undefined && iri !== '';
 

@@ -54,12 +54,12 @@ measured.
 
 ## What the reader is
 
-**One door, one name, and it always takes an engine** — `packages/corpus/src/open.ts, open`, and
+**One door, one name, and it always takes an engine** — `packages/corpus/src/attach.ts, attach`, and
 it is TypeScript with no crate behind it:
 
 ```ts
-const close = await open(job, { engine, host })     // a job's corpus, under the credential the host vends
-const close = await open('demo', { engine, url })   // a corpus at a URL
+const corpus = await attach(job, { engine, host })     // a job's corpus, under the credential the host vends
+const corpus = await attach('demo', { engine, url })   // a corpus at a URL
 ```
 
 It attaches the corpus to the host's `Engine` as the catalog it is given: a view per table, and the
@@ -78,7 +78,7 @@ artefact.
 
 One rule: **a document carries a fact exactly when a reader cannot recover it from the bytes, or
 must have it before it reads them.** `fossil.json` carries the tables, their columns and their types
-because `open` makes views out of them; and `record_count` because a viewer sizes its buffers before
+because `attach` makes views out of them; and `record_count` because a viewer sizes its buffers before
 the first byte. What it does not carry — an extent, a column's domain, statistics — is in the
 Parquet footers or one query away, and comes back as an additive field the day a reader needs it
 before reading. [Position](/docs/design/position) argues the field it no longer carries.

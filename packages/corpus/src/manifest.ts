@@ -1,5 +1,5 @@
 /**
- * `fossil.json` — the one file a reader opens before any Parquet, parsed once, inside `open`.
+ * `fossil.json` — the one file a reader opens before any Parquet, parsed once, inside `attach`.
  *
  * Its shape is `manifest.gen.ts`, generated from the writer's structs. The one field this side
  * validates is `format`: a reader refuses a format it does not know before it reads a byte of
@@ -17,7 +17,7 @@ export const tablesIn = (manifest: Manifest): (VertexTable | EdgeTable | Propert
   ...(manifest.property_tables ?? []),
 ];
 
-/** The format this reader reads. Anything else is refused at `open`. */
+/** The format this reader reads. Anything else is refused at `attach`. */
 export const FOSSIL_FORMAT: Manifest['format'] = 'fossil/1';
 
 /**

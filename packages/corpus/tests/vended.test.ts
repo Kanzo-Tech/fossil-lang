@@ -15,7 +15,7 @@ import type { Engine, Host } from '@fossil-lang/types';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import './boot.js';
-import { open } from '../src/index.js';
+import { attach } from '../src/index.js';
 
 // A job's corpus against a real DuckDB-WASM, vended as Azure: the one store the engine is lent
 // file by file, so every file the corpus reads crosses `lend`. The SAS URL a lease gets is mapped
@@ -89,12 +89,12 @@ const people = async (job: string): Promise<number> =>
   Number((await engine.query(`SELECT count(*) AS n FROM "${job}"."Person"`)).getChild('n')!.get(0));
 
 const declared = async (job: string): Promise<number> =>
-  Number((await engine.query(`SELECT rows FROM "${job}".fossil_tables WHERE table_name = 'Person'`)).getChild('rows')!.get(0));
+  Number((await engine.query(`SELECT record_count FROM "${job}".fossil_tables WHERE table_name = 'Person'`)).getChild('record_count')!.get(0));
 
-describe('open(job, { engine, host })', () => {
+describe('attach(job, { engine, host })', () => {
   it('reads each job under its own prefix, so two corpora of one shape never meet', async () => {
-    const one = await open('1', { engine, host });
-    const two = await open('2', { engine, host });
+    const one = await attach('1', { engine, host });
+    const two = await attach('2', { engine, host });
     const lent = [...engine.lent.keys()];
     expect(lent).toContain('azure/acct/lake/jobs/1/fossil.json');
     expect(lent).toContain('azure/acct/lake/jobs/1/vertex/Person.parquet');
@@ -105,27 +105,27 @@ describe('open(job, { engine, host })', () => {
     expect(await people('1')).toBe(count);
     expect(await people('2')).toBe(count);
 
-    await one();
+    await one.detach();
     expect([...engine.lent.keys()].some((n) => n.startsWith('azure/acct/lake/jobs/1/'))).toBe(false);
     expect(await catalogs()).not.toContain('1');
     expect(await people('2')).toBe(count);
-    await two();
+    await two.detach();
   }, 60_000);
 
-  it('shares a job between two opens, and the first to close leaves the second whole', async () => {
-    const first = await open('3', { engine, host });
-    const again = await open('3', { engine, host });
-    await first();
+  it('shares a job between two attachments, and the first to detach leaves the second whole', async () => {
+    const first = await attach('3', { engine, host });
+    const again = await attach('3', { engine, host });
+    await first.detach();
     expect(await people('3')).toBe(await declared('3'));
-    await again();
-    await again();
+    await again.detach();
+    await again.detach();
     expect([...engine.lent.keys()].some((n) => n.startsWith('azure/acct/lake/jobs/3/'))).toBe(false);
     expect(await catalogs()).not.toContain('3');
   }, 60_000);
 
   it('refuses a job the host vends nothing for', async () => {
     const empty: Host = { connections: async () => ({}), credentials: async () => [] };
-    await expect(open('4', { engine, host: empty })).rejects.toThrow(
+    await expect(attach('4', { engine, host: empty })).rejects.toThrow(
       expect.objectContaining({ name: 'FossilError', code: 'storage/no-credential', data: { scope: 'job 4', access: 'read' } }),
     );
   });

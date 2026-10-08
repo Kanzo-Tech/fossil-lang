@@ -2,7 +2,7 @@ import type { Manifest, Property } from '../src/manifest.gen.js';
 
 /**
  * **What a corpus holds as RDF, and what `triples` says it holds, as two sets of N-Triples** — the
- * test's oracle and its reader. {@link held} is SQL a test states over the views `open` made and the
+ * test's oracle and its reader. {@link held} is SQL a test states over the views `attach` made and the
  * manifest, not the view: so `triples` is held to something it did not compute.
  */
 
@@ -27,7 +27,7 @@ type Rows = (sql: string) => Promise<Record<string, unknown>[]>;
 export async function read(relation: string, query: Rows): Promise<Set<Triple>> {
   const out = new Set<Triple>();
   for (const r of await query(`SELECT * FROM ${relation}`)) {
-    const [sk, s, p, ok, o, od, ol] = ['s_k', 's_v', 'p', 'o_k', 'o_v', 'o_d', 'o_l'].map((c) => String(r[c]));
+    const [sk, s, p, ok, o, od, ol] = ['s_type', 's_value', 'p', 'o_type', 'o_value', 'o_datatype', 'o_lang'].map((c) => String(r[c]));
     if (sk !== 'I' || ol !== '' || !((ok === 'I' && od === '') || (ok === 'L' && od !== ''))) {
       throw new Error(`not a triple of a corpus: ${JSON.stringify(r)}`);
     }
@@ -37,7 +37,7 @@ export async function read(relation: string, query: Rows): Promise<Set<Triple>> 
 }
 
 /**
- * **What the corpus holds as RDF**, written against the manifest and the views `open` made. A
+ * **What the corpus holds as RDF**, written against the manifest and the views `attach` made. A
  * column's term is the one the manifest declares; where it declares none, the caller states the
  * datatype of each type word its corpus uses, and a word it did not state is refused.
  */

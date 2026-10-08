@@ -1,21 +1,21 @@
 ---
 title: Not a corpus location
-description: "`corpus/not-a-location` — `open` was given a URL with a query string or a fragment; a corpus location is a prefix."
+description: "`corpus/not-a-location` — `attach` was given a URL with a query string or a fragment; a corpus location is a prefix."
 ---
 
-`open(url, { engine })` takes the location of a corpus — a directory — and names every file under
+`attach(url, { engine })` takes the location of a corpus — a directory — and names every file under
 it. A URL carrying `?…` or `#…` is refused before the engine is asked anything. The typical one is a
 signed URL:
 
 ```ts
-await open('https://acct.blob.core.windows.net/c?sv=x&sig=y', { engine });
+await attach('https://acct.blob.core.windows.net/c?sv=x&sig=y', { engine });
 ```
 
 ```text
 https://acct.blob.core.windows.net/c?sv=x&sig=y carries a query or a fragment, and a corpus location is a prefix: signed storage is opened as a job, under the host that vends its credential
 ```
 
-A host sees `data: { location }`, the string it passed. It is thrown by `open` in
+A host sees `data: { location }`, the string it passed. It is thrown by `attach` in
 `@fossil-lang/corpus` when no `host` is given.
 
 ## Why fossil refuses it
@@ -29,6 +29,6 @@ vends for a scope, and fossil derives every file's access from it
 
 ## How to repair it
 
-- **Signed or private storage: open it as a job.** `open(job, { engine, host })` — the first argument
+- **Signed or private storage: open it as a job.** `attach(job, { engine, host })` — the first argument
   is the job id, and the host's `credentials({ job }, 'read')` vends the prefix the corpus lives under.
 - **Public storage: drop the query and the fragment**, and pass the directory the corpus was written to.
