@@ -124,6 +124,9 @@ pub struct EdgeTable {
     pub src_type: String,
     pub dst_type: String,
     pub batches: Vec<RecordBatch>,
+    /// The sources its rows were derived from, as [`plan::derived_from`] spells
+    /// them, over every mapping that writes it.
+    pub derived_from: Vec<String>,
     /// Rows of this edge's input that resolved no endpoint pair, and so are not
     /// in [`Self::batches`]. See [`execute_edge`] for why they are discarded
     /// and [`report::EdgeDrops`] for where the number goes.
@@ -250,6 +253,9 @@ pub async fn execute_graph<'db>(
 pub struct VertexTable {
     pub label: String,
     pub batches: Vec<RecordBatch>,
+    /// The sources its rows were derived from, as [`plan::derived_from`] spells
+    /// them, over every mapping that emits the type.
+    pub derived_from: Vec<String>,
     pub properties: Vec<PropertyValues>,
 }
 
@@ -260,6 +266,9 @@ pub struct VertexTable {
 pub struct PropertyValues {
     pub name: String,
     pub batches: Vec<RecordBatch>,
+    /// The sources of the mappings that write the property — a subset of its
+    /// vertex's [`VertexTable::derived_from`].
+    pub derived_from: Vec<String>,
 }
 
 /// A mapping's vertex projection before the dense-id barrier — the W0b columns
@@ -270,6 +279,7 @@ struct PreparedVertex {
     node: NodeType,
     dedup: bool,
     projected: DataFrame,
+    derived_from: Vec<String>,
 }
 
 /// Materialise a single mapping's VERTEX on `DataFusion` and register it — the
@@ -396,6 +406,7 @@ async fn prepare_vertex_ops<'db>(
 
     let df = plan_relation(ctx, ops, input, anchor).await?;
     let projected = df.select(vertex_projection(render(&id)?, &props)?)?;
+    let derived_from = plan::derived_from(ops, input)?;
     let node = NodeType {
         label: type_name,
         iri: rdf_type,
@@ -406,6 +417,7 @@ async fn prepare_vertex_ops<'db>(
         node,
         dedup,
         projected,
+        derived_from,
     })
 }
 
@@ -478,6 +490,25 @@ async fn finalize_vertex(
             .unwrap_or(DataType::Null);
         columns.push((name, ty));
     }
+
+    // A property's sources are those of the mappings that write it; a mapping
+    // that leaves it out contributes a null column, filtered out below.
+    let sources = |name: &str| {
+        union(group.iter().filter_map(|g| {
+            g.projected
+                .schema()
+                .field_with_unqualified_name(name)
+                .is_ok()
+                .then_some(g.derived_from.as_slice())
+        }))
+    };
+    let derived_from = union(group.iter().map(|g| g.derived_from.as_slice()));
+    let property_sources: Vec<(String, Vec<String>)> = node
+        .properties
+        .iter()
+        .filter(|p| p.cardinality == Cardinality::Multi)
+        .map(|p| (p.name.clone(), sources(&p.name)))
+        .collect();
 
     let mut df: Option<DataFrame> = None;
     for part in group {
@@ -575,13 +606,23 @@ async fn finalize_vertex(
         ])?
         .collect()
         .await?;
-        properties.push(PropertyValues { name, batches });
+        let derived_from = property_sources
+            .iter()
+            .find(|(n, _)| *n == name)
+            .map(|(_, s)| s.clone())
+            .unwrap_or_default();
+        properties.push(PropertyValues {
+            name,
+            batches,
+            derived_from,
+        });
     }
 
     Ok((
         VertexTable {
             label: node.label.clone(),
             batches,
+            derived_from,
             properties,
         },
         node,
@@ -710,6 +751,7 @@ fn register_batches(
 struct PreparedEdge {
     resolved: DataFrame,
     dropped: u64,
+    derived_from: Vec<String>,
 }
 
 /// Resolve every [`Op::EmitEdge`] of one mapping into its resolved pairs
@@ -743,7 +785,9 @@ async fn execute_edges<'db>(
         } = op
         {
             let rows = plan_relation(ctx, ops, *input, anchor).await?;
-            let prepared = execute_edge(ctx, rows, src_type, dst_type, src_id, dst_id).await?;
+            let derived_from = plan::derived_from(ops, *input)?;
+            let prepared =
+                execute_edge(ctx, rows, derived_from, src_type, dst_type, src_id, dst_id).await?;
             let edge_type = GraphEdge {
                 label: edge_type.to_string(),
                 iri: rdf_uri.as_ref().map(ToString::to_string),
@@ -789,6 +833,7 @@ async fn execute_edges<'db>(
 async fn execute_edge(
     ctx: &SessionContext,
     rows: DataFrame,
+    derived_from: Vec<String>,
     src_type: &str,
     dst_type: &str,
     src_id: &Expr<'_>,
@@ -850,7 +895,11 @@ async fn execute_edge(
     // program as dropping 96% of its edges.
     let dropped = candidates.saturating_sub(matched);
 
-    Ok(PreparedEdge { resolved, dropped })
+    Ok(PreparedEdge {
+        resolved,
+        dropped,
+        derived_from,
+    })
 }
 
 /// Merge every mapping's pairs for one edge table into the table: `UNION ALL`,
@@ -882,6 +931,7 @@ async fn finalize_edge(
     edge: &GraphEdge,
     group: Vec<PreparedEdge>,
 ) -> datafusion::error::Result<EdgeTable> {
+    let derived_from = union(group.iter().map(|g| g.derived_from.as_slice()));
     let mut dropped = 0;
     let mut merged: Option<DataFrame> = None;
     for part in group {
@@ -908,8 +958,17 @@ async fn finalize_edge(
         src_type: edge.source.clone(),
         dst_type: edge.destination.clone(),
         batches,
+        derived_from,
         dropped,
     })
+}
+
+/// The union of several [`plan::derived_from`] sets, as one: sorted, no repeats.
+fn union<'a>(sets: impl Iterator<Item = &'a [String]>) -> Vec<String> {
+    let mut all: Vec<String> = sets.flatten().cloned().collect();
+    all.sort();
+    all.dedup();
+    all
 }
 
 /// Read a source into a [`DataFrame`], dispatching on its [`SourceFormat`] — the

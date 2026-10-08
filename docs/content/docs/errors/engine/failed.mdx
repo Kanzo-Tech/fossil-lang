@@ -27,7 +27,7 @@ It is raised from these places:
   cannot be read or parsed fails here; one whose file is not there is
   [`source/not-found`](/docs/errors/source/not-found), and so is a `run` over `files` asked to read a
   source they do not hold.
-- **A corpus**, when the host's engine refuses a statement `open` runs to attach it.
+- **A corpus**, when the host's engine refuses a statement `attach` runs to attach it.
 
 ## Why fossil refuses it
 
@@ -42,5 +42,5 @@ and the engine's message, which is the real explanation, travels unchanged besid
 - **Read the cause.** It names the file, the column or the statement the engine choked on.
 - **For a run**, check the sources the cause mentions: that the file exists at that location, and that
   it is the format the program binds it as. For a `run` over `files`, hold every location `inputs` lists.
-- **For `open`**, check that the corpus's Parquet files are present and readable. A read after
-  `open` is the host's own SQL and fails in the engine's terms, not fossil's.
+- **For `attach`**, check that the corpus's Parquet files are present and readable. A read after
+  `attach` is the host's own SQL and fails in the engine's terms, not fossil's.

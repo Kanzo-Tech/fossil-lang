@@ -46,7 +46,7 @@ What else is lost on the way, each one a place where structure existed and was f
 - `StorageError` (`crates/fossil-storage/src/credential.rs, StorageError`) is a seven-variant enum
   with typed fields, and was `.to_string()`'d at every boundary it crossed (it converts to a `Failure` now).
 - A host's own typed rejection from `credentials` is reduced to its `message` before it is wrapped.
-- `open` builds `did not read: ${cause.message}` and drops the `cause`.
+- `attach` builds `did not read: ${cause.message}` and drops the `cause`.
 - A program that does not compile fails at `run` as `execute_graph: Error during planning: the
   mapping did not compile; see the reported diagnostics` — and the executor exposes no diagnostics.
 
@@ -189,7 +189,7 @@ Float ``). The title is a constant of the variant.
 **A foreign error is a cause, never a code.** DataFusion, `object_store`, DuckDB and a host's own
 rejection have their own vocabularies, and fossil does not classify them. The layer that meets one
 wraps it in the fossil failure it *means* — `engine/failed`, `storage/unreachable`,
-`storage/host-refused` — and keeps the original as `cause`, whole. That is what `open` and `JsHost` did
+`storage/host-refused` — and keeps the original as `cause`, whole. That is what `attach` and `JsHost` did
 wrong at `8d6114a3`: they kept the text and dropped the object. Both keep the cause now — and a
 host's own `area/kind` code on it, [as a foreign one](#a-hosts-code-kept-on-a-foreign-cause).
 
@@ -336,11 +336,11 @@ codes above (`provider/unknown`, `provider/wrong-capability`, `document/not-regi
 | `shape` (+1) | `more-than-one-output` | the executor's descriptor |
 | `document` (+1) | `unread` | the executor's `run`, over the documents it could not read |
 | `source` (2) | `not-found`, `unparseable` | a CSV, JSON or Parquet source that names no file; the RDF sources a run decodes |
-| `engine` (1) | `failed` — DataFusion or DuckDB, the engine's error as `cause` | `execute_graph`, the views `open` creates |
+| `engine` (1) | `failed` — DataFusion or DuckDB, the engine's error as `cause` | `execute_graph`, the views `attach` creates |
 | `write` (1) | `failed` | `WriteError`; its other variants are `internal/bug` |
 | `storage` (9) | `no-credential`, `ambiguous-prefix`, `outside-prefix`, `malformed-credential`, `no-route`, `unreachable`, `no-httpfs`, `host-refused`, `host-silent` | `StorageError`, `@fossil-lang/storage`'s `mount`, `JsHost` — `host-silent` is [failure](/docs/design/failure)'s deadline |
 | `module` (1) | `unreachable` | the three wasm loaders, when a module cannot be fetched |
-| `corpus` (5) | `unreadable`, `not-json`, `unsupported-format`, `duplicate-table`, `not-a-location` | `open`, `parseManifest` |
+| `corpus` (5) | `unreadable`, `not-json`, `unsupported-format`, `duplicate-table`, `not-a-location` | `attach`, `parseManifest` |
 | `api` (3) | `invalid-argument`, `busy`, `unknown-handle` | argument shapes on every wasm entry point, `busy` and the executor's borrow, the workspace's `unknown_handle` |
 
 **`internal/bug` — 1 code** for everything that is fossil's fault and not the caller's: the

@@ -46,6 +46,7 @@ the manifest is.
     "key": "dense_id",
     "identity": "subject",
     "record_count": 1000000,
+    "derived_from": ["@crm/people.csv"],
     "properties": [
       { "name": "dense_id", "type": "uint32", "role": "address" },
       { "name": "subject", "type": "string", "role": "identity" },
@@ -59,6 +60,7 @@ the manifest is.
     "source":      { "key": "src", "references": "Order" },
     "destination": { "key": "dst", "references": "Person" },
     "record_count": 2000000,
+    "derived_from": ["@crm/orders.csv", "@crm/people.csv"],
     "properties": [
       { "name": "src", "type": "uint32", "role": "endpoint" },
       { "name": "dst", "type": "uint32", "role": "endpoint" }
@@ -69,6 +71,7 @@ the manifest is.
     "path": "property/Person_nickname.parquet",
     "source": { "key": "src", "references": "Person" },
     "record_count": 1500000,
+    "derived_from": ["@crm/people.csv"],
     "properties": [
       { "name": "src", "type": "uint32", "role": "endpoint" },
       { "name": "nickname", "type": "string", "iri": "https://example.org/#nickname" }
@@ -98,6 +101,7 @@ refuses a program whose table names would collide.
 | `key`, `source.key`, `destination.key` | `dense_id`, `src`, `dst` | joins edges and properties to vertices without knowing column names |
 | `identity` | `subject` | keys anything held outside the corpus |
 | `record_count` | the rows in the file | sizes buffers, and checks a file it read in full |
+| `derived_from` | the sources the table's rows were derived from, PROV-O's `prov:wasDerivedFrom` | names a table's inputs without the program |
 | `properties` | every column, in order, with its type | knows the schema without opening a footer |
 | `properties[].role` | what a column the writer emits IS | tells the writer's columns from the program's without a list of names |
 | `properties[].term_type`, `.datatype` | the RDF term the shape declares for the values | states the column's RDF meaning without re-deriving it |
@@ -106,8 +110,14 @@ refuses a program whose table names would collide.
 `type` is one of `string`, `bool`, `int8` … `int64`, `uint8` … `uint64`, `float`, `double`, `date`,
 `timestamp`, `time` and `decimal` — `corpus.bnf`'s spellings, written by
 `crates/fossil-sinks/src/manifest.rs, data_type_name`. The JSON Schema of the whole document is
-`crates/fossil-sinks/fossil.schema.json`. `iri`, `nullable`, `term_type` and `datatype` are
-optional and absent when there is nothing to say.
+`crates/fossil-sinks/fossil.schema.json`. `iri`, `nullable`, `term_type`, `datatype` and
+`derived_from` are optional and absent when there is nothing to say.
+
+**`derived_from` names each source as the program wrote it** — `@crm/people.csv`, or a path relative
+to the program — and never the location it resolved to, so a corpus carries no storage prefix and
+repointing a connection does not change it. The list is sorted and holds each source once: a vertex
+table's is every source its mappings read, through every join; an edge table's the same over the
+mappings that write the relation; a property table's over the mappings that write the property.
 
 **`term_type` and `datatype` are the shape's, verbatim.** A column whose shape declares a term
 carries it as the standard IRIs: `term_type` is R2RML's `rr:IRI` or `rr:Literal`, and `datatype`

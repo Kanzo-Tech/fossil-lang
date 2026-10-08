@@ -402,6 +402,28 @@ pub(crate) fn column(source: &str, column: &str) -> DfExpr {
     })
 }
 
+/// The sources the relation at `index` is derived from — PROV-O's
+/// `prov:wasDerivedFrom` — as the program wrote each one: `Op::Source`'s `uri`,
+/// the key, and never its location, so a corpus names no storage prefix and
+/// repointing a connection does not change it. Sorted and without repeats: it
+/// is a set, and a self-join reads one source twice.
+///
+/// # Errors
+/// As [`plan_relation`]: `index` is out of range, or the list is not in
+/// topological order.
+pub fn derived_from(ops: &[Op<'_>], index: usize) -> datafusion::error::Result<Vec<String>> {
+    let mut keys: Vec<String> = evaluation_order(ops, index)?
+        .into_iter()
+        .filter_map(|i| match &ops[i] {
+            Op::Source { uri, .. } => Some(uri.to_string()),
+            _ => None,
+        })
+        .collect();
+    keys.sort();
+    keys.dedup();
+    Ok(keys)
+}
+
 /// The op indices `index` depends on, itself included, in ascending order.
 ///
 /// The list is topologically ordered by [`fossil_mir::MirGraph`]'s invariant,

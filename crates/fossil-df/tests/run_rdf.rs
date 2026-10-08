@@ -156,6 +156,16 @@ fn run_rdf_resolves_schema_through_a_connection() {
     assert_eq!(vertex(&m, "KB").record_count, 1);
     assert_eq!(vertex(&m, "Project").record_count, 2);
     assert_eq!(edge(&m, "KB", "Project").record_count, 2);
+
+    // Lineage names the source as the program wrote it, never the location the
+    // connection resolved it to: repointing `@data` must not change a corpus.
+    for derived_from in [
+        &vertex(&m, "KB").derived_from,
+        &vertex(&m, "Project").derived_from,
+        &edge(&m, "KB", "Project").derived_from,
+    ] {
+        assert_eq!(derived_from, &["@data/graph.ttl"]);
+    }
 }
 
 // ── Regression: edges to a property-less (leaf) shape ───────────────────────

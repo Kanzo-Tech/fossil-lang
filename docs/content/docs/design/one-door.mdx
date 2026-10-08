@@ -1,23 +1,23 @@
 ---
 title: One door
-description: "A corpus is attached to the host's engine by `open` and detached by what it answers; every read after that is the host's SQL, and each thing the door does is done once, by one layer."
+description: "A corpus is attached to the host's engine by `attach` and detached by the attachment it answers; every read after that is the host's SQL, and each thing the door does is done once, by one layer."
 ---
 
 A consumer reads a corpus through one door, and the whole of it is one function and what it answers:
 
 ```ts
-const close = await open(job, { engine, host });   // or { engine, url } for a corpus at a URL
+await using corpus = await attach(job, { engine, host });   // or { engine, url } for a corpus at a URL
 // SELECT * FROM "<job>".fossil_tables WHERE kind = 'vertex'
 // SELECT dense_id, name FROM "<job>"."Person"
-// and calling `close` detaches the catalog
+// and leaving the block — or `corpus.detach()` — detaches the catalog
 ```
 
-`open` (`packages/corpus/src/open.ts, open`) reads `fossil.json`, rejects a `format` that is not
-`fossil/1` before a byte of Parquet is read, and attaches the corpus to the host's engine as the
+`attach` (`packages/corpus/src/attach.ts, attach`) reads `fossil.json`, rejects a `format` that is
+not `fossil/1` before a byte of Parquet is read, and attaches the corpus to the host's engine as the
 catalog it is given: one view per table, and the manifest itself as two relations —
-`fossil_tables`, a row per table with its kind, its row count and, for a vertex table, the first id
-of its range; and `fossil_columns`, a row per column with its type and its writer's role. What it
-answers detaches the catalog. The contract is [the corpus](/docs/design/corpus); the format
+`fossil_tables`, a row per table with its kind, its `record_count`, the sources it was derived from
+and, for a vertex table, the first id of its range; and `fossil_columns`, a row per column with its
+`data_type` and its writer's role. The `Attachment` it answers detaches the catalog. The contract is [the corpus](/docs/design/corpus); the format
 underneath is [/docs/format](/docs/format).
 
 **Every read is the host's SQL.** Structure and data alike go through the engine the host already
@@ -29,6 +29,19 @@ The door has no query API of its own; the one it had, and why it went, is in
 **What would reverse it.** A reader that cannot hold a SQL engine and still has to read a corpus.
 [A door for a camera](/docs/design/later/one-door-camera) keeps what a tiled corpus would need.
 
+## `attach` and `detach`, because that is what it runs
+
+The door runs `ATTACH ':memory:' AS <name>`, every view it makes lives under that alias, and giving
+it back runs `DETACH DATABASE`. So it is named with DuckDB's own pair: `attach(name, options)`
+answers an `Attachment` — its `name`, `detach()`, and `[Symbol.asyncDispose]`, the hook TC39's
+explicit resource management calls, so `await using` gives it back on every path out of a block.
+It was `open`, answering a bare function: `open` is the file-system sense, and nothing is opened as
+a file. Keeping `open` and `close` is [a discarded alternative](/docs/design/discarded#the-corpus).
+
+**What would reverse it.** A door that stops being an `ATTACH` — a reader that opens a corpus as a
+handle with no catalog of its own, say a single-table reader with no alias to detach. Then the pair
+is `open`/`close` again, and the dispose hook stays.
+
 ## One door, and one layer behind it
 
 One door is half of the rule. The other half is what stands behind it: **each thing the door does
@@ -37,7 +50,7 @@ call it could have made itself, is a second implementation with a longer path, a
 
 **The measurement that made it a rule, 2026-09-30 at `ac1801d4`.** One read crossed four layers
 that each knew the manifest: the TypeScript door scanned it line by line, a WASM crate resolved it
-again (twice per `open(job)`), a Rust verb path loaded it once more on every call, and the verb it
+again (twice per `open(job)`, as the door was called then), a Rust verb path loaded it once more on every call, and the verb it
 served ended as SQL that DuckDB could have been sent directly. keasy's discover view parsed the
 manifest six times before it drew anything. The first repair made `fossil.json` a TypeScript parse
 and a read one statement; the second took the reader's own `scan` and `Filter` away, because they

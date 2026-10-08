@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { Engine } from '@fossil-lang/types';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { open } from '../src/index.js';
+import { attach } from '../src/index.js';
 import type { Manifest, Property } from '../src/manifest.gen.js';
 import { ident } from '../src/sql.js';
 import { triplesOf } from '../src/triples.js';
@@ -48,13 +48,13 @@ async function triples(manifest: Manifest): Promise<Set<string>> {
 
 describe('triples', () => {
   it('holds what the corpus holds: the classes, the literals as declared, the relations and the multi-valued properties', async () => {
-    const close = await open('conformance', { engine, url: CORPUS });
+    const corpus = await attach('conformance', { engine, url: CORPUS });
     const want = await held(MANIFEST, 'conformance', query, { string: `${XSD}string` });
     const got = await read('conformance.triples', query);
     expect(want.size).toBeGreaterThan(0);
     expect([...got].filter((t) => !want.has(t))).toEqual([]);
     expect([...want].filter((t) => !got.has(t))).toEqual([]);
-    await close();
+    await corpus.detach();
   });
 
   it('spells each type word as its natural RDF literal, and a declared term as declared', async () => {

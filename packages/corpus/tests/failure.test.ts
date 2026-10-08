@@ -1,5 +1,5 @@
 /**
- * The failure paths of `open` and `close` that `/docs/design/failure` names, against a scripted engine
+ * The failure paths of `attach` and `detach` that `/docs/design/failure` names, against a scripted engine
  * rather than DuckDB: what is forced here is the engine or the host failing, not a query.
  */
 import './boot.js';
@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { HOST_MS, isFossilError, type Engine, type Host, type Table } from '@fossil-lang/types';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { open } from '../src/index.js';
+import { attach } from '../src/index.js';
 
 const MANIFEST = readFileSync(fileURLToPath(new URL('../conformance/corpus/fossil.json', import.meta.url)), 'utf8');
 const AZURE = 'acct.dfs.core.windows.net';
@@ -57,14 +57,14 @@ const azure = (drop?: () => never): Host => ({
   },
 });
 
-describe('open, when something fails', () => {
+describe('attach, when something fails', () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
   it('is storage/host-silent after 30 s for a job whose host never answers', async () => {
     const { engine } = scripted(MANIFEST);
     const host: Host = { connections: never, credentials: never };
-    const outcome = open('job-1', { engine, host }).catch((e: unknown) => e);
+    const outcome = attach('job-1', { engine, host }).catch((e: unknown) => e);
     await vi.advanceTimersByTimeAsync(HOST_MS);
     expect(await outcome).toMatchObject({ code: 'storage/host-silent', data: { scope: 'job job-1' } });
   });
@@ -77,7 +77,7 @@ describe('open, when something fails', () => {
       query: (text, options) =>
         text.startsWith('ATTACH') ? (stop.abort(new DOMException('stopped', 'AbortError')), engine.query(text, options)) : engine.query(text, options),
     };
-    const e = await open('job-1', { engine: slow, host: azure(), signal: stop.signal }).catch((x: unknown) => x);
+    const e = await attach('job-1', { engine: slow, host: azure(), signal: stop.signal }).catch((x: unknown) => x);
     expect(e).toMatchObject({ name: 'AbortError' });
     expect(dropped.flat()).toContain('azure/acct/lake/jobs/job-1/fossil.json');
   });
@@ -90,7 +90,7 @@ describe('open, when something fails', () => {
         throw new Error('drop failed');
       },
     };
-    const e = await open('job-1', { engine: failing, host: azure() }).catch((x: unknown) => x);
+    const e = await attach('job-1', { engine: failing, host: azure() }).catch((x: unknown) => x);
     expect(isFossilError(e, 'corpus/not-json')).toBe(true);
     const chain: unknown[] = [];
     for (let at: unknown = e; at instanceof Error; at = at.cause) chain.push(at);
@@ -99,11 +99,11 @@ describe('open, when something fails', () => {
   });
 });
 
-describe('close, when the detach fails', () => {
+describe('detach, when the DETACH fails', () => {
   it('still gives the credential back, and says the detach failed', async () => {
     const { engine, dropped } = scripted(MANIFEST, (sql) => sql.startsWith('DETACH'));
-    const close = await open('job-1', { engine, host: azure() });
-    await expect(close()).rejects.toMatchObject({ code: 'engine/failed' });
+    const corpus = await attach('job-1', { engine, host: azure() });
+    await expect(corpus.detach()).rejects.toMatchObject({ code: 'engine/failed' });
     expect(dropped).toHaveLength(1);
   });
 });

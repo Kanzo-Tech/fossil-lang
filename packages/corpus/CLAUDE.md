@@ -11,9 +11,9 @@ guards' own fixture, and with the real writer (`@fossil-lang/executor`, in `roun
 served over HTTP) — and reads them back through `src/`. None of the three is in `files`, so npm
 never sees them. The prose half is `docs/content/docs/format/`.
 
-`src/` is TypeScript and nothing else: `open` reads `fossil.json` through `JSON.parse`, creates a
+`src/` is TypeScript and nothing else: `attach` reads `fossil.json` through `JSON.parse`, creates a
 view per table, two relations of the manifest — `fossil_tables`, `fossil_columns` — and the corpus
-as RDF, `triples`, and answers the function that detaches them. **Every read after that is the host's SQL** (Mosaic's, in keasy).
+as RDF, `triples`, and answers the attachment that detaches them. **Every read after that is the host's SQL** (Mosaic's, in keasy).
 Do not put a query API back here — `scan` and its `Filter` were a second, poorer copy of SQL, and the
 one consumer translated Mosaic's predicates into it — and do not export the manifest's types: a
 caller reads the manifest as the two relations. The writer's `fossil_sinks::manifest` types are the

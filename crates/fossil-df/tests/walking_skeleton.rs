@@ -36,6 +36,7 @@ fn walking_skeleton_writes_5_person_vertices_with_expected_content() {
     assert_eq!(person.name, "Person");
     assert_eq!(person.path, "vertex/Person.parquet");
     assert_eq!(person.record_count, 5);
+    assert_eq!(person.derived_from, ["users.csv"], "the source, as written");
     for column in ["dense_id", "subject", "name"] {
         assert!(
             person.properties.iter().any(|p| p.name == column),

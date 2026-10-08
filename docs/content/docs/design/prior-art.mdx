@@ -78,6 +78,10 @@ expression in an attribute argument. These are the languages, and the control ex
 
 | source | what it settles |
 | --- | --- |
+| **PROV-O**, W3C Recommendation 2013 | `prov:wasDerivedFrom`, Entity to Entity — a table to each source — which is what `derived_from` states and how it is named. |
+| **OpenLineage** | The same fact a level up, a run event's `inputs`, and the column-level next step, `ColumnLineageDatasetFacet`, that `derived_from` does not take yet. |
+| **SQL `information_schema.columns`, DuckDB's `duckdb_columns()` and Iceberg's `data_file.record_count`** | The names `fossil_columns` and `fossil_tables` use for the same facts: `ordinal_position`, `data_type`, `is_nullable` (a `BOOLEAN`, as DuckDB has it) and `record_count`. |
+| **DuckDB `ATTACH … AS name` / `DETACH`, and TC39 explicit resource management** | The corpus door's names, `attach` and `detach`, because they are the statements it runs; and `Symbol.asyncDispose`, so `await using` gives an attachment back. |
 | **Iceberg** | The model for publishing arithmetic: the formula, the widths, the sign, **and a table of vectors** — `34 → 2017239379` turns up in the tests of independent implementations that copied it. |
 | **PMTiles** | The counterexample: a Hilbert curve dispatched with a link to an encyclopedia, and every port re-deriving it. |
 | **H3 against S2** | One compiled oracle almost nobody reimplements, against four oracles in a chain with no shared vectors and divergences open for years. H3 also settles the 64-bit boundary by decree, typing its index as a string before anyone could get it wrong. |
@@ -90,6 +94,7 @@ expression in an attribute argument. These are the languages, and the control ex
 
 | source | what it settles |
 | --- | --- |
+| **SPARQL 1.1 Query Results JSON Format**, W3C Recommendation 2013, §3.2.2 | The names of an RDF term's parts — `type`, `value`, `datatype` and the language — that `triples` spells its columns with. |
 | **R2RML**, W3C Recommendation 2012 | The **natural mapping** of SQL types to XSD datatypes and lexical forms (§10.2) that [`triples`](/docs/format/reading/rdf) writes a literal in where the shape declares no term — every integer `xsd:integer`, every float `xsd:double` — and `rr:IRI` / `rr:Literal`, the IRIs `term_type` is spelled in. Its mapping language was taken and then dropped for the relation ([discarded](/docs/design/discarded#the-corpus-as-rdf)). |
 | **RML — RML-Core, RML-IO and RML-LV**, the W3C KG-Construct Community Group's drafts | The generalisation of R2RML that was not taken: its logical views state the join in RDF, but they are a draft with few implementations ([discarded](/docs/design/discarded#the-corpus-as-rdf)). |
 | **AlgeMapLoom**, an algebra for knowledge-graph construction mappings | The intermediate layer between the language and its consumers that was not taken: a research artefact and no standard ([discarded](/docs/design/discarded#the-corpus-as-rdf)). |
@@ -147,7 +152,7 @@ division of labour from one product and the two libraries under it.
 | --- | --- |
 | **Cosmograph** ([cosmograph.app/docs-general/concept](https://cosmograph.app/docs-general/concept/)) | **The architecture, and only that.** DuckDB-WASM holds the data, a Mosaic coordinator crossfilters it, and cosmos.gl draws points by index and links as index pairs; a point is placed by two bound columns or, when none is bound, by the GPU simulation. fossil's writer is the half that numbers the points and links. Its library is CC-BY-NC, so it is not used — [what was discarded](/docs/design/discarded#the-camera) has that row. |
 | **cosmos.gl** ([github.com/cosmosgl/graph](https://github.com/cosmosgl/graph)), MIT, under the OpenJS Foundation | The force simulation on the GPU that the gate measured — 200k vertices settled in ~10–12 s — and so the reason the writer places nothing. |
-| **Mosaic** ([idl.uw.edu/mosaic](https://idl.uw.edu/mosaic/)), BSD-3-Clause | One coordinator over one DuckDB, every view a client of it: why `open` attaches views and every read is the host's SQL ([one door](/docs/design/one-door)). |
+| **Mosaic** ([idl.uw.edu/mosaic](https://idl.uw.edu/mosaic/)), BSD-3-Clause | One coordinator over one DuckDB, every view a client of it: why `attach` attaches views and every read is the host's SQL ([one door](/docs/design/one-door)). |
 
 ## Compilers, and how they cut a tree
 

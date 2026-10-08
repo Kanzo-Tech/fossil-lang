@@ -124,6 +124,12 @@ pub struct VertexTable {
     pub identity: String,
     /// Rows in the file.
     pub record_count: u64,
+    /// The sources the table's rows were derived from — PROV-O's
+    /// `prov:wasDerivedFrom` — each as the program wrote it (`@conn/path`, or a
+    /// path), never the location it resolved to. Sorted. Absent when there is
+    /// none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub derived_from: Vec<String>,
     /// Every column of the file, in file order.
     pub properties: Vec<Property>,
 }
@@ -146,6 +152,12 @@ pub struct EdgeTable {
     pub destination: Endpoint,
     /// Rows in the file.
     pub record_count: u64,
+    /// The sources the table's rows were derived from — PROV-O's
+    /// `prov:wasDerivedFrom` — each as the program wrote it (`@conn/path`, or a
+    /// path), never the location it resolved to. Sorted. Absent when there is
+    /// none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub derived_from: Vec<String>,
     /// Every column of the file, in file order.
     pub properties: Vec<Property>,
 }
@@ -163,6 +175,12 @@ pub struct PropertyTable {
     pub source: Endpoint,
     /// Rows in the file.
     pub record_count: u64,
+    /// The sources the table's rows were derived from — PROV-O's
+    /// `prov:wasDerivedFrom` — each as the program wrote it (`@conn/path`, or a
+    /// path), never the location it resolved to. Sorted. Absent when there is
+    /// none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub derived_from: Vec<String>,
     /// Every column of the file, in file order: the source's key, then the
     /// value, which carries the property's IRI and term.
     pub properties: Vec<Property>,
@@ -329,6 +347,7 @@ mod tests {
                 key: "dense_id".to_string(),
                 identity: "subject".to_string(),
                 record_count: 3,
+                derived_from: vec!["@lake/people.csv".to_string()],
                 properties: vec![
                     Property {
                         role: Some(ColumnRole::Address),
@@ -355,6 +374,7 @@ mod tests {
                     references: "Person".to_string(),
                 },
                 record_count: 2,
+                derived_from: vec!["@lake/people.csv".to_string()],
                 properties: vec![
                     column("src", "uint32", false),
                     column("dst", "uint32", false),
@@ -368,6 +388,7 @@ mod tests {
                     references: "Person".to_string(),
                 },
                 record_count: 4,
+                derived_from: vec!["@lake/people.csv".to_string()],
                 properties: vec![
                     column("src", "uint32", false),
                     column("nickname", "string", false),
@@ -410,6 +431,13 @@ mod tests {
         assert_eq!(nickname["name"], "Person_nickname");
         assert_eq!(nickname["path"], "property/Person_nickname.parquet");
         assert_eq!(nickname["source"]["references"], "Person");
+        for table in [person, knows, nickname] {
+            assert_eq!(
+                table["derived_from"],
+                serde_json::json!(["@lake/people.csv"]),
+                "a source is the key the program wrote"
+            );
+        }
     }
 
     /// `fossil/1` grows by optional fields only, so a corpus with no

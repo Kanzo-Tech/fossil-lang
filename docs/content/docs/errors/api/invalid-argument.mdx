@@ -7,11 +7,11 @@ A call into fossil from JavaScript was handed something of the wrong shape: no e
 limit, a credential that is not one. The message names the argument and what it should have been:
 
 ```ts
-await open(url, {} as OpenOptions);
+await attach(url, {} as AttachOptions);
 ```
 
 ```text
-open() needs an engine: { engine } for a corpus at a URL, { engine, host } for a job's
+attach() needs an engine: { engine } for a corpus at a URL, { engine, host } for a job's
 ```
 
 A host sees `data: { argument, expected }` — the parameter's name as the call spells it, and a short
@@ -20,8 +20,8 @@ that refusal is the `cause`. The places that raise it:
 
 | call | `argument` | `expected` |
 | --- | --- | --- |
-| `open` (`@fossil-lang/corpus`) | `engine` | an Engine |
-| `open` (`@fossil-lang/corpus`) | `host` | exactly one of host and url |
+| `attach` (`@fossil-lang/corpus`) | `engine` | an Engine |
+| `attach` (`@fossil-lang/corpus`) | `host` | exactly one of host and url |
 | `setConnections` (workspace and executor) | `connections` | an object of `{ name: baseUrl }` |
 | `registerInferredDescriptor` | `descriptorJson` | an InferredDescriptor as JSON |
 | `runInMemory` | `files`, `dest` | an object of `{ [url]: Uint8Array }` keyed by URL; a URL |

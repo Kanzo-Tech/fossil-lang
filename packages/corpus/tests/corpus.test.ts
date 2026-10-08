@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { Engine } from '@fossil-lang/types';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { open } from '../src/index.js';
+import { attach } from '../src/index.js';
 import type { Manifest } from '../src/manifest.js';
 import { duckdb } from './engine.js';
 
@@ -46,9 +46,9 @@ function manifestOnly(name: string, text: string): string {
 const fossil = (code: string, data?: Record<string, unknown>) =>
   expect.objectContaining({ name: 'FossilError', code, ...(data === undefined ? {} : { data: expect.objectContaining(data) }) });
 
-describe('open', () => {
+describe('attach', () => {
   it('attaches a view per table, the manifest as two relations and the corpus as triples, under the name it was given', async () => {
-    const close = await open('conformance', { engine, url: CORPUS });
+    const corpus = await attach('conformance', { engine, url: CORPUS });
     const views = await query(
       `SELECT table_name AS t FROM information_schema.tables WHERE table_catalog = 'conformance' ORDER BY t`,
     );
@@ -56,7 +56,7 @@ describe('open', () => {
 
     const tables = await query(`SELECT * FROM conformance.fossil_tables`);
     expect(tables.map((r) => r.table_name)).toEqual(TABLES.map((t) => t.name));
-    expect(tables.map((r) => Number(r.rows))).toEqual(TABLES.map((t) => t.record_count));
+    expect(tables.map((r) => Number(r.record_count))).toEqual(TABLES.map((t) => t.record_count));
     for (const t of MANIFEST.edge_tables) {
       expect(tables.find((r) => r.table_name === t.name)).toMatchObject({
         kind: 'edge', source: t.source.references, destination: t.destination.references, first_id: null,
@@ -68,91 +68,112 @@ describe('open', () => {
       });
     }
 
-    const columns = await query(`SELECT table_name, column_name, role FROM conformance.fossil_columns ORDER BY table_name, ordinal`);
+    const columns = await query(`SELECT table_name, column_name, role FROM conformance.fossil_columns ORDER BY table_name, ordinal_position`);
     for (const t of TABLES) {
       expect(columns.filter((r) => r.table_name === t.name).map((r) => [r.column_name, r.role ?? undefined])).toEqual(
         t.properties.map((p) => [p.name, p.role]),
       );
     }
-    await close();
+    await corpus.detach();
   });
 
   it.each(MANIFEST.vertex_tables.map((t) => [t.name] as const))(
     "%s holds its record_count, as the range fossil_tables gives it",
     async (name) => {
-      const close = await open('ranges', { engine, url: CORPUS });
+      const corpus = await attach('ranges', { engine, url: CORPUS });
       const [range] = await query(
-        `SELECT t.first_id::BIGINT AS first, t.rows::BIGINT AS rows, min(v.dense_id)::BIGINT AS lo, max(v.dense_id)::BIGINT AS hi, count(*)::BIGINT AS n
+        `SELECT t.first_id::BIGINT AS first, t.record_count::BIGINT AS record_count, min(v.dense_id)::BIGINT AS lo, max(v.dense_id)::BIGINT AS hi, count(*)::BIGINT AS n
            FROM ranges.fossil_tables t, ranges."${name}" v WHERE t.table_name = '${name}' GROUP BY ALL`,
       );
-      expect(range!.n).toBe(range!.rows);
-      expect([range!.lo, range!.hi]).toEqual([range!.first, range!.first + range!.rows - 1n]);
-      await close();
+      expect(range!.n).toBe(range!.record_count);
+      expect([range!.lo, range!.hi]).toEqual([range!.first, range!.first + range!.record_count - 1n]);
+      await corpus.detach();
     },
   );
 
+  it('lists the sources each table was derived from, as the manifest names them', async () => {
+    const dir = join(scratch, 'lineage');
+    cpSync(CORPUS, dir, { recursive: true });
+    const [person, ...others] = MANIFEST.vertex_tables;
+    const sources = ['@lake/people.csv', 'tags.csv'];
+    writeFileSync(join(dir, 'fossil.json'), JSON.stringify({ ...MANIFEST, vertex_tables: [{ ...person!, derived_from: sources }, ...others] }));
+    const corpus = await attach('lineage', { engine, url: dir });
+    const tables = await query(`SELECT table_name, derived_from FROM lineage.fossil_tables`);
+    expect(tables.map((r) => [r.table_name, Array.from(r.derived_from as Iterable<unknown>, String)])).toEqual(
+      TABLES.map((t) => [t.name, t.name === person!.name ? sources : []]),
+    );
+    await corpus.detach();
+  });
+
+  it('detaches through Symbol.asyncDispose, the hook `await using` calls', async () => {
+    const corpus = await attach('disposed', { engine, url: CORPUS });
+    expect(corpus.name).toBe('disposed');
+    await corpus[Symbol.asyncDispose]();
+    expect(await catalogs()).not.toContain('disposed');
+  });
+
   it('quotes a name SQL would not take bare', async () => {
-    const close = await open('a "quoted" name', { engine, url: CORPUS });
+    const corpus = await attach('a "quoted" name', { engine, url: CORPUS });
     const [count] = await query(`SELECT count(*)::INTEGER AS n FROM "a ""quoted"" name"."Person"`);
     expect(count!.n).toBe(MANIFEST.vertex_tables.find((t) => t.name === 'Person')!.record_count);
-    await close();
+    await corpus.detach();
   });
 
   it('refuses a format it does not read before reading a byte of Parquet', async () => {
     const dir = manifestOnly('fossil2', JSON.stringify({ ...MANIFEST, format: 'fossil/2' }));
-    await expect(open('fossil2', { engine, url: dir })).rejects.toThrow(fossil('corpus/unsupported-format', { format: 'fossil/2' }));
+    await expect(attach('fossil2', { engine, url: dir })).rejects.toThrow(fossil('corpus/unsupported-format', { format: 'fossil/2' }));
     expect(await catalogs()).not.toContain('fossil2');
   });
 
   it('refuses a manifest that is not JSON, and one that is not there', async () => {
-    await expect(open('garbage', { engine, url: manifestOnly('garbage', 'format: fossil/1') })).rejects.toThrow(fossil('corpus/not-json'));
-    await expect(open('nothing', { engine, url: join(scratch, 'nothing-here') })).rejects.toThrow(
+    await expect(attach('garbage', { engine, url: manifestOnly('garbage', 'format: fossil/1') })).rejects.toThrow(fossil('corpus/not-json'));
+    await expect(attach('nothing', { engine, url: join(scratch, 'nothing-here') })).rejects.toThrow(
       fossil('corpus/unreadable', { path: join(scratch, 'nothing-here', 'fossil.json') }),
     );
   });
 
   it('ignores a key it does not know, and an empty corpus is three empty relations', async () => {
     const dir = manifestOnly('extra', JSON.stringify({ ...MANIFEST, vertex_tables: [], edge_tables: [], property_tables: [], extent: [0, 0, 1, 1] }));
-    const close = await open('extra', { engine, url: dir });
+    const corpus = await attach('extra', { engine, url: dir });
     expect(await query('SELECT * FROM extra.fossil_tables')).toEqual([]);
     expect(await query('SELECT * FROM extra.fossil_columns')).toEqual([]);
     expect(await query('SELECT * FROM extra.triples')).toEqual([]);
-    await close();
+    await corpus.detach();
   });
 
   it('refuses a manifest that names one table twice, or a table named like its own relations', async () => {
     const twice = manifestOnly('twice', JSON.stringify({ ...MANIFEST, edge_tables: [{ ...MANIFEST.edge_tables[0], name: 'Person' }] }));
-    await expect(open('twice', { engine, url: twice })).rejects.toThrow(fossil('corpus/duplicate-table', { table: 'Person' }));
+    await expect(attach('twice', { engine, url: twice })).rejects.toThrow(fossil('corpus/duplicate-table', { table: 'Person' }));
     const reserved = manifestOnly('reserved', JSON.stringify({ ...MANIFEST, edge_tables: [{ ...MANIFEST.edge_tables[0], name: 'fossil_tables' }] }));
-    await expect(open('reserved', { engine, url: reserved })).rejects.toThrow(fossil('corpus/duplicate-table', { table: 'fossil_tables' }));
+    await expect(attach('reserved', { engine, url: reserved })).rejects.toThrow(fossil('corpus/duplicate-table', { table: 'fossil_tables' }));
     const triples = manifestOnly('triples', JSON.stringify({ ...MANIFEST, edge_tables: [{ ...MANIFEST.edge_tables[0], name: 'triples' }] }));
-    await expect(open('triples', { engine, url: triples })).rejects.toThrow(fossil('corpus/duplicate-table', { table: 'triples' }));
+    await expect(attach('triples', { engine, url: triples })).rejects.toThrow(fossil('corpus/duplicate-table', { table: 'triples' }));
     expect(await catalogs()).not.toContain('twice');
   });
 
   it('needs an engine, and exactly one of a host and a url', async () => {
-    await expect(open('x', { url: CORPUS } as never)).rejects.toThrow(fossil('api/invalid-argument', { argument: 'engine' }));
-    await expect(open('x', { engine })).rejects.toThrow(fossil('api/invalid-argument', { argument: 'host' }));
+    await expect(attach('x', { url: CORPUS } as never)).rejects.toThrow(fossil('api/invalid-argument', { argument: 'engine' }));
+    await expect(attach('x', { engine })).rejects.toThrow(fossil('api/invalid-argument', { argument: 'host' }));
   });
 
   it('refuses a location carrying a query or a fragment, before the engine sees anything', async () => {
     const asked: string[] = [];
     const untouched = { query: async (sql: string) => void asked.push(sql) } as unknown as Engine;
     for (const location of ['https://acct.blob.core.windows.net/c?sv=x&sig=y', `${CORPUS}#frag`]) {
-      await expect(open('x', { engine: untouched, url: location })).rejects.toThrow(fossil('corpus/not-a-location', { location }));
+      await expect(attach('x', { engine: untouched, url: location })).rejects.toThrow(fossil('corpus/not-a-location', { location }));
     }
     expect(asked).toEqual([]);
   });
 
-  it('shares a catalog between two opens, and the last to close detaches it', async () => {
-    const first = await open('shared', { engine, url: CORPUS });
-    const again = await open('shared', { engine, url: CORPUS });
-    await first();
-    await first();
+  it('shares a catalog between two attachments, and the last to detach takes it', async () => {
+    const first = await attach('shared', { engine, url: CORPUS });
+    const again = await attach('shared', { engine, url: CORPUS });
+    await first.detach();
+    await first.detach();
     const [count] = await query(`SELECT count(*)::INTEGER AS n FROM shared."Person"`);
     expect(count!.n).toBe(MANIFEST.vertex_tables[0]!.record_count);
     expect(await catalogs()).toContain('shared');
-    await again();
+    await again.detach();
     expect(await catalogs()).not.toContain('shared');
   });
 });

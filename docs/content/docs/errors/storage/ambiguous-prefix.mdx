@@ -11,7 +11,7 @@ job 3 vends 2 prefixes, and a corpus lives under one
 ```
 
 A host sees `data: { scope, count }` — `scope` is `job <id>`, `count` the number of prefixes vended.
-There are two emitters. `open(job, { engine, host })` in `@fossil-lang/corpus` mounts `read` on the job
+There are two emitters. `attach(job, { engine, host })` in `@fossil-lang/corpus` mounts `read` on the job
 and throws this, releasing the mount first, when it gets anything but one prefix. A run in the
 executor asks for `write` on the job and throws it with the help *a run writes under exactly one
 prefix*, before it reads a source.
