@@ -1,7 +1,7 @@
 /**
- * `openProgram` is the protocol both editor hosts used to write by hand: push the text before any
- * question, resolve the documents it names before a check, and answer in the shape `fossil()`
- * takes. These pin each half across the real wasm boundary.
+ * `openProgram` is the protocol both editor hosts used to write by hand: the text arrives through
+ * `update`, the documents it names are resolved before a check, and every question takes only a
+ * position. These pin each half across the real wasm boundary.
  */
 import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
@@ -43,12 +43,12 @@ User : Person from users
 afterEach(() => vi.unstubAllGlobals());
 
 const DESCRIPTOR = {
-  uri: '@lake/users.csv',
+  key: '@lake/users.csv',
   columns: [
     { name: 'id', primitive: 'string' as const },
     { name: 'name', primitive: 'string' as const },
   ],
-  freshness_token: '',
+  etag: '',
 };
 
 describe('openProgram', () => {
@@ -62,7 +62,7 @@ describe('openProgram', () => {
       expect(fetched).toHaveLength(1);
       expect(fetched[0]).toBe('http://minio.example/vocab/shapes/person.shex');
       program.registerIntrospection({ descriptors: [DESCRIPTOR], undescribed: [] });
-      const rows = await program.check(PROGRAM);
+      const rows = await program.diagnostics();
       // The shape arrived: `name` is checked against its datatype, which only a read shape knows.
       const mismatch = rows.find((r) => r.code === 'type/property-mismatch');
       expect(mismatch?.code === 'type/property-mismatch' && mismatch.data.expected).toBe('Integer');
@@ -70,23 +70,25 @@ describe('openProgram', () => {
       expect(mismatch?.message).not.toContain('help:');
       expect(rows.every((r) => r.uri === 'prog.fossil')).toBe(true);
       // Nothing new is missing, so a second check reads nothing.
-      await program.check(PROGRAM);
+      await program.diagnostics();
       expect(fetched).toHaveLength(1);
     } finally {
       program.close();
     }
   });
 
-  it('answers a position query about the text it was handed, not the last check', async () => {
+  it('answers a position query about the text of the last update, with no check between', async () => {
     const { host } = recordingHost(SHAPE);
     program = await openProgram('prog.fossil', { host });
     try {
       program.registerIntrospection({ descriptors: [DESCRIPTOR], undescribed: [] });
-      // Opened empty and never checked: hover must push the text itself to find anything.
       const line = PROGRAM.split('\n').findIndex((l) => l.includes('name = users.name'));
       const character = PROGRAM.split('\n')[line]!.indexOf('users.name') + 'users.'.length + 1;
-      expect(program.hover(PROGRAM, line, character)).not.toBeNull();
-      expect(program.complete(PROGRAM, line, character).length).toBeGreaterThan(0);
+      // Opened empty: nothing is under any cursor until the text arrives.
+      expect(program.hover(line, character)).toBeNull();
+      program.update(PROGRAM);
+      expect(program.hover(line, character)).not.toBeNull();
+      expect(program.completion(line, character).length).toBeGreaterThan(0);
     } finally {
       program.close();
     }
@@ -96,8 +98,8 @@ describe('openProgram', () => {
     const { host } = recordingHost(SHAPE);
     program = await openProgram('prog.fossil', { host });
     try {
-      // Opened empty: the call pushes the text it is handed, like every other question.
-      const rows = program.semanticTokens(PROGRAM);
+      program.update(PROGRAM);
+      const rows = program.semanticTokens();
       const lines = PROGRAM.split('\n');
       const at = (text: string) =>
         rows.find((r) => {
@@ -115,34 +117,34 @@ describe('openProgram', () => {
     }
   });
 
-  it('reports the sources through the connection map', async () => {
+  it('reports its inputs through the connection map', async () => {
     const { host } = recordingHost(SHAPE);
-    program = await openProgram('prog.fossil', { host });
+    program = await openProgram('prog.fossil', { host, text: PROGRAM });
     try {
-      expect(await program.sources(PROGRAM)).toEqual([
-        { binding: 'users', key: '@lake/users.csv', locator: 's3://lake/users.csv', connection: 'lake', format: 'csv' },
+      expect(await program.inputs()).toEqual([
+        {
+          role: 'data',
+          binding: 'users',
+          key: '@lake/users.csv',
+          location: 's3://lake/users.csv',
+          connection: 'lake',
+          format: 'csv',
+        },
+        { role: 'schema', key: '@vocab/person.shex', location: 's3://vocab/shapes/person.shex', connection: 'vocab' },
       ]);
     } finally {
       program.close();
     }
   });
 
-  it('carries exactly the option names fossil() takes', async () => {
+  it('refuses a descriptor the compiler cannot read', async () => {
     const { host } = recordingHost(SHAPE);
     program = await openProgram('prog.fossil', { host });
     try {
-      for (const key of [
-        'uri',
-        'tokenize',
-        'semanticTokens',
-        'check',
-        'hover',
-        'complete',
-        'definition',
-      ]) {
-        expect(program, key).toHaveProperty(key);
-      }
-      expect(program.tokenize('x := 1').length).toBeGreaterThan(0);
+      const malformed = { key: 'users.csv' } as unknown as typeof DESCRIPTOR;
+      expect(() => program!.registerIntrospection({ descriptors: [malformed], undescribed: [] })).toThrow(
+        expect.objectContaining({ name: 'FossilError', code: 'api/invalid-argument' }),
+      );
     } finally {
       program.close();
     }
@@ -152,7 +154,7 @@ describe('openProgram', () => {
 describe('openProgram, when a source cannot be described', () => {
   const NOT_FOUND = {
     code: 'source/not-found',
-    data: { locator: 's3://lake/users.csv' },
+    data: { location: 's3://lake/users.csv' },
     title: 'A source names no file',
     detail: 'the source `s3://lake/users.csv` names no file',
     severity: 'error',
@@ -160,25 +162,25 @@ describe('openProgram, when a source cannot be described', () => {
 
   it('answers one warning at the call that reads it, under the code introspection answered', async () => {
     const { host } = recordingHost(SHAPE);
-    const program = await openProgram('prog.fossil', { host });
+    const program = await openProgram('prog.fossil', { host, text: PROGRAM });
     try {
       program.registerIntrospection({
         descriptors: [],
         undescribed: [{ source: { key: '@lake/users.csv' }, problem: NOT_FOUND }],
       });
-      const rows = (await program.check(PROGRAM)).filter((r) => r.code === 'source/not-found');
+      const rows = (await program.diagnostics()).filter((r) => r.code === 'source/not-found');
       expect(rows).toHaveLength(1);
       const [row] = rows;
       expect(row).toMatchObject({
         uri: 'prog.fossil',
         severity: 2,
         title: 'A source names no file',
-        data: { locator: 's3://lake/users.csv' },
+        data: { location: 's3://lake/users.csv' },
         range: { start: { line: 1, character: 9 }, end: { line: 1, character: 34 } },
       });
 
       program.registerIntrospection({ descriptors: [DESCRIPTOR], undescribed: [] });
-      expect((await program.check(PROGRAM)).some((r) => r.code === 'source/not-found')).toBe(false);
+      expect((await program.diagnostics()).some((r) => r.code === 'source/not-found')).toBe(false);
     } finally {
       program.close();
     }
@@ -192,11 +194,11 @@ describe('openProgram, when a document cannot be read', () => {
     const { host } = recordingHost(SHAPE);
     const program = await openProgram('prog.fossil', { host, text: MISSING });
     try {
-      const rows = await program.check(MISSING);
+      const rows = await program.diagnostics();
       expect(rows[0]).toMatchObject({
         uri: 'prog.fossil',
         code: 'storage/unreachable',
-        data: { locator: expect.stringContaining('gone.shex') },
+        data: { location: expect.stringContaining('gone.shex') },
       });
     } finally {
       program.close();
@@ -209,7 +211,7 @@ describe('openProgram, when a document cannot be read', () => {
     vi.useFakeTimers();
     try {
       host.connections = () => new Promise(() => {});
-      const outcome = program.check(MISSING).catch((e: unknown) => e);
+      const outcome = program.diagnostics().catch((e: unknown) => e);
       await vi.advanceTimersByTimeAsync(30_000);
       expect(await outcome).toMatchObject({ code: 'storage/host-silent' });
     } finally {

@@ -27,10 +27,9 @@ over it is not something fossil can write to. The host's part in that is on
 
 ## How to repair it
 
-The two browser entry points choose a covered destination themselves: `run(host, job)` writes under
-the one prefix the host vends `write` on for the job, and `runInMemory(sources, dest)` adds the
-trailing slash and puts an in-memory store at `dest`. So this code comes from calling the executor
-directly with a destination of your own.
+`run` chooses a covered destination itself: `{ host, job }` writes under the one prefix the host
+vends `write` on for the job, and `{ files, path }` puts an in-memory store at `memory://corpus/`. So
+this code comes from calling the executor's glue directly with a destination of your own.
 
 - **Write under a prefix you were granted.** Grant write access for the job first, and pass the
   prefix that grant returned.

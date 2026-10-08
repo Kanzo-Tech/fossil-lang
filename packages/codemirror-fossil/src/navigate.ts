@@ -25,23 +25,17 @@
 import { EditorView, keymap } from '@codemirror/view';
 import { EditorSelection, type Extension } from '@codemirror/state';
 
-import type { DefinitionRow } from '@fossil-lang/types';
+import type { Location } from '@fossil-lang/types';
+import type { FossilProgram } from '@fossil-lang/wasm';
 
 import { offsetOf, positionOf } from './positions.js';
 
-/** What {@link fossilGotoDefinition} calls. Takes the text for the same reason
- *  the check source does — see the note in `hover.ts`. */
-export type DefinitionSource = (
-  text: string,
-  line: number,
-  character: number,
-) => readonly DefinitionRow[] | Promise<readonly DefinitionRow[]>;
+/** What {@link fossilGotoDefinition} asks: the definitions, and the URI this buffer is open under.
+ *  A target carrying that URI is a jump; any other target is the host's to open. */
+export type DefinitionSource = Pick<FossilProgram, 'uri' | 'definition'>;
 
 /** Options for {@link fossilGotoDefinition}. */
 export interface NavigateOptions {
-  /** The URI this buffer is open under. A target carrying it is a jump; any
-   *  other target is the host's to open. */
-  uri: string;
   /**
    * Called with a target in ANOTHER file — and with `null` when the position
    * has no definition at all, so a host can say "nothing here" rather than
@@ -51,7 +45,7 @@ export interface NavigateOptions {
    * extension without this would silently do nothing on the majority of real
    * uses.
    */
-  onNavigate: (target: DefinitionRow | null) => void;
+  onNavigate: (target: Location | null) => void;
   /** Bind Mod-click as well as the keys. Default true. */
   clickToNavigate?: boolean;
 }
@@ -70,34 +64,32 @@ export function gotoDefinitionAt(
   options: NavigateOptions,
 ): void {
   const { line, character } = positionOf(view.state, pos);
-  void (async () => {
-    let rows: readonly DefinitionRow[];
-    try {
-      rows = await source(view.state.doc.toString(), line, character);
-    } catch {
-      // A refused jump is "nothing here" to the host; the linter is where a refusal is shown.
-      options.onNavigate(null);
-      return;
-    }
-    const target = rows[0];
-    if (target === undefined) {
-      options.onNavigate(null);
-      return;
-    }
-    if (target.uri !== options.uri) {
-      options.onNavigate(target);
-      return;
-    }
-    const at = offsetOf(view.state, target.range.start);
-    view.dispatch({
-      selection: EditorSelection.cursor(at),
-      // `center` rather than `nearest`: a jump that scrolls the target to the
-      // very bottom line reads as not having moved.
-      effects: EditorView.scrollIntoView(at, { y: 'center' }),
-      scrollIntoView: false,
-    });
-    view.focus();
-  })();
+  let rows: readonly Location[];
+  try {
+    rows = source.definition(line, character);
+  } catch {
+    // A refused jump is "nothing here" to the host; the linter is where a refusal is shown.
+    options.onNavigate(null);
+    return;
+  }
+  const target = rows[0];
+  if (target === undefined) {
+    options.onNavigate(null);
+    return;
+  }
+  if (target.uri !== source.uri) {
+    options.onNavigate(target);
+    return;
+  }
+  const at = offsetOf(view.state, target.range.start);
+  view.dispatch({
+    selection: EditorSelection.cursor(at),
+    // `center` rather than `nearest`: a jump that scrolls the target to the
+    // very bottom line reads as not having moved.
+    effects: EditorView.scrollIntoView(at, { y: 'center' }),
+    scrollIntoView: false,
+  });
+  view.focus();
 }
 
 /**

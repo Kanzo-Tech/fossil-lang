@@ -6,10 +6,10 @@ answer `@fossil-lang/wasm` already had:
 | half | what drives it | what you see |
 |---|---|---|
 | highlighting | `tokenize()`, then `semanticTokens()` over it | the compiler's own lexer, coloured by the host's own theme; shapes, declarations and `@connections` told apart where the program is open |
-| diagnostics | `check()` → `@codemirror/lint` | squiggles, with the checker's messages and help verbatim, and its two quick fixes — did-you-mean and split-mapping — as actions |
+| diagnostics | `diagnostics()` → `@codemirror/lint` | squiggles, with the checker's messages and help verbatim, and its two quick fixes — did-you-mean and split-mapping — as actions |
 | hover | `hover()` → `hoverTooltip` | the type of what you wrote AND the type the target shape demands of it |
-| completion | `completions()` → `@codemirror/autocomplete` | the receiver's members, spelled bare — `trim`, not `str.trim` |
-| go to definition | `gotoDefinition()` → a keymap | `F12`, `Alt-.`, Mod-click; a target in the shape document goes to the host |
+| completion | `completion()` → `@codemirror/autocomplete` | the receiver's members, spelled bare — `trim`, not `str.trim` |
+| go to definition | `definition()` → a keymap | `F12`, `Alt-.`, Mod-click; a target in the shape document goes to the host |
 
 There is no TypeScript lexer here and there will not be one. `grammar.bnf` is
 normative, `crates/fossil-syntax` implements it, and a second implementation in
@@ -18,9 +18,9 @@ table in this package's predecessor did.
 
 ## Extensions, not an editor
 
-Everything exported is an `Extension`. No component, no `EditorView`, and no
-colours — the one `baseTheme` sets the margins of the hover tooltip's own markup,
-at the lowest precedence CodeMirror has. The editor is the host's decision:
+`fossil(program, options)` is the one export, and it is an `Extension`. No component, no
+`EditorView`, and no colours — the one `baseTheme` sets the margins of the hover tooltip's own
+markup, at the lowest precedence CodeMirror has. The editor is the host's decision:
 
 ```ts
 import { fossil } from '@fossil-lang/codemirror-fossil';
@@ -29,34 +29,31 @@ import { openProgram } from '@fossil-lang/wasm';
 // `host` is the host's `Host`: the connection map, and credentials to read what the program names.
 const program = await openProgram('hello.fossil', { host, text });
 
-const extensions = fossil({ ...program, onNavigate: (target) => console.log(target) });
+const extensions = fossil(program, { onNavigate: (target) => console.log(target) });
 ```
 
-`openProgram` answers with exactly this package's option names — `tokenize`,
-`semanticTokens`, `uri`, `check`, `hover`, `complete`, `definition` — over one workspace, so the host writes
-the one thing that is its own to decide: where a definition in another file goes.
+`options` are the host's to decide: `onNavigate` (where a definition in another file goes; go to
+definition is bound only with it), `onDiagnostics`, `delay`, `hoverTime`, `render`, `maxLength`.
 
-**Every source takes the text, and that repetition is the design.** The workspace answers
-about the text of the last `updateFile`; the checker is debounced, hover fires on
-mouse-move and completion on nearly every keystroke, so three of the four run between two
-checks. A source taking only a position would let a host query text it had not pushed and
-get a range one keystroke wrong. `openProgram` pushes before every answer and compares
-against what it last sent, so the push costs a string comparison in the common case; a
-host wiring `FossilWorkspace` by hand owes the same discipline.
+**The view pushes the text; every question takes a position.** A `ViewPlugin` calls
+`program.update(text)` at construction and on every document change, synchronously inside the
+dispatch, as `@codemirror/lsp-client` syncs a file before a request. Hover, completion, definition
+and the linter then ask by `(line, character)` about exactly the text on screen.
 
-**A check that fails is a row, not a throw.** When `check` rejects, the linter draws the
-failure on the first character by its code (`internal/bug` when fossil did not raise it) and
-hands `onDiagnostics` that one row — `uncheckedRow(uri, cause)` — through the same call as any
-batch. A host counting rows for a panel or a badge wraps nothing; a failure before there is a
-linter, `openProgram` rejecting, is reported with the same `uncheckedRow`.
+**A check that fails is a diagnostic, not a throw.** When `diagnostics()` rejects, the linter draws
+the failure on the first character by its code (`internal/bug` when fossil did not raise it) and
+hands `onDiagnostics` that one diagnostic — `uncheckedDiagnostic(uri, cause)` — through the same
+call as any batch. A host counting diagnostics for a panel or a badge wraps nothing; a failure
+before there is a linter, `openProgram` rejecting, is reported with the same
+`uncheckedDiagnostic`.
 
 `@kanzo-tech/ui`'s `CodeEditor` takes exactly that as its `extensions` prop and
 holds it in a live-reconfigured `Compartment`. So does a bare `EditorView`.
 
 ## `kind` is a name
 
-`TokenRow.kind` is the lexer's variant name — `"Comment"`, `"KwFrom"` — typed by the
-`Token` union `@fossil-lang/types` generates from the Rust enum, so `src/tags.ts` maps
+`Token.kind` is the lexer's variant name — `"Comment"`, `"KwFrom"` — typed by the
+`TokenKind` union `@fossil-lang/types` generates from the Rust enum, so `src/tags.ts` maps
 names and a key the lexer does not have fails the type-check. Offsets are UTF-16 code
 units, the units CodeMirror indexes in.
 
@@ -79,7 +76,7 @@ names — is laid over it, the way rust-analyzer's tokens sit over a TextMate gr
 
 The semantic layer wins where it names something the lexer cannot; where it repeats
 what the lexer already said (strings, numbers, operators, `and`), the lexer's finer tag
-stays. Without `semanticTokens`, or if it throws, the lexical layer is the whole answer.
+stays. If `semanticTokens` throws, the lexical layer is the whole answer.
 
 ## What it does not do
 
@@ -94,6 +91,6 @@ with none of them has no use for it.
 `@codemirror/autocomplete`, `@codemirror/language`, `@codemirror/lint`,
 `@codemirror/state`, `@codemirror/view`, `@fossil-lang/wasm`.
 
-`@fossil-lang/wasm` is a peer rather than a dependency because the host owns when
-the module is instantiated, and two copies of the wasm-bindgen glue is the
-duplication that `packages/wasm/src/client.ts` was split to prevent.
+`@fossil-lang/wasm` is a peer rather than a dependency because `fossil(program)` takes
+the host's `FossilProgram`, and two copies of the wasm-bindgen glue is the duplication
+`packages/wasm`'s leaf-module split exists to prevent.

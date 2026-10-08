@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { createRequire } from 'node:module';
-import { initStorage } from '@fossil-lang/storage';
+import { initFossilStorage } from '@fossil-lang/storage';
 import { FossilError, type Access, type Host, type Problem, type Scope, type StorageCredential } from '@fossil-lang/types';
 
 import { initFossilExecutor, run } from '../src/index.js';
@@ -121,7 +121,7 @@ async function answerS3(request: Request, serve: Record<string, string>, gets: s
 }
 
 beforeAll(async () => {
-  await initStorage(
+  await initFossilStorage(
     await readFile(createRequire(import.meta.url).resolve('@fossil-lang/storage/pkg/fossil_storage_wasm_bg.wasm')),
   );
   const wasmPath = fileURLToPath(new URL('../pkg/fossil_df_wasm_bg.wasm', import.meta.url));
@@ -137,7 +137,7 @@ describe('run', () => {
 
     const report = await run(PROGRAM, { host, job: 'job-1' });
 
-    expect(report.dest).toBe(JOB);
+    expect(report.location).toBe(JOB);
     // The relation exists only because the read shape document was the output
     // contract: without it `placedBy` would be a literal property.
     expect(report.dropped).toEqual([{ table: 'Order_placedBy_Person', dropped: 0 }]);
@@ -171,7 +171,7 @@ describe('run', () => {
     expect(failure).toMatchObject({ name: 'FossilError', code: 'document/unread', data: { documents: [expect.stringContaining('graph.shex')] } });
     expect((failure as FossilError).problem).toMatchObject({
       code: 'document/unread',
-      cause: { code: 'storage/unreachable', data: { locator: expect.stringContaining('graph.shex') } },
+      cause: { code: 'storage/unreachable', data: { location: expect.stringContaining('graph.shex') } },
     });
     expect(puts).toEqual([]);
   });

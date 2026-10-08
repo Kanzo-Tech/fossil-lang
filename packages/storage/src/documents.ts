@@ -1,12 +1,5 @@
-import {
-  FossilError,
-  HOST_MS,
-  isFossilError,
-  within,
-  type DocumentWorkspace,
-  type Host,
-  type UnreadDocument,
-} from '@fossil-lang/types';
+import { FossilError, HOST_MS, isFossilError, type Host } from '@fossil-lang/types';
+import { within, type DocumentWorkspace, type UnreadDocument } from '@fossil-lang/types/internal';
 
 import { read } from './objects.js';
 

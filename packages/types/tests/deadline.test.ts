@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { FossilError, MODULE_MS, attachCause, boot, isFossilError, loader, until, within } from '../src/index.js';
+import { FossilError, isFossilError } from '../src/index.js';
+import { MODULE_MS, attachCause, boot, loader, until, within } from '../src/internal.js';
 
 const silent = (after: number) => new Error(`silent after ${after}`);
 const never = <T>(): Promise<T> => new Promise<T>(() => {});
@@ -63,7 +64,7 @@ describe('boot', () => {
     const dropped = new TypeError('Failed to fetch');
     const e = await boot('m_bg.wasm', () => Promise.reject(dropped)).catch((x: unknown) => x);
     expect(isFossilError(e, 'module/unreachable')).toBe(true);
-    expect((e as FossilError<'module/unreachable'>).data).toEqual({ locator: 'm_bg.wasm' });
+    expect((e as FossilError<'module/unreachable'>).data).toEqual({ location: 'm_bg.wasm' });
     expect((e as Error).cause).toBe(dropped);
   });
 
@@ -79,7 +80,7 @@ describe('boot', () => {
     await vi.advanceTimersByTimeAsync(MODULE_MS);
     const e = await outcome;
     expect(isFossilError(e, 'module/unreachable')).toBe(true);
-    expect((e as FossilError<'module/unreachable'>).data).toEqual({ locator: 'm_bg.wasm', after: MODULE_MS });
+    expect((e as FossilError<'module/unreachable'>).data).toEqual({ location: 'm_bg.wasm', after: MODULE_MS });
     expect(((e as Error).cause as Error).name).toBe('TimeoutError');
   });
 });

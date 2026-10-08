@@ -61,7 +61,7 @@ subjects `https://example.org/user/1` … `/5`. Inspect a written corpus with
 DuckDB:
 
 ```bash
-duckdb -c "SELECT * FROM read_parquet('<dest>/vertex/Person.parquet')"
+duckdb -c "SELECT * FROM read_parquet('<location>vertex/Person.parquet')"
 ```
 
 `crates/fossil-df/tests/walking_skeleton.rs` asserts that content — not merely

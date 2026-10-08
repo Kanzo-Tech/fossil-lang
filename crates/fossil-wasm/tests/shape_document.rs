@@ -24,7 +24,7 @@
 // format-string argument.
 #![allow(clippy::literal_string_with_formatting_args)]
 
-use fossil_wasm::{CheckRow, FossilWorkspace};
+use fossil_wasm::{Diagnostic, FossilWorkspace};
 
 /// A program that names its output shape document and writes `name` from a CSV
 /// column.
@@ -90,45 +90,45 @@ const DEMANDS_STRING: &str = r#"{
 /// source row `.name` has no type and there is nothing for the shape to
 /// disagree with.
 const USERS_DESCRIPTOR: &str = r#"{
-  "uri": "users.csv",
+  "key": "users.csv",
   "columns": [
     { "name": "id", "primitive": "string" },
     { "name": "name", "primitive": "string" }
   ],
-  "freshness_token": ""
+  "etag": ""
 }"#;
 
 /// Every diagnostic the workspace reports, across all open files.
-fn rows(ws: &FossilWorkspace) -> Vec<CheckRow> {
-    ws.check_rows()
+fn rows(ws: &FossilWorkspace) -> Vec<Diagnostic> {
+    ws.diagnostic_rows()
 }
 
-/// The rows [`FossilWorkspace::check_rows`] attributes to ONE file.
+/// The rows [`FossilWorkspace::diagnostic_rows`] attributes to ONE file.
 ///
 /// Step (4) below asks a question about the PROGRAM, so it looks at the
 /// program's rows. It is the narrower question and it stays narrow.
 ///
 /// **This used to carry the reason it HAD to be narrow**, and that reason is
-/// gone: `check_rows` drained every open file as if it were a fossil program,
+/// gone: `diagnostic_rows` drained every open file as if it were a fossil program,
 /// so `person.shex` — a `ShExJ` document — was run through the fossil parser and
 /// the workspace list carried twenty-one rows like `expected IDENT, found
 /// STRING` attributed to it. Comparing the whole workspace would have pinned
 /// that. `tests/documents_are_not_programs.rs` is where the fix is measured; a
 /// file the provider catalogue claims is an input, and an input is not drained
 /// as a program.
-fn rows_for(ws: &FossilWorkspace, uri: &str) -> Vec<CheckRow> {
-    ws.check_rows()
+fn rows_for(ws: &FossilWorkspace, uri: &str) -> Vec<Diagnostic> {
+    ws.diagnostic_rows()
         .into_iter()
         .filter(|r| r.uri == uri)
         .collect()
 }
 
 /// The shape demands an integer where the program writes a string.
-fn expects_integer(row: &CheckRow) -> bool {
+fn expects_integer(row: &Diagnostic) -> bool {
     row.code == "type/property-mismatch" && row.detail.data["expected"] == "Integer"
 }
 
-fn mentions_integer(rows: &[CheckRow]) -> bool {
+fn mentions_integer(rows: &[Diagnostic]) -> bool {
     rows.iter().any(expects_integer)
 }
 
@@ -212,7 +212,7 @@ fn a_document_opened_after_the_program_is_still_found_by_it() {
 ///
 /// A type error is about two texts — `name = users.name` in the program, and
 /// the line of the `.shex` that says what `name` must be — and until
-/// `CheckRow::related` existed the second one had nowhere to go: `to_check_row`
+/// `Diagnostic::related` existed the second one had nowhere to go: `to_diagnostic`
 /// converted the span, the severity and the message and dropped `d.labels`
 /// entirely, so a report whose whole content is a RELATION between two places
 /// arrived as one squiggle. `fossil check` rendered it in full throughout.
@@ -239,7 +239,7 @@ ex:Person {
     ws.open_file_native("person.shex".to_string(), COMPACT.to_string());
 
     let row = ws
-        .check_rows()
+        .diagnostic_rows()
         .into_iter()
         .find(expects_integer)
         .expect("the shape demands an integer where the program writes a string");
@@ -284,7 +284,7 @@ fn a_row_carries_the_code_the_data_and_the_repair() {
     ws.open_file_native("person.shex".to_string(), DEMANDS_STRING.to_string());
 
     let row = ws
-        .check_rows()
+        .diagnostic_rows()
         .into_iter()
         .find(|r| r.code == "name/unknown-field")
         .expect("`nmae` is not a column of users.csv");

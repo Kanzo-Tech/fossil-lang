@@ -5,11 +5,11 @@
 //! what this file pins is the boundary's own half: UTF-16 ranges, legend NAMES
 //! instead of indices, and a multi-line span kept whole.
 
-use fossil_wasm::{FossilWorkspace, SemanticTokenRow};
+use fossil_wasm::{FossilWorkspace, SemanticToken};
 
 /// The text each row covers, with its kind and modifiers — read back through
 /// the UTF-16 range, which is how a JS host will read it.
-fn read(src: &str, rows: &[SemanticTokenRow]) -> Vec<(String, String, Vec<String>)> {
+fn read(src: &str, rows: &[SemanticToken]) -> Vec<(String, String, Vec<String>)> {
     let lines: Vec<Vec<u16>> = src
         .split('\n')
         .map(|l| l.encode_utf16().collect())

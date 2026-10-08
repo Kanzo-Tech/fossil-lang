@@ -30,9 +30,11 @@
 use logos::Logos;
 
 /// One token, serialised as its variant name — the name a highlighter keys on.
+/// On the wire it is a `Token`'s `kind`, so it is named `TokenKind` there.
 #[derive(
     Logos, Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, schemars::JsonSchema,
 )]
+#[schemars(rename = "TokenKind")]
 pub enum Token {
     // ───────────────────────────────────────────────────────────────────
     // Trivia — kept (NOT skipped) so the indent pass can see them.

@@ -5,9 +5,8 @@ the logic that turns the sources a program reads into the `InferredDescriptor`s
 the bidirectional checker (and editor field-completion) consume.
 
 Which sources a program reads is fossil's answer, not this package's:
-`FossilWorkspace.sources(handle)` walks the AST and returns a
-`ProgramSource[]` with each `@conn/path` already expanded into a locator and
-the connection it goes through. This package asks the host for a read
+`program.inputs()` walks the AST and returns an `Input[]` with each `@conn/path`
+already expanded into a location and the connection it goes through. This package asks the host for a read
 credential once per connection, puts it in the host's DuckDB as a scoped secret
 (`@fossil-lang/storage`), DESCRIBEs each source through the reader its
 constructor names, gives the credential back, and builds the descriptor keyed by
@@ -24,13 +23,14 @@ both sides by `cargo xtask catalogue`.
 ```ts
 import { introspect } from "@fossil-lang/introspect";
 
-const described = await introspect(await program.sources(text), {
+const described = await introspect(await program.inputs(), {
   host,     // Host: vends a read credential per connection
   engine,   // Engine: DuckDB with httpfs, where the DESCRIBE runs
+  etag,     // optional: the source's ETag, so an unchanged source is not described again
   signal,   // optional: stops it
 });
 // both halves to the checker: the descriptors type the program, and each
-// source in `undescribed` is a warning of `check` at its call, by its code.
+// source in `undescribed` is a warning of `diagnostics` at its call, by its code.
 program.registerIntrospection(described);
 ```
 

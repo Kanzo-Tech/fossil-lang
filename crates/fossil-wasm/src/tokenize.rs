@@ -12,14 +12,14 @@
 //! `&str`, because its result is already a pure function of the text the
 //! editor just typed.
 
-use fossil_syntax::lexer::{Token, raw_lex};
+use fossil_syntax::lexer::{Token as TokenKind, raw_lex};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 /// One token: its name, and where it is in UTF-16 code units.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, schemars::JsonSchema)]
-pub struct TokenRow {
-    pub kind: Token,
+pub struct Token {
+    pub kind: TokenKind,
     /// Inclusive start, in UTF-16 code units.
     pub start: u32,
     /// Exclusive end, in UTF-16 code units.
@@ -29,7 +29,7 @@ pub struct TokenRow {
 /// The rows [`tokenize`] returns, in source order. A byte the lexer has no
 /// reading for is skipped: the parser reports it.
 #[must_use]
-pub fn tokenize_native(text: &str) -> Vec<TokenRow> {
+pub fn tokenize_native(text: &str) -> Vec<Token> {
     let mut units = 0_u32;
     let mut at = 0_usize;
     let mut rows = Vec::new();
@@ -38,7 +38,7 @@ pub fn tokenize_native(text: &str) -> Vec<TokenRow> {
         let start = units;
         units += utf16_len(&text[range.clone()]);
         at = range.end;
-        rows.push(TokenRow {
+        rows.push(Token {
             kind,
             start,
             end: units,
@@ -56,7 +56,7 @@ fn utf16_len(s: &str) -> u32 {
 /// # Errors
 ///
 /// `internal/bug` if the rows do not serialise.
-#[wasm_bindgen(unchecked_return_type = "TokenRow[]")]
+#[wasm_bindgen(unchecked_return_type = "Token[]")]
 pub fn tokenize(text: &str) -> Result<JsValue, JsValue> {
     crate::to_value("the tokens", &tokenize_native(text))
 }

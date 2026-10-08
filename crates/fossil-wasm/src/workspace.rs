@@ -46,7 +46,7 @@ use wasm_bindgen::prelude::*;
 /// `Copy` does not save it. The derive is a Rust-side property; nothing about it
 /// reaches the JS boundary, where this is a class holding a pointer like any
 /// other. The three methods a host calls repeatedly with one handle
-/// (`update_file`, `close_file`, `diagnostics_for`) take `&FileHandle` so
+/// (`update_file`, `close_file`, `hover`) take `&FileHandle` so
 /// wasm-bindgen borrows instead, and the handle stays live across the whole
 /// lifetime `open_file`'s doc comment promises.
 ///
@@ -93,8 +93,8 @@ impl OpenFiles {
         self.files.remove(&h)
     }
 
-    /// Iterate `(handle, file)` pairs. Used by `check()` to drain
-    /// diagnostics across every open file, and by `diagnostics_for` to
+    /// Iterate `(handle, file)` pairs. Used by `diagnostics()` to drain
+    /// diagnostics across every open file, and by `diagnostics_for_rows` to
     /// scope a drain to a single file.
     pub(crate) fn iter(&self) -> impl Iterator<Item = (FileHandle, SourceFile)> + '_ {
         self.files.iter().map(|(&h, &f)| (h, f))
@@ -102,7 +102,7 @@ impl OpenFiles {
 
     /// Path lookup for one handle — needed to populate the `uri` field on
     /// emitted diagnostics (a `SourceFile` carries its path as a Salsa-input
-    /// string, but `check()` returns per-file rows and needs the URI in the
+    /// string, but `diagnostics()` returns per-file rows and needs the URI in the
     /// outgoing structured shape).
     pub(crate) fn path_for(&self, h: FileHandle, db: &dyn fossil_base::Db) -> Option<String> {
         self.files.get(&h).map(|f| f.path(db).clone())

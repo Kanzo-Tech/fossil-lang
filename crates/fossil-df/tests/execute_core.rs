@@ -48,7 +48,7 @@ impl Host for NoHost {
     }
 }
 
-/// A storage holding each `(locator, fixture)` in memory, and the store the
+/// A storage holding each `(location, fixture)` in memory, and the store the
 /// run writes into.
 async fn storage(sources: &[(&str, &str)]) -> (Storage, Arc<InMemory>) {
     let mut storage = Storage::new(Arc::new(NoHost));
@@ -59,8 +59,8 @@ async fn storage(sources: &[(&str, &str)]) -> (Storage, Arc<InMemory>) {
             Arc::clone(&data) as Arc<dyn ObjectStore>,
         )
         .expect("route");
-    for (locator, fixture) in sources {
-        let key = locator
+    for (location, fixture) in sources {
+        let key = location
             .strip_prefix("https://data.example.com/")
             .expect("in the fixture authority");
         let bytes = std::fs::read(format!("tests/fixtures/{fixture}")).expect("fixture");
@@ -144,7 +144,7 @@ async fn csv_program_runs_through_the_storage_seam() {
     assert_eq!(paths, ["fossil.json", "vertex/Person.parquet"]);
     assert!(!files["vertex/Person.parquet"].is_empty());
 
-    assert_eq!(report.dest, DEST);
+    assert_eq!(report.location, DEST);
     assert!(report.dropped.is_empty(), "no relation, nothing to drop");
 
     // 3 users → 3 vertices.
@@ -185,13 +185,17 @@ Order : Order from orders
 ";
 
 #[test]
-fn program_sources_lists_each_distinct_source_with_its_format() {
-    let srcs = executor(TWO_SOURCE_PROGRAM, HashMap::new()).sources();
-    let uris: Vec<&str> = srcs.iter().map(|s| s.locator.as_str()).collect();
+fn inputs_list_each_distinct_source_with_its_format() {
+    let srcs: Vec<_> = executor(TWO_SOURCE_PROGRAM, HashMap::new())
+        .inputs()
+        .into_iter()
+        .filter(|s| s.role == fossil_lineage::Role::Data)
+        .collect();
+    let uris: Vec<&str> = srcs.iter().map(|s| s.location.as_str()).collect();
     assert!(uris.contains(&"https://data.example.com/users.csv"));
     assert!(uris.contains(&"https://data.example.com/orders.csv"));
     assert_eq!(srcs.len(), 2);
-    assert!(srcs.iter().all(|s| s.format == "csv"));
+    assert!(srcs.iter().all(|s| s.format.as_deref() == Some("csv")));
 }
 
 /// **The report is where the run wrote and what the join dropped** — and the
@@ -210,7 +214,7 @@ async fn the_report_names_the_destination_and_the_drops() {
     let files = written(&out).await;
     let m = manifest(&files);
 
-    assert_eq!(report.dest, DEST);
+    assert_eq!(report.location, DEST);
     let tables: Vec<&str> = m.edge_tables.iter().map(|e| e.name.as_str()).collect();
     let dropped: Vec<&str> = report.dropped.iter().map(|d| d.table.as_str()).collect();
     assert_eq!(
@@ -285,7 +289,7 @@ async fn a_program_that_does_not_compile_fails_with_its_diagnostics() {
 }
 
 /// **A source whose file is not in the store fails as `source/not-found`,
-/// naming the file.** `DataFusion` reads a locator that matches nothing as a
+/// naming the file.** `DataFusion` reads a location that matches nothing as a
 /// relation with no columns, and the run used to fail at the first column the
 /// program read — keasy's unseeded LDBC job answered `engine/failed` with
 /// `Schema error: No field named "PlaceRow".id`, which reads as a program
@@ -293,7 +297,7 @@ async fn a_program_that_does_not_compile_fails_with_its_diagnostics() {
 /// it: through a connection, with a delimiter.
 #[tokio::test]
 async fn a_source_that_names_no_file_fails_as_source_not_found() {
-    for (source, locator) in [
+    for (source, location) in [
         (
             "io.csv(\"@ldbc/static/place_0_0.csv\", delimiter = \"|\")",
             "https://data.example.com/ldbc/static/place_0_0.csv",
@@ -323,7 +327,7 @@ async fn a_source_that_names_no_file_fails_as_source_not_found() {
         assert_eq!(
             refused.problem,
             fossil_graph_schema::Problem::SourceNotFound {
-                locator: locator.to_string()
+                location: location.to_string()
             },
             "{source}: {refused:?}"
         );
@@ -333,7 +337,7 @@ async fn a_source_that_names_no_file_fails_as_source_not_found() {
 #[tokio::test]
 async fn at_conn_source_alias_resolves_through_the_ref_map() {
     // `@mybucket/users.csv` resolves to `{base}/users.csv` via the ref-map —
-    // both `sources()` (enumeration) and `execute()` (the read) must agree.
+    // both `inputs()` (enumeration) and `execute()` (the read) must agree.
     let exec = executor(
         CONN_PROGRAM,
         HashMap::from([(
@@ -342,12 +346,16 @@ async fn at_conn_source_alias_resolves_through_the_ref_map() {
         )]),
     );
 
-    let listed = exec.sources();
+    let listed: Vec<_> = exec
+        .inputs()
+        .into_iter()
+        .filter(|i| i.role == fossil_lineage::Role::Data)
+        .collect();
     assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].locator, "https://data.example.com/users.csv");
-    assert_eq!(listed[0].format, "csv");
+    assert_eq!(listed[0].location, "https://data.example.com/users.csv");
+    assert_eq!(listed[0].format.as_deref(), Some("csv"));
 
-    let (mut storage, out) = storage(&[(listed[0].locator.as_str(), "users.csv")]).await;
+    let (mut storage, out) = storage(&[(listed[0].location.as_str(), "users.csv")]).await;
     exec.execute(&mut storage, DEST)
         .await
         .expect("executor runs the @conn-aliased program");
@@ -379,7 +387,7 @@ fn a_document_is_missing_until_registered() {
     assert_eq!(missing.len(), 1);
     assert_eq!(missing[0].key, "@vocab/executor.shex");
     assert_eq!(
-        missing[0].locator,
+        missing[0].location,
         "https://shapes.example.com/v1/executor.shex"
     );
 

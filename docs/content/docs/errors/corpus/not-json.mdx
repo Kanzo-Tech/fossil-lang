@@ -15,7 +15,7 @@ version: gar/v1
 https://data.example/graphs/people/fossil.json is not JSON
 ```
 
-A host sees `data: { path }`, the locator that was read, and the parser's `SyntaxError` as `cause`.
+A host sees `data: { path }`, the location that was read, and the parser's `SyntaxError` as `cause`.
 It is thrown by `parseManifest` in `@fossil-lang/corpus`, which `attach` calls once, before any view is
 created.
 

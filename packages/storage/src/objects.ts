@@ -1,10 +1,11 @@
-import { until, type Host, type Problem } from '@fossil-lang/types';
+import type { Host, Problem } from '@fossil-lang/types';
+import { until } from '@fossil-lang/types/internal';
 
-import { initStorage, storageRead } from './wasm.js';
+import { initFossilStorage, storageRead } from './wasm.js';
 
 /** A file to read: where it is, and the connection it lies under when it has one. */
 export interface Target {
-  locator: string;
+  location: string;
   connection?: string;
 }
 
@@ -26,7 +27,7 @@ export async function read(
   targets: readonly Target[],
   { signal }: { signal?: AbortSignal } = {},
 ): Promise<ReadResult[]> {
-  await until(initStorage(), signal);
+  await until(initFossilStorage(), signal);
   signal?.throwIfAborted();
   return (await until(storageRead(host, targets), signal)) as ReadResult[];
 }

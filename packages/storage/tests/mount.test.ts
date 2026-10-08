@@ -3,7 +3,7 @@ import './boot.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { mount } from '../src/index.js';
-import { RENEW_BEFORE_MS } from '@fossil-lang/types';
+import { RENEW_BEFORE_MS } from '@fossil-lang/types/internal';
 import { RETRY_MS } from '../src/mount.js';
 import { azure, countingHost, recordingEngine, s3 } from './fixtures.js';
 
@@ -30,7 +30,7 @@ describe('mount', () => {
     expect(await m.files([`${JOB}a.parquet`])).toEqual([`${JOB}a.parquet`]);
   });
 
-  it('refuses a locator no credential covers, before any request leaves', async () => {
+  it('refuses a location no credential covers, before any request leaves', async () => {
     const { engine } = recordingEngine();
     const { host } = countingHost(() => [s3(JOB, 'A')]);
     const m = await mount(engine, host, { job: 'job-1' }, 'read');
@@ -38,12 +38,12 @@ describe('mount', () => {
       expect.objectContaining({
         name: 'FossilError',
         code: 'storage/outside-prefix',
-        data: expect.objectContaining({ locator: 's3://keasy-dev/output/job-1-evil/x' }),
+        data: expect.objectContaining({ location: 's3://keasy-dev/output/job-1-evil/x' }),
       }),
     );
   });
 
-  it('picks the longest prefix that covers a locator', async () => {
+  it('picks the longest prefix that covers a location', async () => {
     const { engine } = recordingEngine();
     const wide = 's3://b/data/';
     const narrow = 's3://b/data/deep/';

@@ -19,11 +19,11 @@ describe('referenceTo', () => {
     ['s3://lake/in', 's3://lake/in'],
     ['s3://never/x.csv', 's3://never/x.csv'],
     ['/srv/data/x.csv', '/srv/data/x.csv'],
-  ])('%s is written %s', (locator, reference) => {
-    expect(referenceTo(locator, CONNECTIONS)).toBe(reference);
+  ])('%s is written %s', (location, reference) => {
+    expect(referenceTo(location, CONNECTIONS)).toBe(reference);
   });
 
-  it('never doubles a prefix the locator already carries', () => {
+  it('never doubles a prefix the location already carries', () => {
     expect(referenceTo('s3://lake/in/in/x.csv', { lake: 's3://lake/in' })).toBe('@lake/in/x.csv');
   });
 });

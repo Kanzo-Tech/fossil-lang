@@ -772,19 +772,19 @@ export interface ProblemData {
    * A CSV, JSON or Parquet source names no file in its store.
    */
   'source/not-found': {
-    locator: string;
+    location: string;
   };
   /**
    * A source's bytes are not UTF-8 text.
    */
   'source/not-utf8': {
-    locator: string;
+    location: string;
   };
   /**
    * A source's bytes did not parse in the format the program named.
    */
   'source/unparseable': {
-    locator: string;
+    location: string;
   };
   /**
    * The query engine failed; its own error is the cause.
@@ -817,10 +817,10 @@ export interface ProblemData {
     scope: string;
   };
   /**
-   * A locator outside every prefix a credential was vended for.
+   * A location outside every prefix a credential was vended for.
    */
   'storage/outside-prefix': {
-    locator: string;
+    location: string;
     prefix: string;
   };
   /**
@@ -833,16 +833,16 @@ export interface ProblemData {
     reason: string;
   };
   /**
-   * A locator no kind of store fossil reads can route.
+   * A location no kind of store fossil reads can route.
    */
   'storage/no-route': {
-    locator: string;
+    location: string;
   };
   /**
    * A store answered with an error; the store's error is the cause.
    */
   'storage/unreachable': {
-    locator: string;
+    location: string;
   };
   /**
    * The engine a host handed over cannot read remote storage.
@@ -869,7 +869,7 @@ export interface ProblemData {
    */
   'module/unreachable': {
     after?: number;
-    locator: string;
+    location: string;
   };
   /**
    * A corpus whose manifest could not be read; the reader's error is the cause.
@@ -1016,7 +1016,7 @@ export const TITLES: { readonly [C in Code]: string } = {
   'storage/ambiguous-prefix': 'More than one prefix was vended',
   'storage/outside-prefix': 'Outside the vended prefix',
   'storage/malformed-credential': 'A credential is malformed',
-  'storage/no-route': 'No store routes this locator',
+  'storage/no-route': 'No store routes this location',
   'storage/unreachable': 'A store could not be reached',
   'storage/no-httpfs': 'The engine cannot read remote storage',
   'storage/host-refused': 'The host refused',
@@ -1175,22 +1175,22 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'unsupported/expression': (d) => `\`${d.expression}\` is not an expression fossil can lower yet, so this property is not written`,
   'run/does-not-compile': (_) => `the program does not compile; nothing was run`,
   'run/destination-uncovered': (d) => `no store covers the destination ${d.destination}`,
-  'source/not-found': (d) => `the source \`${d.locator}\` names no file`,
-  'source/not-utf8': (d) => `the source \`${d.locator}\` is not UTF-8`,
-  'source/unparseable': (d) => `the source \`${d.locator}\` does not parse`,
+  'source/not-found': (d) => `the source \`${d.location}\` names no file`,
+  'source/not-utf8': (d) => `the source \`${d.location}\` is not UTF-8`,
+  'source/unparseable': (d) => `the source \`${d.location}\` does not parse`,
   'engine/failed': (_) => `the query engine failed`,
   'write/failed': (d) => `\`${d.path}\` could not be written`,
   'run/too-large': (d) => `the graph has ${d.vertices} vertices; a \`dense_id\` is a u32`,
   'storage/no-credential': (d) => `the host vended no ${d.access} credential for ${d.scope}`,
   'storage/ambiguous-prefix': (d) => `${d.scope} vends ${d.count} prefixes, and one was expected`,
-  'storage/outside-prefix': (d) => `${d.locator} lies outside ${d.prefix}`,
+  'storage/outside-prefix': (d) => `${d.location} lies outside ${d.prefix}`,
   'storage/malformed-credential': (d) => `the credential for ${d.prefix} is malformed: \`${d.key}\` ${d.reason}`,
-  'storage/no-route': (d) => `${d.locator} has no route: fossil reads s3://bucket/… and abfss://container@account.dfs.core.windows.net/… through a vended credential, and http(s) without one`,
-  'storage/unreachable': (d) => `${d.locator} could not be reached`,
+  'storage/no-route': (d) => `${d.location} has no route: fossil reads s3://bucket/… and abfss://container@account.dfs.core.windows.net/… through a vended credential, and http(s) without one`,
+  'storage/unreachable': (d) => `${d.location} could not be reached`,
   'storage/no-httpfs': (_) => `the engine cannot read remote storage: its httpfs extension is not loaded`,
   'storage/host-refused': (d) => `the host refused ${d.scope}`,
   'storage/host-silent': (d) => `the host did not answer ${d.scope} within ${d.after} ms`,
-  'module/unreachable': (d) => `${d.locator} could not be loaded`,
+  'module/unreachable': (d) => `${d.location} could not be loaded`,
   'corpus/unreadable': (d) => `${d.path} could not be read`,
   'corpus/not-json': (d) => `${d.path} is not JSON`,
   'corpus/unsupported-format': (d) => `${d.path} declares format ${d.format}, and this reader reads fossil/1 only`,

@@ -123,8 +123,8 @@ on its own side of the wire.
 > a test that crosses each host's wire rather than each host's function.
 
 The browser's wire is not the protocol. A page that already calls the checker in-process has no
-reason to stand up an LSP client to ask what type is under a cursor, so check, hover, completion and
-definition are plain method calls on the wasm workspace, and the language server over stdio is the
+reason to stand up an LSP client to ask what type is under a cursor, so diagnostics, hover, completion and
+definition are plain method calls on an open program, and the language server over stdio is the
 other wire. One implementation, two projections of it — and the rule above is what each of them owes.
 
 **What would reverse it.** A browser consumer that needs what only the protocol carries — code
@@ -137,7 +137,7 @@ The same measurement settles what a row may carry across that wire, and it is th
 > compiler is free to change; a consumer that wrote one down is broken by a reorder *silently*,
 > because every kind remaps at once and nothing fails.
 
-This is not a precaution. `TokenRow.kind` was a bare `fossil_syntax::lexer::Token as u32`, and the
+This is not a precaution. A token's `kind` was a bare `fossil_syntax::lexer::Token as u32`, and the
 consumer that kept the matching table — `packages/codemirror-fossil/src/tags.ts`, since deleted —
 was **wrong in nine places** by the time it went: `KwPrefix`, `KwIn`, `KwUse`, `KwAs`, `KwIri`,
 `Template`, `AbsIri`, `EnvVar` and `Pipe` are variants the lexer no longer has, `True`, `False` and
@@ -146,7 +146,7 @@ carried a comment saying it must be updated in lockstep with any reorder. Nothin
 and nothing noticed for as long as it did not.
 
 So a token crosses as its name: `tokenize()` returns `{ kind: "Comment", start, end }`, `kind` typed by
-the `Token` union generated from the lexer's enum, and a host keys on `"Comment"` rather than on `2`; semantic tokens
+the `TokenKind` union generated from the lexer's enum, and a host keys on `"Comment"` rather than on `2`; semantic tokens
 cross the boundary as legend names (`"type"`, `"declaration"`), read off the same `TokenType` enum
 that numbers them, and completion kinds followed — LSP spells `CompletionItemKind` as an integer, and
 the two completion emits cross as the generated `CompletionKind` union, which the editor's icon
@@ -160,6 +160,28 @@ Where an implementation genuinely cannot be shared, what the two must agree on i
 generated into both: the two introspecting hosts DESCRIBE through different DuckDBs, and the reader,
 its option keyword and the DuckDB→primitive table are rows of `catalogue.bnf` that
 `cargo xtask catalogue` writes into each.
+
+## The surface: one way to ask, named after the system it follows
+
+**A package exports what a host calls, and nothing it calls through.** The plumbing the siblings
+share — `until` and `within`, the document loop's `DocumentWorkspace`, the storage grant's
+`GrantPlan`, `attachCause` — is on `@fossil-lang/types/internal`, an exports subpath with no semver
+promise, rather than on the barrel beside `Host`. A name on the barrel is a second way to do what a
+host already does through `openProgram`, `run`, `mount` or `introspect`, and the raw wasm glue is
+the clearest case: `FossilWorkspace` on `@fossil-lang/wasm`'s barrel let a host check a program
+without reading its shape document, which `openProgram` never does. What would reverse it: a host
+that needs one of those names to do something no public call does — and then the call is what is
+missing, not the export.
+
+**A name is the reference system's name for the same thing.** An editor answer is spelled as LSP
+spells it — `Diagnostic`, `Hover`, `CompletionItem`, `Location`, `DiagnosticRelatedInformation`,
+`definition`, `completion` — so a host that knows the protocol reads the type without the docs. What
+a program reads is `inputs`, each an `Input` with a `role`, as OpenLineage names a run's `inputs`
+and PROV a generation's `used`; a written reference resolved is a `location`, the word `fossil-location`
+and `RunReport.location` share; a descriptor's freshness is an `etag`, RFC 9110's. `job` stays: it names the host's unit of work, and fossil only scopes a credential by it — it is
+OpenLineage's `run.runId`, not OpenLineage's `job`, which names the recurring process a run belongs
+to. What would reverse a name: a reference system that renamed its own, or a fossil concept the
+reference's name describes wrongly — then the fossil name is the honest one and the page says why.
 
 ## Storage is reached by a vended credential
 
@@ -187,7 +209,7 @@ one prefix on one engine share the secret, and the last to close drops it.
 **Azure is asymmetric, and the asymmetry is DuckDB-WASM's.** There is no Azure extension in the
 browser, so an Azure prefix is lent file by file — a scheme-less name the engine maps to the blob's
 SAS URL — and there is no glob. No reader of fossil globs: a corpus's manifest enumerates its files.
-The asymmetry stays inside `@fossil-lang/storage`; a reader names a locator and is told what SQL
+The asymmetry stays inside `@fossil-lang/storage`; a reader names a location and is told what SQL
 calls it.
 
 ## An open question this page does not settle

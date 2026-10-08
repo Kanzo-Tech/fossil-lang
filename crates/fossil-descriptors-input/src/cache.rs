@@ -65,12 +65,12 @@ impl DescriptorCache {
         self.table.lock().ok()?.get(uri).cloned()
     }
 
-    /// Register `descriptor` under its own [`InferredDescriptor::uri`],
+    /// Register `descriptor` under its own [`InferredDescriptor::key`],
     /// replacing any previous entry, and count the introspection that
     /// produced it.
     pub fn insert(&self, descriptor: InferredDescriptor) {
         if let Ok(mut table) = self.table.lock() {
-            table.insert(descriptor.uri.clone(), descriptor);
+            table.insert(descriptor.key.clone(), descriptor);
             self.registrations.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -89,7 +89,7 @@ impl DescriptorCache {
         }
         self.table
             .lock()
-            .is_ok_and(|t| t.get(uri).is_some_and(|d| d.freshness_token == token))
+            .is_ok_and(|t| t.get(uri).is_some_and(|d| d.etag == token))
     }
 
     /// Number of descriptors inserted since this cache was created. A skipped
@@ -120,7 +120,7 @@ mod tests {
 
     fn descriptor(uri: &str, token: &str, cols: &[&str]) -> InferredDescriptor {
         InferredDescriptor {
-            uri: uri.into(),
+            key: uri.into(),
             columns: cols
                 .iter()
                 .map(|c| InferredColumn {
@@ -128,7 +128,7 @@ mod tests {
                     primitive: Primitive::String,
                 })
                 .collect(),
-            freshness_token: token.to_string(),
+            etag: token.to_string(),
         }
     }
 
@@ -141,7 +141,7 @@ mod tests {
             "the binding name is not a key"
         );
         assert_eq!(
-            cache.get("examples/users.csv").expect("present").uri,
+            cache.get("examples/users.csv").expect("present").key,
             "examples/users.csv"
         );
     }

@@ -221,7 +221,7 @@ pub fn register_inferred(db: &dyn Db, uri: &str, columns: &[(&str, Primitive)]) 
         panic!("this host keeps no descriptor table");
     };
     cache.insert(fossil_descriptors_input::InferredDescriptor {
-        uri: uri.into(),
+        key: uri.into(),
         columns: columns
             .iter()
             .map(
@@ -232,7 +232,7 @@ pub fn register_inferred(db: &dyn Db, uri: &str, columns: &[(&str, Primitive)]) 
             )
             .collect(),
         // Empty means "never fresh", which is right for a table nobody re-reads.
-        freshness_token: String::new(),
+        etag: String::new(),
     });
 }
 

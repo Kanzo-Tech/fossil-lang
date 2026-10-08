@@ -10,7 +10,7 @@
 //! # The hosts had NO labels at all, not just no document ones
 //!
 //! `fossil-lsp`'s `to_lsp_diagnostic` converted the span, the severity and the
-//! message and dropped `labels` on the floor; `fossil-wasm`'s `to_check_row`
+//! message and dropped `labels` on the floor; `fossil-wasm`'s `to_diagnostic`
 //! did the same. So a report whose whole content is a RELATION between two
 //! places — «`Users` and `Imported` mint two identities for Person», which
 //! names both mappings and underlines both `@subject` lines — reached an editor

@@ -36,7 +36,7 @@ harness = false
 fossil-base               = { path = "../fossil-base" }
 fossil-ide                = { path = "../fossil-ide" }
 fossil-hir                = { path = "../fossil-hir" }
-# `program_sources` — the sources a buffer reads, the list every host introspects.
+# `inputs` — the sources a buffer reads, the list every host introspects.
 fossil-lineage            = { path = "../fossil-lineage" }
 # The editor must report what the compiler reports: diagnostics are drained from
 # the LOWERING (transitively covering the typechecker), so the LSP needs it.

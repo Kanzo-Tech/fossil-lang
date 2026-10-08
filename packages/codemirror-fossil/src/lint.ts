@@ -11,7 +11,7 @@
  *
  * ## The squiggle is not the only rendering
  *
- * `CheckRow.related` carries the other places one diagnostic points at — two
+ * `Diagnostic.related` carries the other places one diagnostic points at — two
  * mappings minting one identity, the line of the `.shex` that declares a violated
  * constraint, which is in ANOTHER FILE. CodeMirror's `Diagnostic` has no
  * cross-file concept, so those are folded into the message as `→ uri:line`
@@ -26,21 +26,16 @@
  * misspelt name, or replace the diagnostic's range with the source `suggestion`
  * carries.
  */
-import { linter, type Action, type Diagnostic } from '@codemirror/lint';
+import { linter, type Action, type Diagnostic as LintDiagnostic } from '@codemirror/lint';
 import type { EditorState, Extension } from '@codemirror/state';
-import {
-  FossilError,
-  helpUrl,
-  isFossilError,
-  rowOf,
-  type CheckRow,
-  type Problem,
-} from '@fossil-lang/types';
+import { FossilError, helpUrl, isFossilError, type Diagnostic, type Problem } from '@fossil-lang/types';
+import { diagnosticOf } from '@fossil-lang/types/internal';
+import type { FossilProgram } from '@fossil-lang/wasm';
 
 import { rangeOf } from './positions.js';
 
-/** LSP `DiagnosticSeverity`, as `fossil-wasm` emits it on `CheckRow.severity`. */
-const SEVERITY: Readonly<Record<CheckRow['severity'], Diagnostic['severity']>> = {
+/** LSP `DiagnosticSeverity`, as `fossil-wasm` emits it on `Diagnostic.severity`. */
+const SEVERITY: Readonly<Record<Diagnostic['severity'], LintDiagnostic['severity']>> = {
   1: 'error',
   2: 'warning',
   3: 'info',
@@ -58,7 +53,7 @@ export function problemMessage(problem: Problem): string {
 }
 
 /** Replace `range` — measured against the text the row was computed from — with `insert`. */
-function replace(name: string, range: CheckRow['range'], insert: string): Action {
+function replace(name: string, range: Diagnostic['range'], insert: string): Action {
   return {
     name,
     apply(view) {
@@ -68,7 +63,7 @@ function replace(name: string, range: CheckRow['range'], insert: string): Action
   };
 }
 
-function actionsOf(row: CheckRow): Action[] {
+function actionsOf(row: Diagnostic): Action[] {
   const actions: Action[] = [];
   if (row.didYouMean !== undefined) {
     const { range, replacement } = row.didYouMean;
@@ -90,19 +85,17 @@ function actionsOf(row: CheckRow): Action[] {
 // out, and the user may have deleted that line before the answer lands.
 
 /**
- * Project `CheckRow`s onto CodeMirror `Diagnostic`s against a given document.
+ * Project fossil's `Diagnostic`s onto CodeMirror's against a given document.
  *
- * `uri` filters to one buffer. The workspace-wide `check()` returns rows for every
- * open file — the `.shex` shape document a program names, any second
- * program — and painting another file's errors onto this one's text is worse than
+ * `uri` filters to one buffer: painting another file's errors onto this one's text is worse than
  * showing nothing.
  */
 export function toDiagnostics(
   state: EditorState,
-  rows: readonly CheckRow[],
+  rows: readonly Diagnostic[],
   uri: string,
-): Diagnostic[] {
-  const out: Diagnostic[] = [];
+): LintDiagnostic[] {
+  const out: LintDiagnostic[] = [];
   for (const row of rows) {
     if (row.uri !== uri) continue;
     const { from, to } = rangeOf(state, row.range);
@@ -131,29 +124,20 @@ function failureOf(cause: unknown): FossilError {
 }
 
 /**
- * A check that never answered, as the one row a host counts: `cause` by its code on the first
- * character of `uri`, and `internal/bug` when fossil did not raise it.
+ * A check that never answered, as the one diagnostic a host counts: `cause` by its code on the
+ * first character of `uri`, and `internal/bug` when fossil did not raise it.
  *
- * {@link fossilLinter} draws a failed check with exactly this row and hands it to `onDiagnostics`,
- * so a host's panel and the squiggle say the same thing and a program nobody could check never
- * reads as clean. A host whose failure happens before there is a linter — `openProgram` rejecting
- * — reports it with the same call rather than a copy of it.
+ * {@link fossilLinter} draws a failed check with exactly this diagnostic and hands it to
+ * `onDiagnostics`, so a host's panel and the squiggle say the same thing and a program nobody could
+ * check never reads as clean. A host whose failure happens before there is a linter —
+ * `openProgram` rejecting — reports it with the same call rather than a copy of it.
  */
-export function uncheckedRow(uri: string, cause: unknown): CheckRow {
-  return rowOf(uri, failureOf(cause).problem);
+export function uncheckedDiagnostic(uri: string, cause: unknown): Diagnostic {
+  return diagnosticOf(uri, failureOf(cause).problem);
 }
-
-/** What {@link fossilLinter} calls to get rows. Synchronous or not — the wasm
- *  surface is synchronous, but a host driving a Worker over `postMessage`
- *  is not, and both should be able to use this. */
-export type CheckSource = (
-  text: string,
-) => readonly CheckRow[] | Promise<readonly CheckRow[]>;
 
 /** Options for {@link fossilLinter}. */
 export interface LinterOptions {
-  /** The URI the buffer was opened under. Rows for other URIs are dropped. */
-  uri: string;
   /**
    * Milliseconds of quiet before a check runs. Default 120.
    *
@@ -173,8 +157,8 @@ export interface LinterOptions {
   /** Called with every batch, before filtering. A host that renders its own
    *  diagnostics panel reads it here rather than running
    *  a second check. A check that threw is a batch too — its one
-   *  {@link uncheckedRow} — so the host never wraps `check` to learn of it. */
-  onDiagnostics?: (rows: readonly CheckRow[]) => void;
+   *  {@link uncheckedDiagnostic} — so the host never wraps `diagnostics` to learn of it. */
+  onDiagnostics?: (rows: readonly Diagnostic[]) => void;
 }
 
 /**
@@ -184,13 +168,15 @@ export interface LinterOptions {
  * Requires `@codemirror/lint` at runtime — the one peer that is not optional here,
  * because there is no diagnostics story without it.
  */
-export function fossilLinter(source: CheckSource, options: LinterOptions): Extension {
+export function fossilLinter(
+  program: Pick<FossilProgram, 'uri' | 'diagnostics'>,
+  options: LinterOptions = {},
+): Extension {
   return linter(
     async (view) => {
-      const text = view.state.doc.toString();
-      let rows: readonly CheckRow[];
+      let rows: readonly Diagnostic[];
       try {
-        rows = await source(text);
+        rows = await program.diagnostics();
       } catch (cause) {
         // A refused check is a diagnostic in its own right, and a silent one is
         // how "the editor stopped underlining things" becomes a mystery. It goes
@@ -198,7 +184,7 @@ export function fossilLinter(source: CheckSource, options: LinterOptions): Exten
         // row's `message` is the problem's detail, and a squiggle with no code
         // on it is one nobody can search for.
         const failure = failureOf(cause);
-        const row = uncheckedRow(options.uri, failure);
+        const row = uncheckedDiagnostic(program.uri, failure);
         options.onDiagnostics?.([row]);
         const { from, to } = rangeOf(view.state, row.range);
         return [
@@ -212,7 +198,7 @@ export function fossilLinter(source: CheckSource, options: LinterOptions): Exten
         ];
       }
       options.onDiagnostics?.(rows);
-      return toDiagnostics(view.state, rows, options.uri);
+      return toDiagnostics(view.state, rows, program.uri);
     },
     { delay: options.delay ?? 120 },
   );

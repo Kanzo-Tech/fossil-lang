@@ -13,21 +13,20 @@
 //! | [`WasmWorkspace::update_file`] | `()`                                 | `textDocument/didChange`   |
 //! | [`WasmWorkspace::close_file`]  | `()`                                 | `textDocument/didClose`    |
 //! | [`WasmWorkspace::set_connections`] | `()`                             | the host's `Host.connections()` |
-//! | [`WasmWorkspace::missing_documents`] | `Array<{ key, locator, connection? }>` | `resolveDocuments` |
+//! | [`WasmWorkspace::missing_documents`] | `Array<{ key, location, connection? }>` | `resolveDocuments` |
 //! | [`WasmWorkspace::register_document`] | `()`                           | `resolveDocuments` |
-//! | [`WasmWorkspace::sources`]     | `Array<ProgramSource>`               | introspection |
+//! | [`WasmWorkspace::inputs`]      | `Array<Input>`                       | introspection, lineage |
 //! | [`WasmWorkspace::register_inferred_descriptor`] | `()`                | introspection, a source described |
 //! | [`WasmWorkspace::register_undescribed`] | `()`                        | introspection, a source that was not |
-//! | [`WasmWorkspace::check`]       | `Array<CheckRow>`                    | a diagnostics panel, workspace-wide |
-//! | [`WasmWorkspace::diagnostics_for`] | `Array<CheckRow>`                | the same rows scoped to one file |
+//! | [`WasmWorkspace::diagnostics`] | `Array<Diagnostic>`                  | `textDocument/diagnostic`, workspace-wide |
 //! | [`WasmWorkspace::hover`]       | `{ markdown, range } \| null`        | `textDocument/hover`       |
-//! | [`WasmWorkspace::completions`] | `Array<{ label, kind, detail }>`     | `textDocument/completion`  |
-//! | [`WasmWorkspace::goto_definition`] | `Array<{ uri, range }>`          | `textDocument/definition`  |
+//! | [`WasmWorkspace::completion`]  | `Array<CompletionItem>`              | `textDocument/completion`  |
+//! | [`WasmWorkspace::definition`]  | `Array<Location>`                    | `textDocument/definition`  |
 //! | [`WasmWorkspace::semantic_tokens`] | `Array<{ range, kind, modifiers }>` | `textDocument/semanticTokens/full` |
 //!
 //! The last four are the [`ide`] module: the `fossil-ide` answers the native
 //! LSP serves, as ordinary method calls, because a tab that already
-//! calls `check()` in-process should not have to stand up an LSP client to ask
+//! calls `diagnostics()` in-process should not have to stand up an LSP client to ask
 //! what type is under a cursor. That module's header is the whole argument,
 //! including why all four take a SHARED borrow and what a caller owes in
 //! return.
@@ -64,14 +63,14 @@ pub mod tokenize;
 mod wasm_system;
 mod workspace;
 
-pub use crate::ide::{CompletionKind, CompletionRow, DefinitionRow, HoverRow, SemanticTokenRow};
-pub use crate::tokenize::{TokenRow, tokenize_native};
+pub use crate::ide::{CompletionItem, CompletionKind, Hover, Location, SemanticToken};
+pub use crate::tokenize::{Token, tokenize_native};
 
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use fossil_base::{Catalogue, Diagnostic, Files, SourceFile, System};
+use fossil_base::{Catalogue, Files, SourceFile, System};
 use fossil_graph_schema::js::{bug, invalid_argument};
 use fossil_graph_schema::{Failure, Problem};
 use fossil_hir::documents::MissingDocument;
@@ -152,16 +151,16 @@ pub struct FossilWorkspace {
     /// cache without round-tripping through the trait object.
     system: Arc<WasmSystem>,
     /// Connection name → base, as `@name/…` expands against it. Outside Salsa:
-    /// it reaches locators only, never a registry key, so setting it
+    /// it reaches locations only, never a registry key, so setting it
     /// invalidates nothing.
     connections: HashMap<String, String>,
     /// Source key → why the host could not describe it. Outside Salsa, like
-    /// the descriptor table beside it, and read by `check` only: a row per key
+    /// the descriptor table beside it, and read by `diagnostics` only: a row per key
     /// at the binding that reads it — see [`FossilWorkspace::undescribed_diagnostics`].
     undescribed: HashMap<String, Undescribed>,
     /// The open-file lifecycle map (handle → `SourceFile` + URI index).
     /// Mutated by `open_file` / `update_file` / `close_file`; iterated by
-    /// `check` / `diagnostics_for`.
+    /// `diagnostics` / `diagnostics_for`.
     files: OpenFiles,
 }
 
@@ -263,9 +262,9 @@ fn busy(method: &str) -> Failure {
 
 // The types the signatures above name, from the one place they are declared.
 #[wasm_bindgen(typescript_custom_section)]
-const WIRE_TYPES: &str = "import type { CheckRow, CompletionRow, DefinitionRow, HoverRow, \
-    MissingDocument, ProgramSource, ProviderInfo, SemanticTokenRow, SourceRefInfo, TokenRow } \
-    from '@fossil-lang/types';";
+const WIRE_TYPES: &str = "import type { Diagnostic, CompletionItem, Format, Hover, Input, \
+    Location, SemanticToken, Token } from '@fossil-lang/types';\n\
+    import type { MissingDocument } from '@fossil-lang/types/internal';";
 
 /// A value this crate built, as plain JS data. A serialiser refusing one is
 /// fossil's fault, `internal/bug`.
@@ -280,7 +279,7 @@ pub(crate) fn to_value<T: serde::Serialize + ?Sized>(
 /// [`to_value`]: a row's `data` is a `serde_json::Value`, and
 /// `serde_wasm_bindgen` writes a map as an ES `Map`, which a host reading
 /// `row.data.field` finds nothing on.
-fn rows_to_value(rows: &[CheckRow]) -> Result<JsValue, JsValue> {
+fn rows_to_value(rows: &[Diagnostic]) -> Result<JsValue, JsValue> {
     let text = serde_json::to_string(rows).map_err(|e| {
         bug(
             "serialising the check rows",
@@ -323,8 +322,9 @@ impl WasmWorkspace {
     ///
     /// Returns a JS error if the workspace is already inside another call —
     /// see the type-level note on [`WasmWorkspace`].
+    #[wasm_bindgen(js_name = openFile)]
     pub fn open_file(&self, path: String, contents: String) -> Result<FileHandle, JsValue> {
-        let mut ws = self.inner.try_borrow_mut().map_err(|_| busy("open_file"))?;
+        let mut ws = self.inner.try_borrow_mut().map_err(|_| busy("openFile"))?;
         Ok(ws.open_file_native(path, contents))
     }
 
@@ -343,11 +343,12 @@ impl WasmWorkspace {
     /// or if the workspace is already inside another call — see the type-level
     /// note on [`WasmWorkspace`]. **Neither leaves the workspace unusable**,
     /// which is the whole reason this method takes `&self`.
+    #[wasm_bindgen(js_name = updateFile)]
     pub fn update_file(&self, handle: &FileHandle, contents: String) -> Result<(), JsValue> {
         let mut ws = self
             .inner
             .try_borrow_mut()
-            .map_err(|_| busy("update_file"))?;
+            .map_err(|_| busy("updateFile"))?;
         Ok(ws.update_file_native(*handle, contents)?)
     }
 
@@ -359,17 +360,15 @@ impl WasmWorkspace {
     ///
     /// Returns a JS error if `handle` was never opened or was already closed,
     /// or if the workspace is busy.
+    #[wasm_bindgen(js_name = closeFile)]
     pub fn close_file(&self, handle: &FileHandle) -> Result<(), JsValue> {
-        let mut ws = self
-            .inner
-            .try_borrow_mut()
-            .map_err(|_| busy("close_file"))?;
+        let mut ws = self.inner.try_borrow_mut().map_err(|_| busy("closeFile"))?;
         Ok(ws.close_file_native(*handle)?)
     }
 
     /// Every open **program**'s diagnostics as a flat JS array of
-    /// [`CheckRow`]s keyed by file URI — the diagnostics panel's view. It is
-    /// NOT the LSP wire's shape; see [`CheckRow`].
+    /// [`Diagnostic`]s keyed by file URI — the diagnostics panel's view. It is
+    /// NOT the LSP wire's shape; see [`Diagnostic`].
     ///
     /// A buffer the installed provider catalogue claims — a `.shex` being
     /// edited, a `.csv`, a `.parquet` — is an INPUT and is not parsed as fossil.
@@ -385,36 +384,15 @@ impl WasmWorkspace {
     ///
     /// Returns a JS error if the workspace is busy, or if the result fails to
     /// serialize to `JsValue`.
-    #[wasm_bindgen(unchecked_return_type = "CheckRow[]")]
-    pub fn check(&self) -> Result<JsValue, JsValue> {
-        // Native-side tests reach the pure-Rust core via `check_rows()`;
+    #[wasm_bindgen(unchecked_return_type = "Diagnostic[]")]
+    pub fn diagnostics(&self) -> Result<JsValue, JsValue> {
+        // Native-side tests reach the pure-Rust core via `diagnostic_rows()`;
         // the wasm-bindgen wrapper just serializes. Separating the two
         // halves keeps `cargo test -p fossil-wasm` runnable without a JS
         // runtime (the `to_value` call panics on native targets — the
         // wasm-bindgen library's deliberate guard).
-        let ws = self.inner.try_borrow().map_err(|_| busy("check"))?;
-        rows_to_value(&ws.check_rows())
-    }
-
-    /// Per-file diagnostic drain: `check()` returns the workspace-wide flat
-    /// array, this returns one file's rows, so a host can refresh one buffer's
-    /// panel without partitioning the workspace array on the JS side. It is NOT
-    /// the LSP wire's shape — that is [`fossil_ide::lsp_diagnostics`].
-    ///
-    /// # Errors
-    ///
-    /// Returns a JS error if `handle` is unknown, if the workspace is busy, or
-    /// if serialization fails.
-    #[wasm_bindgen(unchecked_return_type = "CheckRow[]")]
-    pub fn diagnostics_for(&self, handle: &FileHandle) -> Result<JsValue, JsValue> {
-        let ws = self
-            .inner
-            .try_borrow()
-            .map_err(|_| busy("diagnostics_for"))?;
-        let rows = ws
-            .diagnostics_for_rows(*handle)
-            .ok_or_else(unknown_handle)?;
-        rows_to_value(&rows)
+        let ws = self.inner.try_borrow().map_err(|_| busy("diagnostics"))?;
+        rows_to_value(&ws.diagnostic_rows())
     }
 
     // ----- Documents and sources: fossil resolves, the host reads -----
@@ -447,7 +425,7 @@ impl WasmWorkspace {
     }
 
     /// The documents the file at `handle` names that nothing has registered:
-    /// `{ key, locator }` rows, the locator expanded through the connection map.
+    /// `{ key, location }` rows, the location expanded through the connection map.
     ///
     /// # Errors
     ///
@@ -480,18 +458,17 @@ impl WasmWorkspace {
         Ok(())
     }
 
-    /// The data sources the file at `handle` reads — see
-    /// [`fossil_lineage::program_sources`].
+    /// What the file at `handle` reads — see [`fossil_lineage::inputs`].
     ///
     /// # Errors
     ///
     /// Returns a JS error if `handle` is unknown, if the workspace is busy, or
     /// if serialization fails.
-    #[wasm_bindgen(unchecked_return_type = "ProgramSource[]")]
-    pub fn sources(&self, handle: &FileHandle) -> Result<JsValue, JsValue> {
-        let ws = self.inner.try_borrow().map_err(|_| busy("sources"))?;
-        let rows = ws.sources_native(*handle).ok_or_else(unknown_handle)?;
-        to_value("the sources", &rows)
+    #[wasm_bindgen(unchecked_return_type = "Input[]")]
+    pub fn inputs(&self, handle: &FileHandle) -> Result<JsValue, JsValue> {
+        let ws = self.inner.try_borrow().map_err(|_| busy("inputs"))?;
+        let rows = ws.inputs_native(*handle).ok_or_else(unknown_handle)?;
+        to_value("the inputs", &rows)
     }
 
     // ----- The main-thread IDE surface (see the `ide` module) -----
@@ -520,7 +497,7 @@ impl WasmWorkspace {
     /// Returns a JS error if the workspace is busy, or if the result fails to
     /// serialize to `JsValue`. An unknown handle is `null`, not an error —
     /// see [`FossilWorkspace::hover_row`].
-    #[wasm_bindgen(unchecked_return_type = "HoverRow | undefined")]
+    #[wasm_bindgen(unchecked_return_type = "Hover | undefined")]
     pub fn hover(
         &self,
         handle: &FileHandle,
@@ -531,7 +508,7 @@ impl WasmWorkspace {
         to_value("the hover", &ws.hover_row(*handle, line, character))
     }
 
-    /// The completion candidates at a position: `{ label, kind, detail, insert }` rows,
+    /// The completion candidates at a position: `{ label, kind, detail, insertText }` rows,
     /// already narrowed by the receiver — `str.` offers string members and no
     /// reader, a property key position offers the target shape's predicates and
     /// no catalogue row.
@@ -544,14 +521,14 @@ impl WasmWorkspace {
     ///
     /// Returns a JS error if the workspace is busy, or if the result fails to
     /// serialize to `JsValue`. An unknown handle is an empty array.
-    #[wasm_bindgen(unchecked_return_type = "CompletionRow[]")]
-    pub fn completions(
+    #[wasm_bindgen(unchecked_return_type = "CompletionItem[]")]
+    pub fn completion(
         &self,
         handle: &FileHandle,
         line: u32,
         character: u32,
     ) -> Result<JsValue, JsValue> {
-        let ws = self.inner.try_borrow().map_err(|_| busy("completions"))?;
+        let ws = self.inner.try_borrow().map_err(|_| busy("completion"))?;
         to_value(
             "the completions",
             &ws.completion_rows(*handle, line, character),
@@ -569,17 +546,14 @@ impl WasmWorkspace {
     ///
     /// Returns a JS error if the workspace is busy, or if the result fails to
     /// serialize to `JsValue`.
-    #[wasm_bindgen(js_name = gotoDefinition, unchecked_return_type = "DefinitionRow[]")]
-    pub fn goto_definition(
+    #[wasm_bindgen(unchecked_return_type = "Location[]")]
+    pub fn definition(
         &self,
         handle: &FileHandle,
         line: u32,
         character: u32,
     ) -> Result<JsValue, JsValue> {
-        let ws = self
-            .inner
-            .try_borrow()
-            .map_err(|_| busy("gotoDefinition"))?;
+        let ws = self.inner.try_borrow().map_err(|_| busy("definition"))?;
         to_value(
             "the definitions",
             &ws.definition_rows(*handle, line, character),
@@ -588,13 +562,13 @@ impl WasmWorkspace {
 
     /// Every classified span of the file: `{ range, kind, modifiers }` rows in
     /// source order, `kind` and `modifiers` by legend NAME. An editor lays these
-    /// over its lexical highlighting — see [`ide::SemanticTokenRow`].
+    /// over its lexical highlighting — see [`ide::SemanticToken`].
     ///
     /// # Errors
     ///
     /// Returns a JS error if the workspace is busy, or if the result fails to
     /// serialize to `JsValue`. An unknown handle is an empty array.
-    #[wasm_bindgen(js_name = semanticTokens, unchecked_return_type = "SemanticTokenRow[]")]
+    #[wasm_bindgen(js_name = semanticTokens, unchecked_return_type = "SemanticToken[]")]
     pub fn semantic_tokens(&self, handle: &FileHandle) -> Result<JsValue, JsValue> {
         let ws = self
             .inner
@@ -606,7 +580,7 @@ impl WasmWorkspace {
     // ----- Register a host-introspected descriptor -----
 
     /// Register an [`fossil_descriptors_input::InferredDescriptor`] for a
-    /// source binding name BEFORE invoking `check`. The Rust compiler reads
+    /// source binding name BEFORE invoking `diagnostics`. The Rust compiler reads
     /// from this registration during forward type propagation — the browser has
     /// no filesystem to introspect a CSV from, so the column types must arrive
     /// from the host.
@@ -614,7 +588,7 @@ impl WasmWorkspace {
     /// Registering the same URI twice REPLACES the previous descriptor
     /// — intentional, since the host re-introspects when the source changes.
     /// It also forgets a problem [`Self::register_undescribed`] recorded under
-    /// that URI: the latest answer about a source is the one `check` reports.
+    /// that URI: the latest answer about a source is the one `diagnostics` reports.
     ///
     /// # Errors
     ///
@@ -635,7 +609,7 @@ impl WasmWorkspace {
     /// answered (`{ code, data, help?, … }`; the fields the code does not carry
     /// are ignored).
     ///
-    /// `check` then reports it at the binding that reads `key` — one warning
+    /// `diagnostics` then reports it at the binding that reads `key` — one warning
     /// per key, under the problem's own code — until a descriptor is registered
     /// under the same key, which forgets it. Registering a key twice replaces
     /// the problem.
@@ -656,7 +630,7 @@ impl WasmWorkspace {
 
 // ----- Pure-Rust core (test-reachable; no wasm-bindgen serialization) -----
 //
-// The `#[wasm_bindgen]` methods above (`check`, `diagnostics_for`)
+// The `#[wasm_bindgen]` methods above (`diagnostics`, `diagnostics_for`)
 // call `serde_wasm_bindgen::to_value` and build a `FossilError` through
 // `fossil_graph_schema::js`, both of which call wasm-bindgen extern intrinsics that panic
 // on native targets ("cannot call wasm-bindgen imported functions on
@@ -670,16 +644,16 @@ impl WasmWorkspace {
 
 impl FossilWorkspace {
     /// Native-reachable workspace-wide diagnostic drain. Returns the same
-    /// row structures `check()` serializes, without going through
+    /// row structures `diagnostics()` serializes, without going through
     /// `serde_wasm_bindgen`.
     #[must_use]
-    pub fn check_rows(&self) -> Vec<CheckRow> {
-        let mut all: Vec<CheckRow> = Vec::new();
+    pub fn diagnostic_rows(&self) -> Vec<Diagnostic> {
+        let mut all: Vec<Diagnostic> = Vec::new();
         for (h, file) in self.files.iter() {
             let uri = self.files.path_for(h, &self.db).unwrap_or_default();
             let index = fossil_ide::line_index(&self.db, file);
             for d in self.file_diagnostics(file) {
-                all.push(to_check_row(&self.db, file, &uri, index, &d));
+                all.push(to_diagnostic(&self.db, file, &uri, index, &d));
             }
         }
         all
@@ -687,7 +661,7 @@ impl FossilWorkspace {
 
     /// The checker's diagnostics for `file`, then the sources it reads that the
     /// host could not describe.
-    fn file_diagnostics(&self, file: SourceFile) -> Vec<Diagnostic> {
+    fn file_diagnostics(&self, file: SourceFile) -> Vec<fossil_base::Diagnostic> {
         let mut all = fossil_ide::diagnostics(&self.db, file);
         all.extend(self.undescribed_diagnostics(file));
         all
@@ -706,7 +680,7 @@ impl FossilWorkspace {
     /// Outside Salsa and recomputed per call: it is a table lookup per source
     /// binding over the memoised def map, and a registration then needs no
     /// revision bump to be seen.
-    fn undescribed_diagnostics(&self, file: SourceFile) -> Vec<Diagnostic> {
+    fn undescribed_diagnostics(&self, file: SourceFile) -> Vec<fossil_base::Diagnostic> {
         if self.undescribed.is_empty()
             || fossil_base::claimed(fossil_base::installed(&self.db), file.path(&self.db))
         {
@@ -725,7 +699,7 @@ impl FossilWorkspace {
                 continue;
             }
             seen.push(key);
-            let mut d = Diagnostic::new(
+            let mut d = fossil_base::Diagnostic::new(
                 fossil_graph_schema::Severity::Warning,
                 why.problem.clone(),
                 entry.call_span,
@@ -743,14 +717,14 @@ impl FossilWorkspace {
     /// `handle` is unknown / closed (the wasm-bindgen wrapper throws
     /// `None` as `api/unknown-handle`).
     #[must_use]
-    pub fn diagnostics_for_rows(&self, handle: FileHandle) -> Option<Vec<CheckRow>> {
+    pub fn diagnostics_for_rows(&self, handle: FileHandle) -> Option<Vec<Diagnostic>> {
         let file = self.files.get(handle)?;
         let uri = self.files.path_for(handle, &self.db).unwrap_or_default();
         let index = fossil_ide::line_index(&self.db, file);
         Some(
             self.file_diagnostics(file)
                 .into_iter()
-                .map(|d| to_check_row(&self.db, file, &uri, index, &d))
+                .map(|d| to_diagnostic(&self.db, file, &uri, index, &d))
                 .collect(),
         )
     }
@@ -824,16 +798,12 @@ impl FossilWorkspace {
         fossil_base::register_document(&mut self.db, key, text);
     }
 
-    /// Pure-Rust mirror of [`WasmWorkspace::sources`]; `None` for an unknown
+    /// Pure-Rust mirror of [`WasmWorkspace::inputs`]; `None` for an unknown
     /// handle.
     #[must_use]
-    pub fn sources_native(&self, handle: FileHandle) -> Option<Vec<fossil_lineage::ProgramSource>> {
+    pub fn inputs_native(&self, handle: FileHandle) -> Option<Vec<fossil_lineage::Input>> {
         let file = self.files.get(handle)?;
-        Some(fossil_lineage::program_sources(
-            &self.db,
-            file,
-            &self.connections,
-        ))
+        Some(fossil_lineage::inputs(&self.db, file, &self.connections))
     }
 
     // ----- Accessors for the editor surface in [`ide`] (pub(crate)) -----
@@ -842,7 +812,7 @@ impl FossilWorkspace {
     ///
     /// A caller already holds the handle `open_file` gave it, and making it
     /// re-derive a URI to get back to the file it just opened would be the sort
-    /// of round trip [`CheckRow::uri`]'s note exists to avoid.
+    /// of round trip [`Diagnostic::uri`]'s note exists to avoid.
     pub(crate) fn file_by_handle(&self, handle: FileHandle) -> Option<SourceFile> {
         self.files.get(handle)
     }
@@ -889,7 +859,7 @@ impl FossilWorkspace {
                 })
                 .caused_by(e)
             })?;
-        self.undescribed.remove(descriptor.uri.as_str());
+        self.undescribed.remove(descriptor.key.as_str());
         if let Some(cache) = self.system.descriptors() {
             cache.insert(descriptor);
         }
@@ -938,59 +908,19 @@ impl Default for FossilWorkspace {
     }
 }
 
-// ----- Parse-only lineage + providers (one crate, two hosts) -----
-//
-// `refs` and `providers` serve the BROWSER host: keasy's client-compute job
-// runner reads a program's typed lineage (which `@conn`s + `schema =` it
-// references) and the supported source providers with no native binary. Both
-// delegate to `fossil_lineage` (WASM-clean) over
-// `fossil_descriptors_output::PROVIDERS` — the same calls
-// `fossil-df/tests/provider_registry.rs` makes natively.
-//
-// Free functions (not `FossilWorkspace` methods): they are stateless and
-// program-text-driven (the job runner has the script string, not the editor's
-// open-file workspace), mirroring the existing free `tokenize` export.
-
-/// The providers this host installs (`io.csv`, `io.rdf`, `io.shex`, …) as a JS
-/// array of `{ name, extensions, kind }`. Pure projection of the provider
-/// registry — no parsing, no db. `kind` is read off each row's capabilities, so
-/// the two shape-document rows come back as `Schema`.
+/// The formats this host reads (`csv`, `rdf`, `shex`, …) as a JS array of
+/// `{ name, extensions, kind }`. Pure projection of the provider registry — no
+/// parsing, no db. `kind` is read off each row's capabilities, so the two
+/// shape-document rows come back as `schema`.
 ///
 /// # Errors
 /// Returns a JS error only if the result fails to serialize to `JsValue`.
-#[wasm_bindgen(unchecked_return_type = "ProviderInfo[]")]
-pub fn providers() -> Result<JsValue, JsValue> {
+#[wasm_bindgen(unchecked_return_type = "Format[]")]
+pub fn formats() -> Result<JsValue, JsValue> {
     to_value(
-        "the providers",
-        &fossil_lineage::providers(fossil_descriptors_output::PROVIDERS),
+        "the formats",
+        &fossil_lineage::formats(fossil_descriptors_output::PROVIDERS),
     )
-}
-
-/// Parse `program` and return its external references — every data URI +
-/// `schema =` argument, each tagged with its `@conn` alias (`null` for a direct
-/// path) and role (`Data` / `Schema`) — as a JS array of
-/// `{ connection, path, role }`. Parse-only; the host resolves `@conn` →
-/// `{base}/path` itself (its data-plane job, kept out of fossil's semantics).
-///
-/// # Errors
-/// Returns a JS error only if the result fails to serialize to `JsValue`.
-#[wasm_bindgen(unchecked_return_type = "SourceRefInfo[]")]
-pub fn refs(program: &str) -> Result<JsValue, JsValue> {
-    to_value("the references", &refs_native(program))
-}
-
-/// Native-reachable core of [`refs`] — builds a transient single-file db and
-/// runs the shared [`fossil_lineage::source_refs`]. Cargo-tests call THIS: the
-/// `#[wasm_bindgen]` wrapper's `serde_wasm_bindgen` call panics on
-/// native targets (same split as `check` ↔ `check_rows`). The db is throwaway
-/// (refs is parse-only and called once per job launch, not per keystroke), so
-/// it never touches the editor's persistent workspace.
-#[must_use]
-pub fn refs_native(program: &str) -> Vec<fossil_lineage::SourceRefInfo> {
-    let system = Arc::new(WasmSystem::default()) as Arc<dyn System>;
-    let db = WasmDb::new(system);
-    let file = SourceFile::new(&db, program.to_string(), "<refs>".to_string());
-    fossil_lineage::source_refs(&db, file)
 }
 
 /// Why a source could not be described: the problem a host's introspection
@@ -1005,16 +935,16 @@ struct Undescribed {
     help: Option<String>,
 }
 
-/// One diagnostic row in the [`WasmWorkspace::check`] return array: the
+/// One diagnostic row in the [`WasmWorkspace::diagnostics`] return array: the
 /// workspace's own shape, not the LSP wire's (`lsp_types::Diagnostic`).
 ///
-/// `check()` is one flat array across every open file, so each row carries the
+/// `diagnostics()` is one flat array across every open file, so each row carries the
 /// `uri` the host opened its buffer under. Everything else is projected from the
-/// rendering an editor is shown, so the two cannot disagree. `CheckRow` in
+/// rendering an editor is shown, so the two cannot disagree. `Diagnostic` in
 /// `@fossil-lang/types` is this, with `data` typed by `code`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
-#[schemars(rename = "CheckRowBase")]
-pub struct CheckRow {
+#[schemars(rename = "DiagnosticBase")]
+pub struct Diagnostic {
     pub uri: String,
     #[schemars(with = "fossil_ide::wire::RangeSchema")]
     pub range: Range,
@@ -1042,12 +972,12 @@ pub struct CheckRow {
     /// path it opened a file under has to find the same string in both fields.
     /// The LSP wire does convert, because LSP will not accept anything else.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub related: Vec<CheckRelated>,
+    pub related: Vec<DiagnosticRelatedInformation>,
 }
 
-/// One entry of [`CheckRow::related`] — a place, and what is there.
+/// One entry of [`Diagnostic::related`] — a place, and what is there.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
-pub struct CheckRelated {
+pub struct DiagnosticRelatedInformation {
     pub uri: String,
     #[schemars(with = "fossil_ide::wire::RangeSchema")]
     pub range: Range,
@@ -1061,16 +991,16 @@ pub struct CheckRelated {
 /// [`fossil_ide::DiagnosticData::of`], which is what it sends as `data` — the
 /// same rendering both LSP transports publish — so this cannot drift from what
 /// an editor shows.
-/// Only the two keys are this array's own; [`CheckRow::related`] says why.
-fn to_check_row(
+/// Only the two keys are this array's own; [`Diagnostic::related`] says why.
+fn to_diagnostic(
     db: &WasmDb,
     file: SourceFile,
     uri: &str,
     index: &LineIndex,
-    d: &Diagnostic,
-) -> CheckRow {
+    d: &fossil_base::Diagnostic,
+) -> Diagnostic {
     let rendered = fossil_ide::lsp_diagnostic(db, file, index, d);
-    CheckRow {
+    Diagnostic {
         uri: uri.to_string(),
         range: rendered.range,
         severity: rendered.severity.unwrap_or(DiagnosticSeverity::ERROR),
@@ -1079,7 +1009,7 @@ fn to_check_row(
         detail: fossil_ide::DiagnosticData::of(index, d),
         related: fossil_ide::related_locations(db, file, d)
             .into_iter()
-            .map(|r| CheckRelated {
+            .map(|r| DiagnosticRelatedInformation {
                 // A `LineIndex` per file: a UTF-16 column is a fact about the
                 // text the range is in, and it is memoised, so the labels that
                 // are in the program cost nothing extra.

@@ -767,18 +767,18 @@ catalogue! {
 
     /// A CSV, JSON or Parquet source names no file in its store.
     "source/not-found", "A source names no file",
-    #[error("the source `{locator}` names no file")]
-    SourceNotFound { locator: String },
+    #[error("the source `{location}` names no file")]
+    SourceNotFound { location: String },
 
     /// A source's bytes are not UTF-8 text.
     "source/not-utf8", "A source is not UTF-8",
-    #[error("the source `{locator}` is not UTF-8")]
-    NotUtf8 { locator: String },
+    #[error("the source `{location}` is not UTF-8")]
+    NotUtf8 { location: String },
 
     /// A source's bytes did not parse in the format the program named.
     "source/unparseable", "A source does not parse",
-    #[error("the source `{locator}` does not parse")]
-    SourceUnparseable { locator: String },
+    #[error("the source `{location}` does not parse")]
+    SourceUnparseable { location: String },
 
     /// The query engine failed; its own error is the cause.
     "engine/failed", "The query engine failed",
@@ -805,10 +805,10 @@ catalogue! {
     #[error("{scope} vends {count} prefixes, and one was expected")]
     AmbiguousPrefix { scope: String, count: u64 },
 
-    /// A locator outside every prefix a credential was vended for.
+    /// A location outside every prefix a credential was vended for.
     "storage/outside-prefix", "Outside the vended prefix",
-    #[error("{locator} lies outside {prefix}")]
-    OutsidePrefix { locator: String, prefix: String },
+    #[error("{location} lies outside {prefix}")]
+    OutsidePrefix { location: String, prefix: String },
 
     /// A vended credential fossil cannot read: a missing or malformed key, or
     /// a prefix that is not a directory.
@@ -816,19 +816,19 @@ catalogue! {
     #[error("the credential for {prefix} is malformed: `{key}` {reason}")]
     MalformedCredential { prefix: String, key: String, reason: String },
 
-    /// A locator no kind of store fossil reads can route.
-    "storage/no-route", "No store routes this locator",
+    /// A location no kind of store fossil reads can route.
+    "storage/no-route", "No store routes this location",
     #[error(
-        "{locator} has no route: fossil reads s3://bucket/… and \
+        "{location} has no route: fossil reads s3://bucket/… and \
          abfss://container@account.dfs.core.windows.net/… through a vended credential, and \
          http(s) without one"
     )]
-    NoRoute { locator: String },
+    NoRoute { location: String },
 
     /// A store answered with an error; the store's error is the cause.
     "storage/unreachable", "A store could not be reached",
-    #[error("{locator} could not be reached")]
-    Unreachable { locator: String },
+    #[error("{location} could not be reached")]
+    Unreachable { location: String },
 
     /// The engine a host handed over cannot read remote storage.
     "storage/no-httpfs", "The engine cannot read remote storage",
@@ -852,9 +852,9 @@ catalogue! {
     /// milliseconds, when it is what ended the wait. The browser's error is
     /// the cause.
     "module/unreachable", "A module could not be loaded",
-    #[error("{locator} could not be loaded")]
+    #[error("{location} could not be loaded")]
     ModuleUnreachable {
-        locator: String,
+        location: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[schemars(with = "u64")]
         after: Option<u64>,
@@ -1329,17 +1329,17 @@ mod tests {
     #[test]
     fn an_optional_field_with_no_value_is_absent_not_null() {
         let quiet = Problem::ModuleUnreachable {
-            locator: "m_bg.wasm".into(),
+            location: "m_bg.wasm".into(),
             after: None,
         };
         let wire = serde_json::to_value(&quiet).expect("serializes");
-        assert_eq!(wire["data"], serde_json::json!({ "locator": "m_bg.wasm" }));
+        assert_eq!(wire["data"], serde_json::json!({ "location": "m_bg.wasm" }));
         assert_eq!(
             serde_json::from_value::<Problem>(wire).expect("reads back"),
             quiet
         );
         let late = Problem::ModuleUnreachable {
-            locator: "m_bg.wasm".into(),
+            location: "m_bg.wasm".into(),
             after: Some(60_000),
         };
         let wire = serde_json::to_value(&late).expect("serializes");
@@ -1381,7 +1381,7 @@ mod tests {
     #[test]
     fn the_wire_nests_a_failure_and_names_a_foreign_cause() {
         let inner = Failure::new(Problem::Unreachable {
-            locator: "s3://lake/a".into(),
+            location: "s3://lake/a".into(),
         })
         .caused_by(std::fmt::Error);
         let outer = Failure::new(Problem::EngineFailed {})
@@ -1394,7 +1394,7 @@ mod tests {
         assert_eq!(wire["help"], "try again");
         assert!(wire.get("related").is_none());
         assert_eq!(wire["cause"]["code"], "storage/unreachable");
-        assert_eq!(wire["cause"]["data"]["locator"], "s3://lake/a");
+        assert_eq!(wire["cause"]["data"]["location"], "s3://lake/a");
         assert_eq!(wire["cause"]["cause"]["name"], "Error");
         assert_eq!(
             wire["cause"]["cause"]["detail"],

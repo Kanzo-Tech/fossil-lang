@@ -19,7 +19,7 @@ workspace = true
 # way of filling it. And `providers::DATA` — the `io.` rows, which
 # `pre_introspect_and_register` picks a reader off.
 fossil-base = { path = "../fossil-base" }
-# `program_sources` — which sources a program reads, off the def map's source
+# `inputs` — which sources a program reads, off the def map's source
 # table. The browser's `sources()` is the same function, so the two hosts
 # DESCRIBE one list; reading the program text here instead was a second answer.
 fossil-lineage = { path = "../fossil-lineage" }

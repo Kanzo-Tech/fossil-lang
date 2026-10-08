@@ -68,8 +68,8 @@ const fn is_provider_refusal(p: &Problem) -> bool {
 }
 
 /// The registry as a host lists it to a connector UI.
-fn providers() -> Vec<fossil_lineage::ProviderInfo> {
-    fossil_lineage::providers(fossil_descriptors_output::PROVIDERS)
+fn formats() -> Vec<fossil_lineage::Format> {
+    fossil_lineage::formats(fossil_descriptors_output::PROVIDERS)
 }
 
 /// A real `ShExC` document declaring `ex:Person` with one `ex:name`.
@@ -104,7 +104,7 @@ fn program_binding(type_line: &str) -> String {
 /// different criterion.
 #[test]
 fn one_table_carries_every_constructor() {
-    let listed: Vec<String> = providers().into_iter().map(|p| p.name).collect();
+    let listed: Vec<String> = formats().into_iter().map(|p| p.name).collect();
     assert_eq!(
         listed,
         ["csv", "json", "parquet", "rdf", "shacl", "shex"],
@@ -112,12 +112,12 @@ fn one_table_carries_every_constructor() {
     );
 }
 
-/// `ProviderKind` has carried `Schema` since it was written with nothing ever
+/// `FormatKind` has carried `Schema` since it was written with nothing ever
 /// producing one — the wire contract was shaped for capabilities and the data
 /// behind it was half a table.
 #[test]
 fn the_wire_contract_finally_reports_a_schema_provider() {
-    let listed = providers();
+    let listed = formats();
     let kind = |name: &str| {
         listed
             .iter()
@@ -125,9 +125,9 @@ fn the_wire_contract_finally_reports_a_schema_provider() {
             .unwrap_or_else(|| panic!("{name}"))
             .kind
     };
-    assert_eq!(kind("csv"), fossil_lineage::ProviderKind::Data);
-    assert_eq!(kind("shex"), fossil_lineage::ProviderKind::Schema);
-    assert_eq!(kind("shacl"), fossil_lineage::ProviderKind::Schema);
+    assert_eq!(kind("csv"), fossil_lineage::FormatKind::Data);
+    assert_eq!(kind("shex"), fossil_lineage::FormatKind::Schema);
+    assert_eq!(kind("shacl"), fossil_lineage::FormatKind::Schema);
 }
 
 // ------------------------------------------------------------- the SHACL row

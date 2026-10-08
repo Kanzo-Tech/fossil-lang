@@ -30,7 +30,7 @@
 #![allow(clippy::future_not_send)]
 // `result_large_err`: a run refuses with `fossil_graph_schema::Failure`, which
 // is a `Problem` plus its help, its related diagnostics and its cause — 144
-// bytes, over clippy's 128. It is returned once per run or per `sources()`
+// bytes, over clippy's 128. It is returned once per run or per `inputs()`
 // call, on the path that ends the run, so the copy costs nothing measurable;
 // boxing it would put `Box<Failure>` in every signature a host reads.
 #![allow(clippy::result_large_err)]
@@ -95,7 +95,7 @@ use fossil_graph_schema::{
 };
 use fossil_hir::shapes::inner_primitive;
 use fossil_hir::{MappingLoc, def_map::def_map};
-use fossil_locator::SourceAnchor;
+use fossil_location::SourceAnchor;
 use fossil_mir::{Expr, Op, SourceFormat, VProp, apply_output_shape, lower_to_mir_pg};
 use fossil_sinks::generated::{ENDPOINT_SRC, PAYLOAD_ADDRESS, PAYLOAD_IDENTITY};
 
@@ -169,7 +169,7 @@ pub async fn execute_graph<'db>(
     // anchor — so `io.csv("data/items.csv")` meant a different file depending
     // on where you invoked from, while `io.shex("shop.shex")` in the same
     // program was already resolved beside it.
-    let program_dir = fossil_locator::program_dir(file.path(db));
+    let program_dir = fossil_location::program_dir(file.path(db));
     let anchor = SourceAnchor::new(&program_dir, connections);
     let mappings: Vec<MappingLoc<'db>> = def_map(db, file).mappings(db).clone();
 
@@ -296,7 +296,7 @@ pub async fn execute_vertex<'db>(
     descriptor: &OutputDescriptorKind,
     connections: &HashMap<String, String>,
 ) -> datafusion::error::Result<(VertexTable, NodeType)> {
-    let program_dir = fossil_locator::program_dir(mapping.file(db).path(db));
+    let program_dir = fossil_location::program_dir(mapping.file(db).path(db));
     let anchor = SourceAnchor::new(&program_dir, connections);
     let prepared = prepare_vertex(ctx, db, mapping, descriptor, anchor).await?;
     finalize_vertex(ctx, vec![prepared], 0).await
@@ -1076,7 +1076,7 @@ async fn csv_schema(
 /// The files `uri` names in its store, and `source/not-found` when it names
 /// none.
 ///
-/// `DataFusion` reads a locator that matches nothing as a relation with no
+/// `DataFusion` reads a location that matches nothing as a relation with no
 /// columns — a `HEAD` that answers not-found is retried as a prefix, and an
 /// empty listing infers an empty schema — so a missing file failed later, at
 /// the first column the program read, as `No field named <row>.<column>`: a
@@ -1111,7 +1111,7 @@ async fn source_files(
 fn source_not_found(uri: &str) -> DataFusionError {
     DataFusionError::External(Box::new(fossil_graph_schema::Failure::new(
         fossil_graph_schema::Problem::SourceNotFound {
-            locator: uri.to_string(),
+            location: uri.to_string(),
         },
     )))
 }
@@ -1306,7 +1306,7 @@ pub fn provider_bindings(
     descriptor: &OutputDescriptorKind,
     connections: &HashMap<String, String>,
 ) -> Vec<ProviderBinding> {
-    let program_dir = fossil_locator::program_dir(file.path(db));
+    let program_dir = fossil_location::program_dir(file.path(db));
     let anchor = SourceAnchor::new(&program_dir, connections);
     let mappings = def_map(db, file).mappings(db).clone();
     let schema = descriptor.to_graph_schema();
@@ -1321,7 +1321,7 @@ pub fn provider_bindings(
                 format: SourceFormat::Provider { .. },
                 binding,
                 ..
-            } => Some((anchor.locator(uri), binding.to_string())),
+            } => Some((anchor.location(uri), binding.to_string())),
             _ => None,
         }) else {
             continue; // object-store source — no host bytes seam

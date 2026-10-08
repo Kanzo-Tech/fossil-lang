@@ -53,22 +53,21 @@ fn the_wire() {
     let mut generator = SchemaSettings::draft07()
         .with(|s| s.option_add_null_type = false)
         .into_generator();
-    generator.subschema_for::<fossil_wasm::TokenRow>();
-    generator.subschema_for::<fossil_wasm::CheckRow>();
-    generator.subschema_for::<fossil_wasm::HoverRow>();
-    generator.subschema_for::<fossil_wasm::CompletionRow>();
-    generator.subschema_for::<fossil_wasm::DefinitionRow>();
-    generator.subschema_for::<fossil_wasm::SemanticTokenRow>();
+    generator.subschema_for::<fossil_wasm::Token>();
+    generator.subschema_for::<fossil_wasm::Diagnostic>();
+    generator.subschema_for::<fossil_wasm::Hover>();
+    generator.subschema_for::<fossil_wasm::CompletionItem>();
+    generator.subschema_for::<fossil_wasm::Location>();
+    generator.subschema_for::<fossil_wasm::SemanticToken>();
     generator.subschema_for::<fossil_hir::documents::MissingDocument>();
-    generator.subschema_for::<fossil_lineage::ProgramSource>();
-    generator.subschema_for::<fossil_lineage::SourceRefInfo>();
-    generator.subschema_for::<fossil_lineage::ProviderInfo>();
+    generator.subschema_for::<fossil_lineage::Input>();
+    generator.subschema_for::<fossil_lineage::Format>();
     generator.subschema_for::<fossil_descriptors_input::InferredDescriptor>();
     generator.subschema_for::<fossil_storage::StorageCredential>();
     generator.subschema_for::<fossil_storage::Access>();
     generator.subschema_for::<fossil_storage::Scope>();
     generator.subschema_for::<fossil_storage::GrantPlan>();
-    generator.subschema_for::<fossil_storage::LocatorName>();
+    generator.subschema_for::<fossil_storage::LocationName>();
     generator.subschema_for::<fossil_df::RunReport>();
     let schema = serde_json::json!({ "definitions": generator.take_definitions() });
     // The figures both sides wait by.

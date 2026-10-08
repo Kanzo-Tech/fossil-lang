@@ -52,7 +52,7 @@ fn workspace_lifecycle_smoke() {
     // hello.fossil under AcceptAll may produce zero or more rows
     // depending on which warnings fire); what matters is the call returns
     // and serialization is deferred to the wasm-bindgen wrapper.
-    let _rows = ws.check_rows();
+    let _rows = ws.diagnostic_rows();
 
     // close_file_native removes the handle from the map.
     ws.close_file_native(h).expect("close_file_native");
@@ -100,8 +100,8 @@ fn workspace_multi_file_isolation() {
         assert_eq!(row.uri, "b.fossil", "per-file row keyed to its file URI");
     }
 
-    // check_rows() — workspace-wide drain. Includes rows from both files.
-    let all = ws.check_rows();
+    // diagnostic_rows() — workspace-wide drain. Includes rows from both files.
+    let all = ws.diagnostic_rows();
     // The workspace-wide row set may be empty for well-formed sources,
     // but every row that IS present must carry one of the two URIs (no
     // bleed).

@@ -18,7 +18,7 @@ import './boot.js';
 import { attach } from '../src/index.js';
 
 // A job's corpus against a real DuckDB-WASM, vended as Azure: the one store the engine is lent
-// file by file, so every file the corpus reads crosses `lend`. The SAS URL a lease gets is mapped
+// file by file, so every file the corpus reads crosses `registerFiles`. The SAS URL a lease gets is mapped
 // back onto the conformance corpus through the node runtime's file protocol. The S3 half — a
 // scoped secret over httpfs — needs a store, and is exercised against MinIO instead.
 
@@ -53,7 +53,7 @@ beforeAll(async () => {
     async query(sql) {
       return conn.query(sql);
     },
-    async lend(files) {
+    async registerFiles(files) {
       for (const [name, url] of Object.entries(files)) {
         if (lent.get(name) === url) continue;
         if (lent.has(name)) db.dropFile(name);
@@ -61,7 +61,7 @@ beforeAll(async () => {
         lent.set(name, url);
       }
     },
-    async drop(names) {
+    async dropFiles(names) {
       for (const name of names) if (lent.delete(name)) db.dropFile(name);
     },
   };

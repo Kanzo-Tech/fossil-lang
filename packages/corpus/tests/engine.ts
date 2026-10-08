@@ -70,8 +70,8 @@ export async function duckdb(spill?: string): Promise<{
         }
         return arrow.tableFromIPC(bytes);
       }),
-    lend: async () => {},
-    drop: async () => {},
+    registerFiles: async () => {},
+    dropFiles: async () => {},
   };
   const query = async (sql: string): Promise<Record<string, unknown>[]> =>
     conn.query(sql).toArray().map((row: { toJSON(): Record<string, unknown> }) => row.toJSON());

@@ -7,30 +7,22 @@ import init, {
   storageRead as rawRead,
   type InitInput,
 } from '../pkg/fossil_storage_wasm.js';
-import {
-  FossilError,
-  isFossilError,
-  loader,
-  type Access,
-  type GrantPlan,
-  type Host,
-  type LocatorName,
-  type StorageCredential,
-} from '@fossil-lang/types';
+import { FossilError, isFossilError, type Access, type Host, type StorageCredential } from '@fossil-lang/types';
+import { loader, type GrantPlan, type LocationName } from '@fossil-lang/types/internal';
 
 export type { InitInput };
 
 /**
- * Boot the `fossil-storage` module. Every door awaits it with nothing, and the glue finds its
- * `.wasm` through `new URL(…, import.meta.url)`, which a bundler emits as an asset; a host with no
- * bundler (Node) calls it first with the bytes.
+ * Boot the `fossil-storage` module — for Node, with the bytes, and nothing else. Every door boots it
+ * itself, and the glue finds its `.wasm` through `new URL(…, import.meta.url)`, which a bundler
+ * emits as an asset.
  *
  * A boot that succeeded is kept; one that failed is not, so the next call tries again.
  *
  * @throws {FossilError} `module/unreachable` when the module could not be fetched within 60 s,
  *   `internal/bug` when it would not instantiate.
  */
-export const initStorage = loader<InitInput>('fossil_storage_wasm_bg.wasm', init);
+export const initFossilStorage = loader<InitInput>('fossil_storage_wasm_bg.wasm', init);
 
 /**
  * `call`, with a failure fossil did not raise — a panic is a `RuntimeError: unreachable`, and the
@@ -59,14 +51,14 @@ export async function storageRead(host: Host, targets: readonly unknown[]): Prom
 export const plan = (credential: StorageCredential, access: Access): GrantPlan =>
   guarded('fossil-storage failed planning a grant', () => storageGrant(credential, access));
 
-export const nameOf = (credential: StorageCredential, locator: string): LocatorName =>
-  guarded('fossil-storage failed naming a locator', () => storageName(credential, locator));
+export const nameOf = (credential: StorageCredential, location: string): LocationName =>
+  guarded('fossil-storage failed naming a location', () => storageName(credential, location));
 
-/** The credential whose prefix covers `locator`, by `fossil_storage::covering`. */
+/** The credential whose prefix covers `location`, by `fossil_storage::covering`. */
 export function covering(
   credentials: readonly StorageCredential[],
-  locator: string,
+  location: string,
 ): StorageCredential | undefined {
-  const prefix = storageCovering(credentials.map((c) => c.prefix), locator);
+  const prefix = storageCovering(credentials.map((c) => c.prefix), location);
   return credentials.find((c) => c.prefix === prefix);
 }

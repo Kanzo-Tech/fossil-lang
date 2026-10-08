@@ -1,8 +1,8 @@
 // WASM Workspace lifecycle smoke.
 //
 // Verifies the ty_wasm-shaped lifecycle
-// (open_file / update_file / close_file / check /
-// diagnostics_for) round-trips through wasm-bindgen + serde-wasm-bindgen
+// (openFile / updateFile / closeFile / diagnostics)
+// round-trips through wasm-bindgen + serde-wasm-bindgen
 // correctly in a node process. The native cargo-test mirror is
 // `crates/fossil-wasm/tests/workspace.rs` (catches API regressions on every
 // PR without needing the wasm-bindgen toolchain); this script is the
@@ -47,19 +47,19 @@ function main() {
     const ws = new FossilWorkspace();
     const source = readHello();
 
-    // ----- open_file -----
-    const h1 = ws.open_file('a.fossil', source);
-    if (h1 === undefined || h1 === null) fail('open_file returned no FileHandle');
-    console.log('open_file(a.fossil) ->', h1);
+    // ----- openFile -----
+    const h1 = ws.openFile('a.fossil', source);
+    if (h1 === undefined || h1 === null) fail('openFile returned no FileHandle');
+    console.log('openFile(a.fossil) ->', h1);
 
-    // ----- update_file -----
-    ws.update_file(h1, source + '\n// edit');  // must not throw
+    // ----- updateFile -----
+    ws.updateFile(h1, source + '\n// edit');  // must not throw
 
-    // ----- check -----
-    const diags1 = ws.check();
-    assert.ok(Array.isArray(diags1), 'check returns an array');
-    console.log(`check() -> ${diags1.length} rows`);
-    // Every row carries the CheckRow shape — { uri, range, severity, code, message, title, data, … }.
+    // ----- diagnostics -----
+    const diags1 = ws.diagnostics();
+    assert.ok(Array.isArray(diags1), 'diagnostics returns an array');
+    console.log(`diagnostics() -> ${diags1.length} rows`);
+    // Every row carries the Diagnostic shape — { uri, range, severity, code, message, title, data, … }.
     // That is a diagnostics panel's shape, NOT the LSP wire: the worker
     // publishes lsp_types::Diagnostic, which has no `uri` field.
     for (const d of diags1) {
@@ -73,31 +73,28 @@ function main() {
         assert.ok(d.data !== null && typeof d.data === 'object' && !(d.data instanceof Map), 'row.data is a plain object');
     }
 
-    // ----- multi-file isolation + diagnostics_for -----
-    const h2 = ws.open_file('b.fossil', source);
-    const perFileA = ws.diagnostics_for(h1);
-    const perFileB = ws.diagnostics_for(h2);
-    assert.ok(Array.isArray(perFileA), 'diagnostics_for(h1) returns an array');
-    assert.ok(Array.isArray(perFileB), 'diagnostics_for(h2) returns an array');
-    // Every row drained for h1 carries h1's URI; same for h2 (per-file scoping).
-    for (const d of perFileA) assert.equal(d.uri, 'a.fossil');
-    for (const d of perFileB) assert.equal(d.uri, 'b.fossil');
+    // ----- multi-file isolation -----
+    ws.openFile('b.fossil', source);
+    const both = ws.diagnostics();
+    // Every row carries the URI of the file it is about: one check answers every open file.
+    for (const d of both) assert.ok(d.uri === 'a.fossil' || d.uri === 'b.fossil', `row.uri ${d.uri}`);
 
-    // ----- close_file -----
-    ws.close_file(h1);
+    // ----- closeFile -----
+    ws.closeFile(h1);
     // Closing the same handle again must throw — strict signal mirrors ty_wasm.
     let threwClose = false;
-    try { ws.close_file(h1); } catch (_e) { threwClose = true; }
-    assert.ok(threwClose, 'close_file of closed handle throws');
+    try { ws.closeFile(h1); } catch (_e) { threwClose = true; }
+    assert.ok(threwClose, 'closeFile of closed handle throws');
 
-    // update_file on a closed handle must also throw.
+    // updateFile on a closed handle must also throw.
     let threwUpdate = false;
-    try { ws.update_file(h1, '// post-close'); } catch (_e) { threwUpdate = true; }
-    assert.ok(threwUpdate, 'update_file of closed handle throws');
+    try { ws.updateFile(h1, '// post-close'); } catch (_e) { threwUpdate = true; }
+    assert.ok(threwUpdate, 'updateFile of closed handle throws');
 
     // The other file remains usable.
-    const diagsAfterClose = ws.diagnostics_for(h2);
-    assert.ok(Array.isArray(diagsAfterClose), 'h2 still drainable after closing h1');
+    const diagsAfterClose = ws.diagnostics();
+    assert.ok(Array.isArray(diagsAfterClose), 'b.fossil still checkable after closing h1');
+    for (const d of diagsAfterClose) assert.equal(d.uri, 'b.fossil');
 
     console.log('OK: workspace lifecycle smoke passed');
 }

@@ -8,14 +8,14 @@
  */
 import { EditorState } from '@codemirror/state';
 import { CompletionContext } from '@codemirror/autocomplete';
-import type { CompletionRow } from '@fossil-lang/types';
+import type { CompletionItem } from '@fossil-lang/types';
 import { describe, expect, it } from 'vitest';
 
 import { fossilCompletionSource, toCompletion } from '../src/complete.js';
 
-const rows: CompletionRow[] = [
-  { label: 'trim', kind: 'function', detail: 'str.trim(String) -> String', insert: 'trim' },
-  { label: 'upper', kind: 'function', detail: '', insert: 'upper' },
+const rows: CompletionItem[] = [
+  { label: 'trim', kind: 'function', detail: 'str.trim(String) -> String', insertText: 'trim' },
+  { label: 'upper', kind: 'function', detail: '', insertText: 'upper' },
 ];
 
 function contextAt(doc: string, pos: number, explicit = false): CompletionContext {
@@ -24,27 +24,27 @@ function contextAt(doc: string, pos: number, explicit = false): CompletionContex
 
 describe('toCompletion', () => {
   it('maps the LSP kind name onto CodeMirror’s vocabulary', () => {
-    expect(toCompletion({ label: 'x', kind: 'function', detail: '', insert: 'x' }).type).toBe('function');
+    expect(toCompletion({ label: 'x', kind: 'function', detail: '', insertText: 'x' }).type).toBe('function');
     // LSP has `field` and CodeMirror does not: it is CodeMirror's `property`.
-    expect(toCompletion({ label: 'x', kind: 'field', detail: '', insert: 'x' }).type).toBe('property');
+    expect(toCompletion({ label: 'x', kind: 'field', detail: '', insertText: 'x' }).type).toBe('property');
   });
 
   it('leaves the type off for an item with no kind', () => {
-    expect(toCompletion({ label: 'x', detail: '', insert: 'x' }).type).toBeUndefined();
+    expect(toCompletion({ label: 'x', detail: '', insertText: 'x' }).type).toBeUndefined();
   });
 
   it('omits an empty detail instead of rendering a blank line', () => {
-    expect(toCompletion({ label: 'x', kind: 'function', detail: '', insert: 'x' }).detail).toBeUndefined();
-    expect(toCompletion({ label: 'x', kind: 'function', detail: 'sig', insert: 'x' }).detail).toBe('sig');
+    expect(toCompletion({ label: 'x', kind: 'function', detail: '', insertText: 'x' }).detail).toBeUndefined();
+    expect(toCompletion({ label: 'x', kind: 'function', detail: 'sig', insertText: 'x' }).detail).toBe('sig');
   });
 });
 
 describe('a quoted member', () => {
-  const quoted: CompletionRow = {
+  const quoted: CompletionItem = {
     label: 'Person.id',
     kind: 'field',
     detail: 'source field : String',
-    insert: '"Person.id"',
+    insertText: '"Person.id"',
   };
 
   it('inserts the spelling and lists the name', () => {
@@ -55,7 +55,7 @@ describe('a quoted member', () => {
   });
 
   it('replaces the quoted part, dots and all, and keeps the receiver', async () => {
-    const source = fossilCompletionSource(() => [quoted]);
+    const source = fossilCompletionSource({ completion: () => [quoted] });
     const doc = 'x = KnowsRow."Person.i';
     const result = await source(contextAt(doc, doc.length));
     expect(doc.slice(result!.from)).toBe('"Person.i');
@@ -63,7 +63,7 @@ describe('a quoted member', () => {
 });
 
 describe('fossilCompletionSource', () => {
-  const source = fossilCompletionSource(() => rows);
+  const source = fossilCompletionSource({ completion: () => rows });
 
   it('replaces only the member, not the receiver that narrowed it', async () => {
     const doc = 'x = User.name.tr';
@@ -86,14 +86,16 @@ describe('fossilCompletionSource', () => {
   });
 
   it('offers nothing when the compiler offers nothing', async () => {
-    const empty = fossilCompletionSource(() => []);
+    const empty = fossilCompletionSource({ completion: () => [] });
     const doc = 'x = User.na';
     expect(await empty(contextAt(doc, doc.length))).toBeNull();
   });
 
   it('answers a refused request with no list rather than a thrown error', async () => {
-    const refusing = fossilCompletionSource(() => {
-      throw new Error('fossil workspace is busy');
+    const refusing = fossilCompletionSource({
+      completion: () => {
+        throw new Error('fossil workspace is busy');
+      },
     });
     const doc = 'x = User.na';
     await expect(refusing(contextAt(doc, doc.length))).resolves.toBeNull();

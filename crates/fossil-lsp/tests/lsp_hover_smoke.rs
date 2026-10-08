@@ -178,7 +178,7 @@ use std::sync::Arc;
 fn users_descriptor() -> fossil_descriptors_input::InferredDescriptor {
     use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
     InferredDescriptor {
-        uri: "users.csv".into(),
+        key: "users.csv".into(),
         columns: vec![
             InferredColumn {
                 name: "id".into(),
@@ -193,7 +193,7 @@ fn users_descriptor() -> fossil_descriptors_input::InferredDescriptor {
                 primitive: Primitive::Integer,
             },
         ],
-        freshness_token: String::new(),
+        etag: String::new(),
     }
 }
 

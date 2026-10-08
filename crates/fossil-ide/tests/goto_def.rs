@@ -89,8 +89,8 @@ Users : Person from User
 fn program(db: &mut HostDb, src: &str) -> SourceFile {
     let path = fixture_dir().join("goto.fossil");
     let f = SourceFile::new(db, src.to_string(), path.to_string_lossy().into_owned());
-    fossil_hir::documents::register_missing_documents(db, f, &|_, locator| {
-        std::fs::read_to_string(locator).ok()
+    fossil_hir::documents::register_missing_documents(db, f, &|_, location| {
+        std::fs::read_to_string(location).ok()
     });
     f
 }

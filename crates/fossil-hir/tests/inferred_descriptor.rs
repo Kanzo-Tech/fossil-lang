@@ -22,7 +22,7 @@ const PROGRAM: &str = "users := io.csv(\"data/users.csv\")\n\
 
 fn descriptor(uri: &str, columns: &[(&str, Primitive)]) -> InferredDescriptor {
     InferredDescriptor {
-        uri: uri.into(),
+        key: uri.into(),
         columns: columns
             .iter()
             .map(|(n, p)| InferredColumn {
@@ -30,7 +30,7 @@ fn descriptor(uri: &str, columns: &[(&str, Primitive)]) -> InferredDescriptor {
                 primitive: *p,
             })
             .collect(),
-        freshness_token: "t1".into(),
+        etag: "t1".into(),
     }
 }
 

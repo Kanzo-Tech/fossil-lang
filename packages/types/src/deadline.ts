@@ -75,7 +75,7 @@ export async function boot<T>(module: string, init: () => Promise<T>): Promise<T
     const timedOut = silent !== undefined && cause === silent;
     throw FossilError.of(
       'module/unreachable',
-      timedOut ? { locator: module, after: MODULE_MS } : { locator: module },
+      timedOut ? { location: module, after: MODULE_MS } : { location: module },
       { cause },
     );
   }

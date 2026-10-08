@@ -333,7 +333,7 @@ impl LspState {
     /// **It must not go on the network.** The message loop is one sequential
     /// loop over one channel: a `didOpen` blocked on an `s3://` `DESCRIBE` is
     /// not one slow file, it is hover and completion dead in every other buffer
-    /// until the read returns. A locator that is not a local path is dropped
+    /// until the read returns. A location that is not a local path is dropped
     /// here, and `fossil_introspect::pre_introspect_and_register` skips one it
     /// cannot `stat` — no connection opened, and the diagnostics that needed its
     /// columns stay absent. That gap is pinned by
@@ -353,7 +353,7 @@ impl LspState {
     /// registers no Salsa dependency, so a write that lands after a query has
     /// memoised its answer is invisible until something else invalidates it.
     /// So this runs right after the text is interned or set: the only query in
-    /// this revision that has looked yet is the def map `program_sources`
+    /// this revision that has looked yet is the def map `inputs`
     /// reads, and it does not read descriptors.
     ///
     /// A URI this host cannot turn into a local path (an `untitled:` buffer, a
@@ -362,11 +362,11 @@ impl LspState {
         if local_path(file.path(&self.db)).is_none() {
             return;
         }
-        let sources: Vec<_> = fossil_lineage::program_sources(&self.db, file, &HashMap::new())
+        let sources: Vec<_> = fossil_lineage::inputs(&self.db, file, &HashMap::new())
             .into_iter()
             .filter_map(|source| {
-                let locator = local_path(&source.locator)?.to_string_lossy().into_owned();
-                Some(fossil_lineage::ProgramSource { locator, ..source })
+                let location = local_path(&source.location)?.to_string_lossy().into_owned();
+                Some(fossil_lineage::Input { location, ..source })
             })
             .collect();
         fossil_introspect::pre_introspect_and_register(&*self.db.system, &sources);
@@ -382,9 +382,11 @@ impl LspState {
     /// on it is a buffer, and every keystroke in it is a `set_text` the checker
     /// sees.
     fn register_named_documents(&mut self, file: SourceFile) {
-        let registered =
-            fossil_hir::documents::register_missing_documents(&mut self.db, file, &|_, locator| {
-                let path = local_path(locator)?;
+        let registered = fossil_hir::documents::register_missing_documents(
+            &mut self.db,
+            file,
+            &|_, location| {
+                let path = local_path(location)?;
                 match std::fs::read_to_string(&path) {
                     Ok(text) => Some(text),
                     Err(e) => {
@@ -392,7 +394,8 @@ impl LspState {
                         None
                     }
                 }
-            });
+            },
+        );
         if registered > 0 {
             tracing::debug!("registered {registered} shape document(s) from disk");
         }

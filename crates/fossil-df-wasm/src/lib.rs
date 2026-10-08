@@ -93,7 +93,7 @@ impl FossilExecutor {
         Ok(())
     }
 
-    /// `[{ key, locator, connection? }]` — the documents the program names and
+    /// `[{ key, location, connection? }]` — the documents the program names and
     /// the executor does not hold. `@fossil-lang/storage`'s `resolveDocuments`
     /// reads them.
     ///
@@ -117,14 +117,6 @@ impl FossilExecutor {
         self.borrow_mut("registerDocument")?
             .register_document(&key, &text);
         Ok(())
-    }
-
-    /// The sources to read — `ProgramSource`, the list every host introspects.
-    ///
-    /// # Errors
-    /// `api/busy` if a register is in flight.
-    pub fn sources(&self) -> Result<JsValue, JsValue> {
-        Ok(to_value("the sources", &self.borrow("sources")?.sources())?)
     }
 
     /// Run with the storage `host` vends: read each source through its
@@ -186,16 +178,16 @@ impl FossilExecutor {
         Ok(to_value("the run report", &report)?)
     }
 
-    /// Run over files held in memory, for a host with no storage: `sources`
-    /// maps each locator the program reads to its bytes, and the output stays
+    /// Run over files held in memory, for a host with no storage: `files`
+    /// maps each location the program reads to its bytes, and the output stays
     /// in memory under `dest`. Answers `{ files: [{ path, bytes }], report }`.
     ///
     /// # Errors
-    /// `api/invalid-argument` when `sources` is not an object of `Uint8Array`s
+    /// `api/invalid-argument` when `files` is not an object of `Uint8Array`s
     /// keyed by URL, or the run's own failure, as [`Self::run`]'s is.
     #[allow(clippy::await_holding_refcell_ref, clippy::future_not_send)]
     #[wasm_bindgen(js_name = runInMemory)]
-    pub async fn run_in_memory(&self, sources: JsValue, dest: String) -> Result<JsValue, JsValue> {
+    pub async fn run_in_memory(&self, files: JsValue, dest: String) -> Result<JsValue, JsValue> {
         let dest = format!("{}/", dest.trim_end_matches('/'));
         let mut storage = Storage::new(Arc::new(NoHost));
         let mut held: HashMap<String, Arc<InMemory>> = HashMap::new();
@@ -209,15 +201,15 @@ impl FossilExecutor {
             Ok(store)
         };
         let shape = |error: Option<JsValue>| {
-            invalid_argument("sources", "an object of { [url]: Uint8Array }", error)
+            invalid_argument("files", "an object of { [url]: Uint8Array }", error)
         };
-        let obj: &js_sys::Object = sources.dyn_ref().ok_or_else(|| shape(None))?;
+        let obj: &js_sys::Object = files.dyn_ref().ok_or_else(|| shape(None))?;
         for entry in js_sys::Object::entries(obj).iter() {
             let pair: js_sys::Array = entry.into();
-            let locator = pair.get(0).as_string().ok_or_else(|| shape(None))?;
+            let location = pair.get(0).as_string().ok_or_else(|| shape(None))?;
             let bytes: js_sys::Uint8Array = pair.get(1).dyn_into().map_err(|_| shape(None))?;
-            let url = Url::parse(&locator).map_err(|e| {
-                invalid_argument("sources", "an object keyed by URL", None).caused_by(e)
+            let url = Url::parse(&location).map_err(|e| {
+                invalid_argument("files", "an object keyed by URL", None).caused_by(e)
             })?;
             let root = format!("{}://{}/", url.scheme(), url.authority());
             let store = memory(&mut storage, &root)?;
@@ -227,7 +219,7 @@ impl FossilExecutor {
                     bytes.to_vec().into(),
                 )
                 .await
-                .map_err(|e| unreachable(&locator, e))?;
+                .map_err(|e| unreachable(&location, e))?;
         }
         let out = Arc::new(InMemory::new());
         storage
@@ -300,9 +292,9 @@ fn stopped(signal: &js_sys::Object) -> Result<wasm_bindgen_futures::JsFuture, Fa
 
 /// An in-memory store that answered with an error, as the storage failure a
 /// real store's would be.
-fn unreachable(locator: &str, error: object_store::Error) -> Failure {
+fn unreachable(location: &str, error: object_store::Error) -> Failure {
     Failure::new(Problem::Unreachable {
-        locator: locator.to_string(),
+        location: location.to_string(),
     })
     .caused_by(error)
 }

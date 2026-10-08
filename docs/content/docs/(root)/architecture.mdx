@@ -91,7 +91,7 @@ drawn flat show nothing. The ugliness is the finding, not a failure of the drawi
 
 ```mermaid
 graph LR
-  L["<b>language</b> · 10 crates<br/>base · locator · syntax · hir · mir<br/>lineage · descriptors-input · descriptors-output<br/>shex · graph-schema"]
+  L["<b>language</b> · 10 crates<br/>base · location · syntax · hir · mir<br/>lineage · descriptors-input · descriptors-output<br/>shex · graph-schema"]
   E["<b>editor</b> · 3 crates<br/>ide · lsp · wasm"]
   M["<b>engine</b> · 3 crates<br/>df · df-wasm · introspect"]
   C["<b>corpus</b> · 3 crates<br/>sinks · storage · storage-wasm"]
@@ -128,7 +128,7 @@ vocabulary goes ([one error](/docs/design/errors)) — and at nothing that parse
 of the filing gets settled.
 
 Two things have left `fossil-base` and neither shows on this diagram in the same way. The `@conn`
-locator is `fossil-locator`, a crate with no dependencies at all — filing it under `language` is the
+location is `fossil-location`, a crate with no dependencies at all — filing it under `language` is the
 same subject-not-history move `fossil-sinks` and `fossil-storage` got, except that this one moved a
 file. The `tracked` query that decodes a shape document is `fossil_hir::shape_documents`, and it
 cost **no** edge: its only production caller was `fossil-hir` already, and `fossil-hir` already
@@ -173,7 +173,7 @@ implementation a third.
 > **If a crate called `base` contains the substrate *and* the file abstraction, it is two crates that
 > have not been separated yet.**
 
-Two parts have gone. `fossil-locator` is the file abstraction — the rule that says where a written
+Two parts have gone. `fossil-location` is the file abstraction — the rule that says where a written
 path points; `base-db` keeps its VFS in another crate for exactly that reason. And the shape-document
 decode is `fossil_hir::shape_documents`: `base-db` holds *input queries*, and a query that runs a
 decoder over a document to produce a type is not an input, it is the compiler asking a question.
@@ -186,7 +186,7 @@ implements `System` must depend on `fossil-base`, `fossil-base`'s unit tests mus
 helper, and `#[cfg(test)]` makes the crate under test a second copy of `fossil-base` whose types do
 not unify with the one the helper linked. It does not compile, and the rest of the bill is in
 [what was discarded](/docs/design/discarded). The distinction the rule actually draws is *decides
-something about a program*: the locator did, and a decoder for a format no program is written in
+something about a program*: the location did, and a decoder for a format no program is written in
 does not.
 
 ### What would move the remaining edge
@@ -232,7 +232,7 @@ not restated: it was measured on 2026-08-25 and the tree has changed since, so t
 options were to re-measure or to drop it.
 **At this size the honest target is five to eight.**
 
-Most of the movement was moves, not new code: `fossil-locator` arrived by moving a module down out
+Most of the movement was moves, not new code: `fossil-location` arrived by moving a module down out
 of `fossil-base`, `fossil-engine` left by moving three into the crate that already used them, two
 arrived carrying a write-time bound and left when it was [removed](/docs/design/discarded#privacy),
 `fossil-tile-writer` arrived by moving a struct out of a crate that never called it and left with the
@@ -258,7 +258,7 @@ boundary is `proc-macro-srv-cli`, and procedural macros segfault — fault isola
 
 **No crate that exists by imitation.** A crate earns its boundary from a cycle, a `cfg`, an orphan
 rule, a publishing frontier — or a rule about what the crate it left is allowed to contain, which is
-the fifth and `fossil-locator` is the first to use it. Naming it is not widening the list: the rule
+the fifth and `fossil-location` is the first to use it. Naming it is not widening the list: the rule
 in question is the one at the head of this page, and a list that could not hold the page's own rule
 would be a list that forbids acting on it.
 </Callout>

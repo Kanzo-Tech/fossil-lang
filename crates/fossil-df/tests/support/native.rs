@@ -63,7 +63,7 @@ pub(crate) fn open_db(path: &Path) -> (FossilDb, SourceFile) {
     // has no forward-propagated type for it, which is what the checker reports.
     fossil_introspect::pre_introspect_and_register(
         db.system(),
-        &fossil_lineage::program_sources(&db, file, &HashMap::new()),
+        &fossil_lineage::inputs(&db, file, &HashMap::new()),
     );
     register_shape_documents(&mut db, file);
     (db, file)
@@ -73,9 +73,9 @@ pub(crate) fn open_db(path: &Path) -> (FossilDb, SourceFile) {
 /// read is skipped: the checker has the span of the `io.shex("…")` that named
 /// it, and says so.
 pub(crate) fn register_shape_documents(db: &mut FossilDb, file: SourceFile) {
-    register_missing_documents(db, file, &|db, locator| {
+    register_missing_documents(db, file, &|db, location| {
         db.system()
-            .read_file(Path::new(locator))
+            .read_file(Path::new(location))
             .ok()
             .and_then(|bytes| String::from_utf8(bytes).ok())
     });
@@ -302,7 +302,7 @@ fn files_under(dir: &Path) -> Vec<(String, PathBuf)> {
 ///
 /// Every file under `dir` is served at [`AUTHORITY`], the program is compiled
 /// at its URL there, and each document the executor reports missing is read
-/// from `dir` by its locator. Blocks on a current-thread runtime: the executor
+/// from `dir` by its location. Blocks on a current-thread runtime: the executor
 /// spawns nothing, so one thread is the browser's situation.
 ///
 /// # Errors
@@ -352,9 +352,9 @@ async fn run_dir_async(
     );
     for missing in exec.missing_documents() {
         let rel = missing
-            .locator
+            .location
             .strip_prefix(AUTHORITY)
-            .unwrap_or_else(|| panic!("`{}` is not served here", missing.locator));
+            .unwrap_or_else(|| panic!("`{}` is not served here", missing.location));
         // A document that is not there stays unregistered, and the run reports
         // it as the browser would.
         if let Ok(text) = std::fs::read_to_string(dir.join(rel)) {

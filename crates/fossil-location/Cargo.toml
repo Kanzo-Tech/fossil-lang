@@ -1,12 +1,12 @@
 [package]
-name = "fossil-locator"
+name = "fossil-location"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "The one rule that turns a reference a program writes into a locator a reader can open"
+description = "The one rule that turns a reference a program writes into a location a reader can open"
 # Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 

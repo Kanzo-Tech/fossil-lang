@@ -1,9 +1,9 @@
 ---
 title: Outside the vended prefix
-description: "`storage/outside-prefix` — a locator that no prefix the host vended covers, so no credential may be used to reach it."
+description: "`storage/outside-prefix` — a location that no prefix the host vended covers, so no credential may be used to reach it."
 ---
 
-fossil was asked to read or write a locator, and none of the credentials vended for the scope has a
+fossil was asked to read or write a location, and none of the credentials vended for the scope has a
 prefix it lies under. A connection vended `s3://b/lake/` and a file at `s3://b/other/x.csv` was asked
 for:
 
@@ -11,7 +11,7 @@ for:
 s3://b/other/x.csv lies outside any prefix the host vended
 ```
 
-A host sees `data: { locator, prefix }`. Where one credential was being applied, `prefix` is that
+A host sees `data: { location, prefix }`. Where one credential was being applied, `prefix` is that
 credential's; where fossil looked across everything granted, it is the phrase *any prefix the host
 vended*. The mount in `@fossil-lang/storage` throws it from `name` and `files`, with the prefixes it
 holds, joined, as `prefix`. The same check in
@@ -22,7 +22,7 @@ how a document resolved through a connection reports it — and from a run's rea
 
 The credential is scoped to its prefix, and **nothing in fossil can widen it**: the store enforces the
 prefix, and fossil checks it first. The check is not a courtesy. A DuckDB secret is scoped to the
-prefix it was installed for, so a read of a locator outside it would go out with no secret at all —
+prefix it was installed for, so a read of a location outside it would go out with no secret at all —
 anonymously — and fail later as something unrelated, or succeed against data the host never meant to
 expose. Refusing by name keeps the host's authorisation the only thing that decides what is read. See
 [storage is reached by a vended credential](/docs/design/three-hosts).
@@ -32,6 +32,6 @@ expose. Refusing by name keeps the host's authorisation the only thing that deci
 - **Make the connection map and the credentials agree.** `@name/…` expands against the base the host's
   `connections()` gives for `name`; the credential `credentials({ connection: name }, …)` vends must
   have a prefix that base lies under.
-- **Vend a credential that covers the locator**, or a wider prefix, if the host means to allow it.
-- **Check the locator.** A path that climbs out of its directory, or names a different bucket or
+- **Vend a credential that covers the location**, or a wider prefix, if the host means to allow it.
+- **Check the location.** A path that climbs out of its directory, or names a different bucket or
   container than the connection's, is outside by construction.

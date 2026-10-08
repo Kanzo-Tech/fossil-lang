@@ -37,7 +37,7 @@ fossil-graph-schema = { path = "../fossil-graph-schema" }
 # `workspace` modules here.
 # `split_alias` — the one rule that tells `@connection/` from the path, which
 # the semantic tokens carve out of a reference's string literal.
-fossil-locator = { path = "../fossil-locator" }
+fossil-location = { path = "../fossil-location" }
 rowan = { workspace = true }
 salsa = { workspace = true }
 smol_str = { workspace = true }
@@ -50,7 +50,7 @@ line-index = { workspace = true }
 # percent-encoding, not a `format!`. Pure Rust, wasm-clean.
 url = { workspace = true }
 lsp-types = { workspace = true }
-# `DiagnosticData` — what an LSP diagnostic's `data` and a wasm `CheckRow`
+# `DiagnosticData` — what an LSP diagnostic's `data` and a wasm `Diagnostic`
 # carry beside the code: a problem's `data` is a `serde_json::Value`.
 serde = { workspace = true }
 schemars = { workspace = true }

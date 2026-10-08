@@ -190,7 +190,7 @@ struct FileNames {
     types: Vec<SmolStr>,
     /// Every string a binding reads as a reference: a source's URI, its
     /// `schema =` document, a `type` binding's document. These are the strings
-    /// `fossil-lineage` reports and the locator resolves, so they are the only
+    /// `fossil-lineage` reports and the location resolves, so they are the only
     /// ones whose `@name/` prefix names a connection.
     references: Vec<SmolStr>,
 }
@@ -233,7 +233,7 @@ fn byte_range(tok: &SyntaxToken) -> Range<u32> {
 /// The byte range of `@name` inside a string literal that a binding reads as a
 /// reference, when the reference is written through a connection.
 ///
-/// The split is [`fossil_locator::split_alias`]'s, the rule every other reader
+/// The split is [`fossil_location::split_alias`]'s, the rule every other reader
 /// of a reference uses; the range covers the `@` and stops before the `/`.
 /// Only a binding's literals qualify — a mapping body's string is a value,
 /// and an `@` at the start of one names nothing.
@@ -249,7 +249,7 @@ fn connection_alias(tok: &SyntaxToken, names: &FileNames) -> Option<Range<u32>> 
     if !names.references.iter().any(|r| r == inner) {
         return None;
     }
-    let (alias, _) = fossil_locator::split_alias(inner)?;
+    let (alias, _) = fossil_location::split_alias(inner)?;
     let at = u32::from(tok.text_range().start()) + 1;
     let len = u32::try_from(alias.len() + 1).ok()?;
     Some(at..at + len)

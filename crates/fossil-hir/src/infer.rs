@@ -1238,12 +1238,12 @@ mod tests {
     fn a_column_carries_the_lattice_and_not_its_spelling() {
         let db = db();
         let inferred = fossil_descriptors_input::InferredDescriptor {
-            uri: "users.csv".into(),
+            key: "users.csv".into(),
             columns: vec![fossil_descriptors_input::InferredColumn {
                 name: "born".into(),
                 primitive: Primitive::GYear,
             }],
-            freshness_token: String::new(),
+            etag: String::new(),
         };
         let TyKind::Record(rec) = record_from_inferred(&db, &inferred).kind(&db) else {
             panic!("expected Record");

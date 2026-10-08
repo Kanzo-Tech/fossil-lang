@@ -1,29 +1,26 @@
 import {
   FossilError,
   HOST_MS,
-  RENEW_BEFORE_MS,
-  attachCause,
   isFossilError,
-  until,
-  within,
   type Access,
   type Engine,
   type Host,
   type Scope,
   type StorageCredential,
 } from '@fossil-lang/types';
+import { RENEW_BEFORE_MS, attachCause, until, within } from '@fossil-lang/types/internal';
 
 import { silent } from './documents.js';
-import { covering, initStorage, nameOf, plan } from './wasm.js';
+import { covering, initFossilStorage, nameOf, plan } from './wasm.js';
 
 /** A scope made readable through the engine, until {@link Mount.close}. */
 export interface Mount {
   /** The prefixes the host vended for the scope. */
   readonly prefixes: readonly string[];
-  /** What SQL calls `locator`: `s3://…` itself, or the name an Azure file is lent under. */
-  name(locator: string): string;
-  /** {@link name} for each locator, each made readable first — an Azure file is lent. */
-  files(locators: readonly string[]): Promise<string[]>;
+  /** What SQL calls `location`: `s3://…` itself, or the name an Azure file is lent under. */
+  name(location: string): string;
+  /** {@link name} for each location, each made readable first — an Azure file is lent. */
+  files(locations: readonly string[]): Promise<string[]>;
   /**
    * Why a credential of this mount stopped working: its renewal failed until it expired. Set, it is
    * what {@link name} and {@link files} throw, and what a reader reports in place of the engine's
@@ -35,6 +32,8 @@ export interface Mount {
    * prefix is released even when one fails, and the failures are thrown after, as one.
    */
   close(): Promise<void>;
+  /** {@link close}, for `await using`. */
+  [Symbol.asyncDispose](): Promise<void>;
 }
 
 /** A renewal that failed is tried again after this, while the credential still works. */
@@ -46,7 +45,7 @@ interface Held {
   readonly access: Access;
   holders: number;
   ready: Promise<void>;
-  /** Locator → the name it is lent under, for a store the engine is lent file by file. */
+  /** Location → the name it is lent under, for a store the engine is lent file by file. */
   readonly lent: Map<string, string>;
   timer?: ReturnType<typeof setTimeout>;
   /** Why the credential stopped working, once its renewal failed past expiry. */
@@ -80,7 +79,7 @@ export async function mount(
   access: Access,
   { signal }: { signal?: AbortSignal } = {},
 ): Promise<Mount> {
-  await until(initStorage(), signal);
+  await until(initFossilStorage(), signal);
   const credentials = await vended(host, scope, access, signal);
   if (credentials.length === 0) throw noCredential(scope, access);
   const table = held.get(engine) ?? new Map<string, Held>();
@@ -110,15 +109,15 @@ export async function mount(
   }
 
   const current = (): StorageCredential[] => keys.map((key) => table.get(key)!.credential);
-  const entryFor = (locator: string): Held => {
-    const credential = covering(current(), locator);
+  const entryFor = (location: string): Held => {
+    const credential = covering(current(), location);
     if (credential === undefined) {
       const prefix = current()
         .map((c) => c.prefix)
         .join(', ');
       throw FossilError.of(
         'storage/outside-prefix',
-        { locator, prefix },
+        { location, prefix },
       );
     }
     const entry = table.get(`${access}\u0000${credential.prefix}`)!;
@@ -126,32 +125,34 @@ export async function mount(
     return entry;
   };
   let closed = false;
+  const close = async (): Promise<void> => {
+    if (closed) return;
+    closed = true;
+    await release(engine, table, keys);
+  };
 
   return {
     prefixes: credentials.map((c) => c.prefix),
     get failure() {
       return keys.map((key) => table.get(key)?.failure).find((f) => f !== undefined);
     },
-    name: (locator) => nameOf(entryFor(locator).credential, locator).name,
-    async files(locators) {
+    name: (location) => nameOf(entryFor(location).credential, location).name,
+    async files(locations) {
       const leases: Record<string, string> = {};
-      const names = locators.map((locator) => {
-        const entry = entryFor(locator);
-        const { name, lend } = nameOf(entry.credential, locator);
+      const names = locations.map((location) => {
+        const entry = entryFor(location);
+        const { name, lend } = nameOf(entry.credential, location);
         if (lend !== undefined) {
-          entry.lent.set(locator, name);
+          entry.lent.set(location, name);
           leases[name] = lend;
         }
         return name;
       });
-      if (Object.keys(leases).length > 0) await engine.lend(leases);
+      if (Object.keys(leases).length > 0) await engine.registerFiles(leases);
       return names;
     },
-    async close() {
-      if (closed) return;
-      closed = true;
-      await release(engine, table, keys);
-    },
+    close,
+    [Symbol.asyncDispose]: close,
   };
 }
 
@@ -178,7 +179,7 @@ async function release(engine: Engine, table: Map<string, Held>, keys: readonly 
       failures.push(cause);
     }
     try {
-      if (entry.lent.size > 0) await engine.drop([...entry.lent.values()]);
+      if (entry.lent.size > 0) await engine.dropFiles([...entry.lent.values()]);
     } catch (cause) {
       failures.push(cause);
     }
@@ -202,8 +203,8 @@ async function install(engine: Engine, entry: Held): Promise<void> {
   }
   if (entry.lent.size > 0) {
     const leases: Record<string, string> = {};
-    for (const [locator, name] of entry.lent) leases[name] = nameOf(entry.credential, locator).lend!;
-    await engine.lend(leases);
+    for (const [location, name] of entry.lent) leases[name] = nameOf(entry.credential, location).lend!;
+    await engine.registerFiles(leases);
   }
 }
 

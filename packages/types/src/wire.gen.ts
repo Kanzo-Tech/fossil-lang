@@ -7,23 +7,50 @@
 export type Access = 'read' | 'write';
 
 /**
- * One entry of `CheckRow::related` — a place, and what is there.
+ * One completion candidate — LSP's `CompletionItem`, with the fields `fossil-ide` fills.
  */
-export interface CheckRelated {
-  message: string;
-  range: Range;
-  uri: string;
+export interface CompletionItem {
+  /**
+   * The signature, the shape property's IRI, the source field's type — whatever `fossil-ide`
+   * wrote beside the label. `""` when it wrote none.
+   */
+  detail: string;
+  /**
+   * The text a pick writes, which is the label's one spelling: the label itself, or `"Person.id"`
+   * for a column whose name is not an identifier (`fossil_syntax::name`). Never empty and never
+   * absent.
+   */
+  insertText: string;
+  /**
+   * Absent when the item carries no kind.
+   */
+  kind?: CompletionKind;
+  label: string;
 }
 
 /**
- * One diagnostic row in the `WasmWorkspace::check` return array: the workspace's own shape, not the
- * LSP wire's (`lsp_types::Diagnostic`).
+ * What a completion candidate is: the two LSP `CompletionItemKind`s `fossil-ide` emits, by their
+ * LSP names.
  *
- * `check()` is one flat array across every open file, so each row carries the `uri` the host opened
- * its buffer under. Everything else is projected from the rendering an editor is shown, so the two
- * cannot disagree. `CheckRow` in `@fossil-lang/types` is this, with `data` typed by `code`.
+ * A name and not a number, because the predecessor of `packages/codemirror-fossil` is what happens
+ * when a number crosses this boundary: it hard-copied the lexer's discriminants into a TS enum and
+ * was wrong in nine places by the time it was deleted. And these two and not the specification's
+ * twenty-five, because a variant nothing emits is a row of a table on each side of the boundary
+ * that nothing can exercise. A third kind is a variant here, and the generated union makes the
+ * editor's table say what it is.
  */
-export interface CheckRowBase {
+export type CompletionKind = 'function' | 'field';
+
+/**
+ * One diagnostic row in the `WasmWorkspace::diagnostics` return array: the workspace's own shape,
+ * not the LSP wire's (`lsp_types::Diagnostic`).
+ *
+ * `diagnostics()` is one flat array across every open file, so each row carries the `uri` the host
+ * opened its buffer under. Everything else is projected from the rendering an editor is shown, so
+ * the two cannot disagree. `Diagnostic` in `@fossil-lang/types` is this, with `data` typed by
+ * `code`.
+ */
+export interface DiagnosticBase {
   /**
    * The problem's code — `area/kind`, what a host branches on.
    */
@@ -61,7 +88,7 @@ export interface CheckRowBase {
    * find the same string in both fields. The LSP wire does convert, because LSP will not accept
    * anything else.
    */
-  related?: CheckRelated[];
+  related?: DiagnosticRelatedInformation[];
   severity: 1 | 2 | 3 | 4;
   /**
    * Fossil source that repairs it — `Diagnostic::suggestion_source`.
@@ -75,54 +102,10 @@ export interface CheckRowBase {
 }
 
 /**
- * What a completion candidate is: the two LSP `CompletionItemKind`s `fossil-ide` emits, by their
- * LSP names.
- *
- * A name and not a number, because the predecessor of `packages/codemirror-fossil` is what happens
- * when a number crosses this boundary: it hard-copied the lexer's discriminants into a TS enum and
- * was wrong in nine places by the time it was deleted. And these two and not the specification's
- * twenty-five, because a variant nothing emits is a row of a table on each side of the boundary
- * that nothing can exercise. A third kind is a variant here, and the generated union makes the
- * editor's table say what it is.
+ * One entry of `Diagnostic::related` — a place, and what is there.
  */
-export type CompletionKind = 'function' | 'field';
-
-/**
- * One completion candidate.
- */
-export interface CompletionRow {
-  /**
-   * The signature, the shape property's IRI, the source field's type — whatever `fossil-ide`
-   * wrote beside the label. `""` when it wrote none.
-   */
-  detail: string;
-  /**
-   * The text a pick writes, which is the label's one spelling: the label itself, or `"Person.id"`
-   * for a column whose name is not an identifier (`fossil_syntax::name`). Never empty and never
-   * absent.
-   */
-  insert: string;
-  /**
-   * Absent when the item carries no kind.
-   */
-  kind?: CompletionKind;
-  label: string;
-}
-
-/**
- * One place a definition is.
- *
- * `uri` is the registry key VERBATIM — the path the host opened the buffer under, which in a
- * browser is usually a bare name like `hello.shex` and not a URI. Same choice as
- * `crate::CheckRow::uri` and for the same reason: a caller matching this against the buffer it
- * opened has to find the same string it passed in. The LSP wire converts, because LSP will not
- * accept anything else; this surface has no wire to satisfy.
- *
- * A target in ANOTHER file is the ordinary case rather than the exception — two of the three
- * positions goto-def recognises resolve into the shape document — so a host with one editor pane
- * still has to read `uri` before it moves a cursor.
- */
-export interface DefinitionRow {
+export interface DiagnosticRelatedInformation {
+  message: string;
   range: Range;
   uri: string;
 }
@@ -151,6 +134,31 @@ export interface EdgeDrops {
    */
   table: string;
 }
+
+/**
+ * One format fossil reads — Arrow's `FileFormat`, `DuckDB`'s `FORMAT`: its short name, the file
+ * extensions it reads, and how it can be used. A host lists these so its UI can offer the
+ * constructors and filter files by extension.
+ */
+export interface Format {
+  /**
+   * File extensions it reads (no leading dot).
+   */
+  extensions: string[];
+  /**
+   * Whether it defines a type, loads data, or both.
+   */
+  kind: FormatKind;
+  /**
+   * Short name (e.g. `csv`, `json`, `parquet`) — what `Input::format` holds.
+   */
+  name: string;
+}
+
+/**
+ * What a format can appear as in a program.
+ */
+export type FormatKind = 'schema' | 'data' | 'both';
 
 /**
  * What a host does with a credential: the statements that put it in the engine and take it out, and
@@ -184,7 +192,7 @@ export interface GrantPlan {
  * block with the type the shape demands of that predicate. `range` is UTF-16, because a JS host
  * counts in UTF-16 and LSP does too.
  */
-export interface HoverRow {
+export interface Hover {
   markdown: string;
   range: Range;
 }
@@ -218,30 +226,89 @@ export interface InferredDescriptor {
    */
   columns: InferredColumn[];
   /**
-   * Opaque token identifying the state of the source this was read from. The cache compares it;
-   * nothing interprets it. `fossil-introspect` writes `mtime` + size, a host that has a strong
-   * `ETag` or a content digest writes that instead, and a host that cannot cheaply tell writes `""`
-   * — which `crate::DescriptorCache::is_fresh` reads as "never fresh", so that source is
-   * re-introspected every time. It is NOT a hash of the bytes, and deliberately: hashing means
-   * reading the whole source to decide whether the source needs reading, which makes the cache cost
-   * more than the `DESCRIBE` it saves. `mtime` + size is two fields of one `stat`. Its one
-   * dangerous failure — saying "unchanged" when it changed — needs a file restored with the
-   * same `mtime` AND the same size, which is what pairing the two narrows.
+   * An entity tag in RFC 9110's sense (§8.8.3): an opaque validator of the state of the source
+   * this was read from, which may be weak. The cache compares it; nothing interprets it.
+   * `fossil-introspect` writes `mtime` + size, a host that has a strong `ETag` or a content digest
+   * writes that instead, and a host that cannot cheaply tell writes `""` — which
+   * `crate::DescriptorCache::is_fresh` reads as "never fresh", so that source is re-introspected
+   * every time. It is NOT a hash of the bytes, and deliberately: hashing means reading the whole
+   * source to decide whether the source needs reading, which makes the cache cost more than the
+   * `DESCRIBE` it saves. `mtime` + size is two fields of one `stat`. Its one dangerous failure —
+   * saying "unchanged" when it changed — needs a file restored with the same `mtime` AND the same
+   * size, which is what pairing the two narrows.
    */
-  freshness_token: string;
+  etag: string;
   /**
    * The source URI exactly as written in the program — the string inside
-   * `io.csv("examples/users.csv")`. NOT the resolved locator: the host resolves (`@conn` aliases, a
-   * program-relative path, a signed URL) in order to *read* the source, but the checker only ever
+   * `io.csv("examples/users.csv")`. NOT the resolved location: the host resolves (`@conn` aliases,
+   * a program-relative path, a signed URL) in order to *read* the source, but the checker only ever
    * sees what the program says, so that is the only string both ends can agree on.
    */
+  key: string;
+}
+
+/**
+ * One input a program reads — `Input` in `@fossil-lang/types`, and the one answer to «what does
+ * this program read»: the editor's, the introspecting host's and the executor's.
+ *
+ * The name is `OpenLineage`'s `RunEvent.inputs[]` and PROV's `prov:used`, and not LSP's
+ * `references`, which are the usages of a symbol.
+ */
+export interface Input {
+  /**
+   * The binding a data input is read into (`users` in `users := io.csv(…)`).
+   */
+  binding?: string;
+  /**
+   * The connection the location lies under, when it was written `@name/…` and the connection map
+   * has that name.
+   */
+  connection?: string;
+  /**
+   * The catalogue row a data input's constructor names (`csv`), which chooses the reader.
+   */
+  format?: string;
+  /**
+   * The reference as the program wrote it — what an inferred descriptor is keyed by, and what
+   * survives a connection being repointed.
+   */
+  key: string;
+  /**
+   * `key` through `fossil_location::SourceAnchor`: what a host signs and reads.
+   */
+  location: string;
+  /**
+   * The reader option a data input's binding wrote (`delimiter = "|"`), verbatim.
+   */
+  option?: string;
+  /**
+   * What the program reads it as.
+   */
+  role: Role;
+}
+
+/**
+ * One place a definition is.
+ *
+ * `uri` is the registry key VERBATIM — the path the host opened the buffer under, which in a
+ * browser is usually a bare name like `hello.shex` and not a URI. Same choice as
+ * `crate::Diagnostic::uri` and for the same reason: a caller matching this against the buffer it
+ * opened has to find the same string it passed in. The LSP wire converts, because LSP will not
+ * accept anything else; this surface has no wire to satisfy.
+ *
+ * A target in ANOTHER file is the ordinary case rather than the exception — two of the three
+ * positions goto-def recognises resolve into the shape document — so a host with one editor pane
+ * still has to read `uri` before it moves a cursor.
+ */
+export interface Location {
+  range: Range;
   uri: string;
 }
 
 /**
- * What SQL calls a locator under a credential.
+ * What SQL calls a location under a credential.
  */
-export interface LocatorName {
+export interface LocationName {
   /**
    * The URL the engine lends `name` to; absent when the name is readable as it is.
    */
@@ -257,7 +324,7 @@ export interface LocatorName {
  */
 export interface MissingDocument {
   /**
-   * The connection the locator lies under, when it was written `@name/…`.
+   * The connection the location lies under, when it was written `@name/…`.
    */
   connection?: string;
   /**
@@ -268,7 +335,7 @@ export interface MissingDocument {
   /**
    * Where it is fetched from: the same reference through the connection map.
    */
-  locator: string;
+  location: string;
 }
 
 /**
@@ -292,72 +359,12 @@ export interface Position {
 export type Primitive = 'string' | 'integer' | 'float' | 'bool' | 'date' | 'date_time' | 'time' | 'g_year' | 'any_uri';
 
 /**
- * A data source a program reads, as fossil resolved it — `ProgramSource` in `@fossil-lang/types`.
- */
-export interface ProgramSource {
-  /**
-   * The binding the source is read into (`users` in `users := io.csv(…)`).
-   */
-  binding: string;
-  /**
-   * The connection the locator lies under, when it was written `@name/…`.
-   */
-  connection?: string;
-  /**
-   * The catalogue row the constructor names (`csv`), which chooses the reader.
-   */
-  format: string;
-  /**
-   * The URI as the program wrote it — what an inferred descriptor is keyed by.
-   */
-  key: string;
-  /**
-   * `key` through `fossil_locator::SourceAnchor`: what a host signs and reads.
-   */
-  locator: string;
-  /**
-   * The reader option the binding wrote (`delimiter = "|"`), verbatim.
-   */
-  option?: string;
-}
-
-/**
- * One data-source provider fossil exposes: its short name, the file extensions it reads, and how it
- * can be used. A host lists these so its UI can offer the constructors and filter files by
- * extension.
- */
-export interface ProviderInfo {
-  /**
-   * File extensions this provider reads (no leading dot).
-   */
-  extensions: string[];
-  /**
-   * Whether the provider defines a type, loads data, or both.
-   */
-  kind: ProviderKind;
-  /**
-   * Short provider name (e.g. `csv`, `json`, `parquet`).
-   */
-  name: string;
-}
-
-/**
- * What a provider can appear as in a program.
- */
-export type ProviderKind = 'schema' | 'data' | 'both';
-
-/**
  * Inclusive `start`, exclusive `end` — LSP's `Range`.
  */
 export interface Range {
   end: Position;
   start: Position;
 }
-
-/**
- * The position a reference plays in an `io.*` source constructor.
- */
-export type RefRole = 'data' | 'schema';
 
 /**
  * Replace the text at `range` with `replacement`.
@@ -368,17 +375,22 @@ export interface Replacement {
 }
 
 /**
+ * The position an input plays in a program.
+ */
+export type Role = 'data' | 'schema';
+
+/**
  * Where a run wrote, and what the write discarded.
  */
 export interface RunReport {
   /**
-   * The prefix the corpus was written under, `fossil.json` at its root.
-   */
-  dest: string;
-  /**
    * One entry per relation, in the order `fossil.json` lists its edge tables.
    */
   dropped: EdgeDrops[];
+  /**
+   * The prefix the corpus was written under, `fossil.json` at its root.
+   */
+  location: string;
 }
 
 /**
@@ -402,35 +414,13 @@ export type Scope = {
  * The rows are in source order and never overlap; a connection reference is carved out of its
  * string literal, so `"@warehouse/x.csv"` is three rows.
  */
-export interface SemanticTokenRow {
+export interface SemanticToken {
   kind: string;
   /**
    * Empty when the span carries none — never absent.
    */
   modifiers: string[];
   range: Range;
-}
-
-/**
- * One external reference a program makes. `connection` is the `@conn` alias the reference targets
- * (`Some("cpi")` for `@cpi/graph.ttl`), or `None` for a direct URL / local path. `path` is the
- * remainder after the alias (or the whole locator when there is no alias). This is the program's
- * TYPED lineage — a host derives a job's connection set from the distinct `connection`s, never
- * from a regex over the script text.
- */
-export interface SourceRefInfo {
-  /**
-   * The `@conn` alias this reference targets; absent for a direct URL/path.
-   */
-  connection?: string;
-  /**
-   * The path within the connection, or the whole locator when unaliased.
-   */
-  path: string;
-  /**
-   * Where this reference appears in the source constructor.
-   */
-  role: RefRole;
 }
 
 /**
@@ -454,24 +444,25 @@ export interface StorageCredential {
 }
 
 /**
- * One token, serialised as its variant name — the name a highlighter keys on.
- */
-export type Token = 'Whitespace' | 'Newline' | 'Comment' | 'KwFrom' | 'KwAnd' | 'KwOr' | 'KwNot' | 'AtAttr' | 'True' | 'False' | 'Null' | 'Float' | 'Integer' | 'Ident' | 'String' | 'Define' | 'Eq' | 'Neq' | 'Le' | 'Ge' | 'Assign' | 'Dot' | 'Comma' | 'LParen' | 'RParen' | 'LBrace' | 'RBrace' | 'Lt' | 'Gt' | 'Plus' | 'Minus' | 'Star' | 'Slash' | 'Percent' | 'Question' | 'Colon';
-
-/**
  * One token: its name, and where it is in UTF-16 code units.
  */
-export interface TokenRow {
+export interface Token {
   /**
    * Exclusive end, in UTF-16 code units.
    */
   end: number;
-  kind: Token;
+  kind: TokenKind;
   /**
    * Inclusive start, in UTF-16 code units.
    */
   start: number;
 }
+
+/**
+ * One token, serialised as its variant name — the name a highlighter keys on. On the wire it is a
+ * `Token`'s `kind`, so it is named `TokenKind` there.
+ */
+export type TokenKind = 'Whitespace' | 'Newline' | 'Comment' | 'KwFrom' | 'KwAnd' | 'KwOr' | 'KwNot' | 'AtAttr' | 'True' | 'False' | 'Null' | 'Float' | 'Integer' | 'Ident' | 'String' | 'Define' | 'Eq' | 'Neq' | 'Le' | 'Ge' | 'Assign' | 'Dot' | 'Comma' | 'LParen' | 'RParen' | 'LBrace' | 'RBrace' | 'Lt' | 'Gt' | 'Plus' | 'Minus' | 'Star' | 'Slash' | 'Percent' | 'Question' | 'Colon';
 
 /** `fossil_storage::HOST_MS`. */
 export const HOST_MS = 30000;

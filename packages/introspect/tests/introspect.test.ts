@@ -1,14 +1,9 @@
 import "./boot.js";
 
-import type { Access, ProgramSource, Scope, StorageCredential, Table } from "@fossil-lang/types";
+import type { Access, Input, Scope, StorageCredential, Table } from "@fossil-lang/types";
 import { describe, expect, it, vi } from "vitest";
-import {
-  buildDescriptor,
-  describeSql,
-  introspect,
-  type DescribeRow,
-  type IntrospectIO,
-} from "../src/index.js";
+import { introspect, type IntrospectOptions } from "../src/index.js";
+import { buildDescriptor, describeSql, type DescribeRow } from "../src/describe.js";
 import { duckdbPrimitive } from "../src/catalogue.generated.js";
 
 
@@ -95,19 +90,19 @@ describe("buildDescriptor", () => {
       { column_name: "joined", column_type: "TIMESTAMP" },
     ];
     expect(buildDescriptor("data/users.csv", rows)).toEqual({
-      uri: "data/users.csv",
+      key: "data/users.csv",
       columns: [
         { name: "id", primitive: "integer" },
         { name: "name", primitive: "string" },
         { name: "joined", primitive: "date_time" },
       ],
-      freshness_token: "",
+      etag: "",
     });
   });
 
-  it("carries the host's freshness token through when it supplies one", () => {
+  it("carries the host's etag through when it supplies one", () => {
     const rows: DescribeRow[] = [{ column_name: "id", column_type: "INT" }];
-    expect(buildDescriptor("u.csv", rows, 'W/"abc"').freshness_token).toBe(
+    expect(buildDescriptor("u.csv", rows, 'W/"abc"').etag).toBe(
       'W/"abc"',
     );
   });
@@ -126,17 +121,19 @@ describe("buildDescriptor", () => {
 
 describe("introspect", () => {
   const W = "s3://bucket/w/";
-  const users: ProgramSource = {
+  const users: Input = {
+    role: "data",
     binding: "users",
     key: "@w/users.csv",
-    locator: `${W}users.csv`,
+    location: `${W}users.csv`,
     connection: "w",
     format: "csv",
   };
-  const orders: ProgramSource = {
+  const orders: Input = {
+    role: "data",
     binding: "orders",
     key: "@w/orders.csv",
-    locator: `${W}orders.csv`,
+    location: `${W}orders.csv`,
     connection: "w",
     format: "csv",
   };
@@ -156,12 +153,12 @@ describe("introspect", () => {
    *  records every statement but the `httpfs` probe, which it answers as loaded. */
   function fakeIO(
     query: (sql: string) => Promise<Record<string, unknown>[]>,
-    overrides: Partial<IntrospectIO> = {},
+    overrides: Partial<IntrospectOptions> = {},
     vend: (scope: Scope) => StorageCredential[] = () => [credential(W)],
   ) {
     const sql: string[] = [];
     const credentials = vi.fn(async (scope: Scope, _access: Access) => vend(scope));
-    const io: IntrospectIO = {
+    const io: IntrospectOptions = {
       host: { connections: async () => ({ w: W }), credentials },
       engine: {
         query: async (text) => {
@@ -169,8 +166,8 @@ describe("introspect", () => {
           sql.push(text);
           return tableOf(text.startsWith("DESCRIBE") ? await query(text) : []);
         },
-        lend: async () => {},
-        drop: async () => {},
+        registerFiles: async () => {},
+        dropFiles: async () => {},
       },
       ...overrides,
     };
@@ -179,7 +176,7 @@ describe("introspect", () => {
 
   const describes = (sql: string[]) => sql.filter((s) => s.startsWith("DESCRIBE"));
 
-  it("mounts each connection once, describes the s3:// locator and drops the secret after", async () => {
+  it("mounts each connection once, describes the s3:// location and drops the secret after", async () => {
     const { io, credentials, sql } = fakeIO(async (text) =>
       text.includes("users")
         ? [{ column_name: "id", column_type: "BIGINT" }]
@@ -198,14 +195,14 @@ describe("introspect", () => {
     expect(sql.at(-1)).toMatch(/^DROP SECRET IF EXISTS fossil_read_[0-9a-f]{16}$/);
     expect(descriptors).toEqual([
       {
-        uri: "@w/users.csv",
+        key: "@w/users.csv",
         columns: [{ name: "id", primitive: "integer" }],
-        freshness_token: "",
+        etag: "",
       },
       {
-        uri: "@w/orders.csv",
+        key: "@w/orders.csv",
         columns: [{ name: "total", primitive: "float" }],
-        freshness_token: "",
+        etag: "",
       },
     ]);
   });
@@ -213,7 +210,7 @@ describe("introspect", () => {
   it("describes a public source with no connection as it is, asking the host nothing", async () => {
     const { io, credentials, sql } = fakeIO(async () => [{ column_name: "id", column_type: "INT" }]);
     const { descriptors } = await introspect(
-      [{ binding: "p", key: "https://x.test/p.csv", locator: "https://x.test/p.csv", format: "csv" }],
+      [{ role: "data", binding: "p", key: "https://x.test/p.csv", location: "https://x.test/p.csv", format: "csv" }],
       io,
     );
     expect(credentials).not.toHaveBeenCalled();
@@ -225,7 +222,7 @@ describe("introspect", () => {
     const { io, sql } = fakeIO(async () => [{ column_name: "ts", column_type: "TIMESTAMP" }]);
     await introspect(
       [
-        { binding: "e", key: "@w/e.parquet", locator: `${W}e.parquet`, connection: "w", format: "parquet" },
+        { role: "data", binding: "e", key: "@w/e.parquet", location: `${W}e.parquet`, connection: "w", format: "parquet" },
         { ...users, option: "|" },
       ],
       io,
@@ -240,7 +237,7 @@ describe("introspect", () => {
     const query = vi.fn(async () => []);
     const { io, credentials, sql } = fakeIO(query);
     const { descriptors } = await introspect(
-      [{ binding: "g", key: "@w/g.ttl", locator: `${W}g.ttl`, connection: "w", format: "rdf" }],
+      [{ role: "data", binding: "g", key: "@w/g.ttl", location: `${W}g.ttl`, connection: "w", format: "rdf" }],
       io,
     );
     expect(descriptors).toEqual([]);
@@ -248,12 +245,12 @@ describe("introspect", () => {
     expect(sql).toEqual([]);
   });
 
-  it("asks the host for a freshness token per source", async () => {
-    const freshness = vi.fn((source: ProgramSource) => `etag-for-${source.key}`);
-    const { io } = fakeIO(async () => [{ column_name: "id", column_type: "INT" }], { freshness });
+  it("asks the host for an etag per source", async () => {
+    const etag = vi.fn((source: Input) => `etag-for-${source.key}`);
+    const { io } = fakeIO(async () => [{ column_name: "id", column_type: "INT" }], { etag });
     const { descriptors } = await introspect([users], io);
-    expect(freshness).toHaveBeenCalledWith(users);
-    expect(descriptors[0]?.freshness_token).toBe("etag-for-@w/users.csv");
+    expect(etag).toHaveBeenCalledWith(users);
+    expect(descriptors[0]?.etag).toBe("etag-for-@w/users.csv");
   });
 
   it("is best-effort: an unvended, unaddressable or unreadable source is answered with its problem and skipped", async () => {
@@ -265,15 +262,16 @@ describe("introspect", () => {
       {},
       (scope) => ("connection" in scope && scope.connection === "gone" ? [] : [credential(W)]),
     );
-    const parquet: ProgramSource = {
+    const parquet: Input = {
+      role: "data",
       binding: "e",
       key: "@w/e.parquet",
-      locator: `${W}e.parquet`,
+      location: `${W}e.parquet`,
       connection: "w",
       format: "parquet",
     };
-    const unvended: ProgramSource = { ...users, binding: "u", connection: "gone" };
-    const bare: ProgramSource = { binding: "b", key: "b.csv", locator: "b.csv", format: "csv" };
+    const unvended: Input = { ...users, binding: "u", connection: "gone" };
+    const bare: Input = { role: "data", binding: "b", key: "b.csv", location: "b.csv", format: "csv" };
 
     const { descriptors, undescribed } = await introspect([unvended, orders, parquet, bare], io);
 
@@ -285,9 +283,9 @@ describe("introspect", () => {
     expect(undescribed[1]!.problem.cause).toEqual({ name: "Error", detail: "CORS / unreachable" });
     expect(descriptors).toEqual([
       {
-        uri: "@w/e.parquet",
+        key: "@w/e.parquet",
         columns: [{ name: "total", primitive: "integer" }],
-        freshness_token: "",
+        etag: "",
       },
     ]);
     expect(sql.at(-1)).toMatch(/^DROP SECRET IF EXISTS /);

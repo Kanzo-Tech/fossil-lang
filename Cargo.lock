@@ -1832,7 +1832,7 @@ dependencies = [
  "fossil-hir",
  "fossil-introspect",
  "fossil-lineage",
- "fossil-locator",
+ "fossil-location",
  "fossil-mir",
  "fossil-shex",
  "fossil-sinks",
@@ -1900,7 +1900,7 @@ dependencies = [
  "fossil-base",
  "fossil-descriptors-input",
  "fossil-graph-schema",
- "fossil-locator",
+ "fossil-location",
  "fossil-syntax",
  "indexmap",
  "rowan",
@@ -1922,7 +1922,7 @@ dependencies = [
  "fossil-descriptors-output",
  "fossil-graph-schema",
  "fossil-hir",
- "fossil-locator",
+ "fossil-location",
  "fossil-mir",
  "fossil-syntax",
  "line-index",
@@ -1956,13 +1956,13 @@ version = "0.1.0"
 dependencies = [
  "fossil-base",
  "fossil-hir",
- "fossil-locator",
+ "fossil-location",
  "schemars",
  "serde",
 ]
 
 [[package]]
-name = "fossil-locator"
+name = "fossil-location"
 version = "0.1.0"
 
 [[package]]

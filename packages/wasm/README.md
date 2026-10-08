@@ -1,26 +1,18 @@
 # @fossil-lang/wasm
 
-JS/TS wrapper around the `fossil-wasm` Rust crate's wasm-bindgen artefacts. Provides:
+The fossil compiler front end in the browser, over the `fossil-wasm` Rust crate's wasm-bindgen
+artefacts. Every door boots the module itself:
 
-- `openProgram(uri, { host, text })` — one program open for an editor, and the
-  call a host with an editor makes. See below.
-- `initFossilWasm()` — boots the module, within 60 s (`module/unreachable` when it
-  cannot be fetched); a boot that failed is forgotten, so the next call tries again. Its `.wasm` ships in this
-  package and the host's bundler emits it as an asset; the host copies nothing.
-- `tokenize(text)` — calls the Rust lexer, returns `TokenRow[]`. The Rust lexer
-  is the only lexer: no host reimplements one and drifts from the grammar.
-- `refs(program)` and `providers()` — a program's external references (`@conn`
-  alias, path, role), and the providers this build reads. Each boots the module
-  itself, as `openProgram` does, so a host writes no `initFossilWasm()` before
-  it; both take `{ wasm, signal }` for the same reasons `openProgram` does.
-- `providerFor(path, role, providers)` — which of `providers()`' rows reads a
-  file as `'data'` or as `'schema'`, by extension. Pure: a host asks the module
-  for the list once and filters a whole listing with it. The role is required
-  because one extension names two providers — a `.ttl` is `rdf` as data and
-  `shacl` as a schema.
-- `FossilWorkspace` — the Workspace API class for LSP + compile. `fossil-lsp`
-  itself is native-only (stdio over crossbeam), so the browser gets this
-  equivalent dispatch surface over the same `fossil-ide` functions.
+- `openProgram(uri, { host, text, signal })` — one program open for an editor. See below.
+- `inputs(text, { host, signal })` — what a program reads, with no editor: TypeScript's
+  `ts.preProcessFile`. Each `Input` is `{ role, key, location, connection?, binding?, format?,
+  option? }` — a data source or a shape document, the key as written and the location through
+  `host.connections()`. It reads no document, and it never touches an editor's program.
+- `formats({ signal })` and `formatFor(path, role, formats)` — the formats this build reads, and
+  which of them reads a file as `'data'` or as `'schema'`, by extension. `formatFor` is pure: a host
+  asks the module for the list once and filters a whole listing with it. The role is required
+  because one extension names two formats — a `.ttl` is `rdf` as data and `shacl` as a schema.
+- `initFossilWasm(bytes)` — Node only: hand over the `.wasm`. A bundled host never calls it.
 
 ## One program in one editor: `openProgram`
 
@@ -29,70 +21,27 @@ import { openProgram } from '@fossil-lang/wasm';
 import { fossil } from '@fossil-lang/codemirror-fossil';
 
 const program = await openProgram('job.fossil', { host, text });   // host: Host
-const extensions = fossil({ ...program, onNavigate });
+const extensions = fossil(program, { onNavigate });
 
-const sources = await program.sources(text);   // what introspection DESCRIBEs
-program.registerIntrospection(await introspect(sources, io));   // before a check
+program.registerIntrospection(await introspect(await program.inputs(), { host, engine }));
 ```
 
-It boots the module, opens `uri` in its own workspace, and reads the documents
-the text names through `host`. The answer carries `fossil()`'s option names —
-`uri`, `tokenize`, `check`, `hover`, `complete`, `definition` —
-and every one that answers about the program takes the text and pushes it
-first, comparing against what it last pushed so the common case costs a string
-comparison. `check` and `sources` also run `resolveDocuments`, which reads
-nothing when nothing is missing. That is the whole protocol an editor host used
-to write by hand; `workspace` is the `FossilWorkspace` underneath, for a
-question this surface does not ask, and `close()` frees it.
+It boots the module, opens `uri` in its own workspace, and reads the documents the text names
+through `host`. The text arrives through `update(text)` — LSP's `didChange`, which `fossil()` calls
+from the view's update cycle — and every question takes only a position: `hover(line, character)`,
+`completion(…)`, `definition(…)`, `semanticTokens()`. `diagnostics()` and `inputs()` first run
+`resolveDocuments`, which reads nothing when nothing is missing. `close()` (or `using`) frees it.
 
-## Documents and sources: fossil resolves, the host reads
-
-A program names shape documents (`io.shex("@vocab/person.shex")`) and data
-sources (`io.csv("@lake/users.csv")`). The checker reads no file and no
-network: it reports what it is missing, and `resolveDocuments`
-(`@fossil-lang/storage`) reads it under the credentials the `Host`
-(`@fossil-lang/types`) vends — `connections()` and `credentials(scope, access)`.
-A document under a connection is read by a GET signed with that connection's
-`read` credential; one with no connection only when it is a public `http(s)` URL.
-A host that already holds a document's text calls `registerDocument` itself.
-
-```typescript
-import { resolveDocuments } from '@fossil-lang/storage';
-
-const ws = new FossilWorkspace();
-const h = ws.openFile('prog.fossil', text); // edited buffers only
-const { unread } = await resolveDocuments(ws.workspace(h), host); // sets the connections too
-const rows = ws.check();
-```
-
-- `missingDocuments(h)` — `{ key, locator, connection? }` rows. The key is what
-  the program wrote, so repointing a connection invalidates nothing; the locator
-  is that key through the map, and `connection` is the one it goes through.
-- `registerDocument(key, text)` — what `resolveDocuments` calls for each
-  fetched document, until nothing new is missing (a document can name another).
-  It is the one loop; a host does not write a second.
-- `openFile` is for buffers the user edits. An open `.shex` is the document
-  every program naming it reads; opening a program registers nothing it names.
-- `setConnections(map)` — name → base; re-checks nothing. `resolveDocuments`
-  calls it with `host.connections()`, so a host never does.
-- `sources(h)` — the `ProgramSource[]` the program reads, through the map the
-  last `resolveDocuments` set: binding, key,
-  locator, connection, catalogue row, reader option. Introspection DESCRIBEs these and
-  registers each descriptor under `key` with `registerInferredDescriptor`, and each source it
-  could not describe with `registerUndescribed(key, problem)` — a warning of `check` at the call
-  that reads `key`, until a descriptor under it replaces the problem.
-  `FossilProgram.registerIntrospection` is both, from `introspect`'s result as it came back.
+A program names shape documents (`io.shex("@vocab/person.shex")`) and data sources
+(`io.csv("@lake/users.csv")`). The checker reads no file and no network: `resolveDocuments`
+(`@fossil-lang/storage`) reads what it is missing under the credentials the `Host`
+(`@fossil-lang/types`) vends — `connections()` and `credentials(scope, access)`. A document under a
+connection is read by a GET signed with that connection's `read` credential; one with no connection
+only when it is a public `http(s)` URL.
 
 ## Loading: the `.wasm` is an asset of this package
 
-```typescript
-import { initFossilWasm, tokenize } from '@fossil-lang/wasm';
-
-await initFossilWasm();
-const tokens = tokenize('User := io.csv("data/people.csv")');
-```
-
-That is the whole host flow, in Vite, Next.js (webpack or Turbopack), a Web
+A bundled host imports and calls a door, and that is the whole host flow, in Vite, Next.js (webpack or Turbopack), a Web
 Worker or any bundler that understands `new URL('…', import.meta.url)`. The glue
 (`wasm-bindgen --target web`) locates `fossil_wasm_bg.wasm` with exactly that
 expression, the bundler copies the file into its output under a hashed name and

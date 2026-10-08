@@ -10,8 +10,8 @@
 //! `Db`, and every crate above this one is built on that being true.
 //!
 //! **What is deliberately not here**, because a substrate decides nothing about
-//! a program: the rule turning a written reference into a locator, which is
-//! `fossil-locator`; and the query that decodes a shape document, which is
+//! a program: the rule turning a written reference into a location, which is
+//! `fossil-location`; and the query that decodes a shape document, which is
 //! `fossil_hir::shape_documents` — `providers` still declares the ROW a decoder
 //! fills, because a row is a table entry and not a decision.
 

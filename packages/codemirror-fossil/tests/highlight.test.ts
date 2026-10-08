@@ -12,12 +12,12 @@ import { EditorView } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import { describe, expect, it } from 'vitest';
 
-import type { SemanticTokenRow, TokenRow } from '@fossil-lang/types';
+import type { SemanticToken, Token } from '@fossil-lang/types';
 
 import { buildDecorations, type TokenSource } from '../src/highlight.js';
 
-function source(rows: TokenRow[]): TokenSource {
-  return { tokenize: () => rows };
+function source(rows: Token[]): TokenSource {
+  return { tokenize: () => rows, semanticTokens: () => [] };
 }
 
 /** A style that gives every tag we test a class we can recognise. */
@@ -97,6 +97,7 @@ describe('buildDecorations', () => {
       tokenize: () => {
         throw new Error('null pointer passed to rust');
       },
+      semanticTokens: () => [],
     };
     expect(ranges(v, broken)).toEqual([]);
     v.destroy();
@@ -110,6 +111,7 @@ describe('buildDecorations', () => {
         called = true;
         return [];
       },
+      semanticTokens: () => [],
     };
     expect(ranges(v, counting, 2)).toEqual([]);
     expect(called).toBe(false);
@@ -126,12 +128,12 @@ describe('buildDecorations', () => {
 describe('buildDecorations — the semantic layer', () => {
   /** One-line rows: `[from, to, kind, modifiers]` as UTF-16 columns on line 0. */
   function semantic(
-    lexical: TokenRow[],
+    lexical: Token[],
     rows: [number, number, string, string[]?][],
   ): TokenSource {
     return {
       tokenize: () => lexical,
-      semanticTokens: (): SemanticTokenRow[] =>
+      semanticTokens: (): SemanticToken[] =>
         rows.map(([from, to, kind, modifiers = []]) => ({
           range: { start: { line: 0, character: from }, end: { line: 0, character: to } },
           kind,

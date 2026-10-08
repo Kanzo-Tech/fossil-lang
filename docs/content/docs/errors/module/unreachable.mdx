@@ -11,10 +11,10 @@ bundler said it would be, or nothing came within 60 seconds.
 fossil_df_wasm_bg.wasm could not be loaded
 ```
 
-A host sees `data: { locator }` — the module's file — and `after`, the deadline in milliseconds,
+A host sees `data: { location }` — the module's file — and `after`, the deadline in milliseconds,
 when the wait was ended by it rather than by an error. The browser's own error is the cause. It is
-thrown by `initFossilWasm`, `initFossilExecutor` and `initStorage`, and by every door that boots one
-of them first: `openProgram`, `mount`, `read`.
+thrown by `initFossilWasm`, `initFossilExecutor` and `initFossilStorage`, and by every door that boots one
+of them first: `openProgram`, `inputs`, `run`, `mount`.
 
 ## Why fossil refuses it
 

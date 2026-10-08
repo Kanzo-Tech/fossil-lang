@@ -5,8 +5,7 @@
  * ## Two layers, the rust-analyzer-over-TextMate arrangement
  *
  * The lexical pass (`tokenize()`) needs no workspace and is always there: it is
- * the baseline, and it is the whole of the highlighting for a host that passes
- * no `semanticTokens`. The semantic pass names what the lexer cannot — a shape
+ * the baseline. The semantic pass names what the lexer cannot — a shape
  * from a binding from a column, a declaration from a use, the `@connection` of a
  * reference inside its string — and wins where it speaks. Where it repeats what
  * the lexer already said (a keyword, a string) the lexer's finer tag stays; see
@@ -56,23 +55,15 @@ import {
   type EditorView,
   type ViewUpdate,
 } from '@codemirror/view';
-import type { SemanticTokenRow, TokenRow } from '@fossil-lang/types';
+import type { SemanticToken, Token } from '@fossil-lang/types';
+import type { FossilProgram } from '@fossil-lang/wasm';
 
 import { offsetOf } from './positions.js';
 import { LEXICAL_KINDS, TAG_BY_NAME, semanticTagFor } from './tags.js';
 
-/** What the semantic pass calls: the program's semantic tokens for `text`, in
- *  source order. Synchronous, because a decoration set is. */
-export type SemanticTokenSource = (text: string) => readonly SemanticTokenRow[];
-
-/** The wasm entry points this plugin needs. Injected rather than imported so
- *  the package does not decide when the module is initialised — see `index.ts`. */
-export interface TokenSource {
-  /** `@fossil-lang/wasm`'s `tokenize`. */
-  tokenize: (text: string) => TokenRow[];
-  /** `openProgram(...).semanticTokens`. Omit for lexical highlighting only. */
-  semanticTokens?: SemanticTokenSource;
-}
+/** What the plugin asks: the lexer over the text, and the semantic tokens of the text last
+ *  updated. Synchronous, because a decoration set is. */
+export type TokenSource = Pick<FossilProgram, 'tokenize' | 'semanticTokens'>;
 
 /** Options for {@link fossilHighlighting}. */
 export interface HighlightOptions {
@@ -101,14 +92,14 @@ export function buildDecorations(
   if (text.length === 0 || text.length > maxLength) return builder.finish();
 
   const lexical = lexicalMarks(view, source, text);
-  for (const mark of overlay(lexical, semanticMarks(view, source, text))) {
+  for (const mark of overlay(lexical, semanticMarks(view, source))) {
     builder.add(mark.from, mark.to, Decoration.mark({ class: mark.cls }));
   }
   return builder.finish();
 }
 
 function lexicalMarks(view: EditorView, source: TokenSource, text: string): Mark[] {
-  let rows: TokenRow[];
+  let rows: Token[];
   try {
     rows = source.tokenize(text);
   } catch {
@@ -137,11 +128,10 @@ interface SemanticMark extends Mark {
   fillsOnly: boolean;
 }
 
-function semanticMarks(view: EditorView, source: TokenSource, text: string): SemanticMark[] {
-  if (!source.semanticTokens) return [];
-  let rows: readonly SemanticTokenRow[];
+function semanticMarks(view: EditorView, source: TokenSource): SemanticMark[] {
+  let rows: readonly SemanticToken[];
   try {
-    rows = source.semanticTokens(text);
+    rows = source.semanticTokens();
   } catch {
     // Busy or not booted: the lexical layer is the answer until the next change.
     return [];
@@ -198,8 +188,7 @@ function overlay(base: Mark[], top: SemanticMark[]): Mark[] {
  * Recomputes on a document change and on a viewport change — the latter because
  * `highlightingFor` reads a facet, and a host that swaps its `HighlightStyle` (a
  * light/dark toggle, say) dispatches a reconfigure rather than a doc change. A
- * viewport change re-asks `semanticTokens` for the same text, which the program
- * answers without pushing it again.
+ * viewport change re-asks `semanticTokens` of the same revision.
  */
 export function fossilHighlighting(
   source: TokenSource,

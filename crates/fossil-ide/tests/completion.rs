@@ -97,8 +97,8 @@ User : Person from users
 /// spelled here with the same function `fossil-lsp` and `fossil-wasm` call.
 fn file(db: &mut HostDb, src: &str) -> SourceFile {
     let f = SourceFile::new(db, src.to_string(), "complete.fossil".to_string());
-    fossil_hir::documents::register_missing_documents(db, f, &|_, locator| {
-        std::fs::read_to_string(locator).ok()
+    fossil_hir::documents::register_missing_documents(db, f, &|_, location| {
+        std::fs::read_to_string(location).ok()
     });
     f
 }

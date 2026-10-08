@@ -109,12 +109,12 @@ mod inferred_tests {
 
     fn sample(uri: &str) -> InferredDescriptor {
         InferredDescriptor {
-            uri: uri.into(),
+            key: uri.into(),
             columns: vec![InferredColumn {
                 name: "id".into(),
                 primitive: Primitive::Integer,
             }],
-            freshness_token: "t1".into(),
+            etag: "t1".into(),
         }
     }
 
@@ -124,7 +124,7 @@ mod inferred_tests {
         let cache = s.descriptors().expect("the native host keeps a table");
         cache.insert(sample("examples/users.csv"));
         let got = cache.get("examples/users.csv").expect("present");
-        assert_eq!(got.uri.as_str(), "examples/users.csv");
+        assert_eq!(got.key.as_str(), "examples/users.csv");
         assert_eq!(got.columns.len(), 1);
     }
 

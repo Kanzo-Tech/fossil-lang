@@ -14,23 +14,22 @@ publish = false
 workspace = true
 
 [dependencies]
-# `providers` is a projection of `fossil_base::providers` and `source_refs`
-# walks the def map. What keeps this out of `fossil-hir` is the other end: the
+# `formats` is a projection of `fossil_base::providers` and `inputs` walks
+# the def map. What keeps this out of `fossil-hir` is the other end: the
 # result types are what a HOST reads, and they are declared here, beside the two
 # functions that fill them.
 fossil-hir = { path = "../fossil-hir" }
 fossil-base = { path = "../fossil-base" }
-# `program_sources` reports each source's locator, and the rule that makes one
+# `inputs` reports each source's location, and the rule that makes one
 # is this crate's, not a host's.
-fossil-locator = { path = "../fossil-locator" }
-# `ProviderInfo` / `SourceRefInfo` cross to a host as JSON (the CLI's stdout) or
-# as a JS value (`serde-wasm-bindgen`), and `schemars` publishes the same shape
+fossil-location = { path = "../fossil-location" }
+# `Format` / `Input` cross to a host as a JS value (`serde-wasm-bindgen`), and `schemars` publishes the same shape
 # for TS codegen. Both pure Rust, WASM-clean.
 serde = { workspace = true }
 schemars = { workspace = true }
 
 [dev-dependencies]
 # The reference `DecodeTypes` — a row that reads types, with no schema language
-# behind it, so the `ProviderKind::Schema` projection can be tested without this
+# behind it, so the `FormatKind::Schema` projection can be tested without this
 # crate learning one.
 fossil-base = { path = "../fossil-base", features = ["test-support"] }

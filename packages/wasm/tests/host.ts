@@ -1,11 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 
-import { initStorage } from '@fossil-lang/storage';
+import { initFossilStorage } from '@fossil-lang/storage';
 import type { Host, Scope } from '@fossil-lang/types';
 import { vi } from 'vitest';
 
-await initStorage(
+await initFossilStorage(
   await readFile(createRequire(import.meta.url).resolve('@fossil-lang/storage/pkg/fossil_storage_wasm_bg.wasm')),
 );
 

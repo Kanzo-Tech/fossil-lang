@@ -33,7 +33,7 @@ export interface UnreadDocument extends MissingDocument {
 
 /** What a compiled workspace answers — the checker's and the executor's. */
 export interface DocumentWorkspace {
-  /** The map `@name/…` expands against. It moves locators, never keys. */
+  /** The map `@name/…` expands against. It moves locations, never keys. */
   setConnections(connections: Record<string, string>): void;
   missingDocuments(): MissingDocument[];
   registerDocument(key: string, text: string): void;

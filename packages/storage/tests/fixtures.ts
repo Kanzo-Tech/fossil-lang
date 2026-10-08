@@ -41,10 +41,10 @@ export function recordingEngine(loaded = true) {
       sql.push(text);
       return table('Success', []);
     },
-    async lend(files) {
+    async registerFiles(files) {
       leases.push(files);
     },
-    async drop(names) {
+    async dropFiles(names) {
       dropped.push([...names]);
     },
   };

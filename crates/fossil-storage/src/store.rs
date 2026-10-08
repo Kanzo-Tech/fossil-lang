@@ -10,7 +10,7 @@
 //! storage credentials — and refuses a path none covers before any request
 //! leaves.
 //!
-//! A locator no connection names is read only when it is a public `http(s)` URL,
+//! A location no connection names is read only when it is a public `http(s)` URL,
 //! through an [`HttpStore`] with no credential.
 
 use std::collections::HashMap;
@@ -200,24 +200,24 @@ impl Storage {
             .map_err(|e| e.about("its connections".to_string()))
     }
 
-    /// Whether a store is routed for `locator` already.
+    /// Whether a store is routed for `location` already.
     #[must_use]
-    pub fn covers(&self, locator: &str) -> bool {
-        self.resolve(locator).is_ok()
+    pub fn covers(&self, location: &str) -> bool {
+        self.resolve(location).is_ok()
     }
 
-    /// Make `locator` readable: through `connection`'s read credential when the
-    /// program wrote `@connection/…`, else as a public `http(s)` URL. A locator
+    /// Make `location` readable: through `connection`'s read credential when the
+    /// program wrote `@connection/…`, else as a public `http(s)` URL. A location
     /// something already covers is left where it is routed.
     ///
     /// # Errors
     /// What [`Self::grant`] or [`Self::public`] refused.
     pub async fn route(
         &mut self,
-        locator: &str,
+        location: &str,
         connection: Option<&str>,
     ) -> Result<(), StorageError> {
-        if self.covers(locator) {
+        if self.covers(location) {
             return Ok(());
         }
         match connection {
@@ -225,19 +225,19 @@ impl Storage {
                 .grant(Scope::Connection(connection.to_string()), Access::Read)
                 .await
                 .map(drop),
-            None => self.public(locator),
+            None => self.public(location),
         }
     }
 
-    /// Route a public `http(s)` locator — one no credential covers — through a
+    /// Route a public `http(s)` location — one no credential covers — through a
     /// store that sends no credential.
     ///
     /// # Errors
-    /// `locator` is not an `http(s)` URL.
-    pub fn public(&mut self, locator: &str) -> Result<(), StorageError> {
-        let (authority, _) = split(locator)?;
+    /// `location` is not an `http(s)` URL.
+    pub fn public(&mut self, location: &str) -> Result<(), StorageError> {
+        let (authority, _) = split(location)?;
         if !matches!(authority.scheme(), "http" | "https") {
-            return Err(StorageError::Store(locator.to_string()));
+            return Err(StorageError::Store(location.to_string()));
         }
         let base = authority.as_str().trim_end_matches('/').to_string();
         let routed = self.authorities.entry(authority).or_default();
@@ -247,7 +247,7 @@ impl Storage {
                 .with_client_options(client())
                 .with_retry(retry())
                 .build()
-                .map_err(|e| io(locator, e))?;
+                .map_err(|e| io(location, e))?;
             routed.add(String::new(), Arc::new(store));
         }
         Ok(())
@@ -281,32 +281,32 @@ impl Storage {
             .map(|(authority, routed)| (authority, Arc::new(routed.clone()) as _))
     }
 
-    /// The bytes at `locator`.
+    /// The bytes at `location`.
     ///
     /// # Errors
-    /// Nothing granted covers `locator`, or the store answers with an error.
-    pub async fn get(&self, locator: &str) -> Result<Bytes, StorageError> {
-        let (store, path) = self.resolve(locator)?;
+    /// Nothing granted covers `location`, or the store answers with an error.
+    pub async fn get(&self, location: &str) -> Result<Bytes, StorageError> {
+        let (store, path) = self.resolve(location)?;
         bounded(async move { store.get(&path).await?.bytes().await })
             .await
-            .map_err(|e| io(locator, e))
+            .map_err(|e| io(location, e))
     }
 
-    /// Write `bytes` at `locator`, in parts when it is large.
+    /// Write `bytes` at `location`, in parts when it is large.
     ///
     /// # Errors
-    /// Nothing granted covers `locator`, or the store answers with an error.
-    pub async fn put(&self, locator: &str, bytes: Bytes) -> Result<(), StorageError> {
-        let (store, path) = self.resolve(locator)?;
+    /// Nothing granted covers `location`, or the store answers with an error.
+    pub async fn put(&self, location: &str, bytes: Bytes) -> Result<(), StorageError> {
+        let (store, path) = self.resolve(location)?;
         if bytes.len() <= PART_BYTES {
             bounded(store.put(&path, PutPayload::from(bytes)))
                 .await
-                .map_err(|e| io(locator, e))?;
+                .map_err(|e| io(location, e))?;
             return Ok(());
         }
         let mut upload = bounded(store.put_multipart(&path))
             .await
-            .map_err(|e| io(locator, e))?;
+            .map_err(|e| io(location, e))?;
         let parts: Vec<_> = bytes
             .chunks(PART_BYTES)
             .map(|chunk| bounded(upload.put_part(PutPayload::from(bytes.slice_ref(chunk)))))
@@ -317,9 +317,9 @@ impl Storage {
             .await;
         if let Err(e) = sent {
             return Err(match upload.abort().await {
-                Ok(()) => io(locator, e),
+                Ok(()) => io(location, e),
                 Err(abort) => StorageError::Orphaned {
-                    locator: locator.to_string(),
+                    location: location.to_string(),
                     source: Box::new(e),
                     abort: Box::new(abort),
                 },
@@ -327,27 +327,27 @@ impl Storage {
         }
         bounded(upload.complete())
             .await
-            .map_err(|e| io(locator, e))?;
+            .map_err(|e| io(location, e))?;
         Ok(())
     }
 
-    fn resolve(&self, locator: &str) -> Result<(Arc<dyn ObjectStore>, Path), StorageError> {
-        let (authority, key) = split(locator)?;
+    fn resolve(&self, location: &str) -> Result<(Arc<dyn ObjectStore>, Path), StorageError> {
+        let (authority, key) = split(location)?;
         let path = Path::from(key.as_str());
         self.authorities
             .get(&authority)
             .and_then(|routed| routed.covering(key.as_str()))
             .map(|store| (Arc::clone(store), path))
             .ok_or_else(|| StorageError::Outside {
-                locator: locator.to_string(),
+                location: location.to_string(),
                 prefix: "any prefix the host vended".to_string(),
             })
     }
 }
 
-fn io(locator: &str, e: object_store::Error) -> StorageError {
+fn io(location: &str, e: object_store::Error) -> StorageError {
     StorageError::Io {
-        locator: locator.to_string(),
+        location: location.to_string(),
         source: Box::new(e),
     }
 }
@@ -382,9 +382,9 @@ async fn bounded<T>(
 /// `scheme://authority/key` → (`scheme://authority`, `key`), the split
 /// `DataFusion` registers stores by: the URL with its path taken off, and the
 /// path, decoded, as the object key.
-fn split(locator: &str) -> Result<(Url, String), StorageError> {
-    let store = || StorageError::Store(locator.to_string());
-    let mut url = Url::parse(locator).map_err(|_| store())?;
+fn split(location: &str) -> Result<(Url, String), StorageError> {
+    let store = || StorageError::Store(location.to_string());
+    let mut url = Url::parse(location).map_err(|_| store())?;
     if url.host_str().is_none_or(str::is_empty) {
         return Err(store());
     }
@@ -1013,7 +1013,7 @@ mod tests {
         assert_eq!(
             failure.problem,
             fossil_graph_schema::Problem::Unreachable {
-                locator: "s3://lake/out/big.parquet".into()
+                location: "s3://lake/out/big.parquet".into()
             }
         );
         assert!(matches!(

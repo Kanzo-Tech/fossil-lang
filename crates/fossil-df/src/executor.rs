@@ -35,7 +35,7 @@ use fossil_base::{FossilDb, FsError, Provider, SourceFile, System};
 use fossil_descriptors_output::OutputDescriptorKind;
 use fossil_graph_schema::{Failure, Problem, Related};
 use fossil_hir::documents::MissingDocument;
-use fossil_lineage::ProgramSource;
+use fossil_lineage::Input;
 use fossil_sinks::manifest::MANIFEST_FILE;
 use fossil_storage::Storage;
 
@@ -114,7 +114,7 @@ impl Executor {
     }
 
     /// The map (`{ name: baseUrl }`) every `@name/…` a document or source names
-    /// expands against. It moves locators, never registry keys.
+    /// expands against. It moves locations, never registry keys.
     // The hasher is not ours to choose: the map arrives from
     // `parse_connections(&JsValue)`, which builds a plain `HashMap`.
     #[allow(clippy::implicit_hasher)]
@@ -134,11 +134,11 @@ impl Executor {
         fossil_base::register_document(&mut self.db, key, text);
     }
 
-    /// The program's sources: what [`Self::execute`] reads, and the same list
-    /// every host introspects — [`fossil_lineage::program_sources`].
+    /// What the program reads — [`fossil_lineage::inputs`], the same list every
+    /// host introspects; its data inputs are what [`Self::execute`] reads.
     #[must_use]
-    pub fn sources(&self) -> Vec<ProgramSource> {
-        fossil_lineage::program_sources(&self.db, self.file, &self.connections)
+    pub fn inputs(&self) -> Vec<Input> {
+        fossil_lineage::inputs(&self.db, self.file, &self.connections)
     }
 
     fn descriptor(&self) -> Result<OutputDescriptorKind, Failure> {
@@ -168,9 +168,12 @@ impl Executor {
             .into());
         }
 
-        for source in fossil_lineage::program_sources(db, file, connections) {
+        for source in fossil_lineage::inputs(db, file, connections)
+            .into_iter()
+            .filter(|i| i.role == fossil_lineage::Role::Data)
+        {
             storage
-                .route(&source.locator, source.connection.as_deref())
+                .route(&source.location, source.connection.as_deref())
                 .await?;
         }
 
@@ -192,7 +195,7 @@ impl Executor {
 
         let written = crate::write(&graph, storage, dest).await?;
         Ok(RunReport {
-            dest: dest.to_string(),
+            location: dest.to_string(),
             dropped: written.dropped,
         })
     }
@@ -212,13 +215,13 @@ async fn register_rdf_sources(
         let bytes = storage.get(&binding.uri).await?;
         let turtle = std::str::from_utf8(&bytes).map_err(|e| {
             Failure::new(Problem::NotUtf8 {
-                locator: binding.uri.clone(),
+                location: binding.uri.clone(),
             })
             .caused_by(e)
         })?;
         crate::register_rdf(ctx, &binding, turtle).map_err(|e| {
             Failure::new(Problem::SourceUnparseable {
-                locator: binding.uri.clone(),
+                location: binding.uri.clone(),
             })
             .caused_by(e)
         })?;
