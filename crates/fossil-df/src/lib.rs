@@ -30,7 +30,7 @@
 #![allow(clippy::future_not_send)]
 // `result_large_err`: a run refuses with `fossil_graph_schema::Failure`, which
 // is a `Problem` plus its help, its related diagnostics and its cause — 144
-// bytes, over clippy's 128. It is returned once per run or per `sources()`
+// bytes, over clippy's 128. It is returned once per run or per `inputs()`
 // call, on the path that ends the run, so the copy costs nothing measurable;
 // boxing it would put `Box<Failure>` in every signature a host reads.
 #![allow(clippy::result_large_err)]

@@ -24,7 +24,7 @@ that refusal is the `cause`. The places that raise it:
 | `attach` (`@fossil-lang/corpus`) | `host` | exactly one of host and url |
 | `setConnections` (workspace and executor) | `connections` | an object of `{ name: baseUrl }` |
 | `registerInferredDescriptor` | `descriptorJson` | an InferredDescriptor as JSON |
-| `runInMemory` | `files`, `dest` | an object of `{ [url]: Uint8Array }` keyed by URL; a URL |
+| `run` over `files` (`@fossil-lang/executor`) | `files`, `path` | an object of `{ [url]: Uint8Array }` keyed by URL; a URL |
 | `storageGrant`, `storageName` | `credential`, `access` | a StorageCredential; `read` or `write` |
 | `storageRead` | `targets` | an array of `{ location, connection? }` |
 
