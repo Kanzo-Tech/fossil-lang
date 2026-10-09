@@ -263,3 +263,62 @@ fn a_misspelled_quoted_column_is_corrected_in_the_quoted_spelling() {
         Some(r#"did you mean `"Person.id_1"`?"#)
     );
 }
+
+#[test]
+fn a_hole_reads_a_quoted_column_so_each_row_of_a_relationship_file_is_a_vertex() {
+    // `knows` with the date the two met, as a vertex per row of the file: its
+    // subject is the two ids, which only the quoted spelling can name, written
+    // inside the string's holes (PEP 701's rule — a hole holds an expression).
+    // Last in the document, because the binding below names its shapes in
+    // the document's order.
+    let shex = format!(
+        "{SHEX}\nex:Knowing {{\n  ex:since  xsd:integer ;\n  ex:knower @ex:Person ;\n  ex:known  @ex:Person\n}}\n"
+    );
+    let program = r#"type { City, Person, Knowing } := io.shex("snb.shex")
+
+CityRow   := io.csv("city.csv", delimiter = "|")
+PersonRow := io.csv("person.csv", delimiter = "|")
+KnowsRow  := io.csv("person_knows_person.csv", delimiter = "|")
+
+Cities : City from CityRow
+    @subject = "https://example.org/city/{CityRow.id}"
+    name     = CityRow.name
+
+People : Person from PersonRow
+    @subject = "https://example.org/person/{PersonRow.id}"
+    name     = PersonRow.name
+    livesIn  = City(PersonRow.city)
+
+Knowings : Knowing from KnowsRow
+    @subject = "https://example.org/knowing/{KnowsRow."Person.id"}-{KnowsRow."Person.id_1"}"
+    since    = KnowsRow.creationDate
+    knower   = Person(KnowsRow."Person.id")
+    known    = Person(KnowsRow."Person.id_1")
+"#;
+    let dir = native::write_dir(&[
+        ("snb.fossil", program),
+        ("snb.shex", &shex),
+        ("city.csv", CITIES),
+        ("person.csv", PEOPLE),
+        ("person_knows_person.csv", KNOWS),
+    ]);
+    let messages: Vec<String> = native::check(&dir.path().join("snb.fossil"))
+        .diagnostics
+        .iter()
+        .map(fossil_base::Diagnostic::message)
+        .collect();
+    assert!(messages.is_empty(), "{messages:#?}");
+
+    let corpus = native::run_dir(dir.path(), "snb.fossil", &[]).expect("the program runs");
+    let root = corpus.materialise();
+    let knowing = |a: u8, b: u8| format!("https://example.org/knowing/{a}-{b}");
+    let person = |id: u8| format!("https://example.org/person/{id}");
+    assert_eq!(
+        pairs(root.path(), "Knowing_known_Person", "Knowing", "Person"),
+        [
+            (knowing(1, 2), person(2)),
+            (knowing(1, 3), person(3)),
+            (knowing(2, 3), person(3)),
+        ],
+    );
+}

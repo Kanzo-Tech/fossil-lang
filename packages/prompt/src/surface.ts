@@ -19,7 +19,7 @@
  */
 
 /** SHA-256 of the `grammar.bnf` {@link SURFACE} and {@link FORBIDDEN} were last reviewed against. */
-export const GRAMMAR_DIGEST = 'a9bd64c0b91cb178e386991abf7e5ed924e2dff08950881223a4b095eafe3735';
+export const GRAMMAR_DIGEST = '15bbab2c305d2efc147d2ee27a22e5c391fa0fc9f1e5e90fae7a7e61804f8138';
 
 /** A complete program: `docs/programs/shop/shop.fossil`, region markers removed. */
 export const EXAMPLE = `type { Person, Order } := io.shex("shop.shex")
@@ -185,7 +185,7 @@ Orders : Order from Purchase.join(User, on = Purchase.user_id == User.id)
 ## Expressions
 
 - Literals: \`42\`, \`0.5\`, \`"text"\`, \`true\`, \`false\`, \`null\`.
-- Every string interpolates: \`"https://shop.example/user/{User.email}"\`; \`{{\` escapes a literal brace. Full IRIs are written out inside strings.
+- Every string interpolates: \`"https://shop.example/user/{User.email}"\`; \`{{\` escapes a literal brace. A hole holds any expression, a quoted column too: \`"https://ex.org/knows/{Knows."Person.id"}-{Knows."Person.id_1"}"\`. Full IRIs are written out inside strings.
 - Operators, loosest to tightest: \`? :\` then \`or\` then \`and\` then \`== != < <= > >=\` then \`+ -\` then \`* / %\` then unary \`-\` and \`not\` then \`.\` and calls.
 - A library function is reached through its namespace or, for \`str\` and \`seq\`, on the value: \`str.lower(str.trim(Row.label))\` and \`Row.code.trim().lower()\` are the same two calls.
 - Named arguments: \`str.slice(Row.operator, start = 2)\`, \`parse.date(Row.taken_on, format = "%d %b %Y")\`.

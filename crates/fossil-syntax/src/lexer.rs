@@ -130,7 +130,11 @@ pub enum Token {
     // a second spelling of this one differing only in the delimiter and in `${`
     // for the hole. `"…{expr}…"` is the spelling; a backtick is no longer a
     // token, so logos rejects the byte and the parser names it.
-    #[regex(r#""([^"\\]|\\.)*""#)]
+    //
+    // A hole holds an expression, and an expression may hold a string: PEP
+    // 701's rule, so `"…/{Row."Person.id"}"` is ONE literal. A regex cannot
+    // count braces, so the end is found by `string_end`.
+    #[token("\"", string_end)]
     String,
 
     // There was an `AbsIri` here — `<https://…>`, angle brackets included.
@@ -232,6 +236,63 @@ pub enum Token {
     // dropped — see `raw_lex_lossless`.
 }
 
+/// Where the string a `"` opened ends: past the `"` that closes it at depth 0,
+/// with each hole's braces counted and each string inside a hole skipped
+/// whole — PEP 701's reading, which `crate::indent::match_closing_brace`
+/// already gives the hole once the literal's ends are found.
+///
+/// A literal that does not close that way — an unbalanced `{`, which carving
+/// reports as an unterminated hole — ends at its first unescaped `"`, as it
+/// always did, so a broken string breaks no line after it.
+fn string_end(lex: &mut logos::Lexer<'_, Token>) -> bool {
+    let rest = lex.remainder().as_bytes();
+    close_with_holes(rest)
+        .or_else(|| first_quote(rest))
+        .is_some_and(|end| {
+            lex.bump(end);
+            true
+        })
+}
+
+/// The byte past the `"` that closes a literal whose opening `"` is already
+/// consumed, counting holes; `None` when it does not close.
+fn close_with_holes(s: &[u8]) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut i = 0usize;
+    while i < s.len() {
+        match (s[i], depth) {
+            (b'\\', 0) => i += 2,
+            (b'"', 0) => return Some(i + 1),
+            (b'{', 0) if s.get(i + 1) == Some(&b'{') => i += 2,
+            (b'{', _) => {
+                depth += 1;
+                i += 1;
+            }
+            (b'}', d) if d > 0 => {
+                depth -= 1;
+                i += 1;
+            }
+            (b'"', _) => i += 1 + close_with_holes(&s[i + 1..])?,
+            (b'\n', d) if d > 0 => return None,
+            _ => i += 1,
+        }
+    }
+    None
+}
+
+/// The byte past the first unescaped `"`; `None` when there is none.
+fn first_quote(s: &[u8]) -> Option<usize> {
+    let mut i = 0usize;
+    while i < s.len() {
+        match s[i] {
+            b'\\' => i += 2,
+            b'"' => return Some(i + 1),
+            _ => i += 1,
+        }
+    }
+    None
+}
+
 /// Raw lex pass — every byte of `input` accounted for.
 ///
 /// `None` is logos's «no rule matched here», and its range is kept rather than
@@ -268,6 +329,45 @@ mod tests {
 
     fn just_kinds(input: &str) -> Vec<Token> {
         raw_lex(input).into_iter().map(|(t, _)| t).collect()
+    }
+
+    // ─── Strings: a hole may hold a string ────────────────────────────
+
+    #[test]
+    fn a_quoted_member_inside_a_hole_stays_inside_its_string() {
+        let src = r#""https://x.example/{Row."Person.id"}-{Row."Person.id_1"}" + 1"#;
+        let lexed = raw_lex(src);
+        assert_eq!(lexed[0].0, Token::String);
+        assert_eq!(
+            &src[lexed[0].1.clone()],
+            r#""https://x.example/{Row."Person.id"}-{Row."Person.id_1"}""#
+        );
+    }
+
+    #[test]
+    fn a_string_without_holes_and_an_escaped_brace_lex_as_before() {
+        for src in [
+            r#""plain""#,
+            r#""a \" b""#,
+            r#""{{not a hole}}""#,
+            r#""{x}""#,
+        ] {
+            let lexed = raw_lex(src);
+            assert_eq!(lexed.len(), 1, "{src}");
+            assert_eq!(lexed[0].0, Token::String, "{src}");
+        }
+    }
+
+    #[test]
+    fn an_unbalanced_hole_ends_at_the_first_quote_and_breaks_no_later_line() {
+        let src = "\"a{b\"\nx = 1\n";
+        let lexed = raw_lex(src);
+        assert_eq!(&src[lexed[0].1.clone()], "\"a{b\"");
+        assert!(
+            lexed
+                .iter()
+                .any(|(t, r)| *t == Token::Ident && &src[r.clone()] == "x")
+        );
     }
 
     // ─── Retired spellings: what the lexer no longer claims ───────────
