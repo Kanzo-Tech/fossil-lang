@@ -530,6 +530,17 @@ pub(super) fn rows() -> Vec<RegistryEntry> {
             LoweringKind::Expr(SmolStr::new("strptime(%0, %1)")),
         ),
         RegistryEntry::new(
+            "parse.year",
+            vec![ParamSpec {
+                name: SmolStr::new("text"),
+                ty: SigTy::Scalar(ScalarTy::String),
+                arity: Arity::One,
+                named: false,
+            }],
+            SigTy::Scalar(ScalarTy::GYear),
+            LoweringKind::Expr(SmolStr::new("CAST(%0 AS INTEGER)")),
+        ),
+        RegistryEntry::new(
             "math.sum",
             vec![ParamSpec {
                 name: SmolStr::new("value"),

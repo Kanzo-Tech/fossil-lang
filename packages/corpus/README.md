@@ -28,7 +28,7 @@ const other = await attach('demo', { engine, url });          // a corpus at a U
 // everything else is SQL, over the catalog named by the first argument:
 //   "<name>"."Person"            a view per table
 //   "<name>".fossil_tables       table_name, kind, iri, path, record_count, first_id, source, destination, derived_from
-//   "<name>".fossil_columns      table_name, column_name, ordinal_position, data_type, role, iri, is_nullable
+//   "<name>".fossil_columns      table_name, column_name, ordinal_position, data_type, role, iri, datatype, is_nullable
 //   "<name>".triples             s_type, s_value, p, o_type, o_value, o_datatype, o_lang — the corpus as RDF
 
 await other.detach();             // `await using` detaches `corpus` when the block ends

@@ -88,8 +88,9 @@ const holders = new WeakMap<object, Map<string, number>>();
  * point into, and a property table's `source` the one its `src` does — a row per value of a
  * multi-valued property, whose IRI is its value column's; `derived_from` is the sources the table was
  * derived from, each as the program wrote it. `fossil_columns(table_name, column_name,
- * ordinal_position, data_type, role, iri, is_nullable)` — one row per column, `role` the writer's
- * (`address`, `identity`, `endpoint`) and null on a program's column. `triples(s_type, s_value, p,
+ * ordinal_position, data_type, role, iri, datatype, is_nullable)` — one row per column, `role` the
+ * writer's (`address`, `identity`, `endpoint`) and null on a program's column, `datatype` the literal
+ * datatype IRI its shape declared (`xsd:gYear` over an `int32`) and null where it declared none. `triples(s_type, s_value, p,
  * o_type, o_value, o_datatype, o_lang)` — one row per RDF triple, each term as its type (`I` or `L`),
  * its IRI or lexical form, its datatype and language (`/docs/format/reading/rdf`): what a SHACL
  * engine validates.
@@ -279,13 +280,14 @@ function tablesOf(manifest: Manifest): string {
 function columnsOf(manifest: Manifest): string {
   const rows = tablesIn(manifest).flatMap((t) =>
     t.properties.map((p, at) => [
-      lit(t.name), lit(p.name), String(at + 1), lit(p.type), opt(p.role), opt(p.iri), p.nullable === true ? 'true' : 'false',
+      lit(t.name), lit(p.name), String(at + 1), lit(p.type), opt(p.role), opt(p.iri), opt(p.datatype),
+      p.nullable === true ? 'true' : 'false',
     ]),
   );
   return relationOf(
     [
       ['table_name', 'VARCHAR'], ['column_name', 'VARCHAR'], ['ordinal_position', 'INTEGER'], ['data_type', 'VARCHAR'],
-      ['role', 'VARCHAR'], ['iri', 'VARCHAR'], ['is_nullable', 'BOOLEAN'],
+      ['role', 'VARCHAR'], ['iri', 'VARCHAR'], ['datatype', 'VARCHAR'], ['is_nullable', 'BOOLEAN'],
     ],
     rows,
   );
