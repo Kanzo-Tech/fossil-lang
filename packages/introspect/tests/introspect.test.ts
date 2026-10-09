@@ -89,7 +89,7 @@ describe("buildDescriptor", () => {
       { column_name: "name", column_type: "VARCHAR" },
       { column_name: "joined", column_type: "TIMESTAMP" },
     ];
-    expect(buildDescriptor("data/users.csv", rows)).toEqual({
+    expect(buildDescriptor("data/users.csv", rows, "csv")).toEqual({
       key: "data/users.csv",
       columns: [
         { name: "id", primitive: "integer" },
@@ -102,9 +102,23 @@ describe("buildDescriptor", () => {
 
   it("carries the host's etag through when it supplies one", () => {
     const rows: DescribeRow[] = [{ column_name: "id", column_type: "INT" }];
-    expect(buildDescriptor("u.csv", rows, 'W/"abc"').etag).toBe(
+    expect(buildDescriptor("u.csv", rows, "csv", 'W/"abc"').etag).toBe(
       'W/"abc"',
     );
+  });
+
+  it("types what read_json_auto calls a date or a time as the string the run reads", () => {
+    const rows: DescribeRow[] = [
+      { column_name: "born", column_type: "DATE" },
+      { column_name: "seen", column_type: "TIMESTAMP WITH TIME ZONE" },
+      { column_name: "n", column_type: "BIGINT" },
+    ];
+    expect(buildDescriptor("u.json", rows, "json").columns).toEqual([
+      { name: "born", primitive: "string" },
+      { name: "seen", primitive: "string" },
+      { name: "n", primitive: "integer" },
+    ]);
+    expect(buildDescriptor("u.csv", rows, "csv").columns[0]).toEqual({ name: "born", primitive: "date" });
   });
 
   it("drops columns with empty/missing names", () => {
@@ -113,7 +127,7 @@ describe("buildDescriptor", () => {
       { column_name: "", column_type: "INT" },
       { column_type: "INT" },
     ];
-    expect(buildDescriptor("s.csv", rows).columns).toEqual([
+    expect(buildDescriptor("s.csv", rows, "csv").columns).toEqual([
       { name: "ok", primitive: "integer" },
     ]);
   });

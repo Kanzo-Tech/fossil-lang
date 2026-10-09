@@ -119,7 +119,7 @@ export async function introspect(
             column_name: names?.get(i),
             column_type: types?.get(i),
           }));
-          return buildDescriptor(source.key, rows, await io.etag?.(source));
+          return buildDescriptor(source.key, rows, source.format, await io.etag?.(source));
         } catch (err) {
           signal?.throwIfAborted();
           const problem = isFossilError(err)

@@ -38,3 +38,12 @@ export function duckdbPrimitive(t: string): Primitive {
   if (upper.startsWith("TIME")) return "time";
   return "string";
 }
+
+/** The `Primitive` a column one constructor's reader DESCRIBEs means: a type its row
+ *  declares `text` is one the reader inferred from text that the run reads as text, and
+ *  the rest is `duckdbPrimitive`. */
+export function readerPrimitive(row: NativeRow, t: string): Primitive {
+  const upper = t.trim().toUpperCase();
+  if (row === "json" && (upper === "DATE" || upper.startsWith("TIMESTAMP") || upper.startsWith("TIME"))) return "string";
+  return duckdbPrimitive(t);
+}

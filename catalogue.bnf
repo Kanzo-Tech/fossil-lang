@@ -102,9 +102,21 @@
    `.delimiter(b'|')` is not here: a Rust method taking a byte belongs to the
    one adapter that calls it. *)
 
+(* `text` names the column types a reader infers from TEXT that the run reads
+   as text, so a DESCRIBE answering one of them means `string`. JSON has six
+   types and no date: `read_json_auto` calls `"1845-03-27"` a DATE and
+   `"2010-02-14T20:30:21"` a TIMESTAMP, and the run's reader — arrow-json, as
+   Spark's (`inferTimestamp` off by default) and Polars' do — keeps a JSON
+   string a string. Typed as DuckDB guessed, the checker passed a program the
+   run wrote as text under `xsd:date`, and refused the `parse.date` that would
+   have made it one. DuckDB has no switch for it: a `dateformat` that can never
+   match would turn the guess off by accident, not by saying so. CSV keeps its
+   inference because both engines infer dates from CSV alike. *)
+
 row csv     = extensions "csv"                    ; reads native read_csv_auto option delim
             ; signature (uri: String, delimiter = String?) -> Rows ; op Source .
 row json    = extensions "json"                   ; reads native read_json_auto
+                                                    text "DATE" "TIMESTAMP*" "TIME*"
             ; signature (uri: String) -> Rows ; op Source .
 row parquet = extensions "parquet"                ; reads native read_parquet
             ; signature (uri: String) -> Rows ; op Source .

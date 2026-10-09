@@ -194,7 +194,7 @@ pub fn pre_introspect_and_register(system: &dyn System, sources: &[Input]) {
             let typ: String = row.get(1)?;
             Ok(InferredColumn {
                 name: SmolStr::from(name),
-                primitive: generated::duckdb_primitive(&typ),
+                primitive: generated::read_primitive(native, &typ),
             })
         }) {
             Ok(iter) => iter.filter_map(Result::ok).collect(),

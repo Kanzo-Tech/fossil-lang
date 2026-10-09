@@ -5,6 +5,7 @@
 //!
 //! Edit `catalogue.bnf` and re-run `cargo xtask catalogue`.
 
+use fossil_base::NativeReader;
 use fossil_graph_schema::Primitive;
 
 /// The [`Primitive`] a `DuckDB` column type means: case-blind, the first
@@ -20,5 +21,23 @@ pub fn duckdb_primitive(t: &str) -> Primitive {
         t if t.starts_with("TIMESTAMP") => Primitive::DateTime,
         t if t.starts_with("TIME") => Primitive::Time,
         _ => Primitive::String,
+    }
+}
+
+/// The [`Primitive`] a column one native reader `DESCRIBE`s means: a type
+/// its row declares `text` is one the reader inferred from text that the run
+/// reads as text, and the rest is [`duckdb_primitive`].
+pub fn read_primitive(reader: NativeReader, t: &str) -> Primitive {
+    let upper = t.trim().to_ascii_uppercase();
+    let text = match reader {
+        NativeReader::JsonAuto => {
+            upper == "DATE" || upper.starts_with("TIMESTAMP") || upper.starts_with("TIME")
+        }
+        _ => false,
+    };
+    if text {
+        Primitive::String
+    } else {
+        duckdb_primitive(t)
     }
 }
