@@ -476,10 +476,11 @@ const fn scalar_of(primitive: Primitive) -> Option<ScalarTy> {
         Primitive::Bool => ScalarTy::Bool,
         Primitive::Date => ScalarTy::Date,
         Primitive::DateTime => ScalarTy::DateTime,
-        // `ScalarTy` names no `Time`, `gYear` or `anyURI`, and `SeqString` —
+        Primitive::GYear => ScalarTy::GYear,
+        // `ScalarTy` names no `Time` or `anyURI`, and `SeqString` —
         // the one tag with no primitive — is a `TyKind::Seq`, not a
         // `TyKind::Primitive`, so it never reaches this table.
-        Primitive::Time | Primitive::GYear | Primitive::AnyUri => return None,
+        Primitive::Time | Primitive::AnyUri => return None,
     })
 }
 

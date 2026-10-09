@@ -40,6 +40,7 @@ export const LIBRARY = [
   "- `parse.decimal(text: String) -> Float`",
   "- `parse.float(text: String) -> Float`",
   "- `parse.integer(text: String) -> Integer`",
+  "- `parse.year(text: String) -> GYear`",
   "",
   "### `seq.` — also written on the value: `x.f(…)` is `seq.f(x, …)`",
   "",
@@ -74,4 +75,4 @@ export const LIBRARY = [
 ].join('\n');
 
 /** Every dotted name the catalogue declares, in file order. */
-export const NAMES: readonly string[] = ["core.lang", "seq.where", "seq.map", "seq.flatten", "seq.take", "seq.drop", "seq.distinct", "seq.sort", "seq.select", "seq.join", "seq.union", "seq.group_by", "seq.count", "str.length", "str.slice", "str.contains", "str.starts_with", "str.ends_with", "str.replace", "str.split", "str.concat", "str.trim", "str.lower", "str.upper", "str.slug", "str.strip_html", "parse.integer", "parse.float", "parse.decimal", "parse.date", "parse.datetime", "math.sum", "math.avg", "math.min", "math.max", "math.abs", "math.round", "io.csv", "io.json", "io.parquet", "io.rdf", "io.shex", "io.shacl"];
+export const NAMES: readonly string[] = ["core.lang", "seq.where", "seq.map", "seq.flatten", "seq.take", "seq.drop", "seq.distinct", "seq.sort", "seq.select", "seq.join", "seq.union", "seq.group_by", "seq.count", "str.length", "str.slice", "str.contains", "str.starts_with", "str.ends_with", "str.replace", "str.split", "str.concat", "str.trim", "str.lower", "str.upper", "str.slug", "str.strip_html", "parse.integer", "parse.float", "parse.decimal", "parse.date", "parse.datetime", "parse.year", "math.sum", "math.avg", "math.min", "math.max", "math.abs", "math.round", "io.csv", "io.json", "io.parquet", "io.rdf", "io.shex", "io.shacl"];

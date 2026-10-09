@@ -1878,6 +1878,7 @@ impl TemplateReader<'_> {
 fn cast_target(sql_type: &str) -> Option<datafusion::arrow::datatypes::DataType> {
     Some(match sql_type {
         "BIGINT" => datafusion::arrow::datatypes::DataType::Int64,
+        "INTEGER" => datafusion::arrow::datatypes::DataType::Int32,
         "DOUBLE" => datafusion::arrow::datatypes::DataType::Float64,
         "BOOLEAN" => datafusion::arrow::datatypes::DataType::Boolean,
         "DATE" => datafusion::arrow::datatypes::DataType::Date32,

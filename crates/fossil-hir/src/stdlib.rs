@@ -581,6 +581,8 @@ pub enum ScalarTy {
     Date,
     /// `xsd:dateTime`.
     DateTime,
+    /// `xsd:gYear`.
+    GYear,
     /// `Seq<String>` — the one repeated shape v0.1 needs (`str.split`).
     SeqString,
 }
@@ -595,6 +597,7 @@ impl ScalarTy {
             Self::Bool => Primitive::Bool,
             Self::Date => Primitive::Date,
             Self::DateTime => Primitive::DateTime,
+            Self::GYear => Primitive::GYear,
         }
     }
 

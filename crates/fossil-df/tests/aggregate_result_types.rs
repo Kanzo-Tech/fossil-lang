@@ -309,6 +309,8 @@ const fn matches(declared: ScalarTy, actual: &DataType) -> bool {
         ScalarTy::Bool => matches!(actual, DataType::Boolean),
         ScalarTy::Date => matches!(actual, DataType::Date32 | DataType::Date64),
         ScalarTy::DateTime => matches!(actual, DataType::Timestamp(_, _)),
+        // A year is stored as its integer (`/docs/format`).
+        ScalarTy::GYear => matches!(actual, DataType::Int32 | DataType::Int64),
         ScalarTy::SeqString => matches!(actual, DataType::List(_) | DataType::LargeList(_)),
     }
 }

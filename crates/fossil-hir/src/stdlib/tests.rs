@@ -205,13 +205,14 @@ fn expected_stdlib_names() -> Vec<&'static str> {
         "seq.union",
         "seq.group_by",
         "seq.count",
-        // parse/ (5) — `json` needed an extraction function DataFusion does
+        // parse/ (6) — `json` needed an extraction function DataFusion does
         // not ship; `csv_row` renders and is simply not wanted.
         "parse.integer",
         "parse.float",
         "parse.decimal",
         "parse.date",
         "parse.datetime",
+        "parse.year",
         // math/ (6 — NO ceil/floor)
         "math.sum",
         "math.avg",
@@ -260,8 +261,8 @@ fn catalog_is_bidirectionally_complete() {
         missing.is_empty() && extra.is_empty(),
         "catalog must equal the declared set exactly.\n  MISSING: {missing:?}\n  EXTRA: {extra:?}"
     );
-    // 1 + 12 + 5 + 6 + 13 = 37 surface functions.
-    assert_eq!(catalog.len(), 37);
+    // 1 + 12 + 6 + 6 + 13 = 38 surface functions.
+    assert_eq!(catalog.len(), 38);
     // The FOUR io/ constructors on top, not three. `io.rdf` reads rows like the
     // other three and had no row here at all while the registry stated its `io.`
     // half by hand — so a program writing `io.rdf(...)` in a value position got
@@ -269,7 +270,7 @@ fn catalog_is_bidirectionally_complete() {
     //
     // `io.shex` and `io.shacl` are still absent, and deliberately: they give
     // back a shape document, which `SigTy` has no spelling for.
-    assert_eq!(r.iter().count(), 37 + 4);
+    assert_eq!(r.iter().count(), 38 + 4);
 }
 
 /// **Every name the language has deleted, pinned so that none can come back.**

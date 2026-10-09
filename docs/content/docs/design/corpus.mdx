@@ -233,6 +233,11 @@ without opening [/docs/format](/docs/format). `kind` and `table_name` stay: `ver
 `property` are not `information_schema.tables.table_type` values, and `table_name` already is the
 standard's.
 
+`fossil_columns` also carries `datatype`, the literal datatype IRI the column's shape declared —
+`fossil.json`'s own field, R2RML's `rr:datatype` — because `data_type` is the file's and cannot say
+it: an `xsd:gYear` is an `int32` on disk, and a reader that draws a year as a year needs the IRI, not
+the integer. It is null where the shape declared none.
+
 `triples` names a term's parts as SPARQL 1.1 Query Results JSON names them (§3.2.2) — `type`,
 `value`, `datatype` and the language — under the `s_`, `p` and `o_` prefixes: `s_type`, `s_value`,
 `p`, `o_type`, `o_value`, `o_datatype`, `o_lang`. Those are the names an RDF reader already knows.
