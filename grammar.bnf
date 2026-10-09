@@ -525,7 +525,14 @@ Literal             := INTEGER | FLOAT | STRING | BOOL | NULL
 InterpolatedString  := STRING_OPEN (STRING_TEXT | Interpolation)* STRING_CLOSE
 Interpolation       := INTERP_OPEN Expression RBRACE
 
-(* The hole takes an EXPRESSION and nothing else. There is no PrefixRef:
+(* The hole takes an EXPRESSION, and an expression may hold a string — a
+   quoted column, `"…/{Row."Person.id"}"` — so the literal's end is the `"` at
+   hole depth 0, PEP 701's rule; a regex over STRING_CONTENT above cannot count
+   the braces, and the lexer finds that end itself (`string_end`). A literal
+   whose hole never closes ends at its first unescaped `"`, as before, so a
+   broken string breaks no later line.
+
+   The hole takes an EXPRESSION and nothing else. There is no PrefixRef:
    `${ex:}` — a prefix with no local part — was the CURIE-with-holes, admitted
    in this one position and nowhere else, and it died with the CURIE. A full
    IRI is written out: `"https://shop.example/user/{User.email}"`. *)
