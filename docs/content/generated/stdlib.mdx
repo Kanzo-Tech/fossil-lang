@@ -50,6 +50,7 @@ Source: `catalogue.bnf`, all of it. Change it and re-run the command. */}
 | `parse.decimal` | `(text: String) -> Float` | `CAST(CAST(%0 AS DECIMAL(38,18)) AS DOUBLE)` |
 | `parse.float` | `(text: String) -> Float` | `CAST(%0 AS DOUBLE)` |
 | `parse.integer` | `(text: String) -> Integer` | `CAST(%0 AS BIGINT)` |
+| `parse.year` | `(text: String) -> GYear` | `CAST(%0 AS INTEGER)` |
 
 </section>
 

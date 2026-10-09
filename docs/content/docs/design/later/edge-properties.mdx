@@ -1,0 +1,60 @@
+---
+title: Edge properties
+description: A date on a relation — when a prize was won, since when two people know each other — written as columns of the relation's edge table, typed by a SHACL 1.2 reifier shape. Planned, and waiting on the standard that lets a shape declare it.
+---
+
+> **Planned, not started.** A program cannot put a property on an edge today, and the relation is a
+> vertex instead (below). What starts it: SHACL 1.2 — `sh:reifierShape` — and Turtle 1.2 reaching
+> W3C Recommendation. Both were Working Drafts on 2026-10-09 (SHACL 1.2 Core, 28 August; Turtle 1.2,
+> 3 September).
+
+## Why it waits
+
+A property's name and type are read from the shape: a bare key is the last segment of a predicate the
+shape declares, and a key no predicate declares is an error ([inference from shapes](/docs/design/shapes)).
+An edge is a triple, and a property of a triple is a statement about a statement — a **reifier**. RDF
+1.1 has no term for it; RDF 1.2 does, and SHACL 1.2's `sh:reifierShape` is the only way a shape
+language declares what a reifier carries. ShEx has no counterpart.
+
+Writing the columns before then needs one of two things, and both are refused: a checker that accepts
+an edge property no shape declares, which is the guarantee the language exists for, or an extension of
+ShEx or SHACL that no other tool reads.
+
+## What a program writes until then
+
+The relation as a vertex — the W3C's [n-ary relations](https://www.w3.org/TR/swbp-n-aryRelations/)
+pattern, schema.org's `Role`, Wikidata's qualified statement. RDF 1.1, any shape language, no change to
+the compiler:
+
+```
+Awards : Award from PrizeRow
+    @subject = "https://example.org/award/{PrizeRow.id}"
+    year     = parse.year(PrizeRow.awardYear)
+    laureate = Laureate(PrizeRow.laureate)
+    category = Category(PrizeRow.category)
+```
+
+A reader filtering by `year` greys the awards of other years and every edge into them, and the
+laureates — which have no `year` — stay in full colour.
+
+## The design, when it starts
+
+- **Surface.** The annotation the grammar retired comes back on an edge-valued property, in Turtle
+  1.2's own shape (`:a :p :b {| :q v |}`) and GQL's: `won = Category(Row.category) { year = parse.year(Row.year) }`.
+  The `ANNOTATION_BLOCK` tombstone in `grammar.bnf` is where it returns.
+- **Types.** The edge's predicate carries `sh:reifierShape`; the annotation's keys resolve against that
+  shape's predicates exactly as a mapping body's resolve against its target's. ShEx programs cannot
+  annotate until ShEx can say the same thing.
+- **Corpus.** The properties are columns of the relation's edge table after `src` and `dst`, with
+  `iri` and `datatype` as on a vertex table, and `fossil/1` grows by fields a reader may ignore.
+  `finalize_edge` takes `distinct` over every column, not the pair: two dates on one pair are two edges.
+- **Readers.** A link gets an index as a vertex does — its table's first row plus its row in
+  `(src, dst)` order — so a viewer greys a link by index. A clause over an edge column keeps the edges
+  it matches and their endpoints, Cosmograph's `useLinksData` rule.
+- **RDF.** The view writes one reifier per annotated edge (`rdf:reifies`) under Turtle 1.2.
+
+## What would reverse it
+
+A shape language this compiler reads that declares edge properties without reification — a
+property-graph schema (PG-Schema, GQL's graph types) becoming a third decoder beside ShEx and SHACL.
+Then the annotation is typed from there, and it need not wait for SHACL 1.2.

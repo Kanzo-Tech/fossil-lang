@@ -93,6 +93,10 @@ raising is what the execution engine has no spelling for.
 
 <Program src="expressions/expressions.fossil" region="named-arguments" title="expressions.fossil" />
 
+`parse.year` is XPath's `xs:gYear` constructor and takes text as it does: XPath casts no integer to
+`xs:gYear`, so an integer column does not fill an `xsd:gYear` slot without saying which text it is.
+The year lands as its integer, under the shape's `xsd:gYear` datatype.
+
 `parse.decimal` differs from `parse.float` in refusing what will not fit: `'1e400'` is an error there
 and an infinity here.
 

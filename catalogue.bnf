@@ -366,6 +366,13 @@ fn parse.decimal  = (text: String) -> Float                     ; expr "CAST(CAS
 fn parse.date     = (text: String, format: String) -> Date      ; expr "CAST(strptime(%0, %1) AS DATE)" .
 fn parse.datetime = (text: String, format: String) -> DateTime  ; expr "strptime(%0, %1)" .
 
+(* `year` is XPath's `xs:gYear` constructor, and like it takes TEXT: XPath
+   casts no integer to `xs:gYear`, so neither does this row, and a year is not
+   an integer a shape can widen into. What it returns is stored as the year's
+   integer, the column `/docs/format` says an `xsd:gYear` lands in; a timezone
+   suffix (`1921Z`) is refused by the cast rather than dropped. *)
+fn parse.year     = (text: String) -> GYear                     ; expr "CAST(%0 AS INTEGER)" .
+
 (* ------------------------------------------------------------------- math/ *)
 (* SIX rows, and NO `ceil`/`floor`.
 

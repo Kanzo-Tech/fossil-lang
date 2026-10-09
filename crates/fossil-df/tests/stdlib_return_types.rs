@@ -85,6 +85,8 @@ const fn sql_type_of(ty: ScalarTy) -> &'static str {
         ScalarTy::Bool => "BOOLEAN",
         ScalarTy::Date => "DATE",
         ScalarTy::DateTime => "TIMESTAMP",
+        // A year is stored as its integer (`/docs/format`).
+        ScalarTy::GYear => "INTEGER",
         ScalarTy::SeqString => "VARCHAR[]",
     }
 }
@@ -104,6 +106,7 @@ fn dummy(ty: ScalarTy) -> String {
         ScalarTy::Bool => "true",
         ScalarTy::Date => "'2026-05-21'",
         ScalarTy::DateTime => "'2026-05-21 00:00:00'",
+        ScalarTy::GYear => "2026",
         ScalarTy::SeqString => "['a', 'b']",
     };
     format!("CAST({literal} AS {})", sql_type_of(ty))

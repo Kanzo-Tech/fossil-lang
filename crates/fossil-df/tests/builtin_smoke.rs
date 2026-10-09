@@ -32,6 +32,7 @@ fn dummy(ty: ScalarTy) -> String {
         ScalarTy::Bool => "true".to_string(),
         ScalarTy::Date => "DATE '2026-05-21'".to_string(),
         ScalarTy::DateTime => "TIMESTAMP '2026-05-21 00:00:00'".to_string(),
+        ScalarTy::GYear => "CAST(2026 AS INTEGER)".to_string(),
         ScalarTy::SeqString => "['a', 'b']".to_string(),
     }
 }

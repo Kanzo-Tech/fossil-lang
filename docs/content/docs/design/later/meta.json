@@ -9,6 +9,7 @@
     "camera",
     "cells",
     "cost",
-    "streaming"
+    "streaming",
+    "edge-properties"
   ]
 }
