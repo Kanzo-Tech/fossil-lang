@@ -101,7 +101,8 @@ fn a_new_native_reader_is_a_row_and_nothing_else() {
         invented[0].reads,
         Some(Reads::Native {
             function: "read_avro_scan".into(),
-            option: Some("sep".into())
+            option: Some("sep".into()),
+            text: Vec::new(),
         })
     );
 

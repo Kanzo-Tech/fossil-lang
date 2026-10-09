@@ -3,7 +3,7 @@
  */
 import type { InferredColumn, InferredDescriptor } from "@fossil-lang/types";
 
-import { NATIVE_OPTIONS, NATIVE_READERS, duckdbPrimitive, type NativeRow } from "./catalogue.generated.js";
+import { NATIVE_OPTIONS, NATIVE_READERS, readerPrimitive, type NativeRow } from "./catalogue.generated.js";
 
 /** A single row from DuckDB's `DESCRIBE SELECT * FROM <reader>(...)`. */
 export interface DescribeRow {
@@ -40,6 +40,9 @@ export function describeSql(
 /**
  * Build the descriptor a `DESCRIBE` produced for one source. Keyed by what
  * the program wrote, not the binding name and not the URL that was read.
+ * `format` is the constructor it was read through, because what a column type
+ * means depends on the reader: a JSON string `read_json_auto` calls a DATE is a
+ * string to the run.
  * Columns with empty/missing names are dropped (defensive against malformed
  * rows).
  *
@@ -52,12 +55,13 @@ export function describeSql(
 export function buildDescriptor(
   key: string,
   describeRows: readonly DescribeRow[],
+  format: NativeRow,
   etag = "",
 ): InferredDescriptor {
   const columns: InferredColumn[] = describeRows
     .map((r) => ({
       name: String(r.column_name ?? ""),
-      primitive: duckdbPrimitive(String(r.column_type ?? "")),
+      primitive: readerPrimitive(format, String(r.column_type ?? "")),
     }))
     .filter((c) => c.name.length > 0);
   return { key, columns, etag };
