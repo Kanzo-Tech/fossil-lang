@@ -65,27 +65,43 @@ the module is still one. A host that cannot afford the statistics gets a mode of
 `Options::TYPES`, one `DESCRIBE` a source, which is what the editor asks for on every keystroke —
 not a second package.
 
-## The mapping is a spec, and Fossil is emitted
+## The mapping is Fossil, and the model cannot write a name that does not exist
 
-**The model does not write Fossil.** It fills a mapping spec in the shape of RML's triples maps — a
-source, a subject template, and per property a column or an expression, or a join — whose every name
-is an enum from the Profile and the target shapes. `fossil-mapping` emits the program from it,
-deterministically, and the program goes through the same checker, ShEx conformance and dry run as a
-program written by hand. Whoever wants to edit Fossil by hand still can, in keasy's *Advanced*, under
-the same checks.
+**The model writes Fossil, and Fossil is statically typed, so the checker is its oracle.** A wrong
+type, a second `@subject`, a property the shape requires and the mapping leaves out: the checker
+says each, at its span, with the type it expected, and a Task sends that back for a repair. No
+format in front of Fossil could do better, because none of them is typed — RML validates the graph
+after producing it, which is what [types](/docs/design/types) says fossil exists to move earlier.
 
-Two consequences. The emitter always produces valid Fossil, so a syntax error is no longer something
-a model can cause. And everything the model writes is JSON under a schema, which is the one kind of
-constraint the browser's model runtime enforces — so there is no need to project `grammar.bnf` into
-a decoding grammar.
+**What the checker cannot do is stop a name from being invented** — it reports `nmae` after the
+model wrote it. A decoder constrained by a grammar can, and the browser's has one: WebLLM's engine
+(`xgrammar`) takes an EBNF string beside the prompt. So the grammar for one request is the mapping
+productions of `grammar.bnf`, in one canonical layout, with every reference a closed list: the
+sources of the request, each one's columns as its profile reads them, the shapes' types, each
+type's properties, and the catalogue's `parse.*` functions
+(`crates/fossil-ide/src/constrain.rs, mapping_grammar`). A name not on a list cannot be decoded,
+and the prelude — the shapes imported, the sources bound — is the request's, never the model's
+(`crates/fossil-ide/src/constrain.rs, prelude`). `fossil-wasm` answers both as `mappingGrammar`.
 
-**The emitter's coverage is the risk.** The spec has to say what real programs say: joins,
-`parse.*`, the identity annotations. It is held by round trips over the four examples — spec →
-Fossil → checker → the same corpus as the program written by hand — as expect tests.
+**The grammar is a sub-language of Fossil, held from both sides.** Every sentence sampled from it
+parses with the parser every program goes through, three hundred per vocabulary; the conformance
+programs inside its scope, `hello` and `relationship` — joins, links and quoted columns among them —
+are sentences of it; and a column, a property or a type that does not exist is not. It is not a
+second definition of the language: types, cardinality and identity are the checker's, which a
+context-free grammar cannot say.
 
-**What would reverse it:** a small model given Fossil's grammar that passes the gold set's
-competency questions at the same rate as spec-then-emit. Then the model writes the program, and the
-spec stays only if a screen still needs its rows.
+*Held by* `crates/fossil-ide/tests/constrain.rs`, "every_sentence_it_generates_parses",
+"the_conformance_programs_in_its_scope_are_sentences_of_it",
+"a_name_that_does_not_exist_is_not_a_sentence".
+
+**What it costs:** one layout, so a model cannot align its `=` signs or split a mapping across a
+binding (`Adults := User.where(…)`); the same rows are a `where` on the mapping. And the AI SDK's
+WebLLM provider passes a JSON Schema and not a grammar, so `@kanzo-tech/llm/local` hands the grammar
+to the engine itself.
+
+**What would reverse it:** a model that writes mappings measurably better filling a JSON spec than
+writing grammar-held Fossil with the checker as its oracle, over the evaluation set. Then a spec
+returns — RML's, not one of ours ([discarded](/docs/design/discarded)).
 
 ## Order
 

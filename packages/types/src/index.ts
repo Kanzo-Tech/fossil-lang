@@ -19,6 +19,7 @@ export type {
   InferredDescriptor,
   Input,
   Location,
+  MappingVocabulary,
   Position,
   Primitive,
   Profile,
@@ -34,9 +35,12 @@ export type {
   Scope,
   SemanticToken,
   SourceProfile,
+  SourceVocabulary,
   StorageCredential,
   Token,
   TokenKind,
+  TypeVocabulary,
+  VocabularyDocument,
 } from './wire.gen.js';
 export { HOST_MS } from './wire.gen.js';
 export {

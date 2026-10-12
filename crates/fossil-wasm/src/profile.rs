@@ -1,7 +1,8 @@
 //! `Profiler` — [`fossil_profile::Profiler`] for a JS host: the plan in wasm,
 //! each query run on the page's DuckDB-WASM by the host, and the answers fed
 //! back. `@fossil-lang/profile` is the loop around it; the language server runs
-//! the same plan on native `DuckDB` (`crates/fossil-lsp/src/profile.rs`).
+//! the same plan on native `DuckDB` (`crates/fossil-lsp/src/profile.rs`). And `mappingGrammar`:
+//! what a model may write once the sources are profiled — `fossil_ide::constrain`.
 
 use fossil_graph_schema::js::invalid_argument;
 use fossil_profile::{Options, Rows, Source};
@@ -114,4 +115,31 @@ impl JsProfiler {
 
 fn spent() -> JsValue {
     fossil_graph_schema::js::bug("the profiler was used after `finish`", JsValue::UNDEFINED).into()
+}
+
+/// What a model may write over `vocabulary`: the `prelude` the request already says (the shapes
+/// imported, the sources bound) and the `grammar` of the mappings after it, as the EBNF a
+/// constrained decoder takes — every name in it one that exists (`fossil_ide::constrain`).
+///
+/// # Errors
+///
+/// `api/invalid-argument` when `vocabulary` is not a `MappingVocabulary`.
+#[wasm_bindgen(js_name = mappingGrammar, unchecked_return_type = "{ prelude: string; grammar: string }")]
+pub fn mapping_grammar(
+    #[wasm_bindgen(unchecked_param_type = "MappingVocabulary")] vocabulary: JsValue,
+) -> Result<JsValue, JsValue> {
+    #[derive(serde::Serialize)]
+    struct Constrained {
+        prelude: String,
+        grammar: String,
+    }
+    let vocabulary: fossil_ide::constrain::Vocabulary =
+        argument("vocabulary", "a MappingVocabulary", vocabulary)?;
+    to_value(
+        "the grammar",
+        &Constrained {
+            prelude: fossil_ide::constrain::prelude(&vocabulary),
+            grammar: fossil_ide::constrain::mapping_grammar(&vocabulary).ebnf(),
+        },
+    )
 }

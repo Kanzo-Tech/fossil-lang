@@ -38,6 +38,7 @@
 
 pub mod code_action;
 pub mod completion;
+pub mod constrain;
 pub mod diagnostics;
 pub mod goto_def;
 pub mod hover;

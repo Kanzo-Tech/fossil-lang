@@ -15,6 +15,11 @@ artefacts. Every door boots the module itself:
 - `runProfiler(sources, query, { options, signal })` — `fossil-profile`'s plan over some sources,
   each query run by `query` on the host's engine, a phase's queries at once: the profile the language
   server reads natively, in the page. `@fossil-lang/profile` is what a host calls; this is its loop.
+- `mappingGrammar(vocabulary)` — what a model may write once the sources are profiled: the
+  `prelude` the request already says, and the `grammar` of the mappings after it, as the EBNF a
+  constrained decoder (WebLLM's xgrammar) takes. Every name in it exists — the sources' columns,
+  the shapes' types and properties, the catalogue's `parse.*` — and what it writes is Fossil, for
+  the checker to judge.
 - `initFossilWasm(bytes)` — Node only: hand over the `.wasm`. A bundled host never calls it.
 
 ## One program in one editor: `openProgram`

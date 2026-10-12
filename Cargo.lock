@@ -5981,6 +5981,7 @@ dependencies = [
  "fossil-df",
  "fossil-graph-schema",
  "fossil-hir",
+ "fossil-ide",
  "fossil-lineage",
  "fossil-profile",
  "fossil-sinks",

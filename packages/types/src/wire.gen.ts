@@ -345,6 +345,24 @@ export interface LocationName {
 }
 
 /**
+ * What a mapping can name: what a host knows before the model writes anything.
+ */
+export interface MappingVocabulary {
+  /**
+   * The shape document: its constructor (`shex`, `shacl`) and where it is.
+   */
+  shapes: VocabularyDocument;
+  /**
+   * The sources, each with its columns — a profile's descriptor.
+   */
+  sources: SourceVocabulary[];
+  /**
+   * The types it declares, each with the property keys a mapping of it may write.
+   */
+  types: TypeVocabulary[];
+}
+
+/**
  * A document a program names that the database does not hold yet.
  */
 export interface MissingDocument {
@@ -560,6 +578,17 @@ export interface SourceProfile {
   sampled: boolean;
 }
 
+export interface SourceVocabulary {
+  columns: string[];
+  delimiter?: string;
+  format: string;
+  /**
+   * The binding every reference to it is qualified by.
+   */
+  name: string;
+  reference: string;
+}
+
 /**
  * A storage credential scoped to one prefix — Iceberg REST's `StorageCredential`, verbatim on the
  * wire.
@@ -600,6 +629,16 @@ export interface Token {
  * `Token`'s `kind`, so it is named `TokenKind` there.
  */
 export type TokenKind = 'Whitespace' | 'Newline' | 'Comment' | 'KwFrom' | 'KwAnd' | 'KwOr' | 'KwNot' | 'AtAttr' | 'True' | 'False' | 'Null' | 'Float' | 'Integer' | 'Ident' | 'String' | 'Define' | 'Eq' | 'Neq' | 'Le' | 'Ge' | 'Assign' | 'Dot' | 'Comma' | 'LParen' | 'RParen' | 'LBrace' | 'RBrace' | 'Lt' | 'Gt' | 'Plus' | 'Minus' | 'Star' | 'Slash' | 'Percent' | 'Question' | 'Colon';
+
+export interface TypeVocabulary {
+  name: string;
+  properties: string[];
+}
+
+export interface VocabularyDocument {
+  format: string;
+  reference: string;
+}
 
 /** `fossil_storage::HOST_MS`. */
 export const HOST_MS = 30000;
