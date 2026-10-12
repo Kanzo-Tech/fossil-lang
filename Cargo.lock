@@ -1830,9 +1830,9 @@ dependencies = [
  "fossil-descriptors-output",
  "fossil-graph-schema",
  "fossil-hir",
- "fossil-introspect",
  "fossil-lineage",
  "fossil-location",
+ "fossil-lsp",
  "fossil-mir",
  "fossil-shex",
  "fossil-sinks",
@@ -1937,21 +1937,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fossil-introspect"
-version = "0.1.0"
-dependencies = [
- "duckdb",
- "fossil-base",
- "fossil-descriptors-input",
- "fossil-graph-schema",
- "fossil-lineage",
- "fossil-profile",
- "smol_str",
- "tempfile",
- "tracing",
-]
-
-[[package]]
 name = "fossil-lineage"
 version = "0.1.0"
 dependencies = [
@@ -1972,15 +1957,16 @@ version = "0.1.0"
 dependencies = [
  "criterion",
  "crossbeam-channel",
+ "duckdb",
  "fossil-base",
  "fossil-descriptors-input",
  "fossil-descriptors-output",
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-ide",
- "fossil-introspect",
  "fossil-lineage",
  "fossil-mir",
+ "fossil-profile",
  "lsp-server",
  "lsp-types",
  "salsa",
@@ -2013,6 +1999,7 @@ dependencies = [
  "fossil-base",
  "fossil-descriptors-input",
  "fossil-graph-schema",
+ "schemars",
  "serde",
  "smol_str",
  "tempfile",
@@ -5995,6 +5982,7 @@ dependencies = [
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-lineage",
+ "fossil-profile",
  "fossil-sinks",
  "fossil-storage",
  "fossil-wasm",

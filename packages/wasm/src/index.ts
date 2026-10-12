@@ -7,6 +7,8 @@
  *   `fossil(program)` draws from.
  * - {@link inputs} — what a program reads, with no editor: the `ts.preProcessFile` of fossil.
  * - {@link formats} and {@link formatFor} — the formats this build reads, and which reads a file.
+ * - {@link runProfiler} — `fossil-profile`'s plan over some sources, each query run on the host's
+ *   engine: what `@fossil-lang/profile` describes a program's sources with.
  * - {@link initFossilWasm} — Node only: hand over the `.wasm` bytes. Every door boots itself.
  *
  *   const program = await openProgram('job.fossil', { host, text });
@@ -14,10 +16,11 @@
  */
 
 // The wasm-bindgen glue (`../pkg/fossil_wasm.js`) is imported ONLY from leaf modules — `load.ts`,
-// `program.ts` and `format.ts` — never here in the entry: importing the stateful glue from the
+// `program.ts`, `format.ts` and `profile.ts` — never here in the entry: importing the stateful glue from the
 // package entry lets a `sideEffects:false` bundler duplicate it, splitting `init()`'s wasm instance
 // from the one the functions use (the crash the codemirror tokenizer hit on the main thread).
 export { initFossilWasm, type InitInput } from './load.js';
 export { formatFor, formats } from './format.js';
 export { inputs, openProgram } from './program.js';
-export type { FossilProgram, Introspection, OpenProgramOptions } from './program.js';
+export type { FossilProgram, OpenProgramOptions, Profiled } from './program.js';
+export { runProfiler, type ProfileRows } from './profile.js';

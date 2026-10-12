@@ -82,9 +82,9 @@ failure.
 ```
                      ┌─▶ crates/fossil-base/src/providers/generated.rs
                      ├─▶ crates/fossil-descriptors-output/src/generated.rs
-                     ├─▶ crates/fossil-introspect/src/generated.rs
+                     ├─▶ crates/fossil-profile/src/generated.rs
 catalogue.bnf ──cargo├─▶ crates/fossil-hir/src/stdlib/generated.rs
-              xtask  ├─▶ packages/introspect/src/catalogue.generated.ts
+              xtask  ├─▶ packages/profile/src/catalogue.generated.ts
             catalogue├─▶ docs/content/generated/stdlib.mdx
                      └─▶ packages/prompt/src/catalogue.generated.ts
 
@@ -104,7 +104,7 @@ file's header carries the literal count that made the case.
 Each is a PROJECTION of the same rows, not a copy of the file: `fossil-base` gets
 the rows whose behaviour the compiler can link, `descriptors-output` the ones
 needing a shape-language parser, `fossil-hir` the stdlib table the checker
-resolves every call against, `introspect` the ones with a table function to
+resolves every call against, `profile` the ones with a table function to
 `DESCRIBE` through (`io.rdf` has none), `executor` every row that reads data
 (`io.rdf` included — the host fetches its bytes like any other source). Which
 projection a row lands in is derived from its clauses, never configured.
@@ -149,9 +149,9 @@ reference page, and that the page has not gone back to writing a row of its own.
 
 The `--check` proves each file matches its own emitter. The Rust and TypeScript
 projections agree because one parse feeds both emitters; that an emitter says
-what the row means is the emitter's own test — `fossil-introspect` runs the
-generated type table against a real `DuckDB`, `@fossil-lang/introspect` runs its
-twin.
+what the row means is the emitter's own test — `fossil-profile` runs the
+generated type table against a real `DuckDB`, and the browser runs that same
+crate.
 
 The file carries the argument for each row in its `(* … *)` commentary. A doc
 comment in the generated Rust is derived and one line long; if you want to know

@@ -52,7 +52,7 @@ fn nobel() -> (tempfile::TempDir, Vec<Source>) {
 #[test]
 fn a_profile_says_what_the_files_are() {
     let (_dir, sources) = nobel();
-    let profile = profile(sources, Options { sample: 0, shown: 2 });
+    let profile = profile(sources, Options { sample: 0, shown: 2, ..Options::default() });
 
     assert!(profile.failed.is_empty(), "{:?}", profile.failed);
     let [awards, laureates] = &profile.sources[..] else { panic!("two sources: {profile:?}") };
@@ -117,11 +117,60 @@ fn a_sample_reads_the_counts_from_the_first_rows_and_says_so() {
         body.push_str(&format!("{i},{}\n", i % 3));
     }
     std::fs::write(dir.path().join("rows.csv"), body).expect("rows");
-    let profile = profile([source(dir.path(), "rows.csv", "csv")], Options { sample: 10, shown: 0 });
+    let profile = profile([source(dir.path(), "rows.csv", "csv")], Options { sample: 10, shown: 0, ..Options::default() });
 
     let rows = &profile.sources[0];
     assert_eq!(rows.rows, Some(10));
     assert!(rows.sampled, "the counts read a sample, so the keys are candidates");
     assert_eq!(rows.keys, ["id"]);
     assert!(rows.sample.is_empty(), "shown: 0 keeps no rows");
+}
+
+/// Every spelling `DuckDB` has for an instant maps to an instant.
+///
+/// **The table is derived from `DuckDB` and not from memory**: the arms are
+/// asserted against the `DESCRIBE` of a value `DuckDB` itself typed, so a
+/// version that renames a type fails here rather than silently widening a
+/// column to `String`. That widening is what this test exists for — the arm
+/// was `"TIMESTAMP" | "DATETIME"`, `read_csv_auto` infers `TIMESTAMP WITH
+/// TIME ZONE` for any ISO-8601 string carrying an offset, and the checker
+/// compares this answer against the shape's declared `Primitive`. So the
+/// gap was not a slow path: it made `xsd:dateTime` a hard type error over
+/// every offset-bearing column, which is how LDBC-SNB dates every row.
+#[test]
+fn every_duckdb_instant_is_an_instant() {
+    let conn = duckdb::Connection::open_in_memory().expect("in-memory duckdb");
+    for (sql, expected) in [
+        ("TIMESTAMP '2012-01-01 00:00:00'", Primitive::DateTime),
+        ("TIMESTAMPTZ '2012-01-01 00:00:00+01'", Primitive::DateTime),
+        ("CAST('2012-01-01T00:00:00.000+00:00' AS TIMESTAMP WITH TIME ZONE)", Primitive::DateTime),
+        ("DATE '2012-01-01'", Primitive::Date),
+        ("TIME '12:00:00'", Primitive::Time),
+        ("CAST(1 AS BIGINT)", Primitive::Integer),
+        ("CAST(1.5 AS DOUBLE)", Primitive::Float),
+        ("CAST(1.5 AS DECIMAL(38,18))", Primitive::Float),
+        ("true", Primitive::Bool),
+        ("'x'", Primitive::String),
+    ] {
+        let described = rows(&conn, &format!("DESCRIBE SELECT {sql} AS v")).expect("describe runs");
+        let declared = described[0][1].clone().expect("a type");
+        assert_eq!(
+            fossil_profile::generated::duckdb_primitive(&declared),
+            expected,
+            "DuckDB types `{sql}` as `{declared}`, which must not widen to String"
+        );
+    }
+}
+
+/// A types profile reads the same file the run reads: the delimiter the
+/// binding wrote, so a pipe-delimited file is three columns and not one called
+/// `id|name|city`.
+#[test]
+fn a_pipe_delimited_source_is_described_with_the_delimiter_it_was_written_with() {
+    let dir = tempfile::tempdir().expect("a tempdir");
+    std::fs::write(dir.path().join("people.csv"), "id|name|city\n1|Ada|Kent\n2|Bo|Arles\n").expect("people");
+    let piped = Source { option: Some("|".into()), ..source(dir.path(), "people.csv", "csv") };
+    let profile = profile([piped], Options::TYPES);
+    let names: Vec<&str> = profile.sources[0].descriptor.columns.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["id", "name", "city"]);
 }

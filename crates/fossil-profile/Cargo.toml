@@ -22,6 +22,9 @@ fossil-base = { path = "../fossil-base" }
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 # `Primitive`, the lattice a DuckDB column type maps onto.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
+# A profile crosses to a host as JSON, and `@fossil-lang/types` declares its
+# shape from this schema (`crates/xtask/tests/wire.rs`).
+schemars = { workspace = true }
 serde = { workspace = true }
 smol_str = { workspace = true }
 

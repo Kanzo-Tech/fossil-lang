@@ -29,7 +29,7 @@ reports, with file and line per case, are in `keasy/audits/2026-10-01/`):
 Five shapes cover nearly all of them.
 
 1. **No deadline anywhere.** Not one timeout in fossil or kanzo-ui. A host promise that never settles
-   hangs `mount`, `open`, `runJob` and `introspect`; `open()` does not even take a signal; a DuckDB
+   hangs `mount`, `open`, `runJob` and `profile`; `open()` does not even take a signal; a DuckDB
    worker that fails to load is swallowed by duckdb-wasm's `onError`, which clears its pending
    requests without rejecting them, so `engine()` never settles and every chart and graph on the page
    loads forever; keasy's server calls Entra, Azure and STS with no request timeout; an AI stream
@@ -56,7 +56,7 @@ can take minutes; it has a **signal**, and the person has a Stop. The line is dr
 thing that can wait forever is the person's own patience, and they can end it.
 
 1. **Every async function that crosses a package boundary takes `{ signal }`** and passes it down to
-   every wait it makes. `open`, `mount`, `introspect`, `run`, `openProgram`, `engine()` gain one;
+   every wait it makes. `open`, `mount`, `profile`, `run`, `openProgram`, `engine()` gain one;
    `Engine.query`'s options become required, so fossil always passes one. TypeScript still accepts an
    engine that declares fewer parameters, so honouring the signal is the engine's contract, not the
    compiler's.
@@ -192,7 +192,7 @@ cannot prove.
 Each step is one branch and one merge, green.
 
 1. **Accept the page.** Done on 2026-10-01.
-2. **fossil.** `signal` through `open`, `mount`, `introspect`, `run`, `openProgram`; the deadline
+2. **fossil.** `signal` through `open`, `mount`, `profile`, `run`, `openProgram`; the deadline
    helper on every host wait and wasm fetch; `storage/host-silent`; object-store client options;
    rejections no longer memoized; the cleanup-replaces-cause sites fixed; the guards; a test per G3
    case. *Breaking:* `Engine.query`'s `signal` is required.

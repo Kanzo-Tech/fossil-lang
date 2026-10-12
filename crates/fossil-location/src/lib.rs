@@ -41,8 +41,8 @@
 //!
 //! Because no two of its five readers share anything else: the checker
 //! (`fossil-hir`, resolving a shape document), the host that registers those
-//! documents (`fossil-df`'s executor), the pre-compile introspection
-//! (`fossil-introspect`), the executor (`fossil-df`), and the editor
+//! documents (`fossil-df`'s executor), the pre-compile profiling
+//! (`fossil-lsp`'s host for `fossil-profile`), the executor (`fossil-df`), and the editor
 //! (`fossil-lsp`). Anywhere higher and at least one of them would have to keep
 //! a copy — which is exactly how three of them came to exist.
 //!

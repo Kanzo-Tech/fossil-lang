@@ -12,6 +12,9 @@ artefacts. Every door boots the module itself:
   which of them reads a file as `'data'` or as `'schema'`, by extension. `formatFor` is pure: a host
   asks the module for the list once and filters a whole listing with it. The role is required
   because one extension names two formats — a `.ttl` is `rdf` as data and `shacl` as a schema.
+- `runProfiler(sources, query, { options, signal })` — `fossil-profile`'s plan over some sources,
+  each query run by `query` on the host's engine, a phase's queries at once: the profile the language
+  server reads natively, in the page. `@fossil-lang/profile` is what a host calls; this is its loop.
 - `initFossilWasm(bytes)` — Node only: hand over the `.wasm`. A bundled host never calls it.
 
 ## One program in one editor: `openProgram`
@@ -23,7 +26,7 @@ import { fossil } from '@fossil-lang/codemirror-fossil';
 const program = await openProgram('job.fossil', { host, text });   // host: Host
 const extensions = fossil(program, { onNavigate });
 
-program.registerIntrospection(await introspect(await program.inputs(), { host, engine }));
+program.registerProfile(await profile(await program.inputs(), { host, engine, options: { depth: 'types' } }));
 ```
 
 It boots the module, opens `uri` in its own workspace, and reads the documents the text names

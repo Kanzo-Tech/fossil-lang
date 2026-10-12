@@ -98,7 +98,7 @@ arrow = "58"
 bytes = "1"
 
 # === The native engine — NATIVE ONLY ===
-# `fossil-introspect` is the one crate on a normal edge; `fossil-df` keeps it
+# `fossil-lsp` is the one crate on a normal edge; `fossil-df` and `fossil-profile` keep it
 # as a dev-dependency, to read a written corpus back or to bring an engine to a
 # test. `deny.toml`'s
 # `duckdb` wrappers list is the enforced version of that sentence.
@@ -152,8 +152,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 # === Dev / testing ===
 expect-test = "1"
 # Native temp dirs for integration tests that write Parquet to disk and read it
-# back via duckdb — `fossil-df`, `fossil-introspect` and `fossil-lsp`, which
-# are its three dev-dependents. Native-only
+# back via duckdb — `fossil-df`, `fossil-profile` and `fossil-lsp`, among its
+# dev-dependents. Native-only
 # (uses a real filesystem); no `tests/` target is built for wasm32.
 tempfile = "3"
 

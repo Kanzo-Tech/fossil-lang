@@ -19,13 +19,12 @@ argument is four sentences:
 
 ## Where each engine is reachable from
 
-Measured 2026-08-25 with `cargo tree -e normal -i <engine> --workspace`, the authority here and never
+Measured 2026-10-12 with `cargo tree -e normal -i <engine> --workspace`, the authority here and never
 prose.
 
 | crate | reaches `duckdb` | `wasm32` | what it is |
 | --- | --- | --- | --- |
-| `fossil-introspect` | **directly** | no | the `DESCRIBE`, and the credentials that reach a cloud source |
-| `fossil-lsp` | via `fossil-introspect` | no | a host: it checks a program against the columns it reads |
+| `fossil-lsp` | **directly** | no | a host: it runs `fossil-profile`'s `DESCRIBE`s, and checks a program against the columns they find |
 
 **There is no native write host** ([discarded](/docs/design/discarded#the-tooling) says why and what
 brings one back). The one host that writes is `fossil-df-wasm`, in a browser tab or in Node, so the

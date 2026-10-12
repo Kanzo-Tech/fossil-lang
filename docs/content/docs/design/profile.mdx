@@ -1,8 +1,8 @@
 ---
 title: Profile, and the mapping a model proposes
-description: "fossil's half of Kanzo Tasks: one sans-IO profiler inside the wasm gate, run by both hosts on their own DuckDB, in place of introspect; and a mapping spec in RML's shape from which Fossil is emitted, so a model never writes syntax."
+description: "fossil's half of Kanzo Tasks: one sans-IO profiler inside the wasm gate, run by both hosts on their own DuckDB, which replaced introspect; and a mapping spec in RML's shape from which Fossil is emitted, so a model never writes syntax."
 direction:
-  summary: "A source is read one way — one sans-IO profiler inside the wasm gate, whose queries each host runs on its own DuckDB — and a mapping a model proposes is a spec Fossil is emitted from."
+  summary: "A mapping a model proposes is a spec in RML's shape, whose every name comes from a profile, and Fossil is emitted from it."
 ---
 
 Kanzo's assistant and its Ask become one pattern, a *Task*: a small model in the browser fills a
@@ -28,8 +28,8 @@ inclusion dependencies are the edges. Both are read on a sample for the preview 
 in the background, so on a large file they are *candidates* until the full check agrees, and a
 verdict that changes reaches the person as an assumption to review, not as a silent edit.
 
-**It is written once, sans-IO.** Introspect is two implementations today — `crates/fossil-introspect`
-for the language server and `@fossil-lang/introspect` over DuckDB-WASM — kept in agreement by
+**It is written once, sans-IO.** Introspect was two implementations — a crate for the language
+server and a package over DuckDB-WASM — kept in agreement by
 generating the reader and the type table into both from `catalogue.bnf` ([Three
 hosts](/docs/design/three-hosts)). That works because a `DESCRIBE` has no logic to agree on. A profile
 does: which pairs of columns to test, how to prune them by type, how to read the counts back. Two
@@ -45,24 +45,25 @@ while let Some(query) = plan.next_query() { // DESCRIBE, counts, inclusions
 let profile = plan.finish();                // types, keys, inclusions, samples
 ```
 
-The browser reaches it through `fossil-wasm` and runs each query on the page's DuckDB-WASM;
-`fossil-lsp` calls it natively and runs them with the `duckdb` crate. `@fossil-lang/introspect`
-becomes `@fossil-lang/profile`, a loop of a few lines. When it lands, the paragraph of [Three
-hosts](/docs/design/three-hosts) that says the two introspecting hosts share data and not code is
-rewritten: they share the code, and only the engine differs.
+`fossil-lsp` runs it natively with the `duckdb` crate
+(`crates/fossil-lsp/src/profile.rs, profile_and_register`). The browser reaches it through
+`fossil-wasm`'s `Profiler` and runs each query on the page's DuckDB-WASM: `runProfiler` in
+`@fossil-lang/wasm` is the loop (`packages/wasm/src/profile.ts, runProfiler`), and
+`@fossil-lang/profile` reads each source under its credential and hands the plan its name
+(`packages/profile/src/index.ts, profile`). The two hosts share the code, and only the engine
+differs ([Three hosts](/docs/design/three-hosts)).
 
-**It is inside the wasm gate, on purpose.** `fossil-introspect` is outside the closure — a
-dependency of `fossil-lsp` and a dev-dependency of `fossil-df`, never of `fossil-wasm` or
-`fossil-df-wasm` — because it links DuckDB. `fossil-profile` links no engine, so it is a dependency
-of `fossil-wasm` and the gate watches it from its first commit. Checked on 2026-10-12 with a
-skeleton (`Profiler::new`, `next_query`, `feed`, `finish`, depending on `smol_str` alone) wired into
-`fossil-wasm`: `cargo xtask wasm-check` derived 18 crates with `fossil-profile` among them and passed
-(`crates/xtask/src/main.rs, wasm_check`). The skeleton was not committed; the crate lands with its
-first query.
+**It is inside the wasm gate, on purpose.** The engine stays with the host: `fossil-lsp` links
+DuckDB, and nothing that depends on `fossil-profile` links one through it — its own tests take DuckDB
+on a dev edge. So `fossil-profile` is a dependency of `fossil-wasm`, and the gate has watched it from
+its first commit (`crates/xtask/src/main.rs, wasm_check`). A `native` feature carrying the engine
+was the other shape, and cargo's feature unification is why it is not: one dependent enabling it
+links DuckDB into every build of the crate, the wasm one included.
 
 **What would reverse it:** a query only one host can run. Then that query is marked per host, and
-the module is still one. A host that cannot afford the statistics gets a mode of Profile — types
-only, which is introspect's answer today — not a second package.
+the module is still one. A host that cannot afford the statistics gets a mode of Profile —
+`Options::TYPES`, one `DESCRIBE` a source, which is what the editor asks for on every keystroke —
+not a second package.
 
 ## The mapping is a spec, and Fossil is emitted
 
@@ -89,7 +90,7 @@ spec stays only if a screen still needs its rows.
 ## Order
 
 The profiler and the mapping spec are phase 2 of Kanzo Tasks, after the evaluation set and Ask's
-resolver: `fossil-profile` with its two hosts in place of introspect; the spec and its emitter with
-its round trips; and, on keasy's side, the executor moved off the page's main thread into a worker of
-its own — today `run` constructs `FossilExecutor` in whatever realm calls it, and keasy calls it from
-the page.
+resolver. `fossil-profile` with its two hosts is built, and introspect is gone. Still to come: the
+spec and its emitter with their round trips; and, on keasy's side, the executor moved off the page's
+main thread into a worker of its own — `run` constructs `FossilExecutor` in whatever realm calls it,
+and keasy calls it from the page.

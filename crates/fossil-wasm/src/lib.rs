@@ -24,6 +24,9 @@
 //! | [`WasmWorkspace::definition`]  | `Array<Location>`                    | `textDocument/definition`  |
 //! | [`WasmWorkspace::semantic_tokens`] | `Array<{ range, kind, modifiers }>` | `textDocument/semanticTokens/full` |
 //!
+//! Beside the workspace, [`profile::JsProfiler`] — `Profiler` to JS — is
+//! `fossil-profile`'s plan, whose queries a host runs on its own DuckDB-WASM.
+//!
 //! The last four are the [`ide`] module: the `fossil-ide` answers the native
 //! LSP serves, as ordinary method calls, because a tab that already
 //! calls `diagnostics()` in-process should not have to stand up an LSP client to ask
@@ -59,6 +62,7 @@
 #![allow(clippy::result_large_err)]
 
 pub mod ide;
+pub mod profile;
 pub mod tokenize;
 mod wasm_system;
 mod workspace;
@@ -263,7 +267,8 @@ fn busy(method: &str) -> Failure {
 // The types the signatures above name, from the one place they are declared.
 #[wasm_bindgen(typescript_custom_section)]
 const WIRE_TYPES: &str = "import type { Diagnostic, CompletionItem, Format, Hover, Input, \
-    Location, SemanticToken, Token } from '@fossil-lang/types';\n\
+    Location, Profile, ProfileOptions, ProfileQuery, ProfileSource, SemanticToken, Token } \
+    from '@fossil-lang/types';\n\
     import type { MissingDocument } from '@fossil-lang/types/internal';";
 
 /// A value this crate built, as plain JS data. A serialiser refusing one is

@@ -33,7 +33,7 @@ fn is_normal_edge(dep: &Value) -> bool {
 ///
 /// The walk is over the WHOLE resolve graph, not just workspace members: the
 /// interesting paths are precisely the ones that leave the workspace and come
-/// back (`fossil-lsp` → `fossil-introspect` → `duckdb`, where the middle hop is
+/// back (`fossil-df` → `fossil-lsp` → `duckdb`, where the middle hop is
 /// a member, and equally a path through a registry crate).
 ///
 /// # Panics
@@ -94,8 +94,8 @@ pub fn reachers(meta: &Value, dependency: &str, edges: Edges) -> BTreeSet<String
 /// the gate, and one it stops depending on leaves.
 ///
 /// Normal edges only: a dev-dependency is built for a test on the host, never
-/// for wasm32. It put `fossil-introspect` (and `DuckDB` under it) in the gate
-/// the day `fossil-df`'s tests took it.
+/// for wasm32. Counting dev edges put a `DuckDB` host in the gate the day
+/// `fossil-df`'s tests took one.
 ///
 /// # Panics
 ///

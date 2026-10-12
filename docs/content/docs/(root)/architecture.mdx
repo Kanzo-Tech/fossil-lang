@@ -91,27 +91,29 @@ drawn flat show nothing. The ugliness is the finding, not a failure of the drawi
 
 ```mermaid
 graph LR
-  L["<b>language</b> · 10 crates<br/>base · location · syntax · hir · mir<br/>lineage · descriptors-input · descriptors-output<br/>shex · graph-schema"]
+  L["<b>language</b> · 11 crates<br/>base · location · syntax · hir · mir<br/>lineage · descriptors-input · descriptors-output<br/>shex · graph-schema · profile"]
   E["<b>editor</b> · 3 crates<br/>ide · lsp · wasm"]
-  M["<b>engine</b> · 3 crates<br/>df · df-wasm · introspect"]
+  M["<b>engine</b> · 2 crates<br/>df · df-wasm"]
   C["<b>corpus</b> · 3 crates<br/>sinks · storage · storage-wasm"]
   X["<b>no home</b> · 1 crate<br/>xtask"]
 
-  E -->|20| L
-  E -->|1| M
-  M -->|12| L
+  E -->|22| L
+  M -->|8| L
   M -->|3| C
   C -->|2| L
 ```
 
-**38 cross-group edges**, and no pair runs both ways. Every number above
+**35 cross-group edges**, and no pair runs both ways. Every number above
 is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
 likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
 reads the manifests and fails the build on any figure in this diagram that stops holding.
 
-The single `editor → engine` edge is `fossil-lsp → fossil-introspect`, and it is deliberate: without
-the columns a `DESCRIBE` finds, the editor is silent on every diagnostic whose evidence is a source's
-schema, which is pinned by `crates/fossil-lsp/tests/introspected_diagnostics.rs`.
+No edge runs from the editor to the engine. The editor links `DuckDB` itself, and it is deliberate:
+`fossil-lsp` runs `fossil-profile`'s plan on a connection of its own
+(`crates/fossil-lsp/src/profile.rs, profile_and_register`), because without the columns a
+`DESCRIBE` finds the editor is silent on every diagnostic whose evidence is a source's schema, which
+is pinned by `crates/fossil-lsp/tests/introspected_diagnostics.rs`. The plan itself is a language
+crate: it links no engine, and the browser runs it too.
 
 The arrow between engine and corpus runs one way:
 

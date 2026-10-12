@@ -6,7 +6,7 @@
 //!
 //! - **check** — a [`System`] over the real filesystem, with the whole provider
 //!   registry (`fossil_descriptors_output::PROVIDERS`) and a descriptor cache
-//!   `fossil_introspect::pre_introspect_and_register` fills before the compile,
+//!   `fossil_lsp::profile::profile_and_register` fills before the compile,
 //!   and every shape document the program names registered from disk. It is the
 //!   editor's view of a program: forward-propagated source types, every
 //!   diagnostic, and [`render_diagnostics`] drawing them as `fossil check` drew
@@ -61,7 +61,7 @@ pub(crate) fn open_db(path: &Path) -> (FossilDb, SourceFile) {
     let file = SourceFile::new(&db, text, path.to_string_lossy().into_owned());
     // A source that cannot be described is skipped, not fatal: the compile then
     // has no forward-propagated type for it, which is what the checker reports.
-    fossil_introspect::pre_introspect_and_register(
+    fossil_lsp::profile::profile_and_register(
         db.system(),
         &fossil_lineage::inputs(&db, file, &HashMap::new()),
     );

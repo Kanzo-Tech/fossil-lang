@@ -2,10 +2,7 @@ import "./boot.js";
 
 import type { Access, Input, Scope, StorageCredential, Table } from "@fossil-lang/types";
 import { describe, expect, it, vi } from "vitest";
-import { introspect, type IntrospectOptions } from "../src/index.js";
-import { buildDescriptor, describeSql, type DescribeRow } from "../src/describe.js";
-import { duckdbPrimitive } from "../src/catalogue.generated.js";
-
+import { profile, type ProfileIO } from "../src/index.js";
 
 /** Rows as the columns an engine answers in. */
 function tableOf(rows: readonly Record<string, unknown>[]): Table {
@@ -24,116 +21,7 @@ function tableOf(rows: readonly Record<string, unknown>[]): Table {
   };
 }
 
-describe("duckdbPrimitive", () => {
-  it("maps integer family to integer", () => {
-    for (const t of ["INTEGER", "BIGINT", "INT", "SMALLINT", "TINYINT", "HUGEINT"]) {
-      expect(duckdbPrimitive(t)).toBe("integer");
-    }
-  });
-
-  it("maps float family + DECIMAL(p,s) to Float", () => {
-    for (const t of ["DOUBLE", "FLOAT", "REAL", "DECIMAL(10,2)"]) {
-      expect(duckdbPrimitive(t)).toBe("float");
-    }
-  });
-
-  it("maps temporal + boolean types", () => {
-    expect(duckdbPrimitive("BOOLEAN")).toBe("bool");
-    expect(duckdbPrimitive("DATE")).toBe("date");
-    expect(duckdbPrimitive("TIMESTAMP")).toBe("date_time");
-    expect(duckdbPrimitive("TIMESTAMP WITH TIME ZONE")).toBe("date_time");
-    expect(duckdbPrimitive("DATETIME")).toBe("date_time");
-    expect(duckdbPrimitive("TIME")).toBe("time");
-  });
-
-  it("falls back to String for VARCHAR + unknown types, case/space-insensitive", () => {
-    expect(duckdbPrimitive("VARCHAR")).toBe("string");
-    expect(duckdbPrimitive("  text ")).toBe("string");
-    expect(duckdbPrimitive("STRUCT(a INT)")).toBe("string");
-  });
-});
-
-describe("describeSql", () => {
-  it("single-quote-escapes the url", () => {
-    expect(describeSql("o'brien.csv", "csv")).toBe(
-      "DESCRIBE SELECT * FROM read_csv_auto('o''brien.csv')",
-    );
-  });
-
-  it("carries the reader option under DuckDB's name for it", () => {
-    expect(describeSql("u.csv", "csv", "|")).toBe(
-      "DESCRIBE SELECT * FROM read_csv_auto('u.csv', delim='|')",
-    );
-    expect(describeSql("u.json", "json", "|")).toBe(
-      "DESCRIBE SELECT * FROM read_json_auto('u.json')",
-    );
-  });
-
-  it("reads through the table function the constructor names", () => {
-    expect(describeSql("https://x/u.csv", "csv")).toBe(
-      "DESCRIBE SELECT * FROM read_csv_auto('https://x/u.csv')",
-    );
-    expect(describeSql("https://x/u.json", "json")).toBe(
-      "DESCRIBE SELECT * FROM read_json_auto('https://x/u.json')",
-    );
-    expect(describeSql("https://x/u.parquet", "parquet")).toBe(
-      "DESCRIBE SELECT * FROM read_parquet('https://x/u.parquet')",
-    );
-  });
-});
-
-describe("buildDescriptor", () => {
-  it("maps DESCRIBE rows to a descriptor keyed by URI, with no token", () => {
-    const rows: DescribeRow[] = [
-      { column_name: "id", column_type: "INTEGER" },
-      { column_name: "name", column_type: "VARCHAR" },
-      { column_name: "joined", column_type: "TIMESTAMP" },
-    ];
-    expect(buildDescriptor("data/users.csv", rows, "csv")).toEqual({
-      key: "data/users.csv",
-      columns: [
-        { name: "id", primitive: "integer" },
-        { name: "name", primitive: "string" },
-        { name: "joined", primitive: "date_time" },
-      ],
-      etag: "",
-    });
-  });
-
-  it("carries the host's etag through when it supplies one", () => {
-    const rows: DescribeRow[] = [{ column_name: "id", column_type: "INT" }];
-    expect(buildDescriptor("u.csv", rows, "csv", 'W/"abc"').etag).toBe(
-      'W/"abc"',
-    );
-  });
-
-  it("types what read_json_auto calls a date or a time as the string the run reads", () => {
-    const rows: DescribeRow[] = [
-      { column_name: "born", column_type: "DATE" },
-      { column_name: "seen", column_type: "TIMESTAMP WITH TIME ZONE" },
-      { column_name: "n", column_type: "BIGINT" },
-    ];
-    expect(buildDescriptor("u.json", rows, "json").columns).toEqual([
-      { name: "born", primitive: "string" },
-      { name: "seen", primitive: "string" },
-      { name: "n", primitive: "integer" },
-    ]);
-    expect(buildDescriptor("u.csv", rows, "csv").columns[0]).toEqual({ name: "born", primitive: "date" });
-  });
-
-  it("drops columns with empty/missing names", () => {
-    const rows: DescribeRow[] = [
-      { column_name: "ok", column_type: "INT" },
-      { column_name: "", column_type: "INT" },
-      { column_type: "INT" },
-    ];
-    expect(buildDescriptor("s.csv", rows, "csv").columns).toEqual([
-      { name: "ok", primitive: "integer" },
-    ]);
-  });
-});
-
-describe("introspect", () => {
+describe("profile", () => {
   const W = "s3://bucket/w/";
   const users: Input = {
     role: "data",
@@ -167,12 +55,12 @@ describe("introspect", () => {
    *  records every statement but the `httpfs` probe, which it answers as loaded. */
   function fakeIO(
     query: (sql: string) => Promise<Record<string, unknown>[]>,
-    overrides: Partial<IntrospectOptions> = {},
+    overrides: Partial<ProfileIO> = {},
     vend: (scope: Scope) => StorageCredential[] = () => [credential(W)],
   ) {
     const sql: string[] = [];
     const credentials = vi.fn(async (scope: Scope, _access: Access) => vend(scope));
-    const io: IntrospectOptions = {
+    const io: ProfileIO = {
       host: { connections: async () => ({ w: W }), credentials },
       engine: {
         query: async (text) => {
@@ -183,6 +71,7 @@ describe("introspect", () => {
         registerFiles: async () => {},
         dropFiles: async () => {},
       },
+      options: { depth: "types" },
       ...overrides,
     };
     return { io, credentials, sql };
@@ -197,7 +86,7 @@ describe("introspect", () => {
         : [{ column_name: "total", column_type: "DOUBLE" }],
     );
 
-    const { descriptors } = await introspect([users, orders], io);
+    const { descriptors } = await profile([users, orders], io);
 
     expect(credentials).toHaveBeenCalledTimes(1);
     expect(credentials).toHaveBeenCalledWith({ connection: "w" }, "read", { signal: expect.any(AbortSignal) });
@@ -223,7 +112,7 @@ describe("introspect", () => {
 
   it("describes a public source with no connection as it is, asking the host nothing", async () => {
     const { io, credentials, sql } = fakeIO(async () => [{ column_name: "id", column_type: "INT" }]);
-    const { descriptors } = await introspect(
+    const { descriptors } = await profile(
       [{ role: "data", binding: "p", key: "https://x.test/p.csv", location: "https://x.test/p.csv", format: "csv" }],
       io,
     );
@@ -234,7 +123,7 @@ describe("introspect", () => {
 
   it("describes a parquet source as parquet, and carries a csv source's delimiter", async () => {
     const { io, sql } = fakeIO(async () => [{ column_name: "ts", column_type: "TIMESTAMP" }]);
-    await introspect(
+    await profile(
       [
         { role: "data", binding: "e", key: "@w/e.parquet", location: `${W}e.parquet`, connection: "w", format: "parquet" },
         { ...users, option: "|" },
@@ -250,7 +139,7 @@ describe("introspect", () => {
   it("does not describe a materialised source, and asks the host nothing for none", async () => {
     const query = vi.fn(async () => []);
     const { io, credentials, sql } = fakeIO(query);
-    const { descriptors } = await introspect(
+    const { descriptors } = await profile(
       [{ role: "data", binding: "g", key: "@w/g.ttl", location: `${W}g.ttl`, connection: "w", format: "rdf" }],
       io,
     );
@@ -259,10 +148,17 @@ describe("introspect", () => {
     expect(sql).toEqual([]);
   });
 
+  it("runs the whole plan when no depth is asked for: the counts after the DESCRIBEs", async () => {
+    const { io, sql } = fakeIO(async () => [{ column_name: "id", column_type: "BIGINT" }], { options: undefined });
+    const { profile: profiled } = await profile([users], io);
+    expect(sql.some((s) => s.startsWith("SELECT CAST(count(*) AS VARCHAR)"))).toBe(true);
+    expect(profiled.sources.map((s) => s.descriptor.key)).toEqual(["@w/users.csv"]);
+  });
+
   it("asks the host for an etag per source", async () => {
     const etag = vi.fn((source: Input) => `etag-for-${source.key}`);
     const { io } = fakeIO(async () => [{ column_name: "id", column_type: "INT" }], { etag });
-    const { descriptors } = await introspect([users], io);
+    const { descriptors } = await profile([users], io);
     expect(etag).toHaveBeenCalledWith(users);
     expect(descriptors[0]?.etag).toBe("etag-for-@w/users.csv");
   });
@@ -287,7 +183,7 @@ describe("introspect", () => {
     const unvended: Input = { ...users, binding: "u", connection: "gone" };
     const bare: Input = { role: "data", binding: "b", key: "b.csv", location: "b.csv", format: "csv" };
 
-    const { descriptors, undescribed } = await introspect([unvended, orders, parquet, bare], io);
+    const { descriptors, undescribed } = await profile([unvended, orders, parquet, bare], io);
 
     expect(undescribed.map((u) => [u.source.binding, u.problem.code])).toEqual([
       ["u", "storage/no-credential"],
@@ -311,7 +207,7 @@ describe("introspect", () => {
       const { io } = fakeIO(async () => [], {
         host: { connections: async () => ({}), credentials: () => new Promise(() => {}) },
       });
-      const outcome = introspect([users], io);
+      const outcome = profile([users], io);
       await vi.advanceTimersByTimeAsync(30_000);
       const { undescribed } = await outcome;
       expect(undescribed.map((u) => u.problem.code)).toEqual(["storage/host-silent"]);
@@ -333,7 +229,7 @@ describe("introspect", () => {
             })
           : (sql.push(text), Promise.resolve(tableOf(text.includes("duckdb_extensions()") ? [{ loaded: true }] : []))),
     };
-    await expect(introspect([users], io)).rejects.toMatchObject({ name: "AbortError" });
+    await expect(profile([users], io)).rejects.toMatchObject({ name: "AbortError" });
     expect(sql.at(-1)).toMatch(/^DROP SECRET IF EXISTS /);
   });
 });

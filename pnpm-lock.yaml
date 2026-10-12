@@ -169,7 +169,7 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@20.19.41)(@vitest/coverage-v8@4.1.11)(happy-dom@20.14.5)(vite@8.3.1(@types/node@20.19.41)(esbuild@0.28.1)(jiti@2.7.0))
 
-  packages/introspect:
+  packages/profile:
     dependencies:
       '@fossil-lang/storage':
         specifier: workspace:*
@@ -177,6 +177,9 @@ importers:
       '@fossil-lang/types':
         specifier: workspace:*
         version: link:../types
+      '@fossil-lang/wasm':
+        specifier: workspace:*
+        version: link:../wasm
     devDependencies:
       happy-dom:
         specifier: ^20.8.9
@@ -5970,10 +5973,6 @@ snapshots:
 
   fast-uri@3.1.8: {}
 
-  fdir@6.5.0(picomatch@4.0.4):
-    optionalDependencies:
-      picomatch: 4.0.4
-
   fdir@6.5.0(picomatch@4.0.7):
     optionalDependencies:
       picomatch: 4.0.7
@@ -7421,8 +7420,8 @@ snapshots:
 
   tinyglobby@0.2.16:
     dependencies:
-      fdir: 6.5.0(picomatch@4.0.4)
-      picomatch: 4.0.4
+      fdir: 6.5.0(picomatch@4.0.7)
+      picomatch: 4.0.7
 
   tinyglobby@0.2.17:
     dependencies:

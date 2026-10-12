@@ -35,6 +35,7 @@ use std::collections::{HashMap, VecDeque};
 use fossil_base::{NativeReader, RowReader};
 use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
 use fossil_graph_schema::Primitive;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
@@ -44,9 +45,11 @@ pub mod generated;
 pub type Rows = Vec<Vec<Option<String>>>;
 
 /// A source to profile, as its host can read it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(rename = "ProfileSource")]
 pub struct Source {
     /// What the program wrote — what the descriptor is keyed by.
+    #[schemars(with = "String")]
     pub key: SmolStr,
     /// What the host's `DuckDB` reads: the location, or the name the host
     /// attached it under. Storage is the host's; this is only the name.
@@ -61,23 +64,46 @@ pub struct Source {
     pub etag: String,
 }
 
+/// How far a profile goes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(rename = "ProfileDepth")]
+#[serde(rename_all = "lowercase")]
+pub enum Depth {
+    /// The columns and their types, and nothing else: one `DESCRIBE` a source.
+    /// What a host that compiles on every keystroke can afford — the editor.
+    Types,
+    /// Types, counts, keys, inclusions and a sample.
+    #[default]
+    Whole,
+}
+
 /// How much of a source a profile reads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(rename = "ProfileOptions")]
+#[serde(default)]
 pub struct Options {
     /// The rows the counts read from each source; `0` reads every row.
     pub sample: u64,
     /// The rows kept as the profile's sample of each source.
     pub shown: u64,
+    /// How far it goes: the types alone, or the whole profile.
+    pub depth: Depth,
+}
+
+impl Options {
+    /// The columns and their types alone: what the compiler's cache takes.
+    pub const TYPES: Self = Self { sample: 0, shown: 0, depth: Depth::Types };
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self { sample: 10_000, shown: 5 }
+        Self { sample: 10_000, shown: 5, depth: Depth::Whole }
     }
 }
 
 /// One query for the host to run.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(rename = "ProfileQuery")]
 pub struct Query {
     /// What its rows are fed back with.
     pub id: u32,
@@ -85,15 +111,16 @@ pub struct Query {
 }
 
 /// A column's counts, over the rows the profile read.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ColumnStats {
+    #[schemars(with = "String")]
     pub name: SmolStr,
     pub distinct: u64,
     pub nulls: u64,
 }
 
 /// One source, profiled.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceProfile {
     /// Its columns and their types: what the compiler's cache takes.
     pub descriptor: InferredDescriptor,
@@ -102,36 +129,41 @@ pub struct SourceProfile {
     pub sampled: bool,
     pub columns: Vec<ColumnStats>,
     /// The columns that are candidate keys: never null, never repeated.
+    #[schemars(with = "Vec<String>")]
     pub keys: Vec<SmolStr>,
     /// Its first rows, every cell as text, in the descriptor's column order.
     pub sample: Rows,
 }
 
 /// A column of one source and a column of the same or another.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct ColumnRef {
+    #[schemars(with = "String")]
     pub source: SmolStr,
+    #[schemars(with = "String")]
     pub column: SmolStr,
 }
 
 /// Every value of `from` is a value of `to`, which is a candidate key: the
 /// shape of an edge.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct Inclusion {
     pub from: ColumnRef,
     pub to: ColumnRef,
 }
 
 /// A query the host could not run, and what it said.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(rename = "ProfileFailure")]
 pub struct Failure {
     /// The source it was about: for an inclusion, the dependent side's.
+    #[schemars(with = "String")]
     pub source: SmolStr,
     pub reason: String,
 }
 
 /// What the profiler found.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Profile {
     /// Every source that could be described, in the order given.
     pub sources: Vec<SourceProfile>,
@@ -295,6 +327,7 @@ impl Profiler {
 
     fn advance(&mut self) {
         self.phase = match self.phase {
+            Phase::Describe if self.options.depth == Depth::Types => Phase::Done,
             Phase::Describe => {
                 for i in 0..self.states.len() {
                     let columns = &self.states[i].columns;
@@ -536,7 +569,7 @@ mod tests {
     /// The whole plan over two sources, answered by hand: what each count means.
     #[test]
     fn keys_and_inclusions_are_read_from_the_counts() {
-        let mut plan = Profiler::new([csv("awards.csv"), csv("laureates.csv")], Options { sample: 0, shown: 2 });
+        let mut plan = Profiler::new([csv("awards.csv"), csv("laureates.csv")], Options { sample: 0, shown: 2, ..Options::default() });
         let mut answers: HashMap<&str, Rows> = HashMap::from([
             ("DESCRIBE SELECT * FROM read_csv_auto('awards.csv')", rows(&[&["id", "VARCHAR"], &["laureate", "BIGINT"], &["share", "DOUBLE"]])),
             ("DESCRIBE SELECT * FROM read_csv_auto('laureates.csv')", rows(&[&["id", "BIGINT"], &["name", "VARCHAR"]])),
@@ -577,6 +610,18 @@ mod tests {
         // Only pairs of one primitive are tested: no float, and no string against an integer key.
         assert!(asked.iter().all(|q| !q.contains("CAST(\"share\" AS VARCHAR) AS v")));
         assert_eq!(awards.sample.len(), 1);
+    }
+
+    #[test]
+    fn a_types_profile_is_one_describe_a_source_and_nothing_after() {
+        let mut plan = Profiler::new([csv("a.csv")], Options::TYPES);
+        let q = plan.next_query().expect("the DESCRIBE");
+        plan.feed(q.id, &rows(&[&["id", "BIGINT"]]));
+        assert!(plan.next_query().is_none(), "no counts, no inclusions, no sample");
+        assert!(plan.is_done());
+        let profile = plan.finish();
+        assert_eq!(profile.sources[0].descriptor.columns.len(), 1);
+        assert_eq!(profile.sources[0].rows, None);
     }
 
     #[test]
