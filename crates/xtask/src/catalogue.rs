@@ -949,9 +949,9 @@ pub fn emit_base(rows: &[Row]) -> String {
     out
 }
 
-/// `fossil-introspect`: the `duckdb` table as `duckdb_primitive`.
+/// `fossil-profile`: the `duckdb` table as `duckdb_primitive`.
 #[must_use]
-pub fn emit_introspect(cat: &Catalogue) -> String {
+pub fn emit_profile(cat: &Catalogue) -> String {
     let mut out = header(
         "//! What a `DuckDB` `DESCRIBE` column type means on the lattice — the\n\
          //! `duckdb` table of `catalogue.bnf`.",
@@ -1357,8 +1357,8 @@ pub fn generated() -> Vec<(PathBuf, String)> {
             rustfmt(&emit_descriptors(rows)),
         ),
         (
-            root.join("crates/fossil-introspect/src/generated.rs"),
-            rustfmt(&emit_introspect(&cat)),
+            root.join("crates/fossil-profile/src/generated.rs"),
+            rustfmt(&emit_profile(&cat)),
         ),
         (
             root.join("crates/fossil-hir/src/stdlib/generated.rs"),

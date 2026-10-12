@@ -33,7 +33,7 @@ use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
 use fossil_lineage::Input;
 use smol_str::SmolStr;
 
-pub mod generated;
+use fossil_profile::generated;
 
 /// The rows this host can `DESCRIBE`: the ones `catalogue.bnf` gives a
 /// `reads native <fn>`.

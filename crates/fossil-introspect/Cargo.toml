@@ -27,6 +27,9 @@ fossil-lineage = { path = "../fossil-lineage" }
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 # `Primitive`, the lattice a DuckDB column type maps onto.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
+# `generated::read_primitive` — what a DESCRIBE's type means, generated from
+# `catalogue.bnf` once, into the profiler that replaces this crate.
+fossil-profile = { path = "../fossil-profile" }
 # The engine that DESCRIBES, on this side of the seam. The browser's side is the
 # host's DuckDB-WASM, reached through `@fossil-lang/introspect` — same engine,
 # same dialect, which is what lets both sides read their type table out of `catalogue.bnf`.

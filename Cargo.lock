@@ -1945,6 +1945,7 @@ dependencies = [
  "fossil-descriptors-input",
  "fossil-graph-schema",
  "fossil-lineage",
+ "fossil-profile",
  "smol_str",
  "tempfile",
  "tracing",
@@ -2002,6 +2003,19 @@ dependencies = [
  "fossil-syntax",
  "salsa",
  "smol_str",
+]
+
+[[package]]
+name = "fossil-profile"
+version = "0.1.0"
+dependencies = [
+ "duckdb",
+ "fossil-base",
+ "fossil-descriptors-input",
+ "fossil-graph-schema",
+ "serde",
+ "smol_str",
+ "tempfile",
 ]
 
 [[package]]
@@ -2094,6 +2108,7 @@ dependencies = [
  "fossil-ide",
  "fossil-lineage",
  "fossil-mir",
+ "fossil-profile",
  "fossil-syntax",
  "getrandom 0.3.4",
  "js-sys",
