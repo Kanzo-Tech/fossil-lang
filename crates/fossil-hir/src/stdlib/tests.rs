@@ -250,8 +250,8 @@ fn catalog_is_bidirectionally_complete() {
         missing.is_empty() && extra.is_empty(),
         "catalog must equal the declared set exactly.\n  MISSING: {missing:?}\n  EXTRA: {extra:?}"
     );
-    // 1 + 12 + 6 + 6 + 13 = 38 surface functions.
-    assert_eq!(catalog.len(), 38);
+    // 6 + 5 + 6 + 12 = 29 surface functions.
+    assert_eq!(catalog.len(), 29);
     // The FOUR io/ constructors on top, not three. `io.rdf` reads rows like the
     // other three and had no row here at all while the registry stated its `io.`
     // half by hand — so a program writing `io.rdf(...)` in a value position got
@@ -259,7 +259,7 @@ fn catalog_is_bidirectionally_complete() {
     //
     // `io.shex` and `io.shacl` are still absent, and deliberately: they give
     // back a shape document, which `SigTy` has no spelling for.
-    assert_eq!(r.iter().count(), 38 + 4);
+    assert_eq!(r.iter().count(), 29 + 4);
 }
 
 /// **Every name the language has deleted, pinned so that none can come back.**
