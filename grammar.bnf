@@ -29,9 +29,9 @@
 (*    a rule.                                                          *)
 (*                                                                     *)
 (*    `|>` DIES, and the member call is the spelling. The two          *)
-(*    others that reach a production — naming a shape document is      *)
-(*    mandatory, and the user declares no functions — are stated at    *)
-(*    the production they bind.                                        *)
+(*    others that reach a production — every output type is declared   *)
+(*    in the program or imported from a shape document, and the user  *)
+(*    declares no functions — are stated at the production they bind.  *)
 (*                                                                     *)
 (*  THE CONFORMANCE SET is `docs/programs/` — 30 programs with         *)
 (*  their shape documents and data, 6 of which are expected to fail    *)
@@ -190,8 +190,9 @@ LBRACE, RBRACE := '{' '}'
    appropriate `id`.
 
    Two names are accepted, by two productions, and the position tells them
-   apart: `@rename` above a type binding, `@subject` as the first line of a
-   mapping body. Any other name is an error. *)
+   apart: `@iri` above a type declaration and before each of its fields,
+   `@subject` as the first line of a mapping body. Any other name is an
+   error. *)
 AT_ATTR        := '@' IDENT
 
 
@@ -204,20 +205,15 @@ Program             := TopLevel* EOF
 TopLevel            := SourceDef
                      | MultiSourceDef
                      | TypeDef
+                     | TypeDecl
                      | Mapping
 
-(* `@rename` is NOT a fifth alternative, and looking for one here is the
-   mistake this note exists to stop. `TypeDef := RenameAttr* 'type' …` below,
-   so `@rename(…) type { … } := …` already derives from `TopLevel` through
-   `TypeDef`. What the `RenameAttr*` prefix changed is the FIRST set —
-   `TypeDef` now starts with `AT_ATTR` as well as with the contextual `type` —
-   which is a fact about the parser's dispatch and not about this production.
-
-   LL(1) survives it. `AT_ATTR` has exactly one derivation at top level:
-   `SubjectAssign`, the other thing that lexes as one, sits inside a
-   `MappingBody`, which is reachable only through an `INDENT`. That is
-   disambiguation rule 6 — one token, two names, POSITION decides — and it is
-   why neither name needs a token of its own. *)
+(* `TypeDecl` starts with `AT_ATTR` (its `@iri`), and LL(1) survives it:
+   `AT_ATTR` has exactly one derivation at top level. `SubjectAssign` and a
+   `Field`'s `IriAttr`, the other things that lex as one, sit inside a body
+   reachable only through an `INDENT`. That is disambiguation rule 6 — one
+   token, two names, POSITION decides — and it is why neither name needs a
+   token of its own. *)
 
 (* There is no PrefixDecl. `prefix ex: <http://example.org/>` introduced the
    CURIE, and the CURIE is gone from every position it held: a shape name, a
@@ -251,45 +247,78 @@ TopLevel            := SourceDef
    other verb carries the names it was given. *)
 SourceDef           := IDENT DEFINE Expression
 
-(* Destructuring source: one binding per shape declared by the source schema.
-   Binding is POSITIONAL — the Nth name binds the Nth shape the document
-   declares, and the name is a free local label.
+(* Destructuring source: one binding per shape the source's schema declares,
+   for an RDF source read through its shapes. Each member is bound BY NAME, the
+   same rule as `TypeDef` below and with the same `ImportMember`.
 
-   No conformance program spells one: every source in the 26 is single-shape
+   No conformance program spells one: every source in the set is single-shape
    (`io.csv`, `io.json`). It stays because the type side below is the same
-   production in type position and the two must not drift apart. *)
-MultiSourceDef      := LBRACE IDENT (COMMA IDENT)* RBRACE DEFINE Expression
+   member list in type position and the two must not drift apart. *)
+MultiSourceDef      := LBRACE ImportMember (COMMA ImportMember)* RBRACE DEFINE Expression
 
-(* Type binding: the same destructuring, in type position. `type` is NOT a
-   reserved word — at top level `IDENT LBRACE` is free, and the next token
-   separates this from `SourceDef` (`:=` directly after the name) and from a
-   mapping header (`:`). That matters: `type` is a plausible column name in a
-   language whose commonest predicate is `rdf:type`.
+(* Type import: the shapes of a document somebody else maintains, used as it
+   is. `type` is NOT a reserved word — at top level `IDENT LBRACE` is free, and
+   the next token separates this from `SourceDef` (`:=` directly after the
+   name), from a mapping header (`:`) and from a declaration (`type IDENT`).
+   That matters: `type` is a plausible column name in a language whose
+   commonest predicate is `rdf:type`.
 
-   Naming a shape document is MANDATORY. A bare
-   property key takes its name from a predicate that a shape declares, so
-   without a shape you cannot write a single property, and a program with no
-   `type` binding has no mapping. *)
-TypeDef             := RenameAttr* 'type'
-                       LBRACE IDENT (COMMA IDENT)* RBRACE DEFINE Expression
+   Every output type is DECLARED in the program (`TypeDecl`) or IMPORTED here.
+   A bare property key takes its name from a predicate one of the two names,
+   so without either there is no property to write, and a program with
+   neither has no mapping. *)
+TypeDef             := 'type' LBRACE ImportMember (COMMA ImportMember)* RBRACE
+                       DEFINE Expression
 
-(* The short name of a property is the last segment of the predicate IRI that
-   the shape declares. Two predicates whose last segments coincide are an
-   ERROR naming both IRIs — never disambiguated by the compiler, because the
-   alternative is measured: FSharp.Data's numeric-suffix scheme and its
-   singulariser produced `Purchasis` and renamed members across a minor
-   version, breaking a program in production (PLDI 2016 §6.5). The repair is
-   the author's, it is all constants, and it sits above the declaration in the
-   shape of Prisma's `@map`:
+(* A member is bound BY NAME: the IDENT is the LOCAL NAME of a shape the
+   document declares — the last segment of its IRI, so `geo:Place` and
+   `<https://geo.example/Place>` are both `Place` — and `as` names it in the
+   program. It is the rule a property's name already follows. A name the
+   document does not declare is an error listing the ones it does; two shapes
+   whose local names coincide are an error naming both IRIs, never
+   disambiguated by the compiler — FSharp.Data's numeric-suffix scheme produced
+   `Purchasis` and renamed members across a minor version (PLDI 2016 §6.5). The
+   repair is to DECLARE the type, with the IRI it needs in `@iri`.
 
-       @rename(Person, "http://xmlns.com/foaf/0.1/name" as foaf_name)
-       type { Person } := io.shex("mixed.shex")
+   It was positional — the Nth name took the Nth shape, whatever it was
+   called — and reordering a document rebound the program. *)
+ImportMember        := IDENT ('as' IDENT)?
 
-   It goes in the program and not in the `.shex` because the vocabulary may
-   not be yours. AT_ATTR here must be `@rename`; the IDENT is one of the names
-   this binding introduces. *)
-RenameAttr          := AT_ATTR LPAREN IDENT (COMMA Rename)+ RPAREN
-Rename              := STRING 'as' IDENT
+(* Type declaration: an output type written in the program. One header, and a
+   body with one field per line, indented as a mapping's body is. There is no
+   `=`: it assigns a value, and a declaration assigns nothing.
+
+       @iri("https://schema.org/Person")
+       type Person
+           @iri("https://schema.org/name")          name: String
+           @iri("https://shop.example/vocab/name")  handle: String
+           @iri("https://schema.org/birthDate")     born: Option<Date>
+
+   Every IRI is written, whole, in a string: the type's, above it, and each
+   field's, on the field's line — F#'s `[<Attr>] Name: string`. A missing one is
+   an error. There is no base it could fall back to and no prefix it could
+   expand through (there is no PrefixDecl, below), so a name nobody wrote never
+   becomes an IRI. The field's NAME is what the program writes, so two
+   predicates whose last segments coincide (`schema:name`, `shop:name`) are two
+   fields with two names and collide nowhere.
+
+   A declared type and an imported one are the same thing below the parser:
+   both lower to the neutral shape vocabulary the checker reads, and the
+   checker never learns which one it got. *)
+TypeDecl            := IriAttr 'type' IDENT NEWLINE INDENT Field+ DEDENT
+Field               := IriAttr IDENT SHAPE_SEP TypeExpr NEWLINE
+IriAttr             := AT_ATTR LPAREN STRING RPAREN
+
+(* The type of a field, in the names the checker already prints: a primitive
+   (`String`, `Integer`, `Float`, `Bool`, `Date`, `DateTime`, `Time`, `GYear`,
+   `AnyUri`), and three constructors — `Option<T>` zero or one, `Seq<T>` zero or
+   more, `Ref<T>` a reference to a node of the declared or imported type `T`,
+   which is an edge. A bare `T` is exactly one. Which names are valid in which
+   position is the checker's: `Ref<String>` parses and is refused.
+
+   `<` and `>` are LT and GT; in type position nothing else can follow an
+   IDENT, so they open and close and never compare. *)
+TypeExpr            := IDENT (LT TypeExpr GT)?
 
 (* `as` is one of two survivors of the word (the other is AliasArg, for the
    self-join). It is CONTEXTUAL, not reserved: it is recognised only between
@@ -308,13 +337,13 @@ Mapping             := MappingHeader NEWLINE INDENT MappingBody DEDENT
    noise. *)
 MappingHeader       := IDENT SHAPE_SEP ShapeExpr 'from' Expression
 
-(* The shape is a NAME — one of the names a `type { … }` binding introduced.
+(* The shape is a NAME — one a `type` declaration or import introduced.
    It was `IRIExpr` (a CURIE, an absolute IRI or a template), and it is a name
    now because there is nothing left for the other two to be written against:
-   the vocabulary declaration a CURIE expanded through is gone, and the shape
-   document already names every shape it declares. A header that spelled the
-   IRI would name, a second time and in a second syntax, the very thing the
-   `type { … }` binding above it bound.
+   the vocabulary declaration a CURIE expanded through is gone, and the
+   declaration or the document already names every type. A header that spelled
+   the IRI would name, a second time and in a second syntax, the very thing the
+   `type` above it named.
 
    One shape, not an intersection. `A & B` parsed and then lowered to `A`
    alone, silently, because the lowering took the first IRI and dropped the
@@ -477,7 +506,7 @@ PostfixOp           := DOT Member
 
    It is not a rename either. The compiler does not mint `Person_id` from
    `Person.id`: a generated name is a name nobody wrote, and the numeric-suffix
-   scheme that does it is the one FSharp.Data paid for (see `@rename`). The one
+   scheme that does it is the one FSharp.Data paid for (see `ImportMember`). The one
    suffix that remains is the data's, not the compiler's: a header that names
    one column twice (`Person.id|Person.id`) is described with its second
    occurrence as `Person.id_1`, which is `DuckDB`'s rule for the engine that
@@ -573,22 +602,24 @@ Interpolation       := INTERP_OPEN Expression RBRACE
 (*   only ever one reading. With ABS_IRI gone, `<` no longer even opens.)  *)
 (*                                                                         *)
 (*  5. `type` at top level                                                 *)
-(*     - `type {` → TypeDef.  `type :=` → SourceDef binding the name       *)
-(*       `type`.  `type :` → a mapping called `type`.  One token of        *)
-(*       lookahead, and the word stays available as a column name.         *)
+(*     - `type {` → TypeDef.  `type IDENT` → TypeDecl.  `type :=` →        *)
+(*       SourceDef binding the name `type`.  `type :` → a mapping called   *)
+(*       `type`.  One token of lookahead, and the word stays available as  *)
+(*       a column name.                                                    *)
 (*                                                                         *)
-(*  6. `@rename` vs `@subject`                                             *)
-(*     - Both lex as AT_ATTR; position decides. At top level, immediately  *)
-(*       above a `type` binding → RenameAttr. As the first line inside a   *)
-(*       mapping body → SubjectAssign. Neither name is valid in the        *)
-(*       other's position, and no third name is valid anywhere.            *)
+(*  6. `@iri` vs `@subject`                                                *)
+(*     - Both lex as AT_ATTR; position decides. At top level, above a      *)
+(*       `type IDENT`, and at the start of a line inside a declaration's   *)
+(*       body → IriAttr. As the first line inside a mapping body →         *)
+(*       SubjectAssign. Neither name is valid in the other's position, and *)
+(*       no third name is valid anywhere.                                  *)
 (*                                                                         *)
 (*  7. `as`                                                                *)
-(*     - Contextual, in exactly two places: `STRING as IDENT` inside       *)
-(*       `@rename`, and `IDENT as IDENT` as an argument. In both, an       *)
-(*       operand is followed by a bare IDENT, which no expression can      *)
-(*       continue, so one token of lookahead settles it and `as` stays an  *)
-(*       ordinary identifier everywhere else.                              *)
+(*     - Contextual, in exactly two places: `IDENT as IDENT` in an import  *)
+(*       member, and `IDENT as IDENT` as an argument. In both, an IDENT is *)
+(*       followed by a bare IDENT, which no expression can continue, so    *)
+(*       one token of lookahead settles it and `as` stays an ordinary      *)
+(*       identifier everywhere else.                                       *)
 
 
 (* ═══ RESERVED KEYWORDS (cannot be identifiers) ═══ *)
@@ -613,7 +644,7 @@ Interpolation       := INTERP_OPEN Expression RBRACE
 (*                                                                         *)
 (*  `prefix` and `iri` were reserved and are not. `in`, `use` and `as`     *)
 (*  were reserved for the named-graph clause and the import, and both      *)
-(*  went; `as` came back contextual for the self-join and `@rename`. A     *)
+(*  went; `as` came back contextual for the self-join and the import. A    *)
 (*  word reserved for a form the language does not have costs every        *)
 (*  program that wanted it as a column name.                               *)
 (*                                                                         *)
@@ -650,11 +681,14 @@ Interpolation       := INTERP_OPEN Expression RBRACE
 (*  MutableBinding    — no mutation                                        *)
 (*  FunctionDecl      — the user declares no functions. Polymorphism lives *)
 (*                      in the library only, never in a program            *)
-(*  TypeAnnotation    — no `f :: T -> U` over a value; nothing reads one   *)
+(*  TypeAnnotation    — no `f :: T -> U` over a value; nothing reads one.  *)
+(*                      A type is written only where it is declared: a     *)
+(*                      field of a `TypeDecl`                              *)
 (*  ExportedDefinition— no `@export`; there is no module system to export  *)
 (*                      to, so the marker named nobody                     *)
 (*  PartialPlaceholder— no `f(_, x)`; `_` is an ordinary identifier        *)
-(*  Type parameters   — no generics                                        *)
+(*  Type parameters   — no generics. `Option`, `Seq` and `Ref` are the     *)
+(*                      only constructors, and a program declares none     *)
 (*  `@graph`          — the quad's named graph enters by the same door as  *)
 (*                      `@subject` when the corpus schema has a place to   *)
 (*                      put one. It does not today, so there is no slot.   *)
@@ -668,19 +702,14 @@ Interpolation       := INTERP_OPEN Expression RBRACE
 (*  These are not «not in MVP»: they are forms the language needs and no  *)
 (*  record fixes. Each was hit while writing a production above.          *)
 (*                                                                        *)
-(*  (1 was `@rename`'s repetition — whether it may appear twice over one  *)
-(*   binding and whether one may carry several `STRING as IDENT`. DECIDED *)
-(*   2026-08-12, and permissively: `RenameAttr*` with `(COMMA Rename)+`   *)
-(*   is what the parser implements. The argument is that the alternative  *)
-(*   is a LIMIT, and a limit needs a reason — one repair per binding is   *)
-(*   not a property of anything, and a vocabulary that collides twice is  *)
-(*   the same vocabulary that collided once. `+` and not `*` on `Rename`  *)
-(*   is the one restriction kept: `@rename(Person)` renames nothing and   *)
-(*   would be a line that looks like a repair and is not one.)            *)
+(*  (1 was `@rename`'s repetition. `@rename` went on 2026-10-12 with the  *)
+(*   declared type: a collision is repaired by declaring the type with    *)
+(*   the IRIs it needs, so there is nothing left to rename.)              *)
 (*                                                                        *)
-(*  2. Short destructuring — naming fewer members than the document       *)
-(*     declares. `MultiSourceDef` and `TypeDef` are written as if the     *)
-(*     count must match, because binding is positional; nothing says so.  *)
+(*  (2 was short destructuring — naming fewer members than the document  *)
+(*   declares. DECIDED 2026-10-12 by binding by name: a member names the  *)
+(*   shape it wants, so the document may declare more than it is asked    *)
+(*   for, and the count is nobody's business.)                            *)
 (*                                                                        *)
 (*  (3 was the edge constructor with more than one hole — the binding     *)
 (*   order, and whether an argument is the hole's INPUT or its finished   *)
@@ -693,9 +722,10 @@ Interpolation       := INTERP_OPEN Expression RBRACE
 (*                                                                        *)
 (*   Three reasons, and the last two are the ones that decide it:         *)
 (*                                                                        *)
-(*   - The language then has ONE binding rule. `type { A, B } := …` binds *)
-(*     the Nth name to the Nth declared shape already; by-name binding    *)
-(*     here would be a second idea.                                       *)
+(*   - (It said the language then had ONE binding rule, because          *)
+(*     `type { A, B } := …` bound by position. The import binds by name   *)
+(*     since 2026-10-12, so this reason is gone; the two below decide it  *)
+(*     alone.)                                                            *)
 (*   - By-name would make the hole's SPELLING public API. The identifier  *)
 (*     inside `{…}` is a column of the DEFINING mapping's row; renaming   *)
 (*     it would break every call site that references the type.           *)

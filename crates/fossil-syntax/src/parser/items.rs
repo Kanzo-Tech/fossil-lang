@@ -335,7 +335,7 @@ fn malformed(p: &mut Parser, problem: Problem, help: &str) {
 
 // ───────────────────────────────────────────────────────────────────────
 // RenameAttr := AT_ATTR LPAREN IDENT (COMMA Rename)+ RPAREN
-//                                                     (grammar.bnf, RenameAttr)
+//                                                     (gone from `grammar.bnf` on 2026-10-12, and outstanding here)
 //
 //   @rename(Person, "http://xmlns.com/foaf/0.1/name" as foaf_name)
 //   type { Person } := io.shex("mixed.shex")
@@ -420,7 +420,7 @@ const RENAME_ANCHORS: &[SyntaxKind] = &[
 ];
 
 // ───────────────────────────────────────────────────────────────────────
-// Rename := STRING 'as' IDENT                            (grammar.bnf, Rename)
+// Rename := STRING 'as' IDENT                            (gone from `grammar.bnf` on 2026-10-12)
 //
 // The first of the two places `as` survives, and one of the two that keep it
 // CONTEXTUAL rather than reserved — disambiguation rule 7

@@ -1,8 +1,8 @@
 ---
 title: Profile, and the mapping a model proposes
-description: "fossil's half of Kanzo Tasks: one sans-IO profiler inside the wasm gate, run by both hosts on their own DuckDB, which replaced introspect; and a mapping spec in RML's shape from which Fossil is emitted, so a model never writes syntax."
+description: "fossil's half of Kanzo Tasks: one sans-IO profiler inside the wasm gate, run by both hosts on their own DuckDB, which replaced introspect; and the mapping a model proposes, written in Fossil under a grammar whose names are the profile's and the types'."
 direction:
-  summary: "A mapping a model proposes is a spec in RML's shape, whose every name comes from a profile, and Fossil is emitted from it."
+  summary: "A mapping a model proposes is Fossil written under a grammar whose every name comes from a profile or a declared type, so a name that does not exist cannot be decoded."
 ---
 
 Kanzo's assistant and its Ask become one pattern, a *Task*: a small model in the browser fills a
@@ -105,8 +105,8 @@ returns — RML's, not one of ours ([discarded](/docs/design/discarded)).
 
 ## Order
 
-The profiler and the mapping spec are phase 2 of Kanzo Tasks, after the evaluation set and Ask's
-resolver. `fossil-profile` with its two hosts is built, and introspect is gone. Still to come: the
-spec and its emitter with their round trips; and, on keasy's side, the executor moved off the page's
-main thread into a worker of its own — `run` constructs `FossilExecutor` in whatever realm calls it,
-and keasy calls it from the page.
+The profiler and the mapping grammar are phase 2 of Kanzo Tasks, after the evaluation set and Ask's
+resolver. Both are built: `fossil-profile` with its two hosts, introspect gone, and
+`fossil_ide::constrain`, the grammar of a mapping over a vocabulary. On keasy's side the executor runs
+in a worker of its own. What comes next is the types the grammar's vocabulary reads, declared in the
+program rather than in a `.shex` ([Types declared in the program](/docs/design/declared)).

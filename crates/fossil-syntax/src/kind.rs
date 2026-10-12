@@ -135,7 +135,7 @@ syntax_kinds! {
     TYPE_DEF,
     /// `@rename(Person, "http://xmlns.com/foaf/0.1/name" as foaf_name)` —
     /// `RenameAttr := AT_ATTR LPAREN IDENT (COMMA Rename)+ RPAREN`
-    /// (grammar.bnf, `RenameAttr`).
+    /// (gone from `grammar.bnf` on 2026-10-12, and outstanding here).
     ///
     /// The repair for two predicates whose last IRI segments coincide, in the
     /// shape of Prisma's `@map`: all constants, above the declaration, and in
@@ -149,7 +149,7 @@ syntax_kinds! {
     /// name is valid anywhere.
     RENAME_ATTR,
     /// One `"…" as name` inside a [`SyntaxKind::RENAME_ATTR`] —
-    /// `Rename := STRING 'as' IDENT` (grammar.bnf, Rename).
+    /// `Rename := STRING 'as' IDENT` (gone from `grammar.bnf` on 2026-10-12, and outstanding here).
     ///
     /// The first of the two places `as` survives, and one of the two that make
     /// it CONTEXTUAL rather than reserved: it is recognised between a `STRING`

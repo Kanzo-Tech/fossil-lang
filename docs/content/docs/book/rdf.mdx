@@ -1,0 +1,66 @@
+---
+title: What Fossil supports of RDF
+description: "How far Fossil lines up with RDF: the datatype each type is written as, what of ShEx and SHACL a shape document may use, and what RDF has that Fossil does not."
+---
+
+Fossil writes a graph that can be read as RDF, and it reads its output types from RDF shape documents,
+but it is not an RDF toolkit. This page is where the two line up and where they do not. When it and the
+tree disagree, the tree is right and this page is wrong.
+
+## Literals: one datatype per type
+
+A field's type is one of the primitives the checker knows
+(`crates/fossil-graph-schema/src/lib.rs, Primitive`), and each is written as one XSD datatype.
+
+| Type | Written as | Also read from a shape document as |
+| --- | --- | --- |
+| `String` | `xsd:string` | `xsd:normalizedString`, `xsd:token`, `xsd:language` |
+| `Integer` | `xsd:integer` | `xsd:long`, `xsd:int`, `xsd:short`, `xsd:byte`, `xsd:nonNegativeInteger`, `xsd:positiveInteger`, `xsd:nonPositiveInteger`, `xsd:negativeInteger`, `xsd:unsignedLong`, `xsd:unsignedInt` |
+| `Float` | `xsd:double` | `xsd:decimal`, `xsd:float`, `xsd:double` |
+| `Bool` | `xsd:boolean` | — |
+| `Date` | `xsd:date` | — |
+| `DateTime` | `xsd:dateTime` | `xsd:dateTimeStamp` |
+| `Time` | `xsd:time` | — |
+| `GYear` | `xsd:gYear` | — |
+| `AnyUri` | `xsd:anyURI` | — |
+
+Reading is wider than writing, and the difference loses something. An `xsd:decimal` in a shape is read
+as `Float` and written back as `xsd:double`: the precision a decimal promises is not kept. Any other
+XSD datatype in a shape document narrows nothing; a ShEx document reads it as `String`.
+
+## IRIs and nodes
+
+Every node has an IRI, minted from its mapping's `@subject` template, and every mapping of one type
+mints it the same way ([Identity](/docs/design/identity)). An edge is a reference to that IRI,
+written `T(…)` in a mapping. An `AnyUri` field is an IRI written as a value, not an edge.
+
+There are no blank nodes. A node without an IRI has no key in a vertex table, so a value that would be
+a blank node in RDF is a node with a minted IRI here.
+
+## What a shape document may use
+
+A type can be imported from a ShEx document (`io.shex`) or a SHACL one (`io.shacl`); both are read
+into the same constraint table ([Inference from shapes](/docs/design/shapes)). A shape is its IRI and
+its predicates; a predicate carries its datatype or the shapes it references, and its cardinality.
+
+The decoder rejects, shape by shape, and says which (`crates/fossil-graph-schema/src/shapes.rs, Rejection`):
+
+- a **disjunction** — ShEx `OR` and `OneOf`;
+- a **cycle** of shape references;
+- a reference to a shape the document does not declare;
+- a document that does not parse.
+
+**Closure** (`CLOSED`, `sh:closed`, `EXTRA`) is not read: a property the shape does not declare is
+already an error, so closure could only select what already happens. **SHACL's path** cannot say *one*
+as against *one or more*, so a SHACL document loses that distinction where a ShEx one keeps it.
+
+## What RDF has and Fossil does not
+
+| RDF | In Fossil |
+| --- | --- |
+| Language-tagged strings (`rdf:langString`) | Not written. `core.lang(value, tag)` type-checks and drops the tag |
+| `xsd:decimal` with its precision | Read as `Float`, written as `xsd:double` |
+| Blank nodes | None: every node has an IRI |
+| Named graphs and quads | None: a `fossil/1` corpus is vertex and edge tables |
+| RDF 1.2 triple terms | None ([discarded](/docs/design/discarded)) |
+| Prefixes and CURIEs | None in the language: every IRI is written whole |
