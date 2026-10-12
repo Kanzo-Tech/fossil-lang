@@ -1,0 +1,95 @@
+---
+title: Profile, and the mapping a model proposes
+description: "fossil's half of Kanzo Tasks: one sans-IO profiler inside the wasm gate, run by both hosts on their own DuckDB, in place of introspect; and a mapping spec in RML's shape from which Fossil is emitted, so a model never writes syntax."
+direction:
+  summary: "A source is read one way — one sans-IO profiler inside the wasm gate, whose queries each host runs on its own DuckDB — and a mapping a model proposes is a spec Fossil is emitted from."
+---
+
+Kanzo's assistant and its Ask become one pattern, a *Task*: a small model in the browser fills a
+small artefact under a JSON Schema, a deterministic oracle checks it, and a bounded loop repairs it or
+asks the person. The pattern, its API and the decisions about the model are kanzo-ui's, on [Tasks in
+the design of Kanzo UI](https://kanzo-tech.github.io/ui/docs/design/tasks); the assistant's screens
+are keasy's. This page is the part that lives here: what fossil computes so that the model has less to
+guess, and what the model hands fossil instead of a program.
+
+## What the assistant guesses today
+
+Keasy's wizard asks one call for a whole program. The model sees column types — all `introspect`
+answers is a `DESCRIBE` — and nothing else: not which column is a key, not which column of one
+source holds the values of another. So it invents the keys and the edges, and the checker reads the
+result afterwards. Every one of those guesses is a fact of the data that a query could have
+answered.
+
+## Profile replaces introspect
+
+**A profile is what a source is: its columns and types, its candidate keys, the inclusions between
+its columns and another source's, and a few sample rows.** Unique column combinations are the keys;
+inclusion dependencies are the edges. Both are read on a sample for the preview and checked whole
+in the background, so on a large file they are *candidates* until the full check agrees, and a
+verdict that changes reaches the person as an assumption to review, not as a silent edit.
+
+**It is written once, sans-IO.** Introspect is two implementations today — `crates/fossil-introspect`
+for the language server and `@fossil-lang/introspect` over DuckDB-WASM — kept in agreement by
+generating the reader and the type table into both from `catalogue.bnf` ([Three
+hosts](/docs/design/three-hosts)). That works because a `DESCRIBE` has no logic to agree on. A profile
+does: which pairs of columns to test, how to prune them by type, how to read the counts back. Two
+copies of that would drift. So `fossil-profile` decides which queries to run and interprets their
+answers, and runs nothing — the shape of `h11` and `quinn-proto`:
+
+```rust
+let mut plan = Profiler::new(&sources);
+while let Some(query) = plan.next_query() { // DESCRIBE, counts, inclusions
+    let rows = host.run(&query)?;           // native DuckDB or DuckDB-WASM
+    plan.feed(query.id, &rows);
+}
+let profile = plan.finish();                // types, keys, inclusions, samples
+```
+
+The browser reaches it through `fossil-wasm` and runs each query on the page's DuckDB-WASM;
+`fossil-lsp` calls it natively and runs them with the `duckdb` crate. `@fossil-lang/introspect`
+becomes `@fossil-lang/profile`, a loop of a few lines. When it lands, the paragraph of [Three
+hosts](/docs/design/three-hosts) that says the two introspecting hosts share data and not code is
+rewritten: they share the code, and only the engine differs.
+
+**It is inside the wasm gate, on purpose.** `fossil-introspect` is outside the closure — a
+dependency of `fossil-lsp` and a dev-dependency of `fossil-df`, never of `fossil-wasm` or
+`fossil-df-wasm` — because it links DuckDB. `fossil-profile` links no engine, so it is a dependency
+of `fossil-wasm` and the gate watches it from its first commit. Checked on 2026-10-12 with a
+skeleton (`Profiler::new`, `next_query`, `feed`, `finish`, depending on `smol_str` alone) wired into
+`fossil-wasm`: `cargo xtask wasm-check` derived 18 crates with `fossil-profile` among them and passed
+(`crates/xtask/src/main.rs, wasm_check`). The skeleton was not committed; the crate lands with its
+first query.
+
+**What would reverse it:** a query only one host can run. Then that query is marked per host, and
+the module is still one. A host that cannot afford the statistics gets a mode of Profile — types
+only, which is introspect's answer today — not a second package.
+
+## The mapping is a spec, and Fossil is emitted
+
+**The model does not write Fossil.** It fills a mapping spec in the shape of RML's triples maps — a
+source, a subject template, and per property a column or an expression, or a join — whose every name
+is an enum from the Profile and the target shapes. `fossil-mapping` emits the program from it,
+deterministically, and the program goes through the same checker, ShEx conformance and dry run as a
+program written by hand. Whoever wants to edit Fossil by hand still can, in keasy's *Advanced*, under
+the same checks.
+
+Two consequences. The emitter always produces valid Fossil, so a syntax error is no longer something
+a model can cause. And everything the model writes is JSON under a schema, which is the one kind of
+constraint the browser's model runtime enforces — so there is no need to project `grammar.bnf` into
+a decoding grammar.
+
+**The emitter's coverage is the risk.** The spec has to say what real programs say: joins,
+`parse.*`, the identity annotations. It is held by round trips over the four examples — spec →
+Fossil → checker → the same corpus as the program written by hand — as expect tests.
+
+**What would reverse it:** a small model given Fossil's grammar that passes the gold set's
+competency questions at the same rate as spec-then-emit. Then the model writes the program, and the
+spec stays only if a screen still needs its rows.
+
+## Order
+
+The profiler and the mapping spec are phase 2 of Kanzo Tasks, after the evaluation set and Ask's
+resolver: `fossil-profile` with its two hosts in place of introspect; the spec and its emitter with
+its round trips; and, on keasy's side, the executor moved off the page's main thread into a worker of
+its own — today `run` constructs `FossilExecutor` in whatever realm calls it, and keasy calls it from
+the page.
