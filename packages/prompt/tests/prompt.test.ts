@@ -87,7 +87,7 @@ describe('every form the prompt calls gone is refused by the checker', () => {
   const errors = async (text: string): Promise<string[]> => {
     const program = await openProgram('https://prompt.test/forbidden.fossil', { host, text });
     try {
-      program.registerIntrospection({
+      program.registerProfile({
         descriptors: [
           {
             key: 'users.csv',
