@@ -2062,7 +2062,9 @@ impl<'db> Expr<'db> {
                     if matches!(kind, TyKind::Primitive(Primitive::String))
                         && matches!(op, BinOp::Add)
                     {
-                        d = d.with_help("strings are joined by interpolation, `\"{a} {b}\"`, not `+`");
+                        d = d.with_help(
+                            "strings are joined by interpolation, `\"{a} {b}\"`, not `+`",
+                        );
                     }
                     let eg = self.raise(d);
                     poisoned = Some(eg);
