@@ -308,9 +308,8 @@ fn resolve_leaf_row<'db>(
 
     // There is no fallback below this: a source with no INFERRED descriptor has
     // no row, and that is not an error — it is every schemaless program in the
-    // tree. The host introspects
-    // (`fossil_lsp::profile::profile_and_register`, the browser's
-    // `registerInferredDescriptor`), and what it finds arrives above.
+    // tree. The host profiles the sources (the browser's `registerProfile`)
+    // and what it finds arrives above.
     Ok(None)
 }
 

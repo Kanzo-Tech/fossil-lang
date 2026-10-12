@@ -60,7 +60,7 @@ units, the units CodeMirror indexes in.
 ## Two layers of colour
 
 `tokenize()` paints first and needs no workspace. `semanticTokens()` — the same
-`fossil-ide` answer the language server sends, as absolute rows with the legend's
+`fossil-ide` answer an LSP client would get, as absolute rows with the legend's
 names — is laid over it, the way rust-analyzer's tokens sit over a TextMate grammar:
 
 | semantic kind | tag |

@@ -102,11 +102,14 @@ fn no_crate_links_an_engine_without_declaring_it() {
     let mut failures = Vec::new();
     for (engine, declared) in &policy {
         let linkers = depgraph::reachers(&meta, engine, Edges::Linking);
+        // An engine no crate links is one only tests bring in — `duckdb`, since
+        // the language server went. The walk must still find it over some edge,
+        // or the ban outlived the dependency or the walk is broken.
         assert!(
-            !linkers.is_empty(),
-            "no workspace crate reaches `{engine}` over a normal edge at all, yet \
-             deny.toml declares wrappers for it. Either the ban outlived the \
-             dependency (delete the entry) or the graph walk is broken."
+            !depgraph::reachers(&meta, engine, Edges::Any).is_empty(),
+            "no workspace crate reaches `{engine}` over any edge, yet deny.toml \
+             declares wrappers for it. Either the ban outlived the dependency \
+             (delete the entry) or the graph walk is broken."
         );
         let undeclared: Vec<&String> = linkers.difference(declared).collect();
         if !undeclared.is_empty() {

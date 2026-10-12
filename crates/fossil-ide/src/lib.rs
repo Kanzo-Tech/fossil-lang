@@ -1,8 +1,7 @@
 //! `fossil-ide` — hover, completion, goto-def, code actions for IDE features.
 //!
-//! The crate exists so both editor hosts — `fossil-lsp` (the native server) and
-//! `fossil-wasm` (the browser worker) — answer a question once. Each is a
-//! transport with a host attached; neither owns an answer.
+//! The crate answers each editor question once, transport-free, so the host
+//! (`fossil-wasm`, the browser worker) only translates. It owns no answer.
 //!
 //! The hover bridge:
 //!

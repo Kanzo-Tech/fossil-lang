@@ -39,12 +39,10 @@
 //!
 //! # Why it is its own crate
 //!
-//! Because no two of its five readers share anything else: the checker
-//! (`fossil-hir`, resolving a shape document), the host that registers those
-//! documents (`fossil-df`'s executor), the pre-compile profiling
-//! (`fossil-lsp`'s host for `fossil-profile`), the executor (`fossil-df`), and the editor
-//! (`fossil-lsp`). Anywhere higher and at least one of them would have to keep
-//! a copy — which is exactly how three of them came to exist.
+//! Because no two of its readers share anything else: the checker (`fossil-hir`,
+//! resolving a shape document), the executor that registers those documents and
+//! reads the sources (`fossil-df`), and the browser host (`fossil-wasm`). Anywhere
+//! higher and one of them would have to keep a copy.
 //!
 //! It was a module of `fossil-base`, and that was the mistake this crate
 //! undoes. rust-analyzer's `base-db` states the invariant plainly — it *"doesn't

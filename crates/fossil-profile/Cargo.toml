@@ -29,7 +29,7 @@ serde = { workspace = true }
 smol_str = { workspace = true }
 
 [dev-dependencies]
-# The engine its tests run the plan on, as the language server does. A dev
+# The engine its tests run the plan on. A dev
 # edge: nothing that depends on this crate links a database through it.
 duckdb = { workspace = true }
 tempfile = { workspace = true }

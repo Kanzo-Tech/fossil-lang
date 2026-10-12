@@ -75,8 +75,7 @@ pub fn completions(
     db: &dyn fossil_base::Db,
     // The open-file set. It fed `prefix_completions`, the one source that was
     // cross-file; nothing left here reads past `file`, and the parameter stays
-    // because it is `fossil-lsp`'s call shape and the next cross-file source
-    // (shape names from a `type` binding in a sibling file) wants it back.
+    // for the next cross-file source (a type declared in a sibling file).
     _files: &[SourceFile],
     file: SourceFile,
     line: u32,

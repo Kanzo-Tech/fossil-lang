@@ -88,8 +88,7 @@ impl HostDb {
 }
 
 /// The introspected `users` row, registered by the HOST before the compile —
-/// what `fossil_lsp::profile::profile_and_register` and the browser's
-/// `registerInferredDescriptor` do for real. Its `name` column is
+/// what the browser's `registerProfile` does for real. Its `name` column is
 /// `Integer`; see `SHEX_SRC` for why it is not `String` any more.
 fn register_users(db: &dyn fossil_base::Db) {
     use fossil_descriptors_input::{InferredColumn, InferredDescriptor};

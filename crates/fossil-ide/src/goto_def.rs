@@ -38,15 +38,15 @@
 //! answering nothing takes them nowhere.
 //!
 //! [`NavigationTarget`] carries no precision flag, because no consumer could
-//! act on one — `fossil-lsp` and `fossil-wasm` both translate `{file, range}`
-//! into an `lsp_types::Location` and nothing else. `0..0` IS the flag, and it
+//! act on one — the host translates `{file, range}` into an
+//! `lsp_types::Location` and nothing else. `0..0` IS the flag, and it
 //! is one every consumer already understands.
 //!
 //! # Domain boundary
 //!
 //! Returns Fossil-domain [`NavigationTarget`]s (`{ file, range: Range<u32> }`),
 //! NEVER `lsp_types::Location` — the byte→UTF-16 range translation happens in
-//! `fossil-lsp` via [`crate::position::position`], so this stays
+//! the host via [`crate::position::position`], so this stays
 //! transport-free and WASM-clean. No new Salsa query is added: the
 //! `WorkspaceIndex` is a plain struct built by a CST walk, and the two document
 //! paths read queries that the checker already runs for this file
@@ -77,7 +77,7 @@ use fossil_hir::documents::registry_key;
 
 /// A goto-def navigation target: the owning file + the byte range.
 ///
-/// `fossil-lsp` translates `range` to a UTF-16 `lsp_types::Range` and pairs it
+/// The host translates `range` to a UTF-16 `lsp_types::Range` and pairs it
 /// with the file URI to build a `lsp_types::Location`.
 ///
 /// **`range == 0..0` means "this file, position unknown"** — see the module

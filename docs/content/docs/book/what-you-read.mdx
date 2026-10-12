@@ -54,11 +54,10 @@ with nothing in it.
 file: not a guess, not a cached schema somebody wrote down in a config.
 
 The reading is the host's job, and every host does it: the executor reads each source it is handed
-before it compiles, a browser editor reads the file with DuckDB-WASM, and `fossil-lsp` goes and
-looks at any source it can `stat` (`crates/fossil-lsp/src/profile.rs, profile_and_register`). The gap left is a
-source that is not on disk — a CSV on `s3://`, or behind an `https://` — which the editor declines to
-fetch on its message loop, so there a run refuses things your editor does not, and
-[in your editor](/docs/book/editor) measures it.
+before it compiles, and the editor's host reads each one with DuckDB-WASM under the credential it
+holds for it. The gap left is a source the host could not read — a missing file, storage it cannot
+reach — which the editor reports as a warning with no columns, so there a run refuses things your
+editor did not check; [in your editor](/docs/book/editor) says how.
 
 ## A name that is not an identifier
 

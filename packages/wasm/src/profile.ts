@@ -1,7 +1,7 @@
 /**
  * `fossil-profile`'s plan, run on the host's engine: the wasm `Profiler` hands out each phase's
  * queries, the host's `query` answers them, and the profile is what the answers say. The plan is
- * the one the language server runs on native DuckDB; this is only the loop.
+ * Rust; this is only the loop.
  */
 import { Profiler } from '../pkg/fossil_wasm.js';
 import type { Profile, ProfileOptions, ProfileSource } from '@fossil-lang/types';

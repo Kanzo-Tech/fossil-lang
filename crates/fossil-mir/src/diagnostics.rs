@@ -2,13 +2,8 @@
 //!
 //! # Why this is a crate function and not three copies of a loop
 //!
-//! «What is wrong with this program» was written three times: once in the
-//! native CLI's `check`, once in `fossil-lsp`'s `diagnostics_for`, once in
-//! `fossil-wasm`'s `diagnostics_for_file`. The two editor copies were
-//! byte-identical to each other, comments included, and both were the SHORT
-//! version — a per-mapping drain and nothing else. The engine's was the long
-//! one, and every line it had that they did not was a line added to close a
-//! measured hole:
+//! «What is wrong with this program» is one question, and a per-mapping drain
+//! is not its whole answer. Each line below closes a measured hole:
 //!
 //! - **A file with no mapping reported nothing.** Salsa accumulates over a
 //!   query's dependency subtree, and `parse` is only in the subtree of a

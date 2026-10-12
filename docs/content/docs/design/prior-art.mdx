@@ -194,7 +194,7 @@ parameter it takes is argued in [the dot](/docs/design/the-dot).
 
 | source | what it settles |
 | --- | --- |
-| **`lsp-server` against `tower-lsp`** | The ergonomic framework had roughly three years without maintenance, and all three reference implementations use the low-level library. The ban is explicit so that reintroducing it takes a decision rather than an import. |
+| **`lsp-server` against `tower-lsp`** | What a native language server is built on if one returns ([discarded](/docs/design/discarded#the-tooling)): the ergonomic framework had roughly three years without maintenance, and all three reference implementations use the low-level library. |
 | **`@codemirror/lsp-client`** | Probed rather than read: 27 exports and 17 prototype methods, **none** matching semantic tokens; the generic request escape hatch does work. The transferable part is the technique — probe a package by its exports before adopting it. |
 | **Salsa** | The incremental core. The 52% saving borrowed from a comparable project does not transfer, and measuring locally says why: there, compilation *is* the process; here it is two thousandths of a command dominated by process start-up. |
 

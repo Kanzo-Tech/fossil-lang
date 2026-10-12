@@ -50,7 +50,7 @@ impl fossil_base::Db for HostDb {
 }
 
 /// A host that keeps a descriptor table AND decodes shape documents — the two
-/// jobs `fossil-lsp`'s `LspSystem` does. `NativeSystem` alone keeps the table
+/// jobs the browser host's `System` does. `NativeSystem` alone keeps the table
 /// but not the decoder; the bare `System` trait default keeps neither.
 fn host() -> HostDb {
     HostDb {

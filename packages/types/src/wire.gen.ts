@@ -252,8 +252,8 @@ export interface InferredDescriptor {
   columns: InferredColumn[];
   /**
    * An entity tag in RFC 9110's sense (§8.8.3): an opaque validator of the state of the source
-   * this was read from, which may be weak. The cache compares it; nothing interprets it. The
-   * language server writes `mtime` + size, a host that has a strong `ETag` or a content digest
+   * this was read from, which may be weak. The cache compares it; nothing interprets it. A host
+   * that can stat a file writes `mtime` + size, a host that has a strong `ETag` or a content digest
    * writes that instead, and a host that cannot cheaply tell writes `""` — which
    * `crate::DescriptorCache::is_fresh` reads as "never fresh", so that source is re-introspected
    * every time. It is NOT a hash of the bytes, and deliberately: hashing means reading the whole

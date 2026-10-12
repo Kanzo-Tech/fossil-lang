@@ -6,7 +6,7 @@
 //!
 //! - **check** — a [`System`] over the real filesystem, with the whole provider
 //!   registry (`fossil_descriptors_output::PROVIDERS`) and a descriptor cache
-//!   `fossil_lsp::profile::profile_and_register` fills before the compile,
+//!   `profile::profile_and_register` fills before the compile,
 //!   and every shape document the program names registered from disk. It is the
 //!   editor's view of a program: forward-propagated source types, every
 //!   diagnostic, and [`render_diagnostics`] drawing them as `fossil check` drew
@@ -26,6 +26,9 @@
 #![allow(dead_code)]
 // The executor is single-threaded, so its futures are not `Send` and need not be.
 #![allow(clippy::future_not_send)]
+
+#[path = "profile.rs"]
+pub mod profile;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -61,7 +64,7 @@ pub(crate) fn open_db(path: &Path) -> (FossilDb, SourceFile) {
     let file = SourceFile::new(&db, text, path.to_string_lossy().into_owned());
     // A source that cannot be described is skipped, not fatal: the compile then
     // has no forward-propagated type for it, which is what the checker reports.
-    fossil_lsp::profile::profile_and_register(
+    profile::profile_and_register(
         db.system(),
         &fossil_lineage::inputs(&db, file, &HashMap::new()),
     );

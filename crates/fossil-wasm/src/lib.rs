@@ -36,11 +36,8 @@
 //!
 //! ## Architecture
 //!
-//! `fossil-wasm` is the language service IN THE BROWSER — NOT a recompiled
-//! `fossil-lsp` (which has a `compile_error!` cfg-tripwire because
-//! `lsp-server` uses crossbeam + stdio). Both `fossil-lsp` (native, JSON-RPC
-//! over stdio) and `fossil-wasm` (WASM, plain method calls) are thin transport
-//! adapters over the same `fossil-ide` free functions — "one crate, two hosts".
+//! `fossil-wasm` is the language service in the browser: a thin transport
+//! adapter, plain method calls, over the `fossil-ide` free functions.
 //!
 //! ## Why the Workspace lifecycle is fan-out-safe
 //!
@@ -52,8 +49,7 @@
 //! `fossil-hir`'s `invalidation_regression` test is what proves.
 //!
 //! WASM-first is load-bearing, not a port: everything above `fossil-ide` had to
-//! build for `wasm32` before this shim could exist at all, which is why the
-//! `compile_error!` tripwires live on the native-only crates rather than here.
+//! build for `wasm32` before this shim could exist at all.
 
 // `result_large_err`: the pure-Rust half refuses with
 // `fossil_graph_schema::Failure` (144 bytes, over clippy's 128) on the path that
@@ -88,7 +84,7 @@ use crate::workspace::OpenFiles;
 
 /// The Salsa database the WASM host owns.
 ///
-/// Mirrors `fossil-lsp::LspDb`: the Salsa runtime + the host
+/// The Salsa runtime + the host
 /// [`System`] (here [`WasmSystem`]) + the file registry. The target-side `ShEx`
 /// type/properties `fossil-ide` surfaces are reachable because the PROGRAM
 /// names its output document and the host REGISTERS it (see

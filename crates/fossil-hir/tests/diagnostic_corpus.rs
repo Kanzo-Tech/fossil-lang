@@ -228,8 +228,7 @@ fn run_db_wired_fixture(bucket: &str, name: &str) -> String {
     // Introspection cannot run here — `fossil-hir` is WASM-clean and has no
     // `DuckDB`, and these directories have no CSV to introspect anyway. So the
     // host registers what an introspection WOULD have found, which is exactly
-    // what `fossil_lsp::profile::profile_and_register` and the browser's
-    // `registerInferredDescriptor` do before a compile.
+    // what the browser's `registerProfile` does before a compile.
     for entry in def_map(&db, file).sources(&db).clone() {
         if let Some(uri) = entry.uri.as_deref() {
             fossil_base::test_support::register_inferred(
@@ -501,8 +500,7 @@ fn disjunction_rejection_three_branches() {
 // source + typecheck_mapping. `HirExpr::Call` EXISTS now (`lower.rs`), so the
 // premise is stale and the conclusion is unverified — do not read the next
 // sentence as a measurement. The closure-synthesis algorithm and its rendering
-// are proven in-crate (crates/fossil-hir/src/check_tests.rs) and at the LSP
-// hover layer (crates/fossil-lsp/tests/lsp_hover_smoke.rs). These corpus
+// are proven in-crate (crates/fossil-hir/src/check_tests.rs). These corpus
 // fixtures lock the reachable
 // surface: did-you-mean firing on a body column reference that WILL live inside
 // a synthesised closure once the surface lambda form lands. (It said `FieldRef`

@@ -30,9 +30,7 @@ env:
 # `actions-rust-lang/setup-rust-toolchain` exports `RUSTFLAGS=-D warnings` into
 # every later step unless its `rustflags` input says otherwise, so each job that
 # compiles sets `rustflags: ""`. Without it the wasm job ran with the cfg gone,
-# and `cargo test -p fossil-lsp` denied a warning that only its own feature set
-# produces — which is how the didChange budget step went red on a compile error
-# while measuring 5–7ms against its 400ms.
+# and a warning only one crate's feature set produces turned a measuring step red.
 #
 # Warnings are still denied. `clippy` denies them on its own command line below,
 # which is the lint gate; a warning that only `cargo check` sees and clippy does

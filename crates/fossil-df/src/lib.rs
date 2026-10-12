@@ -1117,7 +1117,7 @@ fn source_not_found(uri: &str) -> DataFusionError {
 }
 
 /// A header's names made unique by `DuckDB`'s rule, because `DuckDB` is the
-/// engine that DESCRIBES a source (`fossil-profile`'s plan, in the language server and the browser)
+/// engine that DESCRIBES a source (`fossil-profile`'s plan, on DuckDB-WASM in the browser)
 /// and the checker types a program against what it describes: a name already
 /// taken — compared without case — becomes `name_1`, then `name_2`, and a
 /// generated name that is itself taken grows another suffix. `a|a|a_1|b|a` is

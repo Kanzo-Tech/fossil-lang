@@ -4,7 +4,7 @@
 //! contract, and it had two independent defects; the stdlib source had a third
 //! in the same position. All three are measured here against
 //! `tests/fixtures/shop.shex` — `shop:Person` declaring `shop:email` and
-//! `shop:name` — with the same host `fossil-lsp` installs.
+//! `shop:name` — with the same host `fossil-wasm` installs.
 //!
 //! **The label.** It offered `constraint.predicate`, the raw predicate IRI. A
 //! property key is never the IRI: it is

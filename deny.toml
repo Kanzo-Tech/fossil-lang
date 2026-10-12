@@ -69,7 +69,6 @@ allow-wildcard-paths = true
 deny = [
     # Strike-from-stack list. Each entry carries the reason it is banned.
     { name = "serde_yml", reason = "RUSTSEC-2025-0068; use serde_yaml_ng" },
-    { name = "tower-lsp", reason = "Unmaintained ~3 years; use lsp-server, as all three reference implementations do" },
     { name = "wasm-pack", reason = "Archived July 2025; use wasm-bindgen-cli + Vite" },
     { name = "sqlx", reason = "Not WASM-compatible; out of MVP scope" },
 
@@ -92,7 +91,7 @@ deny = [
     # the banned crate. Everything one hop further away is invisible to it, so
     # for eight months the review this comment claims to force could be skipped
     # by adding the dependency to a crate that already had a native sibling.
-    # Measured 2026-08-25, with `fossil-lsp` freshly given a `fossil-introspect`
+    # Measured 2026-08-25, with the language server freshly given an introspection
     # dependency: `cargo tree -e normal -i duckdb --workspace` showed the editor
     # linking a bundled database, and `cargo deny check bans` printed `bans ok`.
     # `datafusion` had three such crates and had had them far longer.
@@ -120,17 +119,13 @@ deny = [
     # for the level: cargo-deny 0.19.6 offers it only as the CLI flag
     # `--allow unused-wrapper`, which is not scoped to an entry.
     { name = "duckdb", wrappers = [
-        # Links it, directly: `src/profile.rs` runs the profiler's plan on a
-        # connection. A host, and a host is where reading a source belongs.
-        "fossil-lsp",
-        # A direct parent by a DEV edge only — to bring an engine to a test:
-        # `fossil-df`'s reading of the corpus it wrote. Not a ring crossing, and
-        # cargo-deny still counts it as a direct parent.
+        # Direct parents by a DEV edge only, and nothing links it on a normal
+        # one: `fossil-df`'s tests read back the corpus it wrote and describe a
+        # program's sources before checking it (`tests/support/profile.rs`), and
+        # `fossil-profile`'s tests run the profiler's plan on it.
         "fossil-df",
-        # A direct parent by a DEV edge only: its tests run the profiler's plan on
-        # the engine the language server runs it on. The crate itself links none.
         "fossil-profile",
-    ], reason = "The engine layer, plus the hosts that introspect a source before compiling it. The language layer may not link a database: it must start in milliseconds and it must compile to wasm32, and `fossil-base`/`-syntax`/`-hir`/`-mir`/`-ide` are none of them here. `fossil-lsp` is the host beside `fossil-wasm` — a native-only binary outside every wasm closure — and it links `duckdb` to run `fossil-profile`'s plan for the reason the browser runs the same plan on DuckDB-WASM: without the columns a DESCRIBE finds, the editor is silent on every diagnostic whose evidence is a source's schema, which was measured on 2026-08-23 and is pinned by `crates/fossil-lsp/tests/introspected_diagnostics.rs`. It reads only what it can `stat`, never the network. The native CLI that linked it the same way was deleted on 2026-09-30." },
+    ], reason = "The language may not link a database: it must start in milliseconds and compile to wasm32. Since the native language server was deleted on 2026-10-12 no crate links `duckdb` at all; the browser runs `fossil-profile`'s plan on DuckDB-WASM, and the native engine is a test's." },
     { name = "datafusion", wrappers = [
         # Links it, directly.
         "fossil-df",

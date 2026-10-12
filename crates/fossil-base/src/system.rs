@@ -89,13 +89,11 @@ pub enum FsError {
 // `NativeSystem` — a filesystem, a clock and the DEFAULT provider table — lived
 // here beside the trait it implements, and is `crate::test_support` now.
 //
-// It had no production consumer. Measured across the workspace: every mention
-// outside this crate is `#[cfg(test)]`, a `tests/` file, a bench or an example,
-// and the one in `fossil-lsp` is a docblock saying `LspSystem` replaced it. That
-// is not an accident of history — a host that COMPILES a program has to install
-// the rows that read types, and the trait default is the data rows alone, so
-// every real host (`LspSystem`, the wasm workspace's) declares its
-// own. What was left is a fixture: the cheapest `System` a test can stand up.
+// It has no production consumer, and that is not an accident: a host that
+// COMPILES a program has to install the rows that read types, and the trait
+// default is the data rows alone, so the real host (the wasm workspace's)
+// declares its own. What is left is a fixture: the cheapest `System` a test can
+// stand up.
 //
 // A fixture on the crate root is a fixture something will eventually reach for
 // in production, and «in `base` only traits» is the rule that says so.

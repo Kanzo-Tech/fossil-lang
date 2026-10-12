@@ -24,12 +24,11 @@ prose.
 
 | crate | reaches `duckdb` | `wasm32` | what it is |
 | --- | --- | --- | --- |
-| `fossil-lsp` | **directly** | no | a host: it runs `fossil-profile`'s `DESCRIBE`s, and checks a program against the columns they find |
 
 **There is no native write host** ([discarded](/docs/design/discarded#the-tooling) says why and what
 brings one back). The one host that writes is `fossil-df-wasm`, in a browser tab or in Node, so the
-compiler and the write path are both the wasm32 build and neither links a database. **DuckDB is still the engine that `DESCRIBE`s**: natively
-in the language server, and as DuckDB-WASM in a browser editor.
+compiler and the write path are both the wasm32 build and neither links a database. **DuckDB is still the engine that `DESCRIBE`s**: as DuckDB-WASM
+in a browser editor, and natively only under a test.
 
 ## How DataFusion reaches storage
 

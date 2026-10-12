@@ -95,9 +95,7 @@ const DECLARATION: u32 = 1 << 0;
 
 /// The LSP semantic-tokens legend Fossil's `semanticTokensProvider` declares.
 ///
-/// `fossil-lsp` plugs this straight into
-/// `SemanticTokensOptions { legend: fossil_ide::semantic_legend(), .. }` when
-/// registering the capability.
+/// The browser host ships it as the legend `codemirror-fossil` keys on.
 #[must_use]
 pub fn semantic_legend() -> SemanticTokensLegend {
     SemanticTokensLegend {

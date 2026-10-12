@@ -45,17 +45,17 @@ while let Some(query) = plan.next_query() { // DESCRIBE, counts, inclusions
 let profile = plan.finish();                // types, keys, inclusions, samples
 ```
 
-`fossil-lsp` runs it natively with the `duckdb` crate
-(`crates/fossil-lsp/src/profile.rs, profile_and_register`). The browser reaches it through
+The browser reaches it through
 `fossil-wasm`'s `Profiler` and runs each query on the page's DuckDB-WASM: `runProfiler` in
 `@fossil-lang/wasm` is the loop (`packages/wasm/src/profile.ts, runProfiler`), and
 `@fossil-lang/profile` reads each source under its credential and hands the plan its name
-(`packages/profile/src/index.ts, profile`). The two hosts share the code, and only the engine
-differs ([Three hosts](/docs/design/three-hosts)).
+(`packages/profile/src/index.ts, profile`). `fossil-df`'s tests run the same plan on the native
+`duckdb` crate, so the code is shared and only the engine differs
+([Three hosts](/docs/design/three-hosts)).
 
-**It is inside the wasm gate, on purpose.** The engine stays with the host: `fossil-lsp` links
-DuckDB, and nothing that depends on `fossil-profile` links one through it — its own tests take DuckDB
-on a dev edge. So `fossil-profile` is a dependency of `fossil-wasm`, and the gate has watched it from
+**It is inside the wasm gate, on purpose.** The engine stays with the host, and nothing that
+depends on `fossil-profile` links one through it — its own tests and `fossil-df`'s take DuckDB on a
+dev edge. So `fossil-profile` is a dependency of `fossil-wasm`, and the gate has watched it from
 its first commit (`crates/xtask/src/main.rs, wasm_check`). A `native` feature carrying the engine
 was the other shape, and cargo's feature unification is why it is not: one dependent enabling it
 links DuckDB into every build of the crate, the wasm one included.

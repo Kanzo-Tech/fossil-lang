@@ -92,7 +92,7 @@ drawn flat show nothing. The ugliness is the finding, not a failure of the drawi
 ```mermaid
 graph LR
   L["<b>language</b> · 11 crates<br/>base · location · syntax · hir · mir<br/>lineage · descriptors-input · descriptors-output<br/>shex · graph-schema · profile"]
-  E["<b>editor</b> · 3 crates<br/>ide · lsp · wasm"]
+  E["<b>editor</b> · 2 crates<br/>ide · wasm"]
   M["<b>engine</b> · 2 crates<br/>df · df-wasm"]
   C["<b>corpus</b> · 3 crates<br/>sinks · storage · storage-wasm"]
   X["<b>no home</b> · 1 crate<br/>xtask"]
@@ -108,12 +108,10 @@ is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend 
 likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
 reads the manifests and fails the build on any figure in this diagram that stops holding.
 
-No edge runs from the editor to the engine. The editor links `DuckDB` itself, and it is deliberate:
-`fossil-lsp` runs `fossil-profile`'s plan on a connection of its own
-(`crates/fossil-lsp/src/profile.rs, profile_and_register`), because without the columns a
-`DESCRIBE` finds the editor is silent on every diagnostic whose evidence is a source's schema, which
-is pinned by `crates/fossil-lsp/tests/introspected_diagnostics.rs`. The plan itself is a language
-crate: it links no engine, and the browser runs it too.
+No edge runs from the editor to the engine, and the editor links no database: the browser runs
+`fossil-profile`'s plan on DuckDB-WASM, because without the columns a `DESCRIBE` finds the editor is
+silent on every diagnostic whose evidence is a source's schema. The plan itself is a language crate
+that links no engine ([Profile](/docs/design/profile)).
 
 The arrow between engine and corpus runs one way:
 
@@ -142,11 +140,11 @@ The only write host is `fossil-df-wasm`; nothing native writes a corpus.
 ## What is left of the rings
 
 The attractive cut is three numbered rings by where the code runs. It is not the cut, and
-[three hosts](/docs/design/three-hosts) is where the three reference compilers say why. What survives
-is not a ring: one crate with a `cfg` and a written reason — `crates/fossil-lsp/src/lib.rs`,
-because `lsp-server` uses crossbeam and stdio. The second was `fossil-resolver`, refusing wasm32 to
-keep credentials out of the browser; a vended credential is short-lived and prefix-scoped, and
-reaching the browser is what it is for, so the crate became `fossil-storage` and compiles there.
+[three hosts](/docs/design/three-hosts) is where the three reference compilers say why. Nothing survives
+of it: no crate carries a `wasm32` tripwire any more. The last two to refuse were the language server, a stdio transport over crossbeam, which
+was [deleted](/docs/design/discarded#the-tooling), and `fossil-resolver`, refusing wasm32 to keep
+credentials out of the browser; a vended credential is short-lived and prefix-scoped, and reaching
+the browser is what it is for, so the crate became `fossil-storage` and compiles there.
 
 ## A list is not a check
 
@@ -154,7 +152,7 @@ reaching the browser is what it is for, so the crate became `fossil-storage` and
 
 `deny.toml` names six wrappers for `duckdb` and five for `datafusion` (measured 2026-08-25), but
 `cargo deny check bans` matches `wrappers` against the **direct** parents of a banned crate, so a
-crate one hop further away is invisible to it — measured with `fossil-lsp` linking a bundled database
+crate one hop further away is invisible to it — measured with the since-deleted language server linking a bundled database
 while `cargo deny` printed `bans ok`. `crates/xtask/tests/engine_reach.rs` closes it, deriving the
 policy from `deny.toml` and the truth from `cargo metadata`.
 
@@ -249,7 +247,7 @@ about itself is now a module of the one host that used it.
 
 | the name | what it actually is |
 | --- | --- |
-| `fossil-ide` | not an IDE: the set of LSP functions, and it exists only because `fossil-lsp` does not compile to wasm32. It also returns `lsp_types` structs directly (`crates/fossil-ide/src/completion.rs, completions`), which is the invariant rust-analyzer defends hardest and the one Gleam broke |
+| `fossil-ide` | not an IDE: the set of editor functions `fossil-wasm` calls, and it outlived the native language server it was split out for. It also returns `lsp_types` structs directly (`crates/fossil-ide/src/completion.rs, completions`), which is the invariant rust-analyzer defends hardest and the one Gleam broke |
 | `fossil-sinks` | writes nothing: the manifest model — `fossil.json` and its JSON Schema ([its vocabulary is SQL/PGQ's](/docs/design/corpus#the-vocabulary-is-sqlpgqs-declared-and-not-executed)) — and the column table `corpus.bnf` generates |
 
 <Callout title="Deliberately absent">

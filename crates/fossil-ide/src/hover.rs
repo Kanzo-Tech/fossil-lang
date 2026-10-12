@@ -50,7 +50,7 @@ pub struct HoverInfo {
     /// fence + the rendered type kind + an italic provenance line.
     pub markdown: String,
     /// Byte-offset range the hover applies to. Translated to
-    /// `lsp_types::Range` by the LSP handler in `fossil-lsp/src/lib.rs`.
+    /// `lsp_types::Range` by the host.
     pub range: Range<u32>,
 }
 

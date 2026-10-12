@@ -33,8 +33,8 @@ fn is_normal_edge(dep: &Value) -> bool {
 ///
 /// The walk is over the WHOLE resolve graph, not just workspace members: the
 /// interesting paths are precisely the ones that leave the workspace and come
-/// back (`fossil-df` → `fossil-lsp` → `duckdb`, where the middle hop is
-/// a member, and equally a path through a registry crate).
+/// back (a member that depends on another member that links the engine), and
+/// equally a path through a registry crate).
 ///
 /// # Panics
 ///

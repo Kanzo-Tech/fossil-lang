@@ -149,9 +149,10 @@ smol_str = { workspace = true }
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 fossil-sinks = { path = "../fossil-sinks" }
 # `tests/support/native.rs` is the native test host the deleted `fossil` binary
-# was: its check half describes each source before the compile, with the
-# editor's own host for the profiler, and the executor never does.
-fossil-lsp = { path = "../fossil-lsp" }
+# was: its check half describes each source before the compile
+# (`tests/support/profile.rs`, the profiler's plan on `duckdb`), and the
+# executor never does.
+fossil-profile = { path = "../fossil-profile" }
 # The check host's `System::descriptors` names the cache's type.
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 # `tests/census` counts `PROPERTY` nodes in the CST.

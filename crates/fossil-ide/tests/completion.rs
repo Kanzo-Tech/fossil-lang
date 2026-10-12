@@ -21,7 +21,7 @@
 //! a HOST that has done its two jobs for it: installed a decoder row that
 //! claims `.shex`, and REGISTERED the document as a Salsa input before the
 //! query asks for it. That is what `HostDb::new` + [`file`] do here, and it is
-//! what `fossil-lsp` and `fossil-wasm` do in production. A host that skips
+//! what `fossil-wasm` does in production. A host that skips
 //! either one resolves no shape — which is the correct answer, not a bug, and
 //! is why case (a) would otherwise fail silently.
 
@@ -94,7 +94,7 @@ User : Person from users
 ";
 
 /// Intern the program AND register the documents it names — the host's half,
-/// spelled here with the same function `fossil-lsp` and `fossil-wasm` call.
+/// spelled here with the same function `fossil-wasm` calls.
 fn file(db: &mut HostDb, src: &str) -> SourceFile {
     let f = SourceFile::new(db, src.to_string(), "complete.fossil".to_string());
     fossil_hir::documents::register_missing_documents(db, f, &|_, location| {

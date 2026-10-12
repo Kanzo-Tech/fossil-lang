@@ -8,7 +8,7 @@
 //! It needs a HOST that has done its two jobs — installed a decoder row that
 //! claims `.shex`, and REGISTERED the document as a Salsa input before the query
 //! asks for it — which is what `HostDb::new` + [`file`] do here and what
-//! `fossil-lsp` and `fossil-wasm` do in production. `fossil_base::test_support::NativeSystem`
+//! `fossil-wasm` does in production. `fossil_base::test_support::NativeSystem`
 //! is not enough: its provider table reads no types, so every program resolves
 //! no shape and every assertion below would fail for the wrong reason.
 
@@ -85,7 +85,7 @@ Users : Person from User
 ";
 
 /// Intern the program AND register the documents it names — the host's half,
-/// spelled with the same function `fossil-lsp` calls.
+/// spelled with the same function `fossil-wasm` calls.
 fn program(db: &mut HostDb, src: &str) -> SourceFile {
     let path = fixture_dir().join("goto.fossil");
     let f = SourceFile::new(db, src.to_string(), path.to_string_lossy().into_owned());

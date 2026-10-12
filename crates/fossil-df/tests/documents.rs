@@ -136,7 +136,7 @@ fn intern(db: &FossilDb, dir: &Path) -> SourceFile {
         PROGRAM.to_string(),
         dir.join("prog.fossil").to_string_lossy().into_owned(),
     );
-    fossil_lsp::profile::profile_and_register(
+    support::profile::profile_and_register(
         db.system(),
         &fossil_lineage::inputs(db, file, &std::collections::HashMap::new()),
     );
