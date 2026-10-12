@@ -32,7 +32,6 @@ pub struct Mapping {
 
 /// `@rename(Shape, "iri" as name)`: the key `name` writes the predicate `iri` of `shape`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "MappingRename")]
 pub struct Rename {
     pub shape: String,
     pub iri: String,
@@ -41,7 +40,6 @@ pub struct Rename {
 
 /// The shape document, and the types of it the maps write.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "MappingShapes")]
 pub struct Shapes {
     /// The constructor that reads it: `shex` or `shacl`.
     pub format: String,
@@ -52,7 +50,6 @@ pub struct Shapes {
 
 /// One source the program reads.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "MappingSource")]
 pub struct SourceSpec {
     /// The binding every reference to it is qualified by: `User`.
     pub name: String,
@@ -87,7 +84,6 @@ pub struct TriplesMap {
 
 /// A column compared with a literal: `PlaceRow.isPartOf == null`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "MappingCondition")]
 pub struct Condition {
     pub column: Column,
     pub op: Op,
@@ -96,7 +92,6 @@ pub struct Condition {
 
 /// A comparison a condition makes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "MappingOp")]
 pub enum Op {
     #[serde(rename = "==")]
     Eq,
@@ -127,7 +122,6 @@ impl Op {
 
 /// What a column is compared with: `null`, a boolean, a whole number or text.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "MappingLiteral")]
 #[serde(untagged)]
 pub enum Literal {
     Null(()),
@@ -149,7 +143,6 @@ impl Literal {
 
 /// A source joined to a map's rows where `left` equals `right`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "MappingJoin")]
 pub struct Join {
     pub source: String,
     pub left: Column,
@@ -158,7 +151,6 @@ pub struct Join {
 
 /// A column of a source.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "MappingColumn")]
 pub struct Column {
     pub source: String,
     pub column: String,
@@ -166,7 +158,6 @@ pub struct Column {
 
 /// A piece of a subject template.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "SubjectPart")]
 #[serde(untagged)]
 pub enum Part {
     Text { text: String },
@@ -175,7 +166,6 @@ pub enum Part {
 
 /// One property of the type, and where its value comes from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "MappingProperty")]
 pub struct Property {
     /// The property's key: the last segment of a predicate the shape declares.
     pub key: String,
@@ -184,7 +174,6 @@ pub struct Property {
 
 /// A property's value.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "MappingValue")]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum Value {
     /// The column, as it is.

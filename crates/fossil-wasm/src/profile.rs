@@ -1,8 +1,7 @@
 //! `Profiler` — [`fossil_profile::Profiler`] for a JS host: the plan in wasm,
 //! each query run on the page's DuckDB-WASM by the host, and the answers fed
 //! back. `@fossil-lang/profile` is the loop around it; the language server runs
-//! the same plan on native `DuckDB` (`crates/fossil-lsp/src/profile.rs`). And `emitMapping`: the
-//! program a mapping spec is, for a host whose model filled one.
+//! the same plan on native `DuckDB` (`crates/fossil-lsp/src/profile.rs`).
 
 use fossil_graph_schema::js::invalid_argument;
 use fossil_profile::{Options, Rows, Source};
@@ -115,33 +114,4 @@ impl JsProfiler {
 
 fn spent() -> JsValue {
     fossil_graph_schema::js::bug("the profiler was used after `finish`", JsValue::UNDEFINED).into()
-}
-
-/// What `emitMapping` answers: the program, or where in the spec no program could say it.
-#[derive(serde::Serialize)]
-#[serde(untagged)]
-enum Emitted {
-    Program { program: String },
-    Invalid { at: String, message: String },
-}
-
-/// The Fossil program `spec` is — `fossil_mapping::emit`. A spec that is not a program answers
-/// `{ at, message }`, a JSON Pointer into it, for a Task's oracle to send back to its model.
-///
-/// # Errors
-///
-/// `api/invalid-argument` when `spec` is not a `MappingSpec` at all.
-#[wasm_bindgen(js_name = emitMapping, unchecked_return_type = "{ program: string } | { at: string; message: string }")]
-pub fn emit_mapping(
-    #[wasm_bindgen(unchecked_param_type = "MappingSpec")] spec: JsValue,
-) -> Result<JsValue, JsValue> {
-    let spec: fossil_mapping::Mapping = argument("spec", "a MappingSpec", spec)?;
-    let emitted = match fossil_mapping::emit(&spec) {
-        Ok(program) => Emitted::Program { program },
-        Err(invalid) => Emitted::Invalid {
-            at: invalid.at,
-            message: invalid.message,
-        },
-    };
-    to_value("the program", &emitted)
 }

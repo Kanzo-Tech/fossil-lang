@@ -345,129 +345,6 @@ export interface LocationName {
 }
 
 /**
- * A column of a source.
- */
-export interface MappingColumn {
-  column: string;
-  source: string;
-}
-
-/**
- * A column compared with a literal: `PlaceRow.isPartOf == null`.
- */
-export interface MappingCondition {
-  column: MappingColumn;
-  op: MappingOp;
-  value: MappingLiteral;
-}
-
-/**
- * A source joined to a map's rows where `left` equals `right`.
- */
-export interface MappingJoin {
-  left: MappingColumn;
-  right: MappingColumn;
-  source: string;
-}
-
-/**
- * What a column is compared with: `null`, a boolean, a whole number or text.
- */
-export type MappingLiteral = null | boolean | number | string;
-
-/**
- * A comparison a condition makes.
- */
-export type MappingOp = '==' | '!=' | '<' | '<=' | '>' | '>=';
-
-/**
- * One property of the type, and where its value comes from.
- */
-export interface MappingProperty {
-  /**
-   * The property's key: the last segment of a predicate the shape declares.
-   */
-  key: string;
-  value: MappingValue;
-}
-
-/**
- * `@rename(Shape, "iri" as name)`: the key `name` writes the predicate `iri` of `shape`.
- */
-export interface MappingRename {
-  iri: string;
-  name: string;
-  shape: string;
-}
-
-/**
- * The shape document, and the types of it the maps write.
- */
-export interface MappingShapes {
-  /**
-   * The constructor that reads it: `shex` or `shacl`.
-   */
-  format: string;
-  /**
-   * Where it is, as a program writes it: `hello.shex`, `@vocab/person.shex`.
-   */
-  reference: string;
-  types: string[];
-}
-
-/**
- * One source the program reads.
- */
-export interface MappingSource {
-  /**
-   * The reader's option — a CSV's delimiter — when it is not the default.
-   */
-  delimiter?: string;
-  /**
-   * The constructor that reads it: `csv`, `json`, `parquet`.
-   */
-  format: string;
-  /**
-   * The binding every reference to it is qualified by: `User`.
-   */
-  name: string;
-  /**
-   * Where it is, as a program writes it.
-   */
-  reference: string;
-}
-
-/**
- * A whole mapping: what the program imports, reads and writes.
- */
-export interface MappingSpec {
-  maps: TriplesMap[];
-  /**
-   * Predicates a shape declares whose last segment is not the key a map should write.
-   */
-  renames?: MappingRename[];
-  shapes: MappingShapes;
-  sources: MappingSource[];
-}
-
-/**
- * A property's value.
- */
-export type MappingValue = {
-  column: MappingColumn;
-  kind: 'column';
-} | {
-  column: MappingColumn;
-  format?: string;
-  function: string;
-  kind: 'parse';
-} | {
-  column: MappingColumn;
-  kind: 'link';
-  shape: string;
-};
-
-/**
  * A document a program names that the database does not hold yet.
  */
 export interface MissingDocument {
@@ -704,15 +581,6 @@ export interface StorageCredential {
 }
 
 /**
- * A piece of a subject template.
- */
-export type SubjectPart = {
-  text: string;
-} | {
-  column: MappingColumn;
-};
-
-/**
  * One token: its name, and where it is in UTF-16 code units.
  */
 export interface Token {
@@ -732,37 +600,6 @@ export interface Token {
  * `Token`'s `kind`, so it is named `TokenKind` there.
  */
 export type TokenKind = 'Whitespace' | 'Newline' | 'Comment' | 'KwFrom' | 'KwAnd' | 'KwOr' | 'KwNot' | 'AtAttr' | 'True' | 'False' | 'Null' | 'Float' | 'Integer' | 'Ident' | 'String' | 'Define' | 'Eq' | 'Neq' | 'Le' | 'Ge' | 'Assign' | 'Dot' | 'Comma' | 'LParen' | 'RParen' | 'LBrace' | 'RBrace' | 'Lt' | 'Gt' | 'Plus' | 'Minus' | 'Star' | 'Slash' | 'Percent' | 'Question' | 'Colon';
-
-/**
- * One type written from one source: RML's triples map.
- */
-export interface TriplesMap {
-  /**
-   * Sources joined to it, in order, each on one pair of columns.
-   */
-  joins?: MappingJoin[];
-  /**
-   * The mapping's own name: `People`.
-   */
-  name: string;
-  properties: MappingProperty[];
-  /**
-   * The type it writes, one of `Shapes::types`.
-   */
-  shape: string;
-  /**
-   * The source it reads, one of `Mapping::sources`.
-   */
-  source: string;
-  /**
-   * The subject: text and columns, in order — `https://example.org/user/` then `User.id`.
-   */
-  subject: SubjectPart[];
-  /**
-   * The rows it keeps: every condition holds.
-   */
-  where?: MappingCondition[];
-}
 
 /** `fossil_storage::HOST_MS`. */
 export const HOST_MS = 30000;

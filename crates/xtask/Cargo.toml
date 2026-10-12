@@ -35,7 +35,6 @@ fossil-wasm = { path = "../fossil-wasm" }
 fossil-lineage = { path = "../fossil-lineage" }
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 fossil-profile = { path = "../fossil-profile" }
-fossil-mapping = { path = "../fossil-mapping" }
 fossil-storage = { path = "../fossil-storage" }
 fossil-df = { path = "../fossil-df" }
 schemars = { workspace = true }
