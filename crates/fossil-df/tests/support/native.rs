@@ -28,7 +28,7 @@
 #![allow(clippy::future_not_send)]
 
 #[path = "profile.rs"]
-pub mod profile;
+pub(crate) mod profile;
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};

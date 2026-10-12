@@ -31,7 +31,7 @@ fn rows(conn: &duckdb::Connection, sql: &str) -> duckdb::Result<Rows> {
 /// once per key, and register what came back. A source that cannot be described
 /// is skipped: the compile then has no forward propagation for it, which is what
 /// the program's expected diagnostics record.
-pub fn profile_and_register(system: &dyn System, sources: &[Input]) {
+pub(crate) fn profile_and_register(system: &dyn System, sources: &[Input]) {
     let Some(cache) = system.descriptors() else {
         return;
     };
@@ -43,7 +43,8 @@ pub fn profile_and_register(system: &dyn System, sources: &[Input]) {
             let format = input.format.as_deref()?;
             fossil_profile::native_reader(format)?;
             input.binding.as_ref()?;
-            if !std::path::Path::new(&input.location).is_file() || !seen.insert(input.key.as_str()) {
+            if !std::path::Path::new(&input.location).is_file() || !seen.insert(input.key.as_str())
+            {
                 return None;
             }
             Some(Source {
@@ -59,7 +60,9 @@ pub fn profile_and_register(system: &dyn System, sources: &[Input]) {
         return;
     }
     let conn = duckdb::Connection::open_in_memory().expect("an in-memory DuckDB");
-    let profile = fossil_profile::run(wanted, Options::TYPES, |sql| rows(&conn, sql).map_err(|e| e.to_string()));
+    let profile = fossil_profile::run(wanted, Options::TYPES, |sql| {
+        rows(&conn, sql).map_err(|e| e.to_string())
+    });
     for source in profile.sources {
         cache.insert(source.descriptor);
     }
