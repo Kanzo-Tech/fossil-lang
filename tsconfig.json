@@ -2,7 +2,7 @@
   "files": [],
   "references": [
     { "path": "packages/types" },
-    { "path": "packages/introspect" },
-    { "path": "packages/wasm" }
+    { "path": "packages/wasm" },
+    { "path": "packages/profile" }
   ]
 }

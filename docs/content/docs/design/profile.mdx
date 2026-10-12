@@ -1,0 +1,112 @@
+---
+title: Profile, and the mapping a model proposes
+description: "fossil's half of Kanzo Tasks: one sans-IO profiler inside the wasm gate, run by both hosts on their own DuckDB, which replaced introspect; and a mapping spec in RML's shape from which Fossil is emitted, so a model never writes syntax."
+direction:
+  summary: "A mapping a model proposes is a spec in RML's shape, whose every name comes from a profile, and Fossil is emitted from it."
+---
+
+Kanzo's assistant and its Ask become one pattern, a *Task*: a small model in the browser fills a
+small artefact under a JSON Schema, a deterministic oracle checks it, and a bounded loop repairs it or
+asks the person. The pattern, its API and the decisions about the model are kanzo-ui's, on [Tasks in
+the design of Kanzo UI](https://kanzo-tech.github.io/ui/docs/design/tasks); the assistant's screens
+are keasy's. This page is the part that lives here: what fossil computes so that the model has less to
+guess, and what the model hands fossil instead of a program.
+
+## What the assistant guesses today
+
+Keasy's wizard asks one call for a whole program. The model sees column types — all `introspect`
+answers is a `DESCRIBE` — and nothing else: not which column is a key, not which column of one
+source holds the values of another. So it invents the keys and the edges, and the checker reads the
+result afterwards. Every one of those guesses is a fact of the data that a query could have
+answered.
+
+## Profile replaces introspect
+
+**A profile is what a source is: its columns and types, its candidate keys, the inclusions between
+its columns and another source's, and a few sample rows.** Unique column combinations are the keys;
+inclusion dependencies are the edges. Both are read on a sample for the preview and checked whole
+in the background, so on a large file they are *candidates* until the full check agrees, and a
+verdict that changes reaches the person as an assumption to review, not as a silent edit.
+
+**It is written once, sans-IO.** Introspect was two implementations — a crate for the language
+server and a package over DuckDB-WASM — kept in agreement by
+generating the reader and the type table into both from `catalogue.bnf` ([Three
+hosts](/docs/design/three-hosts)). That works because a `DESCRIBE` has no logic to agree on. A profile
+does: which pairs of columns to test, how to prune them by type, how to read the counts back. Two
+copies of that would drift. So `fossil-profile` decides which queries to run and interprets their
+answers, and runs nothing — the shape of `h11` and `quinn-proto`:
+
+```rust
+let mut plan = Profiler::new(&sources);
+while let Some(query) = plan.next_query() { // DESCRIBE, counts, inclusions
+    let rows = host.run(&query)?;           // native DuckDB or DuckDB-WASM
+    plan.feed(query.id, &rows);
+}
+let profile = plan.finish();                // types, keys, inclusions, samples
+```
+
+`fossil-lsp` runs it natively with the `duckdb` crate
+(`crates/fossil-lsp/src/profile.rs, profile_and_register`). The browser reaches it through
+`fossil-wasm`'s `Profiler` and runs each query on the page's DuckDB-WASM: `runProfiler` in
+`@fossil-lang/wasm` is the loop (`packages/wasm/src/profile.ts, runProfiler`), and
+`@fossil-lang/profile` reads each source under its credential and hands the plan its name
+(`packages/profile/src/index.ts, profile`). The two hosts share the code, and only the engine
+differs ([Three hosts](/docs/design/three-hosts)).
+
+**It is inside the wasm gate, on purpose.** The engine stays with the host: `fossil-lsp` links
+DuckDB, and nothing that depends on `fossil-profile` links one through it — its own tests take DuckDB
+on a dev edge. So `fossil-profile` is a dependency of `fossil-wasm`, and the gate has watched it from
+its first commit (`crates/xtask/src/main.rs, wasm_check`). A `native` feature carrying the engine
+was the other shape, and cargo's feature unification is why it is not: one dependent enabling it
+links DuckDB into every build of the crate, the wasm one included.
+
+**What would reverse it:** a query only one host can run. Then that query is marked per host, and
+the module is still one. A host that cannot afford the statistics gets a mode of Profile —
+`Options::TYPES`, one `DESCRIBE` a source, which is what the editor asks for on every keystroke —
+not a second package.
+
+## The mapping is Fossil, and the model cannot write a name that does not exist
+
+**The model writes Fossil, and Fossil is statically typed, so the checker is its oracle.** A wrong
+type, a second `@subject`, a property the shape requires and the mapping leaves out: the checker
+says each, at its span, with the type it expected, and a Task sends that back for a repair. No
+format in front of Fossil could do better, because none of them is typed — RML validates the graph
+after producing it, which is what [types](/docs/design/types) says fossil exists to move earlier.
+
+**What the checker cannot do is stop a name from being invented** — it reports `nmae` after the
+model wrote it. A decoder constrained by a grammar can, and the browser's has one: WebLLM's engine
+(`xgrammar`) takes an EBNF string beside the prompt. So the grammar for one request is the mapping
+productions of `grammar.bnf`, in one canonical layout, with every reference a closed list: the
+sources of the request, each one's columns as its profile reads them, the shapes' types, each
+type's properties, and the catalogue's `parse.*` functions
+(`crates/fossil-ide/src/constrain.rs, mapping_grammar`). A name not on a list cannot be decoded,
+and the prelude — the shapes imported, the sources bound — is the request's, never the model's
+(`crates/fossil-ide/src/constrain.rs, prelude`). `fossil-wasm` answers both as `mappingGrammar`.
+
+**The grammar is a sub-language of Fossil, held from both sides.** Every sentence sampled from it
+parses with the parser every program goes through, three hundred per vocabulary; the conformance
+programs inside its scope, `hello` and `relationship` — joins, links and quoted columns among them —
+are sentences of it; and a column, a property or a type that does not exist is not. It is not a
+second definition of the language: types, cardinality and identity are the checker's, which a
+context-free grammar cannot say.
+
+*Held by* `crates/fossil-ide/tests/constrain.rs`, "every_sentence_it_generates_parses",
+"the_conformance_programs_in_its_scope_are_sentences_of_it",
+"a_name_that_does_not_exist_is_not_a_sentence".
+
+**What it costs:** one layout, so a model cannot align its `=` signs or split a mapping across a
+binding (`Adults := User.where(…)`); the same rows are a `where` on the mapping. And the AI SDK's
+WebLLM provider passes a JSON Schema and not a grammar, so `@kanzo-tech/llm/local` hands the grammar
+to the engine itself.
+
+**What would reverse it:** a model that writes mappings measurably better filling a JSON spec than
+writing grammar-held Fossil with the checker as its oracle, over the evaluation set. Then a spec
+returns — RML's, not one of ours ([discarded](/docs/design/discarded)).
+
+## Order
+
+The profiler and the mapping spec are phase 2 of Kanzo Tasks, after the evaluation set and Ask's
+resolver. `fossil-profile` with its two hosts is built, and introspect is gone. Still to come: the
+spec and its emitter with their round trips; and, on keasy's side, the executor moved off the page's
+main thread into a worker of its own — `run` constructs `FossilExecutor` in whatever realm calls it,
+and keasy calls it from the page.

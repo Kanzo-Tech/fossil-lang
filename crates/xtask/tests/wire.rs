@@ -63,6 +63,11 @@ fn the_wire() {
     generator.subschema_for::<fossil_lineage::Input>();
     generator.subschema_for::<fossil_lineage::Format>();
     generator.subschema_for::<fossil_descriptors_input::InferredDescriptor>();
+    generator.subschema_for::<fossil_profile::Source>();
+    generator.subschema_for::<fossil_profile::Options>();
+    generator.subschema_for::<fossil_profile::Query>();
+    generator.subschema_for::<fossil_profile::Profile>();
+    generator.subschema_for::<fossil_ide::constrain::Vocabulary>();
     generator.subschema_for::<fossil_storage::StorageCredential>();
     generator.subschema_for::<fossil_storage::Access>();
     generator.subschema_for::<fossil_storage::Scope>();

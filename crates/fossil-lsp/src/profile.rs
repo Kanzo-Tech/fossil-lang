@@ -1,55 +1,23 @@
-//! `fossil-introspect` — what a NATIVE host does before it asks the compiler to
-//! compile: read each source's columns. The one native host is the language
-//! server, `fossil-lsp`.
+//! The editor's host for [`fossil_profile`]: the columns of every source a
+//! buffer reads, described on a native `DuckDB` connection before the compile.
 //!
-//! # Why this is a crate and not a module of a host
+//! The plan is the profiler's — which queries describe a source, and what their
+//! answers mean — and the browser runs the same plan on its own DuckDB-WASM
+//! (`/docs/design/profile`). What is this host's is the connection, and when to
+//! skip the work: a source this host cannot `stat`, and one unchanged since it
+//! was last described. The editor asks for [`Options::TYPES`] — one `DESCRIBE` a
+//! source — because it pays on every keystroke; the counts, keys and
+//! inclusions are a whole profile, and the editor does not need them.
 //!
-//! Because the compiler does not introspect. **The host does**, and one host
-//! already proved it: `fossil-wasm` implements
-//! [`fossil_base::System::descriptors`], the browser runs
-//! `@fossil-lang/introspect` against its own DuckDB-WASM, and the registered
-//! descriptors are all the checker ever sees. The native side did the same job
-//! from *inside* a native host, which is what made that crate open a `DuckDB`
-//! connection and carry a `compile_error!` for `wasm32`.
-//!
-//! Moving it does not change what the compiler infers, and that is the point of
-//! this shape rather than a `DataFusion` rewrite: **`DuckDB` is still the engine
-//! that DESCRIBES, on both sides.** What the two sides must agree on — the reader,
-//! its option keyword and what a column type means — is `catalogue.bnf`'s, generated
-//! into both: «the browser and the language server answer the same program
-//! differently» cannot be written down.
-//!
-//! # What this crate is NOT
-//!
-//! It is not a second compiler entry point. It fills a cache and returns
-//! nothing; a compile reads that cache through `System`. The
-//! order — introspect, then compile — is the caller's, and it is the order the
-//! browser has always used.
+//! It fills a cache and returns nothing; a compile reads that cache through
+//! `System`. The order — describe, then compile — is the caller's, and it is the
+//! order the browser has always used.
 
 use std::collections::HashSet;
 
 use fossil_base::System;
-use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
 use fossil_lineage::Input;
-use smol_str::SmolStr;
-
-pub mod generated;
-
-/// The rows this host can `DESCRIBE`: the ones `catalogue.bnf` gives a
-/// `reads native <fn>`.
-///
-/// **Introspection is a `DESCRIBE` through a table function**, so a row that
-/// reads `materialised` — `io.rdf` — has nothing to describe it with and is
-/// correctly absent.
-fn native_reader(format: &str) -> Option<fossil_base::NativeReader> {
-    fossil_base::providers::DATA
-        .iter()
-        .find(|p| p.name == format)
-        .and_then(|p| match p.reads_rows {
-            Some(fossil_base::RowReader::Native(r)) => Some(r),
-            _ => None,
-        })
-}
+use fossil_profile::{Options, Rows, Source};
 
 /// The token that decides whether a cached descriptor still describes its
 /// source: the file's modification time in nanoseconds since the epoch, paired
@@ -85,130 +53,110 @@ fn etag(resolved: &str) -> String {
     )
 }
 
-/// Register an [`InferredDescriptor`] on `system`'s cache for every native
-/// source in `sources`, BEFORE typecheck — keyed by [`Input::key`],
-/// what the program wrote, and read from [`Input::location`]. One
-/// `DESCRIBE` per key: two bindings over one file are one descriptor.
+/// One query's answer on `conn`, every cell as text: the profiler's queries
+/// cast what they select to `VARCHAR`, and a `DESCRIBE`'s columns are text.
+fn rows(conn: &duckdb::Connection, sql: &str) -> duckdb::Result<Rows> {
+    let mut stmt = conn.prepare(sql)?;
+    let mut rows = stmt.query([])?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next()? {
+        let n = row.as_ref().column_count();
+        out.push(
+            (0..n)
+                .map(|i| row.get::<_, Option<String>>(i))
+                .collect::<duckdb::Result<_>>()?,
+        );
+    }
+    Ok(out)
+}
+
+/// Register a descriptor on `system`'s cache for every source in `sources`
+/// that reads through a native reader, BEFORE typecheck — keyed by
+/// [`Input::key`], what the program wrote, and read from [`Input::location`].
+/// One `DESCRIBE` per key: two bindings over one file are one descriptor.
 ///
-/// A source whose cached descriptor still carries the current
-/// `etag` is skipped — no `DESCRIBE`, no read. That is where the
-/// cost is: programs are small and sources are not, so the introspection is
-/// the expensive half of a compile and it is the half that rarely needs doing
-/// twice.
+/// A source whose cached descriptor still carries the current [`etag`] is
+/// skipped — no `DESCRIBE`, no read. That is where the cost is: programs are
+/// small and sources are not, so describing is the expensive half of a compile
+/// and the half that rarely needs doing twice.
 ///
-/// Per-source failures are non-fatal — they log + skip; the compile may still
-/// succeed with no forward propagation for that source.
+/// A source that cannot be described is logged and skipped; the compile may
+/// still succeed with no forward propagation for it.
 ///
 /// **Only a source this host can `stat` is read**: a local file that exists
-/// right now. `fossil-lsp`'s `main_loop` is one sequential loop over one
-/// channel, so a `didOpen` blocked on `s3://` is not one slow file — it is
-/// hover and completion dead in every other buffer for as long as the read
-/// takes. The discriminator is [`etag`] and not a scheme test,
-/// because a location this host cannot `stat` is exactly one whose freshness it
-/// cannot establish — which also covers a relative path that does not exist
-/// yet, and the half-typed one a keystroke produces on the way to it.
-pub fn pre_introspect_and_register(system: &dyn System, sources: &[Input]) {
+/// right now. The message loop is one sequential loop over one channel, so a
+/// `didOpen` blocked on `s3://` is not one slow file — it is hover and
+/// completion dead in every other buffer for as long as the read takes. The
+/// discriminator is [`etag`] and not a scheme test, because a location this
+/// host cannot `stat` is exactly one whose freshness it cannot establish —
+/// which also covers a relative path that does not exist yet, and the
+/// half-typed one a keystroke produces on the way to it.
+pub fn profile_and_register(system: &dyn System, sources: &[Input]) {
     let Some(cache) = system.descriptors() else {
-        tracing::debug!("host keeps no descriptor cache; skipping pre-introspection");
+        tracing::debug!("host keeps no descriptor cache; not describing sources");
         return;
     };
-
-    // Opened on the first miss, not on entry. A compile whose sources are all
-    // fresh must do no DuckDB work at all, and opening a connection is work.
-    let mut conn: Option<duckdb::Connection> = None;
     let mut seen = HashSet::new();
-
-    for source in sources {
-        let Input {
-            binding,
-            key,
-            location,
-            format,
-            option,
-            ..
-        } = source;
-        // The constructor chooses the reader: a JSON array read as CSV
-        // introspects to one column named `[`. A materialised row (`io.rdf`)
-        // takes its schema from its shape and has nothing to DESCRIBE.
-        let (Some(binding), Some(native)) = (binding, format.as_deref().and_then(native_reader))
-        else {
-            continue;
-        };
-        if !seen.insert(key.as_str()) {
-            continue;
-        }
-        let token = etag(location);
-        // An empty token means this host could not `stat` the location — a
-        // scheme it does not own, or a path that is not there. It is checked
-        // BEFORE `is_fresh`: an empty token is never fresh, so without this the
-        // editor would open a connection and attempt the read on every single
-        // keystroke.
-        if token.is_empty() {
-            tracing::debug!(
-                "`{location}` is not a file this host can stat; not reading it from here"
-            );
-            continue;
-        }
-        if cache.is_fresh(key, &token) {
-            tracing::debug!("`{key}` is unchanged since it was introspected; reusing");
-            continue;
-        }
-
-        let conn = if let Some(c) = &conn {
-            c
-        } else {
-            match duckdb::Connection::open_in_memory() {
-                Ok(c) => conn.insert(c),
-                Err(e) => {
-                    tracing::warn!("DuckDB in-memory open failed; skipping pre-introspection: {e}");
-                    return;
-                }
+    let stale: Vec<Source> = sources
+        .iter()
+        .filter_map(|input| {
+            // The constructor chooses the reader; a materialised row (`io.rdf`)
+            // takes its schema from its shape and has nothing to describe.
+            let format = input.format.as_deref()?;
+            fossil_profile::native_reader(format)?;
+            input.binding.as_ref()?;
+            if !seen.insert(input.key.as_str()) {
+                return None;
             }
-        };
-
-        let reader = native.table_function();
-        // **The option the binding wrote, in DuckDB's spelling, or nothing.**
-        // Nothing is the whole of the absent case: `read_csv_auto` sniffs, and
-        // substituting a comma here would make this DESCRIBE describe a file
-        // the executor does not read — the divergence naming a delimiter exists
-        // to close. `fossil_hir::lower::check_reader_option` has already refused
-        // a value that is not one character and one written on a row that takes
-        // none, so what arrives here is either absent or usable.
-        let args = match (option.as_deref(), native.option_keyword()) {
-            (Some(value), Some(keyword)) => {
-                format!(", {keyword}='{}'", value.replace('\'', "''"))
+            // An empty token means this host could not `stat` the location. It
+            // is checked BEFORE freshness: an empty token is never fresh, so
+            // without this the editor would open a connection and attempt the
+            // read on every keystroke.
+            let token = etag(&input.location);
+            if token.is_empty() {
+                tracing::debug!(
+                    "`{}` is not a file this host can stat; not reading it from here",
+                    input.location
+                );
+                return None;
             }
-            _ => String::new(),
-        };
-        let escaped_path = location.replace('\'', "''");
-        let sql = format!("DESCRIBE SELECT * FROM {reader}('{escaped_path}'{args})");
-        let mut stmt = match conn.prepare(&sql) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!("DESCRIBE prepare failed for source `{binding}` (uri=`{key}`): {e}");
-                continue;
+            if cache.is_fresh(&input.key, &token) {
+                return None;
             }
-        };
-        let cols: Vec<InferredColumn> = match stmt.query_map([], |row| {
-            let name: String = row.get(0)?;
-            let typ: String = row.get(1)?;
-            Ok(InferredColumn {
-                name: SmolStr::from(name),
-                primitive: generated::read_primitive(native, &typ),
+            Some(Source {
+                key: input.key.as_str().into(),
+                name: input.location.clone(),
+                format: format.to_string(),
+                option: input.option.clone(),
+                etag: token,
             })
-        }) {
-            Ok(iter) => iter.filter_map(Result::ok).collect(),
-            Err(e) => {
-                tracing::warn!("DESCRIBE query_map failed for `{binding}`: {e}");
-                continue;
-            }
-        };
-        cache.insert(InferredDescriptor {
-            key: SmolStr::from(key.as_str()),
-            columns: cols,
-            etag: token,
-        });
-        tracing::debug!("introspected `{key}` for source `{binding}`");
+        })
+        .collect();
+    // A compile whose sources are all fresh does no `DuckDB` work at all, and
+    // opening a connection is work.
+    if stale.is_empty() {
+        return;
+    }
+    let conn = match duckdb::Connection::open_in_memory() {
+        Ok(conn) => conn,
+        Err(e) => {
+            tracing::warn!("DuckDB in-memory open failed; not describing sources: {e}");
+            return;
+        }
+    };
+    let profile = fossil_profile::run(stale, Options::TYPES, |sql| {
+        rows(&conn, sql).map_err(|e| e.to_string())
+    });
+    for failure in profile.failed {
+        tracing::warn!(
+            "could not describe `{}`: {}",
+            failure.source,
+            failure.reason
+        );
+    }
+    for source in profile.sources {
+        tracing::debug!("described `{}`", source.descriptor.key);
+        cache.insert(source.descriptor);
     }
 }
 
@@ -216,7 +164,6 @@ pub fn pre_introspect_and_register(system: &dyn System, sources: &[Input]) {
 mod tests {
     use super::*;
     use fossil_base::test_support::NativeSystem;
-    use fossil_graph_schema::Primitive;
     use std::collections::HashMap;
     use std::path::Path;
     use std::sync::Arc;
@@ -231,52 +178,6 @@ mod tests {
             dir.join("prog.fossil").to_string_lossy().into_owned(),
         );
         fossil_lineage::inputs(&db, file, connections)
-    }
-
-    /// Every spelling `DuckDB` has for an instant maps to an instant.
-    ///
-    /// **The table is derived from `DuckDB` and not from memory**: the arms are
-    /// asserted against the `DESCRIBE` of a value `DuckDB` itself typed, so a
-    /// version that renames a type fails here rather than silently widening a
-    /// column to `String`. That widening is what this test exists for — the arm
-    /// was `"TIMESTAMP" | "DATETIME"`, `read_csv_auto` infers `TIMESTAMP WITH
-    /// TIME ZONE` for any ISO-8601 string carrying an offset, and the checker
-    /// compares this answer against the shape's declared `Primitive`. So the
-    /// gap was not a slow path: it made `xsd:dateTime` a hard type error over
-    /// every offset-bearing column, which is how LDBC-SNB dates every row.
-    #[test]
-    fn every_duckdb_instant_is_an_instant() {
-        for (sql, expected) in [
-            ("TIMESTAMP '2012-01-01 00:00:00'", Primitive::DateTime),
-            ("TIMESTAMPTZ '2012-01-01 00:00:00+01'", Primitive::DateTime),
-            (
-                "CAST('2012-01-01T00:00:00.000+00:00' AS TIMESTAMP WITH TIME ZONE)",
-                Primitive::DateTime,
-            ),
-            ("DATE '2012-01-01'", Primitive::Date),
-            ("TIME '12:00:00'", Primitive::Time),
-            ("CAST(1 AS BIGINT)", Primitive::Integer),
-            ("CAST(1.5 AS DOUBLE)", Primitive::Float),
-            ("CAST(1.5 AS DECIMAL(38,18))", Primitive::Float),
-            ("true", Primitive::Bool),
-            ("'x'", Primitive::String),
-        ] {
-            let conn = duckdb::Connection::open_in_memory().expect("in-memory duckdb");
-            let mut stmt = conn
-                .prepare(&format!("DESCRIBE SELECT {sql} AS v"))
-                .expect("describe prepares");
-            let declared: String = stmt
-                .query_map([], |row| row.get::<_, String>(1))
-                .expect("describe runs")
-                .next()
-                .expect("one column")
-                .expect("one row");
-            assert_eq!(
-                generated::duckdb_primitive(&declared),
-                expected,
-                "DuckDB types `{sql}` as `{declared}`, which must not widen to String"
-            );
-        }
     }
 
     /// **Introspection reads the same file the run reads.**
@@ -301,7 +202,7 @@ mod tests {
         let system = NativeSystem::default();
         let text = format!("User := io.csv(\"{}\", delimiter = \"|\")\n", csv.display());
         let sources = sources_of(dir.path(), &text, &HashMap::new());
-        pre_introspect_and_register(&system, &sources);
+        profile_and_register(&system, &sources);
 
         let descriptor = system
             .descriptors()
@@ -338,7 +239,7 @@ mod tests {
         let system = NativeSystem::default();
         let cache = system.descriptors().expect("the engine keeps a table");
 
-        pre_introspect_and_register(&system, &sources);
+        profile_and_register(&system, &sources);
         assert_eq!(
             cache.registrations(),
             1,
@@ -346,7 +247,7 @@ mod tests {
         );
         assert_eq!(cache.get("users.csv").expect("registered").columns.len(), 2);
 
-        pre_introspect_and_register(&system, &sources);
+        profile_and_register(&system, &sources);
         assert_eq!(
             cache.registrations(),
             1,
@@ -354,7 +255,7 @@ mod tests {
         );
 
         std::fs::write(&csv, "id,name,email\n1,ada,ada@example.org\n").expect("rewrite csv");
-        pre_introspect_and_register(&system, &sources);
+        profile_and_register(&system, &sources);
         assert_eq!(
             cache.registrations(),
             2,
@@ -381,7 +282,7 @@ mod tests {
 
         let system = NativeSystem::default();
         let cache = system.descriptors().expect("the engine keeps a table");
-        pre_introspect_and_register(&system, &sources);
+        profile_and_register(&system, &sources);
 
         assert_eq!(cache.registrations(), 1);
         assert_eq!(cache.len(), 1);
@@ -410,7 +311,7 @@ mod tests {
         let system = NativeSystem::default();
         let cache = system.descriptors().expect("the host keeps a table");
         for _ in 0..3 {
-            pre_introspect_and_register(&system, &sources);
+            profile_and_register(&system, &sources);
         }
 
         assert_eq!(
@@ -440,7 +341,7 @@ mod tests {
         );
 
         let system = NativeSystem::default();
-        pre_introspect_and_register(&system, &sources);
+        profile_and_register(&system, &sources);
 
         let cache = system.descriptors().expect("the host keeps a table");
         assert_eq!(
@@ -467,7 +368,7 @@ mod tests {
         assert_eq!(data, 2, "one data input per destructured binding");
 
         let system = NativeSystem::default();
-        pre_introspect_and_register(&system, &sources);
+        profile_and_register(&system, &sources);
 
         assert_eq!(system.descriptors().expect("a table").registrations(), 0);
     }

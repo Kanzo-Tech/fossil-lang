@@ -7,6 +7,23 @@
 export type Access = 'read' | 'write';
 
 /**
+ * A column of one source and a column of the same or another.
+ */
+export interface ColumnRef {
+  column: string;
+  source: string;
+}
+
+/**
+ * A column's counts, over the rows the profile read.
+ */
+export interface ColumnStats {
+  distinct: number;
+  name: string;
+  nulls: number;
+}
+
+/**
  * One completion candidate — LSP's `CompletionItem`, with the fields `fossil-ide` fills.
  */
 export interface CompletionItem {
@@ -198,6 +215,14 @@ export interface Hover {
 }
 
 /**
+ * Every value of `from` is a value of `to`, which is a candidate key: the shape of an edge.
+ */
+export interface Inclusion {
+  from: ColumnRef;
+  to: ColumnRef;
+}
+
+/**
  * One column from a host-introspected source.
  */
 export interface InferredColumn {
@@ -227,8 +252,8 @@ export interface InferredDescriptor {
   columns: InferredColumn[];
   /**
    * An entity tag in RFC 9110's sense (§8.8.3): an opaque validator of the state of the source
-   * this was read from, which may be weak. The cache compares it; nothing interprets it.
-   * `fossil-introspect` writes `mtime` + size, a host that has a strong `ETag` or a content digest
+   * this was read from, which may be weak. The cache compares it; nothing interprets it. The
+   * language server writes `mtime` + size, a host that has a strong `ETag` or a content digest
    * writes that instead, and a host that cannot cheaply tell writes `""` — which
    * `crate::DescriptorCache::is_fresh` reads as "never fresh", so that source is re-introspected
    * every time. It is NOT a hash of the bytes, and deliberately: hashing means reading the whole
@@ -320,6 +345,24 @@ export interface LocationName {
 }
 
 /**
+ * What a mapping can name: what a host knows before the model writes anything.
+ */
+export interface MappingVocabulary {
+  /**
+   * The shape document: its constructor (`shex`, `shacl`) and where it is.
+   */
+  shapes: VocabularyDocument;
+  /**
+   * The sources, each with its columns — a profile's descriptor.
+   */
+  sources: SourceVocabulary[];
+  /**
+   * The types it declares, each with the property keys a mapping of it may write.
+   */
+  types: TypeVocabulary[];
+}
+
+/**
  * A document a program names that the database does not hold yet.
  */
 export interface MissingDocument {
@@ -357,6 +400,94 @@ export interface Position {
  * lives here, because xsd is the RDF border every side reads.
  */
 export type Primitive = 'string' | 'integer' | 'float' | 'bool' | 'date' | 'date_time' | 'time' | 'g_year' | 'any_uri';
+
+/**
+ * What the profiler found.
+ */
+export interface Profile {
+  /**
+   * A source that could not be described is here and not in `sources`; a later query that failed
+   * leaves its source with less in it.
+   */
+  failed: ProfileFailure[];
+  inclusions: Inclusion[];
+  /**
+   * Every source that could be described, in the order given.
+   */
+  sources: SourceProfile[];
+}
+
+/**
+ * How far a profile goes.
+ */
+export type ProfileDepth = 'types' | 'whole';
+
+/**
+ * A query the host could not run, and what it said.
+ */
+export interface ProfileFailure {
+  reason: string;
+  /**
+   * The source it was about: for an inclusion, the dependent side's.
+   */
+  source: string;
+}
+
+/**
+ * How much of a source a profile reads.
+ */
+export interface ProfileOptions {
+  /**
+   * How far it goes: the types alone, or the whole profile.
+   */
+  depth?: ProfileDepth;
+  /**
+   * The rows the counts read from each source; `0` reads every row.
+   */
+  sample?: number;
+  /**
+   * The rows kept as the profile's sample of each source.
+   */
+  shown?: number;
+}
+
+/**
+ * One query for the host to run.
+ */
+export interface ProfileQuery {
+  /**
+   * What its rows are fed back with.
+   */
+  id: number;
+  sql: string;
+}
+
+/**
+ * A source to profile, as its host can read it.
+ */
+export interface ProfileSource {
+  /**
+   * The host's validator for the bytes it read: carried into the descriptor.
+   */
+  etag?: string;
+  /**
+   * The catalogue row its constructor names (`csv`), which picks the reader.
+   */
+  format: string;
+  /**
+   * What the program wrote — what the descriptor is keyed by.
+   */
+  key: string;
+  /**
+   * What the host's `DuckDB` reads: the location, or the name the host attached it under. Storage
+   * is the host's; this is only the name.
+   */
+  name: string;
+  /**
+   * The reader option the binding wrote (`delimiter = "|"`), verbatim.
+   */
+  option?: string;
+}
 
 /**
  * Inclusive `start`, exclusive `end` — LSP's `Range`.
@@ -424,6 +555,41 @@ export interface SemanticToken {
 }
 
 /**
+ * One source, profiled.
+ */
+export interface SourceProfile {
+  columns: ColumnStats[];
+  /**
+   * Its columns and their types: what the compiler's cache takes.
+   */
+  descriptor: InferredDescriptor;
+  /**
+   * The columns that are candidate keys: never null, never repeated.
+   */
+  keys: string[];
+  /**
+   * The rows the counts read, and whether that was a sample.
+   */
+  rows?: number;
+  /**
+   * Its first rows, every cell as text, in the descriptor's column order.
+   */
+  sample: string[][];
+  sampled: boolean;
+}
+
+export interface SourceVocabulary {
+  columns: string[];
+  delimiter?: string;
+  format: string;
+  /**
+   * The binding every reference to it is qualified by.
+   */
+  name: string;
+  reference: string;
+}
+
+/**
  * A storage credential scoped to one prefix — Iceberg REST's `StorageCredential`, verbatim on the
  * wire.
  *
@@ -463,6 +629,16 @@ export interface Token {
  * `Token`'s `kind`, so it is named `TokenKind` there.
  */
 export type TokenKind = 'Whitespace' | 'Newline' | 'Comment' | 'KwFrom' | 'KwAnd' | 'KwOr' | 'KwNot' | 'AtAttr' | 'True' | 'False' | 'Null' | 'Float' | 'Integer' | 'Ident' | 'String' | 'Define' | 'Eq' | 'Neq' | 'Le' | 'Ge' | 'Assign' | 'Dot' | 'Comma' | 'LParen' | 'RParen' | 'LBrace' | 'RBrace' | 'Lt' | 'Gt' | 'Plus' | 'Minus' | 'Star' | 'Slash' | 'Percent' | 'Question' | 'Colon';
+
+export interface TypeVocabulary {
+  name: string;
+  properties: string[];
+}
+
+export interface VocabularyDocument {
+  format: string;
+  reference: string;
+}
 
 /** `fossil_storage::HOST_MS`. */
 export const HOST_MS = 30000;

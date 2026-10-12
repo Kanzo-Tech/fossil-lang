@@ -349,7 +349,7 @@ pub enum SourceFormat {
     ///
     /// **`None` is absent and not a default.** A default written here would be
     /// one this enum cannot make true: `read_csv_auto` — the reader
-    /// `fossil-introspect` DESCRIBES through — SNIFFS the delimiter, and
+    /// `fossil-profile` DESCRIBES through — SNIFFS the delimiter, and
     /// `DataFusion`'s `CsvReadOptions` assumes a comma without looking, so the
     /// two readers have different answers for absent and only the same answer
     /// for a delimiter the program names. `catalogue.bnf` declares the position

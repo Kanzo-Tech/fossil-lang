@@ -97,8 +97,8 @@
 
    `option delim` is what DuckDB calls that position, and it is here for the
    reason `read_csv_auto` is: it is the named parameter OF that table function,
-   and two adapters speak it — `fossil-introspect` and `@fossil-lang/introspect`,
-   one DuckDB each. Written in either adapter it was written twice. `DataFusion`'s
+   and `fossil-profile` speaks it, the plan both hosts run on a DuckDB of
+   their own. Written in a host it would be written twice. `DataFusion`'s
    `.delimiter(b'|')` is not here: a Rust method taking a byte belongs to the
    one adapter that calls it. *)
 
@@ -143,10 +143,10 @@ row shacl   = extensions "ttl" "shacl"            ; decodes decode_shacl        
 
 (* ------------------------------------------------------------ duckdb types *)
 (* What a DuckDB `DESCRIBE` column type means on the lattice — the `Primitive`
-   by its wire name, then the spellings that map to it. Both introspecting
-   hosts DESCRIBE through a native reader above, so the vocabulary is the
-   readers' and is generated into both, `fossil-introspect`'s
-   `duckdb_primitive` and `@fossil-lang/introspect`'s.
+   by its wire name, then the spellings that map to it. Both hosts
+   DESCRIBE through a native reader above, so the vocabulary is the readers'
+   and is generated into the plan they share, `fossil-profile`'s
+   `duckdb_primitive`.
 
    A spelling is matched case-blind and whole; `"X*"` matches every spelling
    that starts with `X`, and `"*"` matches anything and must come last. The

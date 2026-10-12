@@ -61,7 +61,7 @@ describe('openProgram', () => {
       expect(asked).toEqual([{ connection: 'vocab' }]);
       expect(fetched).toHaveLength(1);
       expect(fetched[0]).toBe('http://minio.example/vocab/shapes/person.shex');
-      program.registerIntrospection({ descriptors: [DESCRIPTOR], undescribed: [] });
+      program.registerProfile({ descriptors: [DESCRIPTOR], undescribed: [] });
       const rows = await program.diagnostics();
       // The shape arrived: `name` is checked against its datatype, which only a read shape knows.
       const mismatch = rows.find((r) => r.code === 'type/property-mismatch');
@@ -81,7 +81,7 @@ describe('openProgram', () => {
     const { host } = recordingHost(SHAPE);
     program = await openProgram('prog.fossil', { host });
     try {
-      program.registerIntrospection({ descriptors: [DESCRIPTOR], undescribed: [] });
+      program.registerProfile({ descriptors: [DESCRIPTOR], undescribed: [] });
       const line = PROGRAM.split('\n').findIndex((l) => l.includes('name = users.name'));
       const character = PROGRAM.split('\n')[line]!.indexOf('users.name') + 'users.'.length + 1;
       // Opened empty: nothing is under any cursor until the text arrives.
@@ -142,7 +142,7 @@ describe('openProgram', () => {
     program = await openProgram('prog.fossil', { host });
     try {
       const malformed = { key: 'users.csv' } as unknown as typeof DESCRIPTOR;
-      expect(() => program!.registerIntrospection({ descriptors: [malformed], undescribed: [] })).toThrow(
+      expect(() => program!.registerProfile({ descriptors: [malformed], undescribed: [] })).toThrow(
         expect.objectContaining({ name: 'FossilError', code: 'api/invalid-argument' }),
       );
     } finally {
@@ -160,11 +160,11 @@ describe('openProgram, when a source cannot be described', () => {
     severity: 'error',
   } as const;
 
-  it('answers one warning at the call that reads it, under the code introspection answered', async () => {
+  it('answers one warning at the call that reads it, under the code the profile answered', async () => {
     const { host } = recordingHost(SHAPE);
     const program = await openProgram('prog.fossil', { host, text: PROGRAM });
     try {
-      program.registerIntrospection({
+      program.registerProfile({
         descriptors: [],
         undescribed: [{ source: { key: '@lake/users.csv' }, problem: NOT_FOUND }],
       });
@@ -179,7 +179,7 @@ describe('openProgram, when a source cannot be described', () => {
         range: { start: { line: 1, character: 9 }, end: { line: 1, character: 34 } },
       });
 
-      program.registerIntrospection({ descriptors: [DESCRIPTOR], undescribed: [] });
+      program.registerProfile({ descriptors: [DESCRIPTOR], undescribed: [] });
       expect((await program.diagnostics()).some((r) => r.code === 'source/not-found')).toBe(false);
     } finally {
       program.close();

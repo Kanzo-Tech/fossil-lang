@@ -181,6 +181,15 @@ parameter it takes is argued in [the dot](/docs/design/the-dot).
 | **PostgreSQL's catalogue** (`pg_proc` and its `.dat` files) | The strongest form of the design in the survey: a data file, a generator, and **a reference the linker has to resolve** — ~3,300 rows paying one file per addition for a link error as the guarantee. `catalogue.bnf`'s `decodes decode_shex` gets the identical property at six rows. |
 | **rust-analyzer's `xtask codegen --check`** | The ergonomics of a drift guard: rewrite in place locally with a red note on stderr, hard-fail only under CI, and name the exact command to re-run in the failure text. |
 
+## Profiling, and the mapping a model proposes
+
+| source | what it settles |
+| --- | --- |
+| **`h11`** and **`quinn-proto`** — sans-IO protocol implementations | The shape of `fossil-profile`: a state machine that says what to do next and reads what came back, with no I/O of its own, so one implementation serves every host that brings its own engine ([Profile](/docs/design/profile)). |
+| **HyUCC** (Papenbrock & Naumann, *A Hybrid Approach for Efficient Unique Column Combination Discovery*, BTW 2017) | What a candidate key is in a profile: a unique column combination, discovered on a sample and verified on the whole. |
+| **SPIDER** (Bauckmann, Leser & Naumann, ICDE 2006) and the **Metanome** profiling platform (Papenbrock et al., PVLDB 2015) | What an edge candidate is: an inclusion dependency between two sources' columns, tested over the pairs a type prunes. |
+| **RML** (Dimou et al., *RML: A Generic Language for Integrated RDF Mappings of Heterogeneous Data*, LDOW 2014) | The shape of the mapping spec a model fills: a source, a subject template, and per property a column, an expression or a join — from which Fossil is emitted. |
+
 ## Tooling
 
 | source | what it settles |

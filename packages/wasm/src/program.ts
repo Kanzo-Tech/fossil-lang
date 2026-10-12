@@ -35,10 +35,10 @@ import { diagnosticOf, until, type DocumentWorkspace, type UnreadDocument } from
 import { initFossilWasm } from './load.js';
 
 /**
- * What a host's introspection answered — `introspect`'s result in `@fossil-lang/introspect`, passed
- * as it came back: the sources it described, and the ones it could not, each with its problem.
+ * What a host's profile of the sources answered — `profile`'s result in `@fossil-lang/profile`,
+ * passed as it came back: the sources it described, and the ones it could not, each with its problem.
  */
-export interface Introspection {
+export interface Profiled {
   descriptors: readonly InferredDescriptor[];
   undescribed: readonly { source: Pick<Input, 'key'>; problem: Problem }[];
 }
@@ -81,20 +81,20 @@ export interface FossilProgram {
   /** Where the name under the cursor is defined. Often in the shape document: read `uri`. */
   definition(line: number, character: number): Location[];
   /**
-   * What the program reads, through the connection map — what introspection DESCRIBEs. Resolves
+   * What the program reads, through the connection map — what a profile DESCRIBEs. Resolves
    * the documents first, because a location goes through the connection map the host answers.
    */
   inputs(): Promise<Input[]>;
   /**
-   * What the host's introspection answered, whole. The compiler never introspects a source itself;
-   * push this before the check that should see it.
+   * What the host's profile of the sources answered, whole. The compiler never reads a source
+   * itself; push this before the check that should see it.
    *
    * A described source types the program under the key it was written as. A source that could not
    * be described is a warning of {@link diagnostics}' at the call that reads it — `io.csv("…")` —
    * under its problem's code (`source/not-found`, `storage/*`, `engine/failed`), once per key. The
    * latest answer about a key wins, so a source that describes on a later call loses its warning.
    */
-  registerIntrospection(introspection: Introspection): void;
+  registerProfile(profiled: Profiled): void;
   /** Free the workspace. Every member fails after it. */
   close(): void;
   /** {@link close}, for `using`. */
@@ -160,7 +160,7 @@ export async function openProgram(uri: string, options: OpenProgramOptions): Pro
       await settle();
       return workspace.inputs(handle);
     },
-    registerIntrospection({ descriptors, undescribed }) {
+    registerProfile({ descriptors, undescribed }) {
       for (const descriptor of descriptors) workspace.registerInferredDescriptor(JSON.stringify(descriptor));
       for (const { source, problem } of undescribed) workspace.registerUndescribed(source.key, JSON.stringify(problem));
     },

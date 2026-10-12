@@ -89,19 +89,21 @@ fossil-descriptors-input  = { path = "../fossil-descriptors-input" }
 #
 # A cold build of this crate now pays for `libduckdb-sys`.
 #
-# `cargo deny check bans` does NOT catch this edge: the `wrappers` list names
-# DIRECT parents of `duckdb` and this is transitive through `fossil-introspect`.
-# That hole is why `crates/xtask/tests/engine_reach.rs` now exists — it derives
-# every transitive linker from `cargo metadata` and requires each to be named in
-# `deny.toml`, so this edge IS reviewed by a gate, and so is the next one.
+# The edge is DIRECT: `src/profile.rs` runs `fossil-profile`'s plan on this
+# connection, so `deny.toml`'s `wrappers` names this crate and
+# `crates/xtask/tests/engine_reach.rs` holds the two against each other.
 #
-# `fossil-introspect` is native-only by its `DuckDB` edge and so is
-# this crate (the `wasm32` `compile_error!` at the top of `main.rs`), so nothing
-# here reaches a wasm shell: `cargo xtask wasm-check` walks down from the cdylib
-# roots and never enters a binary crate. The LANGUAGE layer is untouched —
-# `fossil-base`, `-syntax`, `-hir`, `-mir` and `-ide` are what has to start in
-# milliseconds and compile to wasm32, and none of them gained an edge here.
-fossil-introspect         = { path = "../fossil-introspect" }
+# Native-only by this edge (the `wasm32` `compile_error!` at the top of
+# `main.rs`), so nothing here reaches a wasm shell: `cargo xtask wasm-check`
+# walks down from the cdylib roots and never enters a binary crate. The LANGUAGE
+# layer is untouched — `fossil-base`, `-syntax`, `-hir`, `-mir` and `-ide` are
+# what has to start in milliseconds and compile to wasm32, and none of them
+# gained an edge here.
+duckdb                    = { workspace = true }
+# The plan the connection runs: which queries describe a source, and what their
+# answers mean. Sans-IO and inside the wasm closure — the browser runs the same
+# plan on DuckDB-WASM (`/docs/design/profile`).
+fossil-profile            = { path = "../fossil-profile" }
 salsa              = { workspace = true }
 lsp-server         = { workspace = true }
 lsp-types          = { workspace = true }
@@ -128,10 +130,8 @@ fossil-graph-schema = { path = "../fossil-graph-schema" }
 # syntax that would trigger synthesis does not exist yet: there is no
 # `seq.filter` / pipeline form, and no stub was added to fake one.
 #
-# `fossil-descriptors-input` used to be listed HERE as well, and is not any
-# more: it became a normal dependency above when `LspSystem` grew a descriptor
-# table, and a normal dependency is already visible to every test. Two entries
-# for one crate is not an error to cargo, which is why it survived a day.
+# `fossil-descriptors-input` is a normal dependency above, which every test
+# already sees.
 smol_str = { workspace = true }
 # Criterion for the advisory didChange benchmark. No default
 # features → no rayon/plotters pull-in; native-only (fossil-lsp is native-only).
@@ -140,5 +140,6 @@ criterion                = { version = "0.5", default-features = false }
 # asserts the editor does NOT go and read it. That program has to be on a real
 # disk — the server resolves a source relative to the program's own path — and it
 # must not be in the repository, or the absence being asserted would depend on a
-# checked-in file nobody would connect to this test.
+# checked-in file nobody would connect to this test. `src/profile.rs`'s tests
+# write their sources to one for the same reason.
 tempfile = { workspace = true }

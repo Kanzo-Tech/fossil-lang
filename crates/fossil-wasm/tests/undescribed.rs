@@ -1,8 +1,8 @@
 //! A source the host could not describe is a row of `check`, at the call that
 //! reads it, under the code its introspection answered.
 //!
-//! `introspect` in `@fossil-lang/introspect` returns `{ descriptors, undescribed }`
-//! and `FossilProgram.registerIntrospection` hands both halves over; this is the
+//! `profile` in `@fossil-lang/profile` returns `{ descriptors, undescribed }`
+//! and `FossilProgram.registerProfile` hands both halves over; this is the
 //! Rust half the second one drives.
 
 use fossil_wasm::{Diagnostic, FossilWorkspace};
@@ -14,7 +14,7 @@ again := io.csv(\"@lake/users.csv\")
 orders := io.csv(\"@lake/orders.csv\")
 ";
 
-/// What `introspect` answers for a source whose file is not there — the
+/// What `profile` answers for a source whose file is not there — the
 /// TypeScript `Problem`, `title` and `detail` included, as a host passes it.
 const NOT_FOUND: &str = r#"{
   "code": "source/not-found",

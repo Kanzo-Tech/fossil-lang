@@ -156,10 +156,11 @@ whole difference between a guard and a comment. A kind past the end of a legend 
 than the host and reads as plain text, so appending stays backwards-compatible and reordering stops
 being an event at all.
 
-Where an implementation genuinely cannot be shared, what the two must agree on is data and is
-generated into both: the two introspecting hosts DESCRIBE through different DuckDBs, and the reader,
-its option keyword and the DuckDB→primitive table are rows of `catalogue.bnf` that
-`cargo xtask catalogue` writes into each.
+Where an implementation can be shared across the boundary, it is: the two hosts that read a
+source's columns — the language server on native DuckDB, a browser on DuckDB-WASM — run one plan,
+`fossil-profile`, compiled into each, and only the engine that answers its queries differs. What
+the plan reads off `catalogue.bnf` — the reader, its option keyword and the DuckDB→primitive table
+— is generated into that one crate.
 
 ## The surface: one way to ask, named after the system it follows
 
@@ -167,7 +168,7 @@ its option keyword and the DuckDB→primitive table are rows of `catalogue.bnf` 
 share — `until` and `within`, the document loop's `DocumentWorkspace`, the storage grant's
 `GrantPlan`, `attachCause` — is on `@fossil-lang/types/internal`, an exports subpath with no semver
 promise, rather than on the barrel beside `Host`. A name on the barrel is a second way to do what a
-host already does through `openProgram`, `run`, `mount` or `introspect`, and the raw wasm glue is
+host already does through `openProgram`, `run`, `mount` or `profile`, and the raw wasm glue is
 the clearest case: `FossilWorkspace` on `@fossil-lang/wasm`'s barrel let a host check a program
 without reading its shape document, which `openProgram` never does. What would reverse it: a host
 that needs one of those names to do something no public call does — and then the call is what is

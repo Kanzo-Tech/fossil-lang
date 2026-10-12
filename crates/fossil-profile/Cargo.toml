@@ -1,0 +1,35 @@
+[package]
+name = "fossil-profile"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "What a source is — columns, candidate keys, inclusions, a sample — decided as queries and read from their answers, running nothing."
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# `providers::DATA` — the `io.` rows, which choose the reader a source is read
+# with — and `NativeReader`, its table function and option keyword.
+fossil-base = { path = "../fossil-base" }
+# `InferredDescriptor` / `InferredColumn` — what the compiler's cache holds, and
+# the first half of a profile.
+fossil-descriptors-input = { path = "../fossil-descriptors-input" }
+# `Primitive`, the lattice a DuckDB column type maps onto.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
+# A profile crosses to a host as JSON, and `@fossil-lang/types` declares its
+# shape from this schema (`crates/xtask/tests/wire.rs`).
+schemars = { workspace = true }
+serde = { workspace = true }
+smol_str = { workspace = true }
+
+[dev-dependencies]
+# The engine its tests run the plan on, as the language server does. A dev
+# edge: nothing that depends on this crate links a database through it.
+duckdb = { workspace = true }
+tempfile = { workspace = true }

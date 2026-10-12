@@ -14,7 +14,7 @@ Keep it under 200 lines, rules-not-context.
   meant different questions by them. `cargo xtask corpus` generates the Rust projection;
   `crates/xtask/tests/corpus_generated.rs` is the `--check` as a test.
 - `catalogue.bnf` — WHICH NAMES EXIST, both halves: the `io.` constructors and every stdlib
-  function with its signature and lowering, plus the DuckDB type table both introspecting
+  function with its signature and lowering, plus the DuckDB type table both profiling
   hosts read. Generated from, not compared against — `cargo xtask catalogue` writes every
   projection and no Rust or TS states a row a second time. Adding a function is a line here.
   `CONTRIBUTING.md` has the list and the round-trip guard.
@@ -124,7 +124,7 @@ crates/
                            the cwd. It was a module of `fossil-base` and is not one now: a
                            substrate «doesn't know about file paths». It depends on NOTHING and
                            `fossil-base` does not depend on IT — each of its readers
-                           (`fossil-hir`, `-introspect`, `-df`, `-lineage`) takes it direct
+                           (`fossil-hir`, `-ide`, `-df`, `-lineage`) takes it direct
   fossil-syntax/           lossless CST + parser
   fossil-hir/              types + name resolution + bidirectional checker + the stdlib
                            catalog. `stdlib.rs` owns the TYPES a row is written in; the ROWS
@@ -150,21 +150,23 @@ crates/
                            writer (`write`: a Parquet per table, `fossil.json`
                            last), and `Executor` — the whole run a host drives, under the
                            2 GiB pool in `memory.rs` that refuses as `run/over-budget`
-  fossil-introspect/       a host job and not a compiler one: `DESCRIBE` each local source's
-                           columns, and nothing that is not a file it can `stat`. `fossil-lsp` calls it
-                           before the compile. It links `DuckDB` on a normal edge, and
-                           it is not the only crate that does — `cargo tree -e normal -i duckdb
-                           --workspace` is the list, and `crates/xtask/tests/engine_reach.rs`
-                           holds it against `deny.toml`. Native by that edge, without a
-                           tripwire of its own. Which sources it
-                           DESCRIBEs is `fossil_lineage::inputs` — the list the
-                           browser's `inputs()` returns — so it links the compiler front-end,
-                           as every host does
+  fossil-profile/          what a source is — columns and types, counts, candidate keys, the
+                           inclusions between sources, a sample — planned as queries and read
+                           from their answers, running NOTHING (sans-IO, `run(sources, options,
+                           exec)`). Each host runs the plan on its own `DuckDB`; it links no
+                           engine, so it is in the wasm closure. `Options::TYPES` is one
+                           `DESCRIBE` a source, what the editor asks for. `generated.rs` is
+                           `catalogue.bnf`'s reader and type table
   fossil-graph-schema/     the canonical graph-schema — the shared substrate contract — and the
                            error catalogue: `Problem`, `Failure`, and (feature `js`) the one
                            function every wasm crate throws a failure through
   fossil-ide/              hover, completion, goto-def + the symbol/prefix/workspace indexes
-  fossil-lsp/              LSP server via lsp-server  [NATIVE-ONLY]
+  fossil-lsp/              LSP server via lsp-server  [NATIVE-ONLY]. `src/profile.rs` is the
+                           native host for `fossil-profile`: the columns of every source it can
+                           `stat`, on a `DuckDB` connection, before the compile. It links
+                           `DuckDB` on a normal edge — `cargo tree -e normal -i duckdb
+                           --workspace` is the list, and `crates/xtask/tests/engine_reach.rs`
+                           holds it against `deny.toml`
   fossil-wasm/             WASM host shim (the workspace under `openProgram` + the tokenizer)
   fossil-df-wasm/          `fossil_df::Executor` exposed to JS — the only host that writes a
                            corpus, in the browser and in Node. There is no native CLI: it
@@ -179,7 +181,8 @@ crates/
                            binary must not link the crates `catalogue` generates into
 
 packages/                  npm-published @fossil-lang/* family (pnpm workspace)
-  wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts)
+  wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts); `runProfiler`
+                           is the loop over its `Profiler`
   corpus/                  the reader, and it is TypeScript and nothing else: `fossil.json`
                            through `JSON.parse`: `open` attaches one view per table on the host's
                            DuckDB, the manifest as two relations and the corpus as RDF as a
@@ -223,10 +226,10 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            lexer's DISCRIMINANTS into a TS enum, which was wrong in nine
                            places by the time it went. This one keys on the NAMES the wasm
                            legend ships, and the guard is on the Rust side
-  introspect/              source-binding schema introspection (the one home; `fossil-introspect`
-                           is the Rust sibling). What they must agree on — the reader, its
-                           option keyword, the DuckDB type table — is `catalogue.bnf`'s and is
-                           generated into both
+  profile/                 what a program's sources are, on the host's DuckDB: each read under
+                           its credential, then `fossil-profile`'s plan run on the engine
+                           (`runProfiler`, from `wasm/`). The plan is the language server's
+                           too, so the two hosts share the code and only the engine differs
 
 docs/                      Next.js + fumadocs, and ALL of the prose: the book, the corpus
                            format, and the design argument behind a maintainers' divider.

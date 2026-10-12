@@ -949,9 +949,9 @@ pub fn emit_base(rows: &[Row]) -> String {
     out
 }
 
-/// `fossil-introspect`: the `duckdb` table as `duckdb_primitive`.
+/// `fossil-profile`: the `duckdb` table as `duckdb_primitive`.
 #[must_use]
-pub fn emit_introspect(cat: &Catalogue) -> String {
+pub fn emit_profile(cat: &Catalogue) -> String {
     let mut out = header(
         "//! What a `DuckDB` `DESCRIBE` column type means on the lattice — the\n\
          //! `duckdb` table of `catalogue.bnf`.",
@@ -1024,15 +1024,6 @@ fn rust_test(s: &Spelling, var: &str) -> String {
     match s {
         Spelling::Exact(x) => format!("{var} == {x:?}"),
         Spelling::Prefix(x) => format!("{var}.starts_with({x:?})"),
-        Spelling::Any => "true".to_owned(),
-    }
-}
-
-/// A TypeScript test of `var` against one spelling.
-fn ts_test(s: &Spelling, var: &str) -> String {
-    match s {
-        Spelling::Exact(x) => format!("{var} === {x:?}"),
-        Spelling::Prefix(x) => format!("{var}.startsWith({x:?})"),
         Spelling::Any => "true".to_owned(),
     }
 }
@@ -1119,103 +1110,31 @@ fn ts_header(body: &str) -> String {
     )
 }
 
-/// `@fossil-lang/introspect`: the constructors an introspecting host can
-/// `DESCRIBE`, and the reader each one goes through.
+/// `@fossil-lang/profile`: the constructors a host can `DESCRIBE`, so it asks
+/// for no credential to read a source it has nothing to describe with. What a
+/// `DESCRIBE` means is `fossil-profile`'s, in the wasm module, and not stated
+/// here a second time.
 ///
 /// A materialised row (`io.rdf`) is absent on purpose and not by omission —
 /// there is no table function to `DESCRIBE` it with, which is what
 /// `reads materialised` means.
 #[must_use]
-pub fn emit_ts_introspect(cat: &Catalogue) -> String {
+pub fn emit_ts_profile(cat: &Catalogue) -> String {
     let native = native_rows(&cat.rows);
     let mut out = ts_header(
-        "// The `io.` constructors that read through a native DuckDB table function,\n\
-         // and what the DESCRIBE answers means. A materialised row (`io.rdf`) has no\n\
-         // reader to DESCRIBE through and is deliberately absent.",
+        "// The `io.` constructors that read through a native DuckDB table function. A\n\
+         // materialised row (`io.rdf`) has no reader to DESCRIBE through and is\n\
+         // deliberately absent.",
     );
-    out.push_str("import type { Primitive } from \"@fossil-lang/types\";\n\n");
-
-    out.push_str("/** The DuckDB table function each constructor reads through. */\n");
-    out.push_str("export const NATIVE_READERS = {\n");
-    for (name, f) in &native {
-        let _ = writeln!(out, "  {name}: {f:?},");
-    }
-    out.push_str("} as const;\n\n");
-
-    out.push_str("/** The constructors above, in catalogue order. */\n");
+    out.push_str("/** The constructors a host can DESCRIBE, in catalogue order. */\n");
     let names: Vec<String> = native.iter().map(|(n, _)| format!("{n:?}")).collect();
     let _ = writeln!(
         out,
         "export const NATIVE_ROWS = [{}] as const;\n",
         names.join(", ")
     );
-
     out.push_str("/** One `io.` constructor that reads through a native reader. */\n");
-    out.push_str("export type NativeRow = (typeof NATIVE_ROWS)[number];\n\n");
-
-    out.push_str(
-        "/** The DuckDB named parameter each constructor's reader option is spelled with. */\n\
-         export const NATIVE_OPTIONS: Partial<Record<NativeRow, string>> = {\n",
-    );
-    for row in &cat.rows {
-        if let Some(Reads::Native {
-            option: Some(o), ..
-        }) = &row.reads
-        {
-            let _ = writeln!(out, "  {}: {o:?},", row.name);
-        }
-    }
-    out.push_str("};\n\n");
-
-    out.push_str(
-        "/** The `Primitive` a DuckDB column type means: case-blind, the first `duckdb` line\n\
-         \x20*  of `catalogue.bnf` that matches. */\n\
-         export function duckdbPrimitive(t: string): Primitive {\n\
-         \x20 const upper = t.trim().toUpperCase();\n",
-    );
-    for t in &cat.duckdb {
-        let tests: Vec<String> = t
-            .spellings
-            .iter()
-            .map(|s| match s {
-                Spelling::Exact(x) => format!("upper === {x:?}"),
-                Spelling::Prefix(x) => format!("upper.startsWith({x:?})"),
-                Spelling::Any => String::new(),
-            })
-            .collect();
-        if t.spellings.contains(&Spelling::Any) {
-            let _ = writeln!(out, "  return {:?};", t.primitive);
-        } else {
-            let _ = writeln!(
-                out,
-                "  if ({}) return {:?};",
-                tests.join(" || "),
-                t.primitive
-            );
-        }
-    }
-    out.push_str("}\n\n");
-    out.push_str(
-        "/** The `Primitive` a column one constructor's reader DESCRIBEs means: a type its row\n\
-         \x20*  declares `text` is one the reader inferred from text that the run reads as text, and\n\
-         \x20*  the rest is `duckdbPrimitive`. */\n\
-         export function readerPrimitive(row: NativeRow, t: string): Primitive {\n\
-         \x20 const upper = t.trim().toUpperCase();\n",
-    );
-    for row in &cat.rows {
-        if let Some(Reads::Native { text, .. }) = &row.reads
-            && !text.is_empty()
-        {
-            let tests: Vec<String> = text.iter().map(|s| ts_test(s, "upper")).collect();
-            let _ = writeln!(
-                out,
-                "  if (row === {:?} && ({})) return \"string\";",
-                row.name,
-                tests.join(" || ")
-            );
-        }
-    }
-    out.push_str("  return duckdbPrimitive(t);\n}\n");
+    out.push_str("export type NativeRow = (typeof NATIVE_ROWS)[number];\n");
     out
 }
 
@@ -1357,16 +1276,16 @@ pub fn generated() -> Vec<(PathBuf, String)> {
             rustfmt(&emit_descriptors(rows)),
         ),
         (
-            root.join("crates/fossil-introspect/src/generated.rs"),
-            rustfmt(&emit_introspect(&cat)),
+            root.join("crates/fossil-profile/src/generated.rs"),
+            rustfmt(&emit_profile(&cat)),
         ),
         (
             root.join("crates/fossil-hir/src/stdlib/generated.rs"),
             rustfmt(&emit_hir_stdlib(&cat)),
         ),
         (
-            root.join("packages/introspect/src/catalogue.generated.ts"),
-            emit_ts_introspect(&cat),
+            root.join("packages/profile/src/catalogue.generated.ts"),
+            emit_ts_profile(&cat),
         ),
         (
             root.join(crate::reference::PARTIAL),

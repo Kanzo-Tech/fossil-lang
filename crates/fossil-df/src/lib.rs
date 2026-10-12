@@ -1117,7 +1117,7 @@ fn source_not_found(uri: &str) -> DataFusionError {
 }
 
 /// A header's names made unique by `DuckDB`'s rule, because `DuckDB` is the
-/// engine that DESCRIBES a source (`fossil-introspect`, `@fossil-lang/introspect`)
+/// engine that DESCRIBES a source (`fossil-profile`'s plan, in the language server and the browser)
 /// and the checker types a program against what it describes: a name already
 /// taken — compared without case — becomes `name_1`, then `name_2`, and a
 /// generated name that is itself taken grows another suffix. `a|a|a_1|b|a` is
@@ -1239,7 +1239,7 @@ async fn fetch_bytes(ctx: &SessionContext, uri: &str) -> datafusion::error::Resu
 /// `delimiter` is what the program wrote (`io.csv("u.csv", delimiter = "|")`)
 /// and `None` is ABSENT — so this leaves `CsvReadOptions`' own answer alone
 /// rather than substituting a comma of its own. That distinction is not
-/// cosmetic: `read_csv_auto`, which `fossil-introspect` DESCRIBES the same file
+/// cosmetic: `read_csv_auto`, which `fossil-profile` DESCRIBES the same file
 /// through, SNIFFS the delimiter, so «absent» is two different answers on the
 /// two readers and only a named delimiter makes them one. `catalogue.bnf`
 /// states no default for that reason and neither does this.

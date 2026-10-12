@@ -74,6 +74,8 @@ compile_error!(
      the browser reaches LSP features through fossil-wasm directly, not through this binary"
 );
 
+pub mod profile;
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -129,7 +131,7 @@ use lsp_types::{
 /// behind the `Arc<dyn System>` on [`LspDb`] and needs no mutable path.
 /// Reading it registers no Salsa dependency — see
 /// [`fossil_base::System::descriptors`] — which is why
-/// [`LspState::introspect`] runs BEFORE anything queries the db.
+/// [`LspState::describe_sources`] runs BEFORE anything queries the db.
 #[derive(Debug, Default)]
 struct LspSystem {
     descriptors: DescriptorCache,
@@ -314,7 +316,7 @@ impl LspState {
     /// documents THIS file names are read from disk if nobody has them yet.
     fn open(&mut self, uri: &Uri, text: String, path: String) -> SourceFile {
         let file = SourceFile::new(&self.db, text, path.clone());
-        self.introspect(file);
+        self.describe_sources(file);
         register_file(&mut self.db, path, file);
         self.files.insert(uri.as_str().to_string(), file);
         self.register_named_documents(file);
@@ -334,7 +336,7 @@ impl LspState {
     /// loop over one channel: a `didOpen` blocked on an `s3://` `DESCRIBE` is
     /// not one slow file, it is hover and completion dead in every other buffer
     /// until the read returns. A location that is not a local path is dropped
-    /// here, and `fossil_introspect::pre_introspect_and_register` skips one it
+    /// here, and [`profile::profile_and_register`] skips one it
     /// cannot `stat` — no connection opened, and the diagnostics that needed its
     /// columns stay absent. That gap is pinned by
     /// `tests/introspected_diagnostics.rs::a_remote_source_is_not_introspected_by_the_editor`.
@@ -358,7 +360,7 @@ impl LspState {
     ///
     /// A URI this host cannot turn into a local path (an `untitled:` buffer, a
     /// remote workspace) resolves nothing relative and is skipped whole.
-    fn introspect(&self, file: SourceFile) {
+    fn describe_sources(&self, file: SourceFile) {
         if local_path(file.path(&self.db)).is_none() {
             return;
         }
@@ -369,7 +371,7 @@ impl LspState {
                 Some(fossil_lineage::Input { location, ..source })
             })
             .collect();
-        fossil_introspect::pre_introspect_and_register(&*self.db.system, &sources);
+        profile::profile_and_register(&*self.db.system, &sources);
     }
 
     /// Register every shape document `file` names that the database does not
@@ -411,10 +413,10 @@ impl LspState {
         use salsa::Setter as _;
         if let Some(&file) = self.files.get(uri.as_str()) {
             file.set_text(&mut self.db).to(text);
-            // Right after the revision bump, for the reason in `introspect`. A
+            // Right after the revision bump, for the reason in `describe_sources`. A
             // keystroke that changed no source line costs a `stat` per source
             // and no read.
-            self.introspect(file);
+            self.describe_sources(file);
             // The keystroke may have just written the `type { … } =
             // io.shex("…")` line that names a document. A no-op once the
             // document is in — the loop skips what the registry already holds.
