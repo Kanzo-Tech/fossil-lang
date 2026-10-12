@@ -61,7 +61,11 @@ fn rows(conn: &duckdb::Connection, sql: &str) -> duckdb::Result<Rows> {
     let mut out = Vec::new();
     while let Some(row) = rows.next()? {
         let n = row.as_ref().column_count();
-        out.push((0..n).map(|i| row.get::<_, Option<String>>(i)).collect::<duckdb::Result<_>>()?);
+        out.push(
+            (0..n)
+                .map(|i| row.get::<_, Option<String>>(i))
+                .collect::<duckdb::Result<_>>()?,
+        );
     }
     Ok(out)
 }
@@ -110,7 +114,10 @@ pub fn profile_and_register(system: &dyn System, sources: &[Input]) {
             // read on every keystroke.
             let token = etag(&input.location);
             if token.is_empty() {
-                tracing::debug!("`{}` is not a file this host can stat; not reading it from here", input.location);
+                tracing::debug!(
+                    "`{}` is not a file this host can stat; not reading it from here",
+                    input.location
+                );
                 return None;
             }
             if cache.is_fresh(&input.key, &token) {
@@ -137,9 +144,15 @@ pub fn profile_and_register(system: &dyn System, sources: &[Input]) {
             return;
         }
     };
-    let profile = fossil_profile::run(stale, Options::TYPES, |sql| rows(&conn, sql).map_err(|e| e.to_string()));
+    let profile = fossil_profile::run(stale, Options::TYPES, |sql| {
+        rows(&conn, sql).map_err(|e| e.to_string())
+    });
     for failure in profile.failed {
-        tracing::warn!("could not describe `{}`: {}", failure.source, failure.reason);
+        tracing::warn!(
+            "could not describe `{}`: {}",
+            failure.source,
+            failure.reason
+        );
     }
     for source in profile.sources {
         tracing::debug!("described `{}`", source.descriptor.key);

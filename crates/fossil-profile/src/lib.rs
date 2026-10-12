@@ -92,12 +92,20 @@ pub struct Options {
 
 impl Options {
     /// The columns and their types alone: what the compiler's cache takes.
-    pub const TYPES: Self = Self { sample: 0, shown: 0, depth: Depth::Types };
+    pub const TYPES: Self = Self {
+        sample: 0,
+        shown: 0,
+        depth: Depth::Types,
+    };
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Self { sample: 10_000, shown: 5, depth: Depth::Whole }
+        Self {
+            sample: 10_000,
+            shown: 5,
+            depth: Depth::Whole,
+        }
     }
 }
 
@@ -194,7 +202,11 @@ pub fn relation(reader: NativeReader, name: &str, option: Option<&str>) -> Strin
         (Some(value), Some(keyword)) => format!(", {keyword}='{}'", value.replace('\'', "''")),
         _ => String::new(),
     };
-    format!("{}('{}'{args})", reader.table_function(), name.replace('\'', "''"))
+    format!(
+        "{}('{}'{args})",
+        reader.table_function(),
+        name.replace('\'', "''")
+    )
 }
 
 fn ident(name: &str) -> String {
@@ -225,7 +237,10 @@ struct State {
 enum Pending {
     Describe(usize),
     Stats(usize),
-    Inclusion { from: (usize, usize), to: (usize, usize) },
+    Inclusion {
+        from: (usize, usize),
+        to: (usize, usize),
+    },
     Sample(usize),
 }
 
@@ -262,7 +277,9 @@ impl Profiler {
     pub fn new(sources: impl IntoIterator<Item = Source>, options: Options) -> Self {
         let mut states: Vec<State> = Vec::new();
         for source in sources {
-            let Some(reader) = native_reader(&source.format) else { continue };
+            let Some(reader) = native_reader(&source.format) else {
+                continue;
+            };
             if states.iter().any(|s| s.source.key == source.key) {
                 continue;
             }
@@ -376,7 +393,9 @@ impl Profiler {
         let mut asks = Vec::new();
         for (b, target) in self.states.iter().enumerate() {
             for key in &self.keys(b) {
-                let Some(k) = target.columns.iter().position(|c| &c.name == key) else { continue };
+                let Some(k) = target.columns.iter().position(|c| &c.name == key) else {
+                    continue;
+                };
                 let kind = target.columns[k].primitive;
                 for (a, dependent) in self.states.iter().enumerate() {
                     for (c, column) in dependent.columns.iter().enumerate() {
@@ -390,14 +409,20 @@ impl Profiler {
                         let sql = format!(
                             "SELECT CAST(count(*) AS VARCHAR), CAST(count(*) FILTER (WHERE y.v IS NULL) AS VARCHAR) \
                              FROM (SELECT DISTINCT {from} AS v FROM {dependent} AS a WHERE {col} IS NOT NULL) AS x \
-                             LEFT JOIN (SELECT DISTINCT {to} AS v FROM {referenced} AS b) AS y ON x.v = y.v",
+                             LEFT JOIN (SELECT DISTINCT {to} AS v FROM (SELECT * FROM {referenced}) AS b) AS y ON x.v = y.v",
                             from = text(&column.name),
                             col = ident(&column.name),
                             dependent = self.sampled(a),
                             to = text(key),
-                            referenced = format!("(SELECT * FROM {})", target.relation),
+                            referenced = target.relation,
                         );
-                        asks.push((sql, Pending::Inclusion { from: (a, c), to: (b, k) }));
+                        asks.push((
+                            sql,
+                            Pending::Inclusion {
+                                from: (a, c),
+                                to: (b, k),
+                            },
+                        ));
                     }
                 }
             }
@@ -411,7 +436,9 @@ impl Profiler {
     /// repeated in the rows read — and there were rows.
     fn keys(&self, i: usize) -> Vec<SmolStr> {
         let state = &self.states[i];
-        let Some(rows) = state.rows.filter(|&r| r > 0) else { return Vec::new() };
+        let Some(rows) = state.rows.filter(|&r| r > 0) else {
+            return Vec::new();
+        };
         state
             .columns
             .iter()
@@ -423,8 +450,13 @@ impl Profiler {
 
     /// The rows query `id` answered.
     pub fn feed(&mut self, id: u32, rows: &[Vec<Option<String>>]) {
-        let Some(what) = self.pending.remove(&id) else { return };
-        let count = |cell: Option<&Option<String>>| cell.and_then(|c| c.as_deref()).and_then(|c| c.parse::<u64>().ok());
+        let Some(what) = self.pending.remove(&id) else {
+            return;
+        };
+        let count = |cell: Option<&Option<String>>| {
+            cell.and_then(|c| c.as_deref())
+                .and_then(|c| c.parse::<u64>().ok())
+        };
         match what {
             Pending::Describe(i) => {
                 let reader = native_reader(&self.states[i].source.format);
@@ -435,15 +467,21 @@ impl Profiler {
                     .filter_map(|row| {
                         let name = row.first()?.as_deref()?;
                         let kind = row.get(1)?.as_deref()?;
-                        let primitive = reader.map_or(Primitive::String, |r| generated::read_primitive(r, kind));
-                        (!name.is_empty()).then(|| InferredColumn { name: name.into(), primitive })
+                        let primitive = reader
+                            .map_or(Primitive::String, |r| generated::read_primitive(r, kind));
+                        (!name.is_empty()).then(|| InferredColumn {
+                            name: name.into(),
+                            primitive,
+                        })
                     })
                     .collect();
             }
             Pending::Stats(i) => {
                 let Some(row) = rows.first() else { return };
                 let state = &mut self.states[i];
-                let Some(total) = count(row.first()) else { return };
+                let Some(total) = count(row.first()) else {
+                    return;
+                };
                 state.rows = Some(total);
                 state.stats = state
                     .columns
@@ -452,19 +490,28 @@ impl Profiler {
                     .map(|(n, c)| {
                         let distinct = count(row.get(1 + 2 * n)).unwrap_or(0);
                         let present = count(row.get(2 + 2 * n)).unwrap_or(0);
-                        ColumnStats { name: c.name.clone(), distinct, nulls: total.saturating_sub(present) }
+                        ColumnStats {
+                            name: c.name.clone(),
+                            distinct,
+                            nulls: total.saturating_sub(present),
+                        }
                     })
                     .collect();
             }
             Pending::Inclusion { from, to } => {
                 let Some(row) = rows.first() else { return };
-                let (Some(values), Some(missing)) = (count(row.first()), count(row.get(1))) else { return };
+                let (Some(values), Some(missing)) = (count(row.first()), count(row.get(1))) else {
+                    return;
+                };
                 if values > 0 && missing == 0 {
                     let at = |(s, c): (usize, usize)| ColumnRef {
                         source: self.states[s].source.key.clone(),
                         column: self.states[s].columns[c].name.clone(),
                     };
-                    self.inclusions.push(Inclusion { from: at(from), to: at(to) });
+                    self.inclusions.push(Inclusion {
+                        from: at(from),
+                        to: at(to),
+                    });
                 }
             }
             Pending::Sample(i) => self.states[i].sample = rows.to_vec(),
@@ -473,12 +520,17 @@ impl Profiler {
 
     /// Query `id` could not be run, and `reason` is what the host said.
     pub fn fail(&mut self, id: u32, reason: impl Into<String>) {
-        let Some(what) = self.pending.remove(&id) else { return };
+        let Some(what) = self.pending.remove(&id) else {
+            return;
+        };
         let i = match what {
             Pending::Describe(i) | Pending::Stats(i) | Pending::Sample(i) => i,
             Pending::Inclusion { from: (a, _), .. } => a,
         };
-        self.failed.push(Failure { source: self.states[i].source.key.clone(), reason: reason.into() });
+        self.failed.push(Failure {
+            source: self.states[i].source.key.clone(),
+            reason: reason.into(),
+        });
     }
 
     /// The profile. Called before [`Profiler::is_done`], it holds what was
@@ -498,10 +550,18 @@ impl Profiler {
                 columns: s.stats,
                 keys,
                 sample: s.sample,
-                descriptor: InferredDescriptor { key: s.source.key, columns: s.columns, etag: s.source.etag },
+                descriptor: InferredDescriptor {
+                    key: s.source.key,
+                    columns: s.columns,
+                    etag: s.source.etag,
+                },
             })
             .collect();
-        Profile { sources, inclusions: self.inclusions, failed: self.failed }
+        Profile {
+            sources,
+            inclusions: self.inclusions,
+            failed: self.failed,
+        }
     }
 }
 
@@ -528,31 +588,56 @@ mod tests {
     use super::*;
 
     fn csv(key: &str) -> Source {
-        Source { key: key.into(), name: key.into(), format: "csv".into(), option: None, etag: String::new() }
+        Source {
+            key: key.into(),
+            name: key.into(),
+            format: "csv".into(),
+            option: None,
+            etag: String::new(),
+        }
     }
 
     fn rows(cells: &[&[&str]]) -> Rows {
-        cells.iter().map(|r| r.iter().map(|c| Some((*c).to_string())).collect()).collect()
+        cells
+            .iter()
+            .map(|r| r.iter().map(|c| Some((*c).to_string())).collect())
+            .collect()
     }
 
     #[test]
     fn a_source_is_read_with_its_rows_reader_and_the_option_its_binding_wrote() {
         let mut plan = Profiler::new(
-            [Source { option: Some("|".into()), ..csv("o'brien.csv") }],
+            [Source {
+                option: Some("|".into()),
+                ..csv("o'brien.csv")
+            }],
             Options::default(),
         );
         let q = plan.next_query().expect("a DESCRIBE");
-        assert_eq!(q.sql, "DESCRIBE SELECT * FROM read_csv_auto('o''brien.csv', delim='|')");
+        assert_eq!(
+            q.sql,
+            "DESCRIBE SELECT * FROM read_csv_auto('o''brien.csv', delim='|')"
+        );
     }
 
     #[test]
     fn a_materialised_source_and_a_repeated_key_are_not_read() {
         let mut plan = Profiler::new(
-            [csv("a.csv"), csv("a.csv"), Source { format: "rdf".into(), ..csv("g.ttl") }],
+            [
+                csv("a.csv"),
+                csv("a.csv"),
+                Source {
+                    format: "rdf".into(),
+                    ..csv("g.ttl")
+                },
+            ],
             Options::default(),
         );
         assert!(plan.next_query().is_some());
-        assert!(plan.next_query().is_none(), "one DESCRIBE: the repeat and the graph are left out");
+        assert!(
+            plan.next_query().is_none(),
+            "one DESCRIBE: the repeat and the graph are left out"
+        );
     }
 
     #[test]
@@ -563,16 +648,38 @@ mod tests {
         plan.feed(a.id, &rows(&[&["id", "BIGINT"]]));
         assert!(plan.next_query().is_none(), "b is still out");
         plan.feed(b.id, &rows(&[&["id", "BIGINT"]]));
-        assert!(plan.next_query().expect("a count").sql.starts_with("SELECT CAST(count(*)"));
+        assert!(
+            plan.next_query()
+                .expect("a count")
+                .sql
+                .starts_with("SELECT CAST(count(*)")
+        );
     }
 
     /// The whole plan over two sources, answered by hand: what each count means.
     #[test]
     fn keys_and_inclusions_are_read_from_the_counts() {
-        let mut plan = Profiler::new([csv("awards.csv"), csv("laureates.csv")], Options { sample: 0, shown: 2, ..Options::default() });
+        let mut plan = Profiler::new(
+            [csv("awards.csv"), csv("laureates.csv")],
+            Options {
+                sample: 0,
+                shown: 2,
+                ..Options::default()
+            },
+        );
         let mut answers: HashMap<&str, Rows> = HashMap::from([
-            ("DESCRIBE SELECT * FROM read_csv_auto('awards.csv')", rows(&[&["id", "VARCHAR"], &["laureate", "BIGINT"], &["share", "DOUBLE"]])),
-            ("DESCRIBE SELECT * FROM read_csv_auto('laureates.csv')", rows(&[&["id", "BIGINT"], &["name", "VARCHAR"]])),
+            (
+                "DESCRIBE SELECT * FROM read_csv_auto('awards.csv')",
+                rows(&[
+                    &["id", "VARCHAR"],
+                    &["laureate", "BIGINT"],
+                    &["share", "DOUBLE"],
+                ]),
+            ),
+            (
+                "DESCRIBE SELECT * FROM read_csv_auto('laureates.csv')",
+                rows(&[&["id", "BIGINT"], &["name", "VARCHAR"]]),
+            ),
         ]);
         let mut asked = Vec::new();
         while let Some(q) = plan.next_query() {
@@ -585,7 +692,10 @@ mod tests {
             } else if q.sql.contains("count(DISTINCT \"id\")") {
                 // 3 laureates, ids and names unique.
                 rows(&[&["3", "3", "3", "3", "3"]])
-            } else if q.sql.contains("LEFT JOIN") && q.sql.contains("CAST(\"laureate\"") && q.sql.contains("laureates.csv") {
+            } else if q.sql.contains("LEFT JOIN")
+                && q.sql.contains("CAST(\"laureate\"")
+                && q.sql.contains("laureates.csv")
+            {
                 rows(&[&["3", "0"]])
             } else if q.sql.contains("LEFT JOIN") {
                 rows(&[&["3", "2"]])
@@ -597,18 +707,40 @@ mod tests {
         assert!(plan.is_done());
         let profile = plan.finish();
         let awards = &profile.sources[0];
-        assert_eq!(awards.descriptor.columns.iter().map(|c| c.primitive).collect::<Vec<_>>(), [Primitive::String, Primitive::Integer, Primitive::Float]);
-        assert_eq!(awards.keys, ["id"], "laureate repeats; a float is never a key");
+        assert_eq!(
+            awards
+                .descriptor
+                .columns
+                .iter()
+                .map(|c| c.primitive)
+                .collect::<Vec<_>>(),
+            [Primitive::String, Primitive::Integer, Primitive::Float]
+        );
+        assert_eq!(
+            awards.keys,
+            ["id"],
+            "laureate repeats; a float is never a key"
+        );
         assert_eq!(profile.sources[1].keys, ["id", "name"]);
         assert_eq!(
             profile.inclusions,
             [Inclusion {
-                from: ColumnRef { source: "awards.csv".into(), column: "laureate".into() },
-                to: ColumnRef { source: "laureates.csv".into(), column: "id".into() },
+                from: ColumnRef {
+                    source: "awards.csv".into(),
+                    column: "laureate".into()
+                },
+                to: ColumnRef {
+                    source: "laureates.csv".into(),
+                    column: "id".into()
+                },
             }],
         );
         // Only pairs of one primitive are tested: no float, and no string against an integer key.
-        assert!(asked.iter().all(|q| !q.contains("CAST(\"share\" AS VARCHAR) AS v")));
+        assert!(
+            asked
+                .iter()
+                .all(|q| !q.contains("CAST(\"share\" AS VARCHAR) AS v"))
+        );
         assert_eq!(awards.sample.len(), 1);
     }
 
@@ -617,7 +749,10 @@ mod tests {
         let mut plan = Profiler::new([csv("a.csv")], Options::TYPES);
         let q = plan.next_query().expect("the DESCRIBE");
         plan.feed(q.id, &rows(&[&["id", "BIGINT"]]));
-        assert!(plan.next_query().is_none(), "no counts, no inclusions, no sample");
+        assert!(
+            plan.next_query().is_none(),
+            "no counts, no inclusions, no sample"
+        );
         assert!(plan.is_done());
         let profile = plan.finish();
         assert_eq!(profile.sources[0].descriptor.columns.len(), 1);
@@ -633,6 +768,12 @@ mod tests {
         assert!(plan.is_done());
         let profile = plan.finish();
         assert!(profile.sources.is_empty());
-        assert_eq!(profile.failed, [Failure { source: "gone.csv".into(), reason: "No files found that match the pattern".into() }]);
+        assert_eq!(
+            profile.failed,
+            [Failure {
+                source: "gone.csv".into(),
+                reason: "No files found that match the pattern".into()
+            }]
+        );
     }
 }

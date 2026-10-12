@@ -12,12 +12,18 @@ use crate::to_value;
 /// The plan over some sources: hand out a query, take its rows, until there
 /// are none; then the profile.
 #[wasm_bindgen(js_name = Profiler)]
+#[derive(Debug)]
 pub struct JsProfiler {
     plan: Option<fossil_profile::Profiler>,
 }
 
-fn argument<T: serde::de::DeserializeOwned>(name: &str, expected: &str, value: JsValue) -> Result<T, JsValue> {
-    serde_wasm_bindgen::from_value(value).map_err(|e| invalid_argument(name, expected, Some(e.into())).into())
+fn argument<T: serde::de::DeserializeOwned>(
+    name: &str,
+    expected: &str,
+    value: JsValue,
+) -> Result<T, JsValue> {
+    serde_wasm_bindgen::from_value(value)
+        .map_err(|e| invalid_argument(name, expected, Some(e.into())).into())
 }
 
 #[wasm_bindgen(js_class = Profiler)]
@@ -34,9 +40,14 @@ impl JsProfiler {
         #[wasm_bindgen(unchecked_param_type = "ProfileOptions | undefined")] options: JsValue,
     ) -> Result<Self, JsValue> {
         let sources: Vec<Source> = argument("sources", "an array of ProfileSource", sources)?;
-        let options: Options =
-            if options.is_undefined() { Options::default() } else { argument("options", "ProfileOptions", options)? };
-        Ok(Self { plan: Some(fossil_profile::Profiler::new(sources, options)) })
+        let options: Options = if options.is_undefined() {
+            Options::default()
+        } else {
+            argument("options", "ProfileOptions", options)?
+        };
+        Ok(Self {
+            plan: Some(fossil_profile::Profiler::new(sources, options)),
+        })
     }
 
     /// The next query to run, or `undefined` when none is to be handed out now:
@@ -47,10 +58,10 @@ impl JsProfiler {
     /// `internal/bug` after [`Self::finish`].
     #[wasm_bindgen(js_name = nextQuery, unchecked_return_type = "ProfileQuery | undefined")]
     pub fn next_query(&mut self) -> Result<JsValue, JsValue> {
-        match self.plan_mut()?.next_query() {
-            Some(query) => to_value("the query", &query),
-            None => Ok(JsValue::UNDEFINED),
-        }
+        self.plan_mut()?.next_query().map_or_else(
+            || Ok(JsValue::UNDEFINED),
+            |query| to_value("the query", &query),
+        )
     }
 
     /// The rows query `id` answered, every cell its text or `null`.
@@ -64,7 +75,11 @@ impl JsProfiler {
         id: u32,
         #[wasm_bindgen(unchecked_param_type = "(string | null)[][]")] rows: JsValue,
     ) -> Result<(), JsValue> {
-        let rows: Rows = argument("rows", "an array of rows, each an array of text or null", rows)?;
+        let rows: Rows = argument(
+            "rows",
+            "an array of rows, each an array of text or null",
+            rows,
+        )?;
         self.plan_mut()?.feed(id, &rows);
         Ok(())
     }
