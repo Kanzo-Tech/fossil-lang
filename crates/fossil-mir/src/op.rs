@@ -14,9 +14,8 @@
 //!
 //! `/docs/design/algebra` is the page that argues it. **Completeness of the
 //! IR is not surface coverage**: every operator is DEFINED here, and the ones
-//! a program can reach are the ones a verb spells. `fossil_hir::stdlib::PlanOp`
-//! is the list, and `fossil_hir::lower::lowered_verbs` derives which of them
-//! have arrived; the rest are exercised by direct `MirGraph` construction.
+//! a program can reach are the ones a verb spells — `fossil_hir::stdlib::PlanOp`
+//! is that list — and the rest are exercised by direct `MirGraph` construction.
 //!
 //! # Design notes
 //!

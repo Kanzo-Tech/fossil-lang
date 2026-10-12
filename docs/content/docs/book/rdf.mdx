@@ -58,8 +58,8 @@ as against *one or more*, so a SHACL document loses that distinction where a ShE
 
 | RDF | In Fossil |
 | --- | --- |
-| Language-tagged strings (`rdf:langString`) | Not written. `core.lang(value, tag)` type-checks and drops the tag |
-| `xsd:decimal` with its precision | Read as `Float`, written as `xsd:double` |
+| Language-tagged strings (`rdf:langString`) | None: a corpus has no column for a literal's language |
+| `xsd:decimal` with its precision | Read as `Float`, written as `xsd:double`; `parse.float` is the one way to read one from text |
 | Blank nodes | None: every node has an IRI |
 | Named graphs and quads | None: a `fossil/1` corpus is vertex and edge tables |
 | RDF 1.2 triple terms | None ([discarded](/docs/design/discarded)) |

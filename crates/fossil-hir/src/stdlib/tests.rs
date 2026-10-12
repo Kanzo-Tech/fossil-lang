@@ -188,28 +188,18 @@ fn math_namespace_has_exactly_six_no_ceil_floor() {
 /// The authoritative function set. `io/` is excluded (source constructors).
 fn expected_stdlib_names() -> Vec<&'static str> {
     vec![
-        // core/ (1) — `core.require` went with `error()`, which DataFusion
-        // cannot express at all.
-        "core.lang",
-        // seq/ (12) — the relation verbs. `filter`/`project` are spelled
+        // seq/ (6) — the relation verbs, each with an operator. `filter`/`project` are spelled
         // `where`/`select`, which is what the surface spells.
         "seq.where",
-        "seq.map",
-        "seq.flatten",
-        "seq.take",
-        "seq.drop",
         "seq.distinct",
-        "seq.sort",
         "seq.select",
         "seq.join",
         "seq.union",
         "seq.group_by",
-        "seq.count",
-        // parse/ (6) — `json` needed an extraction function DataFusion does
+        // parse/ (5) — `json` needed an extraction function DataFusion does
         // not ship; `csv_row` renders and is simply not wanted.
         "parse.integer",
         "parse.float",
-        "parse.decimal",
         "parse.date",
         "parse.datetime",
         "parse.year",
@@ -220,7 +210,7 @@ fn expected_stdlib_names() -> Vec<&'static str> {
         "math.max",
         "math.abs",
         "math.round",
-        // str/ (13) — every operation on a string. `normalize_unicode` is NOT
+        // str/ (12) — every operation on a string. `normalize_unicode` is NOT
         // among them: it is not in the language.
         "str.length",
         "str.slice",
@@ -229,7 +219,6 @@ fn expected_stdlib_names() -> Vec<&'static str> {
         "str.ends_with",
         "str.replace",
         "str.split",
-        "str.concat",
         "str.trim",
         "str.lower",
         "str.upper",
@@ -319,6 +308,16 @@ fn the_deleted_names_are_gone() {
         // user, which is why `fossil-df` leaves `crypto_expressions` off.
         "anon.hash",
         "anon.redact",
+        // Rows that ran nothing or said what another says (`/docs/design/declared`).
+        "core.lang",
+        "seq.map",
+        "seq.flatten",
+        "seq.take",
+        "seq.drop",
+        "seq.sort",
+        "seq.count",
+        "str.concat",
+        "parse.decimal",
     ] {
         assert!(r.lookup(gone).is_none(), "`{gone}` must not exist");
     }

@@ -752,9 +752,9 @@ enum ConditionSide {
 /// is the size where that is not a slow program but a hung one.
 ///
 /// A COMPUTED key (`on = str.lower(A.k) == B.k`) is refused with them, and it is
-/// the one refusal with no workaround inside the language today: `seq.map` takes
-/// no function (`grammar.bnf` lists `LambdaExpr` among the productions
-/// intentionally absent) and there is no `extend`, so there is nowhere to put
+/// the one refusal with no workaround inside the language today: there is no
+/// verb that computes a column (`grammar.bnf` lists `LambdaExpr` among the
+/// productions intentionally absent), so there is nowhere to put
 /// the computation. Widening the rule to admit it would
 /// mean admitting an arbitrary expression as a key, which is the theta join
 /// again wearing an `==`.

@@ -117,7 +117,6 @@ User : Person from users
     assert_eq!(
         labels(&items, CompletionItemKind::FUNCTION),
         vec![
-            "concat",
             "contains",
             "ends_with",
             "length",

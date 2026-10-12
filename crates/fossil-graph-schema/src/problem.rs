@@ -653,15 +653,6 @@ catalogue! {
     #[error("`{verb}` is not a relation verb; the catalogue has {}", code_list(.verbs))]
     UnknownVerb { verb: String, verbs: Vec<String> },
 
-    /// A verb the catalogue declares and the lowering does not implement yet.
-    "pipeline/unimplemented-verb", "A verb with no lowering yet",
-    #[error(
-        "`{verb}` is a relation verb the lowering does not implement yet, so `{pipeline}` \
-         cannot compile; implemented today: {}",
-        code_list(.implemented)
-    )]
-    UnimplementedVerb { verb: String, pipeline: String, implemented: Vec<String> },
-
     /// A stage missing a position it needs (`missing`), or given more than
     /// it takes (`missing` absent).
     "pipeline/stage-arity", "A stage given the wrong arguments",

@@ -4,18 +4,18 @@ description: "`argument/arity` — a call gives a function fewer arguments than 
 ---
 
 Every function in [the standard library](/docs/book/stdlib) has a signature, and a call has to fill
-its required parameters and no more than all of them. `str.concat` takes exactly two strings:
+its required parameters and no more than all of them. `str.replace` takes three strings:
 
 ```fossil
-    label = str.concat(Row.label)
+    label = str.replace(Row.label, "-")
 ```
 
 ```text
-`str.concat` takes 2 arguments, and 1 was given
+`str.replace` takes 3 arguments, and 2 were given
 ```
 
-On the value path the receiver counts: `Row.label.concat()` is the same call with the same one
-argument, because `x.concat(y)` is `str.concat(x, y)`. When a row has optional trailing parameters,
+On the value path the receiver counts: `Row.label.replace("-")` is the same call with the same two
+arguments, because `x.replace(a, b)` is `str.replace(x, a, b)`. When a row has optional trailing parameters,
 the message gives the range, `takes 1 to 2 arguments`.
 
 This code is for calls to catalogue functions in an expression. A relation verb given the wrong
@@ -37,5 +37,5 @@ itself. So a short argument list is always missing its trailing parameters, neve
 - **An argument is missing.** Read the row in the standard library and supply it. Remember that on
   the value path the receiver is the first argument already.
 - **There is one too many.** Some rows take fewer arguments than their counterparts elsewhere:
-  `str.slice` has a `start` and no `end`, `math.round` takes no `digits`, `str.concat` takes exactly
-  two. Nest calls to combine more: `str.concat(a, str.concat(b, c))`.
+  `str.slice` has a `start` and no `end`, and `math.round` takes no `digits`. To join more than one
+  value into a string, interpolate: `"{a}{b}{c}"`.

@@ -835,11 +835,8 @@ Orders : Order from Purchase
 /// independently — the column search reads the row the checker is holding, and
 /// the conversion search reads the stdlib catalogue.
 ///
-/// **`parse.float` and not `parse.decimal`.** Both answer String → Float; the
-/// MVP lattice has no Decimal, so `parse.decimal` returns a Float by compromise
-/// and says so in its own catalogue row. Sorting on the name alone put it in
-/// front of an author who asked for a Float, which is why the tiebreak prefers
-/// the row NAMED after the type. Under that, alphabetical — because
+/// **The row NAMED after the type wins** when two answer the same conversion.
+/// Under that, alphabetical — because
 /// `FunctionRegistry::iter` walks a `HashMap` and its order is the process's
 /// hash seed, so an unsorted pick would put a different function in a committed
 /// artefact on different runs.

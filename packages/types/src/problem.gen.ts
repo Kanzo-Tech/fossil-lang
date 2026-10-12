@@ -70,7 +70,6 @@ export type Code =
   | 'identity/edge-without-template'
   | 'identity/edge-arity'
   | 'pipeline/unknown-verb'
-  | 'pipeline/unimplemented-verb'
   | 'pipeline/stage-arity'
   | 'pipeline/invalid-stage-argument'
   | 'pipeline/not-an-aggregate'
@@ -173,7 +172,6 @@ export const CODES: readonly Code[] = [
   'identity/edge-without-template',
   'identity/edge-arity',
   'pipeline/unknown-verb',
-  'pipeline/unimplemented-verb',
   'pipeline/stage-arity',
   'pipeline/invalid-stage-argument',
   'pipeline/not-an-aggregate',
@@ -651,14 +649,6 @@ export interface ProblemData {
     verbs: string[];
   };
   /**
-   * A verb the catalogue declares and the lowering does not implement yet.
-   */
-  'pipeline/unimplemented-verb': {
-    implemented: string[];
-    pipeline: string;
-    verb: string;
-  };
-  /**
    * A stage missing a position it needs (`missing`), or given more than it takes (`missing`
    * absent).
    */
@@ -991,7 +981,6 @@ export const TITLES: { readonly [C in Code]: string } = {
   'identity/edge-without-template': 'An edge to a type nothing writes',
   'identity/edge-arity': 'An edge given the wrong number of values',
   'pipeline/unknown-verb': 'Not a relation verb',
-  'pipeline/unimplemented-verb': 'A verb with no lowering yet',
   'pipeline/stage-arity': 'A stage given the wrong arguments',
   'pipeline/invalid-stage-argument': 'A stage argument of the wrong kind',
   'pipeline/not-an-aggregate': 'Not an aggregation',

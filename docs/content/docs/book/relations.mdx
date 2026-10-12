@@ -92,7 +92,5 @@ its readers see the change.
 | `union` | another relation | every row of both, under this pipeline's name |
 | `group_by` | columns, and an aggregation per column it produces | one row per group |
 
-Those six reach the surface today. The catalogue holds six more for a relation — `sort`, `take`,
-`drop`, `count`, `map`, `flatten` — which the checker knows and the lowering does not yet handle;
-[the standard library](/docs/book/stdlib) lists them. None is a special form: they are functions
-with a relation on the left.
+Those six are all of them, and each runs; [the standard library](/docs/book/stdlib) lists them. None
+is a special form: they are functions with a relation on the left.

@@ -20,11 +20,10 @@
 //! | `math.round` | `Integer` | `DOUBLE` — `round(DOUBLE)` is a `DOUBLE` |
 //! | `parse.date` | `Date` | `TIMESTAMP` — `strptime` always is |
 //! | `parse.json` | `String` | `JSON` — `DuckDB`'s own type |
-//! | `parse.decimal` | `Float` | `DECIMAL(38,18)` |
 //!
 //! The two guards that existed could not see any of them. `builtin_smoke.rs`
 //! executes each template and asks whether `DuckDB` BOUND it, which every one of
-//! the five passed — they are all valid SQL, they are the WRONG valid SQL.
+//! the four passed — they are all valid SQL, they are the WRONG valid SQL.
 //! This crate's `UNREACHABLE_ON_DATAFUSION` asks whether a template renders at
 //! all. Neither reads `sig.ret`, so neither could compare the halves.
 //!
@@ -51,13 +50,11 @@
 //!
 //! - **The `Op` rows.** A `PlanOp` names an operator of the algebra; there is
 //!   no scalar expression to `DESCRIBE`. That covers every relation verb
-//!   (`SigTy::Rows`, true by construction), `seq.count` (`Integer` over
-//!   `COUNT(*)`) and the `io/` constructors (`SigTy::Rows`). Their return types
+//!   (`SigTy::Rows`, true by construction) and the `io/` constructors (`SigTy::Rows`). Their return types
 //!   are asserted by reading, not by an engine.
 //! - **That the type is the RIGHT one.** It proves `sig.ret` and the template
-//!   agree, not that either is what the language should say. `parse.decimal`
-//!   returning `Float` is a compromise recorded in its own row; this test would
-//!   be just as green if the pair had settled on the wrong answer together.
+//!   agree, not that either is what the language should say; this test would be
+//!   just as green if the pair had settled on the wrong answer together.
 //! - **VALUES.** `parse.json` changed from `json_extract` to
 //!   `json_extract_string`, which alters the string as well as its type
 //!   (`"x"` → `x`); nothing here would have noticed if only the type had moved.
@@ -197,7 +194,7 @@ fn every_expr_template_returns_the_type_its_row_declares() {
 /// that inserted them took a `ScalarTy` and the one that did not was called
 /// `add_verb`.
 #[test]
-fn every_op_row_returns_rows_except_the_one_that_counts_them() {
+fn every_op_row_returns_rows() {
     let reg = stdlib();
 
     let mut op_rows: Vec<(&str, SigTy)> = reg
@@ -212,17 +209,10 @@ fn every_op_row_returns_rows_except_the_one_that_counts_them() {
         .filter(|(_, ret)| ret.scalar().is_some())
         .map(|(name, _)| *name)
         .collect();
-    assert_eq!(
-        scalar_returning,
-        ["seq.count"],
-        "an operator of the algebra gives back a relation; `seq.count` is the \
-         one that gives back a number, and any other is a row that says it \
-         produces a value where the plan produces rows"
-    );
-    assert_eq!(
-        reg.lookup("seq.count").map(|e| e.sig.ret),
-        Some(SigTy::Scalar(ScalarTy::Integer)),
-        "`COUNT(*)` is a BIGINT"
+    assert!(
+        scalar_returning.is_empty(),
+        "an operator of the algebra gives back a relation, and these say they \
+         produce a value where the plan produces rows: {scalar_returning:?}"
     );
     // Every `seq/` row plus every `io.` constructor that reads data — derived,
     // because this was the literal `15` written as "12 `seq/` rows and 3 `io/`
@@ -241,7 +231,7 @@ fn every_op_row_returns_rows_except_the_one_that_counts_them() {
          got {op_rows:?}"
     );
     assert!(
-        seq >= 12 && io >= 4,
+        seq >= 6 && io >= 4,
         "expected every relation verb and every data constructor, got {seq} `seq/` \
          and {io} `io/`"
     );

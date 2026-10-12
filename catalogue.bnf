@@ -212,9 +212,10 @@ duckdb string    = "*" .
    than evaluate), and Aggregate (whose argument names are the PROGRAM's).
 
    **The return type is independent of the lowering, and the grammar has to keep
-   it that way.** `seq.count` is an operator that gives back an Integer;
-   `io.csv` is an operator that takes a scalar and gives back Rows. A notation
-   that tied `-> Rows` to `op` could express neither.
+   it that way.** `io.csv` is an operator that takes a scalar and gives back
+   Rows, and `str.length` an expression that gives back an Integer. A notation
+   that tied `-> Rows` to `op` would also tie a verb to its relation, and a verb
+   that gives back a number is a row this grammar must still be able to write.
 
    # The lowering
 
@@ -232,17 +233,9 @@ duckdb string    = "*" .
    ========================================================================== *)
 
 (* ------------------------------------------------------------------- core/ *)
-(* This was eight rows. Six were RDF term constructors — `iri`, `triple`,
-   `blank`, `literal`, `typed`, `emit` — and not one `.fossil` in the tree
-   called any of them; they took the variadic and the not-an-argument template
-   shapes with them, which is why the notation above needs neither.
-
-   `core.require` was the eighth and is gone from the language. It read its
-   argument twice around an `error()`, and `error()` has no DataFusion
-   equivalent at all — there is no way to raise from an expression, so «this
-   value or stop the run» had no spelling on the engine that writes a corpus. *)
-
-fn core.lang = (value: String, tag: String) -> String ; expr "%0" .
+(* Empty. It held RDF term constructors no program called, `core.require`,
+   which no engine can raise from, and `core.lang`, which dropped its tag
+   because a corpus has nowhere to put one (`/docs/design/declared`). *)
 
 (* -------------------------------------------------------------------- seq/ *)
 (* The relation verbs, and a new verb is a ROW rather than a grammar rule —
@@ -252,16 +245,14 @@ fn core.lang = (value: String, tag: String) -> String ; expr "%0" .
    `User.filter(…)` for a language whose word is `where` is a completion that is
    confidently wrong.
 
-   `map`'s function argument is the higher-order position the surface does not
-   spell yet (`grammar.bnf` has no lambda), so the row declares the relation and
-   stops. A parameter invented here would be the reference page's old invented
-   `by`/`key`/`desc` written one layer lower down.
+   Every row here has an operator in `fossil-mir`. A verb comes back with its
+   operator and a test that executes it, never as a row alone
+   (`/docs/design/declared`).
 
    `distinct` takes NOTHING. A `DISTINCT ON` column list keeps one row per group
-   and chooses it arbitrarily without an `ORDER BY`, and `sort` has no lowering
-   yet, so there is no way to write the order that would settle it — a verb
-   whose corpus differs between two runs of the same program is not one this
-   language can admit.
+   and chooses it arbitrarily without an `ORDER BY`, and there is no verb that
+   writes the order that would settle it — a verb whose corpus differs between
+   two runs of the same program is not one this language can admit.
 
    `union`'s right side takes no `X as Y`, unlike a join's: the two sides become
    ONE row under the pipeline's name, so an alias would name a side the verb
@@ -270,22 +261,15 @@ fn core.lang = (value: String, tag: String) -> String ; expr "%0" .
    `group_by` is the one row with two `+` positions, and they do not collide.
    The rule a repetition obeys is about POSITIONAL arguments — a repeating
    position cannot be told from the position after it — and `aggregations` is
-   reached by NAME or not at all. `count` is the one `seq/` row that is not a
-   verb of the algebra: it takes a relation and gives back a number. *)
+   reached by NAME or not at all. *)
 
 fn seq.where    = (rows: Rows, keep: Predicate) -> Rows                 ; op Where    .
-fn seq.map      = (rows: Rows) -> Rows                                  ; op Map      .
-fn seq.flatten  = (rows: Rows, of: Column) -> Rows                      ; op Flatten  .
-fn seq.take     = (rows: Rows, n: Integer) -> Rows                      ; op Take     .
-fn seq.drop     = (rows: Rows, n: Integer) -> Rows                      ; op Drop     .
 fn seq.distinct = (rows: Rows) -> Rows                                  ; op Distinct .
-fn seq.sort     = (rows: Rows, by: Column+) -> Rows                     ; op Sort     .
 fn seq.select   = (rows: Rows, cols: Column+) -> Rows                   ; op Select   .
 fn seq.join     = (rows: Rows, right: Binding, on = Predicate) -> Rows  ; op Join     .
 fn seq.union    = (rows: Rows, other: Binding) -> Rows                  ; op Union    .
 fn seq.group_by = (rows: Rows, keys: Column+, aggregations: Aggregate+) -> Rows
                                                                         ; op GroupBy  .
-fn seq.count    = (rows: Rows) -> Integer                               ; op Count    .
 
 (* -------------------------------------------------------------------- str/ *)
 (* Every operation on a string. There is no `clean/`: no principle separates
@@ -305,7 +289,6 @@ fn str.replace     = (text: String, needle: String, replacement: String) -> Stri
                                                                 ; expr "replace(%0, %1, %2)" .
 fn str.split       = (text: String, separator: String) -> SeqString
                                                                 ; expr "string_split(%0, %1)" .
-fn str.concat      = (text: String, other: String) -> String    ; expr "concat(%0, %1)" .
 fn str.trim        = (text: String) -> String                   ; expr "trim(%0)" .
 fn str.lower       = (text: String) -> String                   ; expr "lower(%0)" .
 fn str.upper       = (text: String) -> String                   ; expr "upper(%0)" .
@@ -353,13 +336,6 @@ fn str.strip_html = (text: String) -> String
 (* ------------------------------------------------------------------ parse/ *)
 (* Casts, and `strptime` behind two rows that differ by one.
 
-   `decimal` returns Float and the OUTER cast is what makes that sentence true;
-   the template was `CAST(%0 AS DECIMAL(38,18))`, which returns a fixed-point
-   column while the row said `Float`. The INNER cast stays because it is the
-   only thing separating this row from `parse.float`: `CAST('1e400' AS
-   DECIMAL(38,18))` REFUSES the value where `CAST('1e400' AS DOUBLE)` yields
-   `inf`. Measured on DuckDB v1.5.3.
-
    `strptime` returns a TIMESTAMP whatever the format string asks for, so a bare
    call was `parse.datetime` under a second name. The cast on `date` is what
    makes the two rows two things.
@@ -374,7 +350,6 @@ fn str.strip_html = (text: String) -> String
 
 fn parse.integer  = (text: String) -> Integer                   ; expr "CAST(%0 AS BIGINT)" .
 fn parse.float    = (text: String) -> Float                     ; expr "CAST(%0 AS DOUBLE)" .
-fn parse.decimal  = (text: String) -> Float                     ; expr "CAST(CAST(%0 AS DECIMAL(38,18)) AS DOUBLE)" .
 fn parse.date     = (text: String, format: String) -> Date      ; expr "CAST(strptime(%0, %1) AS DATE)" .
 fn parse.datetime = (text: String, format: String) -> DateTime  ; expr "strptime(%0, %1)" .
 

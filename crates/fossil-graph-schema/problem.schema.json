@@ -2041,46 +2041,6 @@
       "x-detail": "\"`{verb}` is not a relation verb; the catalogue has {}\", code_list(.verbs)"
     },
     {
-      "description": "A verb the catalogue declares and the lowering does not implement yet.",
-      "properties": {
-        "code": {
-          "enum": [
-            "pipeline/unimplemented-verb"
-          ],
-          "type": "string"
-        },
-        "data": {
-          "properties": {
-            "implemented": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "pipeline": {
-              "type": "string"
-            },
-            "verb": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "implemented",
-            "pipeline",
-            "verb"
-          ],
-          "type": "object"
-        }
-      },
-      "required": [
-        "code",
-        "data"
-      ],
-      "title": "A verb with no lowering yet",
-      "type": "object",
-      "x-detail": "\"`{verb}` is a relation verb the lowering does not implement yet, so `{pipeline}` \\\n         cannot compile; implemented today: {}\",\ncode_list(.implemented)"
-    },
-    {
       "description": "A stage missing a position it needs (`missing`), or given more than it takes (`missing` absent).",
       "properties": {
         "code": {

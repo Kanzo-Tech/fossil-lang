@@ -31,7 +31,6 @@ pub fn datafusion_name(duckdb_name: &str) -> Option<&'static str> {
     Some(match duckdb_name {
         // Shared spellings.
         "abs" => "abs",
-        "concat" => "concat",
         "contains" => "contains",
         "ends_with" => "ends_with",
         "length" => "length",

@@ -1017,13 +1017,10 @@ fn repair_for<'db>(
                 && matches!(e.sig.params.as_slice(), [only] if is_ty(only.ty.scalar(), actual))
         })
         .collect();
-    // **The one NAMED after the type wins**, then alphabetical. `parse.decimal`
-    // and `parse.float` both answer String → Float — the catalogue has no
-    // Decimal type in the MVP lattice, so `decimal` returns a Float by
-    // compromise and says so in its own row — and sorting on the name alone
-    // put `decimal` in front of an author who asked for a Float. The tiebreak
-    // is what a reader would reach for; the alphabetical order under it is what
-    // keeps the answer the same on every run.
+    // **The one NAMED after the type wins**, then alphabetical: two rows may
+    // answer the same conversion, and the tiebreak is what a reader would reach
+    // for; the alphabetical order under it keeps the answer the same on every
+    // run.
     let wanted = expected_display.to_ascii_lowercase();
     conversions.sort_by(|a, b| (a.member != wanted, &a.name).cmp(&(b.member != wanted, &b.name)));
     if let Some(convert) = conversions.first() {
@@ -2050,9 +2047,9 @@ impl<'db> Expr<'db> {
                 TyKind::Primitive(Primitive::Integer) => {}
                 // The mistake this arm exists to catch, and `+` is where it is
                 // made: `User.first + " " + User.last` is what someone writes on
-                // the first day. It is not string concatenation — `str.concat`
+                // the first day. It is not string concatenation — interpolation
                 // is, and one idea does not get two spellings — so the message
-                // names the row rather than only refusing.
+                // says how rather than only refusing.
                 kind => {
                     let mut d = Diagnostic::new(
                         Severity::Error,
@@ -2065,7 +2062,7 @@ impl<'db> Expr<'db> {
                     if matches!(kind, TyKind::Primitive(Primitive::String))
                         && matches!(op, BinOp::Add)
                     {
-                        d = d.with_help("two strings are joined with `str.concat`, not `+`");
+                        d = d.with_help("strings are joined by interpolation, `\"{a} {b}\"`, not `+`");
                     }
                     let eg = self.raise(d);
                     poisoned = Some(eg);

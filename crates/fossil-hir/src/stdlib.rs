@@ -98,7 +98,7 @@ pub fn stdlib() -> &'static FunctionRegistry {
 
 /// Every catalogue row that is an aggregate, sorted, for a message.
 ///
-/// Derived, like `crate::lower::lowered_verbs` and for the same reason: the
+/// Derived from the catalogue, and for this reason: the
 /// list a user is shown and the list the checker admits have to be one list, or
 /// the message goes stale on its own and nothing turns red.
 #[must_use]
@@ -342,8 +342,7 @@ impl ParamSpec {
 ///
 /// A position was implicitly [`Self::One`] and nothing could say otherwise, so
 /// `seq.select`'s list of columns was unwritable in a signature and lived in a
-/// hand-written arm instead. It is also why `str.concat` is documented variadic
-/// while the row takes two: the page could write a repetition the row could not.
+/// hand-written arm instead.
 ///
 /// # The repetition rule, stated precisely
 ///
@@ -688,10 +687,8 @@ pub enum LoweringKind {
 /// are the four that go inside `aggregate`. Nothing in the rows says so.»
 /// [`RegistryEntry::agg_fn`] is the row saying so, and this is what it answers.
 ///
-/// There is no `Count`: no row of the catalogue is a per-group count.
-/// `seq.count` takes a whole relation and hands back an `Integer`, which is a
-/// verb and not an aggregation, and a variant nothing can build is what
-/// `Op::Distinct`'s `by` was.
+/// There is no `Count`: no row of the catalogue is a per-group count, and a
+/// variant nothing can build is what `Op::Distinct`'s `by` was.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum AggFn {
     Sum,
@@ -705,8 +702,7 @@ pub enum AggFn {
 /// A variant says *this name is an operator of the algebra, not a scalar
 /// template*; what it lowers to is written beside it. The names are NOT a
 /// mirror of `fossil-mir`'s `Op` — this crate has no `fossil-mir` dependency,
-/// the direction of the graph forbids adding one, and `Take`/`Drop`/`Sort`/
-/// `Flatten`/`Count` have no `Op` of their own in any case.
+/// and the direction of the graph forbids adding one.
 ///
 /// `crate::lower::lower_source_stage` matches this enum exhaustively, so a new
 /// variant is a compile error there and no count is written down anywhere.
@@ -714,18 +710,8 @@ pub enum AggFn {
 pub enum PlanOp {
     /// `seq.where` → `FilterOp` (`WHERE`).
     Where,
-    /// `seq.map` → `ExtendOp`s + `ProjectOp`.
-    Map,
-    /// `seq.flatten` → `UNNEST`.
-    Flatten,
-    /// `seq.take` → `LIMIT n`.
-    Take,
-    /// `seq.drop` → `OFFSET n`.
-    Drop,
     /// `seq.distinct` → `SELECT DISTINCT`, over the whole row.
     Distinct,
-    /// `seq.sort` → `ORDER BY`.
-    Sort,
     /// `seq.select` → `ProjectOp` (`SELECT cols`).
     Select,
     /// `seq.join` → `JoinOp` (`JOIN ... ON`).
@@ -734,8 +720,6 @@ pub enum PlanOp {
     Union,
     /// `seq.group_by` → `SELECT keys, aggs … GROUP BY keys`.
     GroupBy,
-    /// `seq.count` → `COUNT(*)`.
-    Count,
     /// An `io/` source constructor. **Which** reader it is is not written here.
     ///
     /// The format comes from the PROVIDER ROW —

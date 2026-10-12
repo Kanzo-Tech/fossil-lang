@@ -7,14 +7,6 @@ which pulls each section in with `<include>`.
 
 Source: `catalogue.bnf`, all of it. Change it and re-run the command. */}
 
-<section id="core">
-
-| | signature | lowers to |
-| --- | --- | --- |
-| `core.lang` | `(value: String, tag: String) -> String` | `%0` |
-
-</section>
-
 <section id="io">
 
 | | extensions | what it reads |
@@ -47,7 +39,6 @@ Source: `catalogue.bnf`, all of it. Change it and re-run the command. */}
 | --- | --- | --- |
 | `parse.date` | `(text: String, format: String) -> Date` | `CAST(strptime(%0, %1) AS DATE)` |
 | `parse.datetime` | `(text: String, format: String) -> DateTime` | `strptime(%0, %1)` |
-| `parse.decimal` | `(text: String) -> Float` | `CAST(CAST(%0 AS DECIMAL(38,18)) AS DOUBLE)` |
 | `parse.float` | `(text: String) -> Float` | `CAST(%0 AS DOUBLE)` |
 | `parse.integer` | `(text: String) -> Integer` | `CAST(%0 AS BIGINT)` |
 | `parse.year` | `(text: String) -> GYear` | `CAST(%0 AS INTEGER)` |
@@ -58,16 +49,10 @@ Source: `catalogue.bnf`, all of it. Change it and re-run the command. */}
 
 | | signature | lowers to |
 | --- | --- | --- |
-| `count` | `(rows: Relation) -> Integer` | the `Count` operator |
 | `distinct` | `(rows: Relation) -> Relation` | the `Distinct` operator |
-| `drop` | `(rows: Relation, n: Integer) -> Relation` | the `Drop` operator |
-| `flatten` | `(rows: Relation, of: Column) -> Relation` | the `Flatten` operator |
 | `group_by` | `(rows: Relation, keys: Column…, <name> = Aggregate…) -> Relation` | the `GroupBy` operator |
 | `join` | `(rows: Relation, right: Binding, on = Predicate) -> Relation` | the `Join` operator |
-| `map` | `(rows: Relation) -> Relation` | the `Map` operator |
 | `select` | `(rows: Relation, cols: Column…) -> Relation` | the `Select` operator |
-| `sort` | `(rows: Relation, by: Column…) -> Relation` | the `Sort` operator |
-| `take` | `(rows: Relation, n: Integer) -> Relation` | the `Take` operator |
 | `union` | `(rows: Relation, other: Binding) -> Relation` | the `Union` operator |
 | `where` | `(rows: Relation, keep: Predicate) -> Relation` | the `Where` operator |
 
@@ -77,7 +62,6 @@ Source: `catalogue.bnf`, all of it. Change it and re-run the command. */}
 
 | | signature | lowers to |
 | --- | --- | --- |
-| `concat` | `(text: String, other: String) -> String` | `concat(%0, %1)` |
 | `contains` | `(text: String, needle: String) -> Bool` | `contains(%0, %1)` |
 | `ends_with` | `(text: String, suffix: String) -> Bool` | `ends_with(%0, %1)` |
 | `length` | `(text: String) -> Integer` | `length(%0)` |

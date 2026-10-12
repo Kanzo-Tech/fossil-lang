@@ -114,8 +114,7 @@ pub struct HirSourcePipe {
     pub span: Span,
 }
 
-/// The relation verbs that have a lowering. `lowered_verbs` derives the list
-/// from this enum's constructors; the catalogue declares more.
+/// The relation verbs, one constructor per `seq.` row of the catalogue.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum HirSourceOp {
     /// `where(User.age >= 18)` — keeps the rows the predicate holds for. The row
@@ -269,7 +268,7 @@ pub enum BinOp {
     Ge,
     And,
     Or,
-    /// L5 `+`. Numeric only — string concatenation is `str.concat`, and one
+    /// L5 `+`. Numeric only — strings are joined by interpolation, and one
     /// idea does not get two spellings.
     Add,
     /// L5 `-`.
@@ -387,7 +386,7 @@ pub enum HirExpr {
     /// [`crate::stdlib`] catalogues it (`"str.slug"`), NOT a backend spelling:
     /// which `DuckDB` builtin or `DataFusion` UDF it becomes is the
     /// materializer's business, resolved from the catalog entry. Arguments are
-    /// positional and recursive — `str.concat(str.trim(User.a), "-")` nests.
+    /// positional and recursive — `str.slug(str.trim(User.a))` nests.
     Call { func: SmolStr, args: Vec<HirExpr> },
     /// `buyer = Person(User.email)` — an EDGE: «the `Person` whose identity is
     /// built from this email».
@@ -1636,28 +1635,6 @@ fn lower_source_stage(
             }
             Some(HirSourceOp::Union { right })
         }
-        // Catalogued, and `fossil-mir` has no lowering for them. Listed by name
-        // on purpose: the day one is implemented it moves up one group, and
-        // until then a user is told which of the two things is true about the
-        // verb they wrote.
-        PlanOp::Map
-        | PlanOp::Flatten
-        | PlanOp::Take
-        | PlanOp::Drop
-        | PlanOp::Sort
-        | PlanOp::Count => {
-            diagnose(
-                db,
-                stage,
-                Problem::UnimplementedVerb {
-                    verb: verb.to_string(),
-                    pipeline: pipe.to_string(),
-                    implemented: lowered_verbs(),
-                },
-                None,
-            );
-            None
-        }
         // A stage resolves against the relation verbs, and a source constructor
         // is not one of them, so no program reaches this arm.
         PlanOp::Source => {
@@ -1682,20 +1659,6 @@ fn lower_source_stage(
 /// read from the table.
 fn relation_verbs() -> Vec<String> {
     verb_names(|_| true)
-}
-
-fn lowered_verbs() -> Vec<String> {
-    verb_names(|op| {
-        matches!(
-            op,
-            crate::stdlib::PlanOp::Where
-                | crate::stdlib::PlanOp::Select
-                | crate::stdlib::PlanOp::Join
-                | crate::stdlib::PlanOp::Distinct
-                | crate::stdlib::PlanOp::Union
-                | crate::stdlib::PlanOp::GroupBy
-        )
-    })
 }
 
 fn verb_names(f: impl Fn(crate::stdlib::PlanOp) -> bool) -> Vec<String> {

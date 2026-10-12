@@ -10,14 +10,14 @@ writes:
 ```fossil
     full_name = User.first + " " + User.last
     // the left side of `+` must be a number, and it is String
-    // help: two strings are joined with `str.concat`, not `+`
+    // help: strings are joined by interpolation, `"{a} {b}"`, not `+`
 ```
 
 ## Why fossil refuses it
 
 Arithmetic takes two numbers and gives the wider of them — `Integer` when both are, `Float` as soon
 as either is — and `/` is always `Float` ([typing](/docs/design/typing#arithmetic-comparison-boolean)).
-A `String` has no place in that rule. `+` is not string concatenation: `str.concat` is, and one idea
+A `String` has no place in that rule. `+` is not string concatenation: interpolation is, and one idea
 does not get two spellings in fossil. Unary `-` keeps its operand's numeric type, so it too needs an
 `Integer` or a `Float`.
 
@@ -26,8 +26,7 @@ a known, wrong type is refused.
 
 ## How to repair it
 
-- **You meant to join strings.** Use `str.concat`, which takes exactly two strings — nest it for
-  more, or use an interpolated string: `"{User.first} {User.last}"`.
-- **The column is a number stored as text.** Convert it with `parse.integer`, `parse.float` or
-  `parse.decimal` before the arithmetic.
+- **You meant to join strings.** Interpolate them: `"{User.first} {User.last}"`.
+- **The column is a number stored as text.** Convert it with `parse.integer` or `parse.float` before
+  the arithmetic.
 - **The wrong column was named.** Use the numeric field the source declares.
