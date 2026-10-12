@@ -31,9 +31,8 @@ use fossil_base::test_support::NativeSystem;
 use fossil_base::{FossilDb, SourceFile};
 use lsp_types::CompletionItemKind;
 
-/// A host db stand-in: a real Salsa db over a `NativeSystem` with every provider row, so the shape
-/// document the program names is readable from disk.
-
+/// The database a host builds: every provider row installed, so the
+/// documents the program names are readable.
 fn host_db() -> FossilDb {
     FossilDb::new(Arc::new(NativeSystem::with_providers(
         fossil_descriptors_output::PROVIDERS,

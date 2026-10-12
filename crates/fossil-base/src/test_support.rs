@@ -89,7 +89,7 @@ impl Default for NativeSystem {
 impl NativeSystem {
     /// A host that installs `providers`.
     #[must_use]
-    pub fn with_providers(providers: &'static [&'static Provider]) -> Self {
+    pub const fn with_providers(providers: &'static [&'static Provider]) -> Self {
         Self { providers }
     }
 
