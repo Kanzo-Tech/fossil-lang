@@ -267,7 +267,8 @@ fn busy(method: &str) -> Failure {
 // The types the signatures above name, from the one place they are declared.
 #[wasm_bindgen(typescript_custom_section)]
 const WIRE_TYPES: &str = "import type { Diagnostic, CompletionItem, Format, Hover, Input, \
-    Location, Profile, ProfileOptions, ProfileQuery, ProfileSource, SemanticToken, Token } \
+    Location, MappingSpec, Profile, ProfileOptions, ProfileQuery, ProfileSource, SemanticToken, \
+    Token } \
     from '@fossil-lang/types';\n\
     import type { MissingDocument } from '@fossil-lang/types/internal';";
 

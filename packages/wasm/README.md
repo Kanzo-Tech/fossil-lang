@@ -15,6 +15,8 @@ artefacts. Every door boots the module itself:
 - `runProfiler(sources, query, { options, signal })` — `fossil-profile`'s plan over some sources,
   each query run by `query` on the host's engine, a phase's queries at once: the profile the language
   server reads natively, in the page. `@fossil-lang/profile` is what a host calls; this is its loop.
+- `emitMapping(spec)` — the Fossil program a `MappingSpec` is (`fossil-mapping`'s emitter), or
+  `{ at, message }` where no program could say it: what a model fills instead of writing syntax.
 - `initFossilWasm(bytes)` — Node only: hand over the `.wasm`. A bundled host never calls it.
 
 ## One program in one editor: `openProgram`
