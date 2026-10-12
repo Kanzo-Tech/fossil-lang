@@ -157,10 +157,6 @@ crates/
                            engine, so it is in the wasm closure. `Options::TYPES` is one
                            `DESCRIBE` a source, what the editor asks for. `generated.rs` is
                            `catalogue.bnf`'s reader and type table
-  fossil-mapping/          a mapping as DATA — RML's triples maps, every name a column or a shape's
-                           — and `emit`, the Fossil program it is. What a model fills instead of
-                           writing syntax; depends on no fossil crate. `tests/round_trip.rs` holds
-                           each spec in `tests/specs/` to the conformance program it describes
   fossil-graph-schema/     the canonical graph-schema — the shared substrate contract — and the
                            error catalogue: `Problem`, `Failure`, and (feature `js`) the one
                            function every wasm crate throws a failure through

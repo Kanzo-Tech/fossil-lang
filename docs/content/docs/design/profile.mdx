@@ -80,16 +80,8 @@ constraint the browser's model runtime enforces — so there is no need to proje
 a decoding grammar.
 
 **The emitter's coverage is the risk.** The spec has to say what real programs say: joins,
-`parse.*`, the identity annotations. It is held by round trips: a spec in
-`crates/fossil-mapping/tests/specs/` emits, token for token, the conformance program it describes,
-and that program is held by the conformance suite to check, run and write its corpus
-(`crates/fossil-mapping/tests/round_trip.rs`). `fossil-mapping` says a shapes document, sources, and
-per type a source, its joins, a subject template, and properties that are a column, a `parse.*` call
-or a link to another type, a map's `where` — each a column against a literal — and `@rename`:
-`hello`, `relationship` and `rename` round-trip, and those are what the four dev examples write. A
-mapping over an intermediate binding (`Adults := User.where(…)`) is not in it: the same rows are a
-`where` on the map, and one way to say a thing is the emitter's whole point. The browser reaches it through
-`fossil-wasm` once a Task asks for it.
+`parse.*`, the identity annotations. It is held by round trips over the four examples — spec →
+Fossil → checker → the same corpus as the program written by hand — as expect tests.
 
 **What would reverse it:** a small model given Fossil's grammar that passes the gold set's
 competency questions at the same rate as spec-then-emit. Then the model writes the program, and the
