@@ -3,6 +3,8 @@
 //! bundled native `DuckDB` installs its `json` extension from the network on
 //! first use, which a test must not need.
 
+use std::fmt::Write as _;
+
 use fossil_graph_schema::Primitive;
 use fossil_profile::{ColumnRef, Inclusion, Options, Profile, Rows, Source};
 
@@ -181,7 +183,7 @@ fn a_sample_reads_the_counts_from_the_first_rows_and_says_so() {
     let dir = tempfile::tempdir().expect("a tempdir");
     let mut body = String::from("id,group\n");
     for i in 0..50 {
-        body.push_str(&format!("{i},{}\n", i % 3));
+        let _ = writeln!(body, "{i},{}", i % 3);
     }
     std::fs::write(dir.path().join("rows.csv"), body).expect("rows");
     let profile = profile(
