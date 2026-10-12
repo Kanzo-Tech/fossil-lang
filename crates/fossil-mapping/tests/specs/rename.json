@@ -1,0 +1,17 @@
+{
+  "renames": [{ "shape": "Person", "iri": "http://xmlns.com/foaf/0.1/name", "name": "foaf_name" }],
+  "shapes": { "format": "shex", "reference": "mixed.shex", "types": ["Person"] },
+  "sources": [{ "name": "User", "format": "csv", "reference": "data/users.csv" }],
+  "maps": [
+    {
+      "name": "People",
+      "shape": "Person",
+      "source": "User",
+      "subject": [{ "text": "https://shop.example/user/" }, { "column": { "source": "User", "column": "email" } }],
+      "properties": [
+        { "key": "name", "value": { "kind": "column", "column": { "source": "User", "column": "name" } } },
+        { "key": "foaf_name", "value": { "kind": "column", "column": { "source": "User", "column": "name" } } }
+      ]
+    }
+  ]
+}

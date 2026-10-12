@@ -1,0 +1,13 @@
+{
+  "shapes": { "format": "shex", "reference": "hello.shex", "types": ["Person"] },
+  "sources": [{ "name": "User", "format": "csv", "reference": "data/people.csv" }],
+  "maps": [
+    {
+      "name": "People",
+      "shape": "Person",
+      "source": "User",
+      "subject": [{ "text": "https://shop.example/person/" }, { "column": { "source": "User", "column": "id" } }],
+      "properties": [{ "key": "name", "value": { "kind": "column", "column": { "source": "User", "column": "name" } } }]
+    }
+  ]
+}

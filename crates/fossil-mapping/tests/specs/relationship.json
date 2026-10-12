@@ -1,0 +1,266 @@
+{
+  "shapes": {
+    "format": "shex",
+    "reference": "relationship.shex",
+    "types": [
+      "Place",
+      "Tag",
+      "Person"
+    ]
+  },
+  "sources": [
+    {
+      "name": "PlaceRow",
+      "format": "csv",
+      "reference": "data/place.csv",
+      "delimiter": "|"
+    },
+    {
+      "name": "TagRow",
+      "format": "csv",
+      "reference": "data/tag.csv",
+      "delimiter": "|"
+    },
+    {
+      "name": "PersonRow",
+      "format": "csv",
+      "reference": "data/person.csv",
+      "delimiter": "|"
+    },
+    {
+      "name": "KnowsRow",
+      "format": "csv",
+      "reference": "data/person_knows_person.csv",
+      "delimiter": "|"
+    },
+    {
+      "name": "InterestRow",
+      "format": "csv",
+      "reference": "data/person_hasInterest_tag.csv",
+      "delimiter": "|"
+    }
+  ],
+  "maps": [
+    {
+      "name": "Places",
+      "shape": "Place",
+      "source": "PlaceRow",
+      "subject": [
+        {
+          "text": "https://ldbc.example/place/"
+        },
+        {
+          "column": {
+            "source": "PlaceRow",
+            "column": "id"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "key": "name",
+          "value": {
+            "kind": "column",
+            "column": {
+              "source": "PlaceRow",
+              "column": "name"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tags",
+      "shape": "Tag",
+      "source": "TagRow",
+      "subject": [
+        {
+          "text": "https://ldbc.example/tag/"
+        },
+        {
+          "column": {
+            "source": "TagRow",
+            "column": "id"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "key": "name",
+          "value": {
+            "kind": "column",
+            "column": {
+              "source": "TagRow",
+              "column": "name"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "People",
+      "shape": "Person",
+      "source": "PersonRow",
+      "subject": [
+        {
+          "text": "https://ldbc.example/person/"
+        },
+        {
+          "column": {
+            "source": "PersonRow",
+            "column": "id"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "key": "firstName",
+          "value": {
+            "kind": "column",
+            "column": {
+              "source": "PersonRow",
+              "column": "firstName"
+            }
+          }
+        },
+        {
+          "key": "isLocatedIn",
+          "value": {
+            "kind": "link",
+            "shape": "Place",
+            "column": {
+              "source": "PersonRow",
+              "column": "place"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Friends",
+      "shape": "Person",
+      "source": "PersonRow",
+      "joins": [
+        {
+          "source": "KnowsRow",
+          "left": {
+            "source": "PersonRow",
+            "column": "id"
+          },
+          "right": {
+            "source": "KnowsRow",
+            "column": "Person.id"
+          }
+        }
+      ],
+      "subject": [
+        {
+          "text": "https://ldbc.example/person/"
+        },
+        {
+          "column": {
+            "source": "PersonRow",
+            "column": "id"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "key": "firstName",
+          "value": {
+            "kind": "column",
+            "column": {
+              "source": "PersonRow",
+              "column": "firstName"
+            }
+          }
+        },
+        {
+          "key": "isLocatedIn",
+          "value": {
+            "kind": "link",
+            "shape": "Place",
+            "column": {
+              "source": "PersonRow",
+              "column": "place"
+            }
+          }
+        },
+        {
+          "key": "knows",
+          "value": {
+            "kind": "link",
+            "shape": "Person",
+            "column": {
+              "source": "KnowsRow",
+              "column": "Person.id_1"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Interested",
+      "shape": "Person",
+      "source": "PersonRow",
+      "joins": [
+        {
+          "source": "InterestRow",
+          "left": {
+            "source": "PersonRow",
+            "column": "id"
+          },
+          "right": {
+            "source": "InterestRow",
+            "column": "Person.id"
+          }
+        }
+      ],
+      "subject": [
+        {
+          "text": "https://ldbc.example/person/"
+        },
+        {
+          "column": {
+            "source": "PersonRow",
+            "column": "id"
+          }
+        }
+      ],
+      "properties": [
+        {
+          "key": "firstName",
+          "value": {
+            "kind": "column",
+            "column": {
+              "source": "PersonRow",
+              "column": "firstName"
+            }
+          }
+        },
+        {
+          "key": "isLocatedIn",
+          "value": {
+            "kind": "link",
+            "shape": "Place",
+            "column": {
+              "source": "PersonRow",
+              "column": "place"
+            }
+          }
+        },
+        {
+          "key": "hasInterest",
+          "value": {
+            "kind": "link",
+            "shape": "Tag",
+            "column": {
+              "source": "InterestRow",
+              "column": "Tag.id"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
