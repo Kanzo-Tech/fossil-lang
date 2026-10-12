@@ -17,7 +17,6 @@ use std::path::Path;
 use std::time::SystemTime;
 
 use fossil_base::{FsError, Provider, System};
-use fossil_descriptors_input::DescriptorCache;
 
 // `pub(crate)` is the deliberate visibility: `WasmSystem` is an
 // implementation detail of the `fossil-wasm` crate. The clippy
@@ -28,14 +27,7 @@ use fossil_descriptors_input::DescriptorCache;
 // locally.
 #[allow(clippy::redundant_pub_crate)]
 #[derive(Debug, Default)]
-pub(crate) struct WasmSystem {
-    /// Keyed by the source URI the program writes:
-    /// the descriptors the host introspected with DuckDB-WASM and
-    /// pushed in via [`crate::FossilWorkspace::register_inferred_descriptor`]
-    /// BEFORE invoking `diagnostics()`. Consumed by
-    /// `fossil-hir::infer::resolve_source_scope` inside the typecheck query.
-    descriptors: DescriptorCache,
-}
+pub(crate) struct WasmSystem;
 
 impl System for WasmSystem {
     fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
@@ -46,10 +38,6 @@ impl System for WasmSystem {
         // No callers; UNIX_EPOCH avoids the wasm32 SystemTime::now() panic.
         // The first caller that needs a real clock adds `web-time`.
         SystemTime::UNIX_EPOCH
-    }
-
-    fn descriptors(&self) -> Option<&DescriptorCache> {
-        Some(&self.descriptors)
     }
 
     /// The workspace CHECKS programs — it is the LSP server-side in the

@@ -4,10 +4,9 @@
 //! and there is deliberately no list here: the one that was written down named
 //! `fossil-codegen`, which has not existed for some time.
 //!
-//! **Public-API commitment**: the signatures here are stable. The
-//! change this commitment exists to prevent is widening the `Db` trait —
-//! descriptors, registry and host capabilities go behind `System`, never onto
-//! `Db`, and every crate above this one is built on that being true.
+//! **What a host writes is a Salsa input**, reached through a handle on `Db`:
+//! files, sources and the provider catalogue. `System` keeps only what no
+//! answer depends on (`/docs/design/incremental`).
 //!
 //! **What is deliberately not here**, because a substrate decides nothing about
 //! a program: the rule turning a written reference into a location, which is
@@ -20,6 +19,7 @@ pub mod diagnostic;
 pub mod error;
 pub mod files;
 pub mod providers;
+pub mod sources;
 pub mod system;
 /// A shape decoder with no schema language behind it, plus the host that
 /// installs it — the seam every crate above this one needs to test against a
@@ -37,6 +37,9 @@ pub use files::{FileRegistry, Files, SourceFile, file_at, register_document, reg
 pub use providers::{
     CONSTRUCTOR_PREFIX, Capability, Catalogue, NativeReader, Provider, Registry, RowReader,
     claimed, install, installed, provider,
+};
+pub use sources::{
+    Described, SourceRegistry, Sources, columns, describe, describe_columns, described,
 };
 pub use system::{FsError, System};
 

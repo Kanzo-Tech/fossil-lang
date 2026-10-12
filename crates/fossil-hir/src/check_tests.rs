@@ -1649,9 +1649,9 @@ fn a_stage_condition_is_typed_and_not_only_resolved() {
 
     fn diagnostics(condition: &str) -> Vec<String> {
         let system: Arc<dyn fossil_base::System> = Arc::new(NativeSystem::decoding());
-        let db = FossilDb::new(system);
+        let mut db = FossilDb::new(system);
         register_inferred(
-            &db,
+            &mut db,
             "r.csv",
             &[
                 ("celsius", Primitive::Float),
@@ -1730,10 +1730,10 @@ fn a_join_condition_relates_the_two_sides_and_not_only_its_own() {
     /// fixtures can simply agree on.
     fn diagnostics(program: &str) -> Vec<String> {
         let system: Arc<dyn fossil_base::System> = Arc::new(NativeSystem::decoding());
-        let db = FossilDb::new(system);
+        let mut db = FossilDb::new(system);
         for (file, key) in [("l.csv", "id"), ("r.csv", "rid"), ("t.csv", "tid")] {
             register_inferred(
-                &db,
+                &mut db,
                 file,
                 &[
                     (key, Primitive::Integer),
@@ -1912,9 +1912,9 @@ fn null_compares_with_anything_and_assigns_to_nothing() {
 
     fn stage_diagnostics(condition: &str) -> Vec<String> {
         let system: Arc<dyn fossil_base::System> = Arc::new(NativeSystem::decoding());
-        let db = FossilDb::new(system);
+        let mut db = FossilDb::new(system);
         register_inferred(
-            &db,
+            &mut db,
             "r.csv",
             &[("when", Primitive::Date), ("n", Primitive::Float)],
         );

@@ -21,7 +21,7 @@
 //! # Driving strategy — "Db-wired" vs "helper-proven"
 //!
 //! The production `typecheck_mapping` Salsa query resolves the target shape
-//! through the file registry and the source row through the descriptor table,
+//! through the file registry and the source row through the source registry,
 //! so forward propagation (SC#1) is exercised **end-to-end through the
 //! production query path**: `run_db_wired_fixture` writes a real `SourceFile`
 //! whose path lets the relative `io.shex("…")` argument resolve, then drains
@@ -229,11 +229,16 @@ fn run_db_wired_fixture(bucket: &str, name: &str) -> String {
     // `DuckDB`, and these directories have no CSV to introspect anyway. So the
     // host registers what an introspection WOULD have found, which is exactly
     // what the browser's `registerProfile` does before a compile.
-    for entry in def_map(&db, file).sources(&db).clone() {
-        if let Some(uri) = entry.uri.as_deref() {
+    let uris: Vec<String> = def_map(&db, file)
+        .sources(&db)
+        .iter()
+        .filter_map(|entry| entry.uri.as_deref().map(str::to_string))
+        .collect();
+    for uri in uris {
+        {
             fossil_base::test_support::register_inferred(
-                &db,
-                uri,
+                &mut db,
+                &uri,
                 &[
                     ("id", Primitive::Integer),
                     ("name", Primitive::String),
@@ -620,7 +625,7 @@ fn the_generated_split_suggestion_compiles() {
          prop http://example.org/phone string 0 1\n",
     );
     fossil_base::test_support::register_inferred(
-        &db,
+        &mut db,
         "users.csv",
         &[
             ("id", Primitive::Integer),

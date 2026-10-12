@@ -70,7 +70,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use fossil_base::{Catalogue, Files, SourceFile, System};
+use fossil_base::{FossilDb, SourceFile, System};
 use fossil_graph_schema::js::{bug, invalid_argument};
 use fossil_graph_schema::{Failure, Problem};
 use fossil_hir::documents::MissingDocument;
@@ -82,60 +82,9 @@ use crate::wasm_system::WasmSystem;
 pub use crate::workspace::FileHandle;
 use crate::workspace::OpenFiles;
 
-/// The Salsa database the WASM host owns.
-///
-/// The Salsa runtime + the host
-/// [`System`] (here [`WasmSystem`]) + the file registry. The target-side `ShEx`
-/// type/properties `fossil-ide` surfaces are reachable because the PROGRAM
-/// names its output document and the host REGISTERS it (see
-/// [`FossilWorkspace::register_document_native`]) — the host supplies
-/// documents, not a contract.
-#[salsa::db]
-#[derive(Clone)]
-struct WasmDb {
-    storage: salsa::Storage<Self>,
-    system: Arc<dyn System>,
-    files: Files,
-    catalogue: Catalogue,
-}
-
-impl std::fmt::Debug for WasmDb {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WasmDb").finish_non_exhaustive()
-    }
-}
-
-#[salsa::db]
-impl salsa::Database for WasmDb {}
-
-#[salsa::db]
-impl fossil_base::Db for WasmDb {
-    fn system(&self) -> &dyn System {
-        &*self.system
-    }
-    fn files(&self) -> &Files {
-        &self.files
-    }
-
-    fn catalogue(&self) -> &Catalogue {
-        &self.catalogue
-    }
-}
-
-impl WasmDb {
-    fn new(system: Arc<dyn System>) -> Self {
-        Self {
-            storage: salsa::Storage::default(),
-            system,
-            files: Files::default(),
-            catalogue: Catalogue::default(),
-        }
-    }
-}
-
 /// JS-facing handle for the Fossil compiler running inside a WASM module.
 ///
-/// One instance owns one [`WasmDb`] (Salsa store + injected [`WasmSystem`]).
+/// One instance owns one [`FossilDb`] (Salsa store + injected [`WasmSystem`]).
 /// Hosts construct a single workspace per browser tab / Node process and
 /// reuse it across all method calls to amortise the Salsa interning +
 /// memoisation overhead.
@@ -145,19 +94,11 @@ impl WasmDb {
 /// exports it under the name `FossilWorkspace`. That indirection is the fix
 /// for a real defect — the type-level note on [`WasmWorkspace`] says which.
 pub struct FossilWorkspace {
-    db: WasmDb,
-    /// The system handle is owned by `db` via `Arc<dyn System>`; we retain a
-    /// typed `Arc<WasmSystem>` here so descriptor registration reaches its
-    /// cache without round-tripping through the trait object.
-    system: Arc<WasmSystem>,
+    db: FossilDb,
     /// Connection name → base, as `@name/…` expands against it. Outside Salsa:
     /// it reaches locations only, never a registry key, so setting it
     /// invalidates nothing.
     connections: HashMap<String, String>,
-    /// Source key → why the host could not describe it. Outside Salsa, like
-    /// the descriptor table beside it, and read by `diagnostics` only: a row per key
-    /// at the binding that reads it — see [`FossilWorkspace::undescribed_diagnostics`].
-    undescribed: HashMap<String, Undescribed>,
     /// The open-file lifecycle map (handle → `SourceFile` + URI index).
     /// Mutated by `open_file` / `update_file` / `close_file`; iterated by
     /// `diagnostics` / `diagnostics_for`.
@@ -181,13 +122,10 @@ impl FossilWorkspace {
     #[must_use]
     pub fn new() -> Self {
         console_error_panic_hook::set_once();
-        let system = Arc::new(WasmSystem::default());
-        let db = WasmDb::new(system.clone() as Arc<dyn System>);
+        let db = FossilDb::new(Arc::new(WasmSystem) as Arc<dyn System>);
         Self {
             db,
-            system,
             connections: HashMap::new(),
-            undescribed: HashMap::new(),
             files: OpenFiles::default(),
         }
     }
@@ -664,54 +602,8 @@ impl FossilWorkspace {
     /// host could not describe.
     fn file_diagnostics(&self, file: SourceFile) -> Vec<fossil_base::Diagnostic> {
         let mut all = fossil_ide::diagnostics(&self.db, file);
-        all.extend(self.undescribed_diagnostics(file));
+        all.extend(fossil_hir::infer::refused_sources(&self.db, file));
         all
-    }
-
-    /// One warning per source key `file` reads that the host registered as
-    /// undescribed, at the call of the first binding that reads it — the
-    /// `io.csv("users.csv")` right of `:=` — under the problem's own code.
-    ///
-    /// A warning and not an error: what is lost is the source's columns, so
-    /// field completion and forward typing, and the program still compiles
-    /// against an open row. Whether the source is readable at all is the run's
-    /// to say, under the same code. `/docs/design/tooling-for-humans` has the
-    /// argument and what would reverse it.
-    ///
-    /// Outside Salsa and recomputed per call: it is a table lookup per source
-    /// binding over the memoised def map, and a registration then needs no
-    /// revision bump to be seen.
-    fn undescribed_diagnostics(&self, file: SourceFile) -> Vec<fossil_base::Diagnostic> {
-        if self.undescribed.is_empty()
-            || fossil_base::claimed(fossil_base::installed(&self.db), file.path(&self.db))
-        {
-            return Vec::new();
-        }
-        let mut seen: Vec<&str> = Vec::new();
-        let mut out = Vec::new();
-        for entry in fossil_hir::def_map::def_map(&self.db, file).sources(&self.db) {
-            let Some(key) = entry.uri.as_deref() else {
-                continue;
-            };
-            let Some(why) = self.undescribed.get(key) else {
-                continue;
-            };
-            if seen.contains(&key) {
-                continue;
-            }
-            seen.push(key);
-            let mut d = fossil_base::Diagnostic::new(
-                fossil_graph_schema::Severity::Warning,
-                why.problem.clone(),
-                entry.call_span,
-            )
-            .file_absolute();
-            if let Some(help) = &why.help {
-                d = d.with_help(help.clone());
-            }
-            out.push(d);
-        }
-        out
     }
 
     /// Native-reachable per-file diagnostic drain. Returns `None` when
@@ -847,7 +739,7 @@ impl FossilWorkspace {
     /// # Errors
     ///
     /// Returns `api/invalid-argument`, the `serde_json` error as its cause, if
-    /// the JSON fails to deserialise. The descriptor table is not modified on error.
+    /// the JSON fails to deserialise. Nothing is recorded on error.
     pub fn register_inferred_descriptor_native(
         &mut self,
         descriptor_json: &str,
@@ -860,10 +752,7 @@ impl FossilWorkspace {
                 })
                 .caused_by(e)
             })?;
-        self.undescribed.remove(descriptor.key.as_str());
-        if let Some(cache) = self.system.descriptors() {
-            cache.insert(descriptor);
-        }
+        fossil_base::describe_columns(&mut self.db, descriptor);
         Ok(())
     }
 
@@ -886,12 +775,15 @@ impl FossilWorkspace {
             })
             .caused_by(e)
         })?;
-        self.undescribed
-            .insert(key.to_string(), Undescribed { problem, help });
+        fossil_base::describe(
+            &mut self.db,
+            key,
+            fossil_base::Described::Refused { problem, help },
+        );
         Ok(())
     }
 
-    /// Native-reachable lookup into the descriptor cache, by source URI.
+    /// The columns registered for a source, by the location the program writes.
     /// Lets cargo-tests verify the registration round-trips without going
     /// through the wasm-bindgen wrapper.
     #[must_use]
@@ -899,7 +791,7 @@ impl FossilWorkspace {
         &self,
         uri: &str,
     ) -> Option<fossil_descriptors_input::InferredDescriptor> {
-        self.system.descriptors()?.get(uri)
+        fossil_base::columns(&self.db, uri)
     }
 }
 
@@ -994,7 +886,7 @@ pub struct DiagnosticRelatedInformation {
 /// an editor shows.
 /// Only the two keys are this array's own; [`Diagnostic::related`] says why.
 fn to_diagnostic(
-    db: &WasmDb,
+    db: &FossilDb,
     file: SourceFile,
     uri: &str,
     index: &LineIndex,

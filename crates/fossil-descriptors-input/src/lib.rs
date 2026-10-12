@@ -28,10 +28,8 @@
 //! is allowed; removing a method is a decision, and gets written down on the
 //! reference page that states the rule before it lands.
 
-pub mod cache;
 pub mod inferred;
 
-pub use cache::DescriptorCache;
 pub use inferred::{InferredColumn, InferredDescriptor};
 
 /// Input-side schema descriptor.

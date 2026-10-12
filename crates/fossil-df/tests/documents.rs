@@ -130,16 +130,14 @@ fn counting_db(query: &'static str) -> (FossilDb, Arc<AtomicUsize>) {
 /// Intern the program AND introspect its CSV, which is what gives `.name` a
 /// type — without it there is nothing for the shape's constraint to
 /// disagree with. The check host does the same, in the same order.
-fn intern(db: &FossilDb, dir: &Path) -> SourceFile {
+fn intern(db: &mut FossilDb, dir: &Path) -> SourceFile {
     let file = SourceFile::new(
         db,
         PROGRAM.to_string(),
         dir.join("prog.fossil").to_string_lossy().into_owned(),
     );
-    native::profile::profile_and_register(
-        db.system(),
-        &fossil_lineage::inputs(db, file, &std::collections::HashMap::new()),
-    );
+    let inputs = fossil_lineage::inputs(db, file, &std::collections::HashMap::new());
+    native::profile::profile_and_register(db, &inputs);
     file
 }
 
@@ -168,7 +166,7 @@ fn diagnostics(db: &FossilDb, file: SourceFile) -> Vec<fossil_graph_schema::Prob
 fn the_document_the_program_names_is_registered_and_decodes() {
     let dir = program_dir(DEMANDS_INTEGER);
     let (mut db, _) = counting_db("shape_document");
-    let file = intern(&db, dir.path());
+    let file = intern(&mut db, dir.path());
     native::register_shape_documents(&mut db, file);
 
     let key = registry_key(&db, file, "person.shex");
@@ -209,7 +207,7 @@ fn a_program_that_names_no_document_registers_nothing() {
 fn editing_the_document_rechecks_the_program_and_the_diagnostic_changes() {
     let dir = program_dir(DEMANDS_INTEGER);
     let (mut db, decodes) = counting_db("shape_document");
-    let file = intern(&db, dir.path());
+    let file = intern(&mut db, dir.path());
     native::register_shape_documents(&mut db, file);
     let key = registry_key(&db, file, "person.shex");
     let document = file_at(&db, &key).expect("registered");
@@ -247,7 +245,7 @@ fn editing_the_document_rechecks_the_program_and_the_diagnostic_changes() {
 fn editing_the_program_does_not_re_run_the_decode() {
     let dir = program_dir(DEMANDS_INTEGER);
     let (mut db, decodes) = counting_db("shape_document");
-    let file = intern(&db, dir.path());
+    let file = intern(&mut db, dir.path());
     native::register_shape_documents(&mut db, file);
 
     let before = diagnostics(&db, file);

@@ -20,7 +20,7 @@
 //! Case (a) needs a program that NAMES its output shape document and
 //! a HOST that has done its two jobs for it: installed a decoder row that
 //! claims `.shex`, and REGISTERED the document as a Salsa input before the
-//! query asks for it. That is what `HostDb::new` + [`file`] do here, and it is
+//! query asks for it. That is what `FossilDb::new` + [`file`] do here, and it is
 //! what `fossil-wasm` does in production. A host that skips
 //! either one resolves no shape — which is the correct answer, not a bug, and
 //! is why case (a) would otherwise fail silently.
@@ -28,54 +28,16 @@
 use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{Catalogue, Files, SourceFile, System};
+use fossil_base::{FossilDb, SourceFile};
 use lsp_types::CompletionItemKind;
 
 /// A host db stand-in: a real Salsa db over a `NativeSystem` with every provider row, so the shape
 /// document the program names is readable from disk.
-#[salsa::db]
-#[derive(Clone)]
-struct HostDb {
-    storage: salsa::Storage<Self>,
-    system: Arc<dyn System>,
-    files: Files,
-    catalogue: Catalogue,
-}
 
-impl std::fmt::Debug for HostDb {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HostDb").finish_non_exhaustive()
-    }
-}
-
-#[salsa::db]
-impl salsa::Database for HostDb {}
-
-#[salsa::db]
-impl fossil_base::Db for HostDb {
-    fn system(&self) -> &dyn System {
-        &*self.system
-    }
-    fn files(&self) -> &Files {
-        &self.files
-    }
-
-    fn catalogue(&self) -> &Catalogue {
-        &self.catalogue
-    }
-}
-
-impl HostDb {
-    fn new() -> Self {
-        Self {
-            storage: salsa::Storage::default(),
-            system: Arc::new(NativeSystem::with_providers(
-                fossil_descriptors_output::PROVIDERS,
-            )),
-            files: Files::default(),
-            catalogue: Catalogue::default(),
-        }
-    }
+fn host_db() -> FossilDb {
+    FossilDb::new(Arc::new(NativeSystem::with_providers(
+        fossil_descriptors_output::PROVIDERS,
+    )))
 }
 
 /// The program NAMES its output shape document — `tests/fixtures/person.shex`,
@@ -95,7 +57,7 @@ User : Person from users
 
 /// Intern the program AND register the documents it names — the host's half,
 /// spelled here with the same function `fossil-wasm` calls.
-fn file(db: &mut HostDb, src: &str) -> SourceFile {
+fn file(db: &mut FossilDb, src: &str) -> SourceFile {
     let f = SourceFile::new(db, src.to_string(), "complete.fossil".to_string());
     fossil_hir::documents::register_missing_documents(db, f, &|_, location| {
         std::fs::read_to_string(location).ok()
@@ -108,7 +70,7 @@ fn file(db: &mut HostDb, src: &str) -> SourceFile {
 ///     a program writes.
 #[test]
 fn shape_property_names_are_offered_when_shape_resolves() {
-    let mut db = HostDb::new();
+    let mut db = host_db();
     let f = file(&mut db, SRC);
     // Line 3 (`    name = users.name`) is inside the `User : Person` mapping
     // whose target shape resolves to `http://example.org/Person`. Column 8 is
@@ -157,7 +119,7 @@ users := io.csv(\"users.csv\")
 User : Person from users
     name = users.name
 ";
-    let mut db = HostDb::new();
+    let mut db = host_db();
     let f = file(&mut db, NO_DOCUMENT);
     // One line shorter than `SRC` — the body is line 2 here, and column 8 is
     // the same KEY position case (a) asks from. Asking anywhere else would make
@@ -195,13 +157,13 @@ User : Person from users
 // **51 stdlib rows** offered whatever the receiver — 13 `seq.*`, 13 `str.*`,
 // 3 `io.*`, the rest `parse` / `math` / `validate` / `core` / `anon` — in
 // `HashMap` order, which three consecutive runs printed three different
-// spellings of. Below: 13, all of them `seq.*`, in one order.
+// spellings of. Below: all of them `seq.*`, in one order.
 
 /// After a `:=` binding's dot, the catalogue offers the RELATION VERBS and
 /// nothing else — labelled bare, because the member is what is being typed.
 #[test]
 fn a_relation_receiver_offers_the_verbs_and_no_other_row() {
-    let mut db = HostDb::new();
+    let mut db = host_db();
     let f = file(&mut db, SRC);
     // `    name = users.name` is line 3; the `.` is at column 16, so 17 is the
     // first character of the member.
@@ -213,10 +175,7 @@ fn a_relation_receiver_offers_the_verbs_and_no_other_row() {
         .collect();
     assert_eq!(
         fns,
-        vec![
-            "count", "distinct", "drop", "flatten", "group_by", "join", "map", "select", "sort",
-            "take", "union", "where",
-        ],
+        vec!["distinct", "group_by", "join", "select", "union", "where"],
         "`users` is a relation: its members are the verbs, sorted, bare",
     );
     // The dotted spelling is still reachable — it is the `detail`.
@@ -241,7 +200,7 @@ users := io.csv(\"users.csv\")
 User : Person from users
     name = str.
 ";
-    let mut db = HostDb::new();
+    let mut db = host_db();
     let f = file(&mut db, WITH_STR);
     // `    name = str.` — the `.` is the last character of line 2, column 14.
     let items = fossil_ide::completions(&db, &[f], f, 2, 15);
@@ -268,7 +227,7 @@ fn a_namespace_head_offers_only_its_own_namespace() {
     const WITH_IO: &str = "\
 users := io.
 ";
-    let mut db = HostDb::new();
+    let mut db = host_db();
     let f = file(&mut db, WITH_IO);
     let items = fossil_ide::completions(&db, &[f], f, 0, 12);
     let fns: Vec<&str> = items
@@ -292,7 +251,7 @@ users := io.csv(\"users.csv\")
 User : Person from users
     name = orders.
 ";
-    let mut db = HostDb::new();
+    let mut db = host_db();
     let f = file(&mut db, UNKNOWN);
     let items = fossil_ide::completions(&db, &[f], f, 2, 18);
     assert!(
@@ -314,7 +273,7 @@ User : Person from users
 /// dot-free for the reason this test is about.
 #[test]
 fn the_bare_catalogue_is_whole_and_sorted() {
-    let mut db = HostDb::new();
+    let mut db = host_db();
     let f = file(&mut db, SRC);
     // Line 2 is `User : Person from users`; column 3 is inside `User`.
     let items = fossil_ide::completions(&db, &[f], f, 2, 3);

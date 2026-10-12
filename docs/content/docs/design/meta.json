@@ -14,6 +14,7 @@
     "identity",
     "one-engine",
     "tooling-for-humans",
+    "incremental",
     "tooling-for-machines",
     "errors",
     "failure",

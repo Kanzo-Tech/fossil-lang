@@ -44,9 +44,10 @@ fn program(pipe: &str) -> String {
 }
 
 fn diagnostics(pipe: &str) -> Vec<String> {
-    let (db, file): (FossilDb, SourceFile) = db_with_document(&program(pipe), "v.shex", DOCUMENT);
-    register_inferred(&db, "o.csv", COLUMNS);
-    register_inferred(&db, "p.csv", COLUMNS);
+    let (mut db, file): (FossilDb, SourceFile) =
+        db_with_document(&program(pipe), "v.shex", DOCUMENT);
+    register_inferred(&mut db, "o.csv", COLUMNS);
+    register_inferred(&mut db, "p.csv", COLUMNS);
     let _ = lower_to_hir(&db, file);
     lower_to_hir::accumulated::<Diagnostic>(&db, file)
         .iter()

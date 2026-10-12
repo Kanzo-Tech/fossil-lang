@@ -85,9 +85,9 @@ fn db_reading(
     column: &str,
     descriptors: Vec<(&'static str, &'static [(&'static str, Primitive)])>,
 ) -> (FossilDb, SourceFile) {
-    let (db, file) = db_with_document(&program(pipe, row, column), "v.shex", DOCUMENT);
+    let (mut db, file) = db_with_document(&program(pipe, row, column), "v.shex", DOCUMENT);
     for (uri, columns) in descriptors {
-        register_inferred(&db, uri, columns);
+        register_inferred(&mut db, uri, columns);
     }
     (db, file)
 }

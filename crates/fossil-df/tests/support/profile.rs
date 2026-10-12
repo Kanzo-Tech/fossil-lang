@@ -1,12 +1,12 @@
 //! The test host's half of [`fossil_profile`]: every source a program reads,
-//! described on a native `DuckDB` connection before the compile, and registered
-//! on the [`System`]'s descriptor cache. The plan is the profiler's; the browser
+//! described on a native `DuckDB` connection before the compile, and written to
+//! the database's source registry, the input the checker reads. The plan is the profiler's; the browser
 //! runs it on DuckDB-WASM (`/docs/design/profile`). What is this host's is only
 //! the connection.
 
 use std::collections::HashSet;
 
-use fossil_base::System;
+use fossil_base::Db;
 use fossil_lineage::Input;
 use fossil_profile::{Options, Rows, Source};
 
@@ -31,10 +31,7 @@ fn rows(conn: &duckdb::Connection, sql: &str) -> duckdb::Result<Rows> {
 /// once per key, and register what came back. A source that cannot be described
 /// is skipped: the compile then has no forward propagation for it, which is what
 /// the program's expected diagnostics record.
-pub(crate) fn profile_and_register(system: &dyn System, sources: &[Input]) {
-    let Some(cache) = system.descriptors() else {
-        return;
-    };
+pub(crate) fn profile_and_register(db: &mut dyn Db, sources: &[Input]) {
     let mut seen = HashSet::new();
     let wanted: Vec<Source> = sources
         .iter()
@@ -64,6 +61,6 @@ pub(crate) fn profile_and_register(system: &dyn System, sources: &[Input]) {
         rows(&conn, sql).map_err(|e| e.to_string())
     });
     for source in profile.sources {
-        cache.insert(source.descriptor);
+        fossil_base::describe_columns(db, source.descriptor);
     }
 }

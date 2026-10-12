@@ -22,7 +22,7 @@
 //! Case 2 is decided by the program alone — there is no host mode that can turn
 //! backward checking on or off behind it. That is the whole of F4.
 //!
-//! # The db stand-in (`HostDb`)
+//! # The db stand-in (`FossilDb`)
 //!
 //! A `#[salsa::db]` struct carrying a host `System` that reads the disk AND
 //! installs the `ShEx` decoder row, plus — in [`fixture`] — the registration of
@@ -37,79 +37,41 @@
 use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{Catalogue, Files, SourceFile, System};
+use fossil_base::{FossilDb, SourceFile};
 
 /// A host db stand-in: a real Salsa db (so tracked queries run) over a
 /// `NativeSystem` with every provider row (so the documents the program names
 /// are readable).
-#[salsa::db]
-#[derive(Clone)]
-struct HostDb {
-    storage: salsa::Storage<Self>,
-    system: Arc<dyn System>,
-    files: Files,
-    catalogue: Catalogue,
-}
 
-impl std::fmt::Debug for HostDb {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HostDb").finish_non_exhaustive()
-    }
-}
-
-#[salsa::db]
-impl salsa::Database for HostDb {}
-
-#[salsa::db]
-impl fossil_base::Db for HostDb {
-    fn system(&self) -> &dyn System {
-        &*self.system
-    }
-    fn files(&self) -> &Files {
-        &self.files
-    }
-
-    fn catalogue(&self) -> &Catalogue {
-        &self.catalogue
-    }
-}
-
-impl HostDb {
-    fn new() -> Self {
-        Self {
-            storage: salsa::Storage::default(),
-            system: Arc::new(NativeSystem::with_providers(
-                fossil_descriptors_output::PROVIDERS,
-            )),
-            files: Files::default(),
-            catalogue: Catalogue::default(),
-        }
-    }
+fn host_db() -> FossilDb {
+    FossilDb::new(Arc::new(NativeSystem::with_providers(
+        fossil_descriptors_output::PROVIDERS,
+    )))
 }
 
 /// The introspected `users` row, registered by the HOST before the compile —
 /// what the browser's `registerProfile` does for real. Its `name` column is
 /// `Integer`; see `SHEX_SRC` for why it is not `String` any more.
-fn register_users(db: &dyn fossil_base::Db) {
+fn register_users(db: &mut dyn fossil_base::Db) {
     use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
     use fossil_graph_schema::Primitive;
-    let Some(cache) = db.system().descriptors() else {
-        panic!("the host keeps no descriptor table");
-    };
-    cache.insert(InferredDescriptor {
-        key: "users.csv".into(),
-        columns: vec![
-            InferredColumn {
-                name: "id".into(),
-                primitive: Primitive::Integer,
-            },
-            InferredColumn {
-                name: "name".into(),
-                primitive: Primitive::Integer,
-            },
-        ],
-        etag: String::new(),
-    });
+    fossil_base::describe_columns(
+        db,
+        InferredDescriptor {
+            key: "users.csv".into(),
+            columns: vec![
+                InferredColumn {
+                    name: "id".into(),
+                    primitive: Primitive::Integer,
+                },
+                InferredColumn {
+                    name: "name".into(),
+                    primitive: Primitive::Integer,
+                },
+            ],
+            etag: String::new(),
+        },
+    );
 }
 
 /// A `ShEx` schema declaring `http://example.org/Person` with an
@@ -156,7 +118,7 @@ const SHEX_SRC: &str = r#"{
 /// `Person` (so target-side resolution finds the `ShEx` shape). The shape
 /// document is written next to the `.fossil`, because it is read by relative
 /// path from the program.
-fn fixture(dir: &std::path::Path) -> (HostDb, SourceFile) {
+fn fixture(dir: &std::path::Path) -> (FossilDb, SourceFile) {
     // The shape document sits beside the program, and the PROGRAM names it:
     // `resolve_target_shape` reads what the program declares, so
     // hover resolves a target type for the same reason the compiler does.
@@ -169,8 +131,8 @@ User : Person from users
     @subject = \"https://example.org/u/{users.id}\"
     name = users.name
 ";
-    let mut db = HostDb::new();
-    register_users(&db);
+    let mut db = host_db();
+    register_users(&mut db);
     let file = SourceFile::new(
         &db,
         src.to_string(),
@@ -178,7 +140,7 @@ User : Person from users
     );
     // The host's half: the shape document is a Salsa input, so it has to be in
     // the database before any query goes looking for it. The `users` row came
-    // in through the descriptor cache above — the input side has not moved.
+    // in through the source registry above — the input side has not moved.
     fossil_hir::documents::register_missing_documents(&mut db, file, &|_, location| {
         std::fs::read_to_string(location).ok()
     });
@@ -256,8 +218,8 @@ User : Person from users
     @subject = \"https://example.org/u/{users.id}\"
     name = users.name
 ";
-    let db = HostDb::new();
-    register_users(&db);
+    let mut db = host_db();
+    register_users(&mut db);
     let file = SourceFile::new(
         &db,
         src.to_string(),

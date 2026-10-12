@@ -378,7 +378,7 @@ pub fn suggested_alias(predicate_iri: &str) -> SmolStr {
 /// provider, and that is `provider/bare-document-path` — not a fallback. The
 /// `schema =` argument of a source is a provider call like every other position
 /// that names a document, so there is one rule and no corner left in it.
-pub(crate) fn decoded_document(
+pub fn decoded_document(
     db: &dyn fossil_base::Db,
     file: fossil_base::SourceFile,
     constructor: Option<&str>,

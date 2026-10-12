@@ -33,9 +33,8 @@ test-support = []
 salsa = { workspace = true }
 thiserror = { workspace = true }
 smol_str = { workspace = true }
-# The `System` trait hands out a
-# `&fossil_descriptors_input::DescriptorCache`, keyed by the source URI the
-# program writes. Verified before adding it: fossil-descriptors-input has NO
+# `sources::Described` carries an `InferredDescriptor`, keyed by the source URI
+# the program writes. Verified before adding it: fossil-descriptors-input has NO
 # dependency on fossil-base — no cycle. The fossil-base → fossil-descriptors-input
 # direction matches the existing fossil-hir → fossil-descriptors-input
 # direction; descriptors-input remains a leaf data crate.

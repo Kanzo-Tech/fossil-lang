@@ -1,60 +1,20 @@
-//! Host-injected capabilities (filesystem, time, future: registry, descriptors).
+//! Host-injected capabilities: a filesystem and a clock, and the provider rows
+//! the host declares.
 //!
-//! **The `Db` trait stays thin, and descriptors and registry live behind a
-//! single `dyn System` indirection on it** — so a new host capability widens one
-//! trait and never the query surface. Today that is `read_file` and `now`, plus
-//! the two tables below; `read_dir`, `random_seed` and the function registry are
-//! extension points, listed at the foot of the trait and not written yet.
-//!
-//! The inferred-descriptor table arrived as a read/write method pair that three
-//! `System` impls each re-implemented, and it sits behind ONE accessor now,
-//! [`System::descriptors`]. Hosts (browser-side
-//! `DuckDB-WASM` via `FossilWorkspace::registerInferredDescriptor`; the
-//! native engine via the `duckdb` crate) populate runtime-introspected column
-//! lists BEFORE invoking `compile()`. The Rust compiler never initiates
-//! network IO from the WASM-gated crate set — descriptors are HOST-PROVIDED
-//! and consumed inside tracked queries through this accessor (mirrors the
-//! `read_file` pattern; Salsa-safe; `MAX_PER_MAPPING_FAN_OUT = 1` invariant
-//! preserved — see `crates/fossil-hir/tests/invalidation_regression.rs`).
+//! Nothing a compile's answer depends on lives here. What a host writes — files,
+//! what each source is, the installed rows — is a Salsa input with a handle on
+//! `Db` (`/docs/design/incremental`); a table read beside Salsa is memoised with
+//! the answer and never invalidated, which is what the descriptor table that
+//! used to be here did.
 
 use std::path::Path;
 use std::time::SystemTime;
-
-use fossil_descriptors_input::DescriptorCache;
 
 use crate::providers::{DATA, Provider};
 
 pub trait System: Send + Sync + std::fmt::Debug {
     fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError>;
     fn now(&self) -> SystemTime;
-
-    /// The host's [`DescriptorCache`] — the introspected input schemas, keyed
-    /// by source URI — or `None` for a host that does not keep one.
-    ///
-    /// This is the whole descriptor surface: one accessor handing out a
-    /// reference to a plain table, in place of the read/write method pair that
-    /// three `System` impls each re-implemented over a private
-    /// `Mutex<HashMap>`. There is no default to write, so a host either has a
-    /// table or answers `None`. **A host capability is ambient in the context
-    /// and never part of a query key**, which is what lets this be an accessor
-    /// at all.
-    ///
-    /// It is a concrete struct and not a `fn` table because the split is data
-    /// against behaviour: [`Self::providers`] is a table of BEHAVIOUR and this
-    /// is a table of DATA, and a function pointer that returned descriptors
-    /// would be the indirection without the reason for it.
-    ///
-    /// `None` is a real answer and not a stub: `fossil-df-wasm`'s executor
-    /// takes its schemas from the plan it was handed and has nothing to cache.
-    ///
-    /// Salsa-safe: reading through this accessor does NOT register a Salsa
-    /// dependency and does NOT trigger invalidation. The cache is host-owned
-    /// state, never produced by a tracked query. A host that wants downstream
-    /// queries to re-run bumps the source file's text via `set_text`, which
-    /// Salsa already tracks.
-    fn descriptors(&self) -> Option<&DescriptorCache> {
-        None
-    }
 
     /// **What this host declares it recognises**, and nothing reads it directly:
     /// `FossilDb::new` copies it into [`crate::providers::Registry`], a Salsa
@@ -97,55 +57,3 @@ pub enum FsError {
 //
 // A fixture on the crate root is a fixture something will eventually reach for
 // in production, and «in `base` only traits» is the rule that says so.
-
-#[cfg(test)]
-mod inferred_tests {
-    use super::*;
-    use crate::test_support::NativeSystem;
-    use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
-    use fossil_graph_schema::Primitive;
-
-    fn sample(uri: &str) -> InferredDescriptor {
-        InferredDescriptor {
-            key: uri.into(),
-            columns: vec![InferredColumn {
-                name: "id".into(),
-                primitive: Primitive::Integer,
-            }],
-            etag: "t1".into(),
-        }
-    }
-
-    #[test]
-    fn native_system_register_then_lookup_returns_same_descriptor() {
-        let s = NativeSystem::default();
-        let cache = s.descriptors().expect("the native host keeps a table");
-        cache.insert(sample("examples/users.csv"));
-        let got = cache.get("examples/users.csv").expect("present");
-        assert_eq!(got.key.as_str(), "examples/users.csv");
-        assert_eq!(got.columns.len(), 1);
-    }
-
-    #[test]
-    fn native_system_lookup_unknown_uri_returns_none() {
-        let s = NativeSystem::default();
-        assert!(s.descriptors().expect("table").get("nope.csv").is_none());
-    }
-
-    /// The default `System` has no table, and says so with a value the caller
-    /// can branch on rather than a panic.
-    #[test]
-    fn a_system_without_a_table_says_so_instead_of_panicking() {
-        #[derive(Debug)]
-        struct Bare;
-        impl System for Bare {
-            fn read_file(&self, path: &Path) -> Result<Vec<u8>, FsError> {
-                Err(FsError::NotFound(path.display().to_string()))
-            }
-            fn now(&self) -> SystemTime {
-                SystemTime::UNIX_EPOCH
-            }
-        }
-        assert!(Bare.descriptors().is_none());
-    }
-}

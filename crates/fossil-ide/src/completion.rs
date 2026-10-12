@@ -669,56 +669,20 @@ fn sig_name(t: fossil_hir::stdlib::SigTy) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fossil_base::FossilDb;
     use fossil_base::test_support::NativeSystem;
-    use fossil_base::{Catalogue, Files, System};
     use std::sync::Arc;
 
     // A minimal host db stand-in, so these unit tests exercise the stdlib
     // source without a filesystem fixture. The shape-property source needs a
     // program naming a real document on disk, and is exercised end-to-end in
     // `tests/completion.rs`.
-    #[salsa::db]
-    #[derive(Clone)]
-    struct HostDb {
-        storage: salsa::Storage<Self>,
-        system: Arc<dyn System>,
-        files: Files,
-        catalogue: Catalogue,
+
+    fn db() -> FossilDb {
+        FossilDb::new(Arc::new(NativeSystem::default()))
     }
 
-    impl std::fmt::Debug for HostDb {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.debug_struct("HostDb").finish_non_exhaustive()
-        }
-    }
-
-    #[salsa::db]
-    impl salsa::Database for HostDb {}
-
-    #[salsa::db]
-    impl fossil_base::Db for HostDb {
-        fn system(&self) -> &dyn System {
-            &*self.system
-        }
-        fn files(&self) -> &Files {
-            &self.files
-        }
-
-        fn catalogue(&self) -> &Catalogue {
-            &self.catalogue
-        }
-    }
-
-    fn db() -> HostDb {
-        HostDb {
-            storage: salsa::Storage::default(),
-            system: Arc::new(NativeSystem::default()),
-            files: Files::default(),
-            catalogue: Catalogue::default(),
-        }
-    }
-
-    fn file(db: &HostDb, src: &str) -> SourceFile {
+    fn file(db: &FossilDb, src: &str) -> SourceFile {
         SourceFile::new(db, src.to_string(), "c.fossil".to_string())
     }
 
@@ -767,11 +731,10 @@ mod tests {
     #[test]
     fn offers_source_fields_after_the_row_binding_s_dot() {
         use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
-        let db = db();
-        db.system
-            .descriptors()
-            .expect("the test host keeps a descriptor table")
-            .insert(InferredDescriptor {
+        let mut db = db();
+        fossil_base::describe_columns(
+            &mut db,
+            InferredDescriptor {
                 // Keyed by the URI the binding names, not by `u` —
                 // so the program below has to declare the binding for the
                 // completion to find anything.
@@ -787,7 +750,8 @@ mod tests {
                     },
                 ],
                 etag: String::new(),
-            });
+            },
+        );
         let src = "u := io.csv(\"u.csv\")\nUser : Person from u\n    name = u.\n";
         let f = file(&db, src);
         // The cursor an editor puts one character past the `.` it fired on.

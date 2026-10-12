@@ -21,10 +21,9 @@
 //! Priority order:
 //!
 //! 1. **`InferredDescriptor`** (preferred). When the host has pre-registered
-//!    a descriptor for the mapping's source **URI** via
-//!    `db.system().descriptors()` (browser-side `DuckDB-WASM` via
-//!    `FossilWorkspace::registerInferredDescriptor`; the native engine via
-//!    the `duckdb` crate), `resolve_source_scope` consumes that descriptor and
+//!    a descriptor for the mapping's source **URI** through
+//!    [`fossil_base::sources`] (`FossilWorkspace::registerInferredDescriptor`
+//!    in the browser), `resolve_source_scope` consumes that descriptor and
 //!    builds the [`Record`] directly — nothing is read from disk.
 //!
 //!    The lookup key is the URI as the program writes it, not the binding
@@ -38,16 +37,10 @@
 //! 3. **No descriptor**. Returns `None`; forward propagation is disabled for
 //!    the mapping — `.field` accesses synthesise no type.
 //!
-//! ## Salsa-safety of the inferred path
+//! ## The descriptor is an input
 //!
-//! `db.system().descriptors()` reads through the existing `System`
-//! abstraction — the one indirection a host is swapped behind. The descriptor
-//! table is NOT a `salsa::input` — it is host-owned state on the System impl,
-//! mirroring
-//! `read_file`. Reads from inside a tracked query do not register a Salsa
-//! input dependency, so re-registering a descriptor does NOT trigger
-//! invalidation. (When the host wants to invalidate, it bumps the source
-//! file's text via `set_text`, which Salsa already tracks.)
+//! [`fossil_base::sources::columns`] reads a Salsa input, so describing a
+//! source re-runs every check that read it (`/docs/design/incremental`).
 
 use fossil_base::{Diagnostic, bug, report};
 use fossil_descriptors_input::InferredDescriptor;
@@ -95,7 +88,50 @@ fn lookup_inferred<'db>(
     source_name: &str,
 ) -> Option<InferredDescriptor> {
     let call = dm.lookup_source_call(db, source_name)?;
-    db.system().descriptors()?.get(call.uri?.as_str())
+    fossil_base::sources::columns(db, call.uri?.as_str())
+}
+
+/// One warning per source `file` reads that the host could not describe, at
+/// the call of the first binding that reads it — the `io.csv("users.csv")`
+/// right of `:=` — under the problem the host's profile answered.
+///
+/// A warning and not an error: what is lost is the source's columns, so field
+/// completion and forward typing, and the program still compiles against an
+/// open row. Whether the source is readable at all is the run's to say, under
+/// the same code. `/docs/design/tooling-for-humans` has the argument and what
+/// would reverse it.
+#[must_use]
+pub fn refused_sources(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> Vec<Diagnostic> {
+    if fossil_base::claimed(fossil_base::installed(db), file.path(db)) {
+        return Vec::new();
+    }
+    let mut seen: Vec<&str> = Vec::new();
+    let mut out = Vec::new();
+    for entry in crate::def_map::def_map(db, file).sources(db) {
+        let Some(key) = entry.uri.as_deref() else {
+            continue;
+        };
+        let Some(fossil_base::Described::Refused { problem, help }) =
+            fossil_base::described(db, key)
+        else {
+            continue;
+        };
+        if seen.contains(&key) {
+            continue;
+        }
+        seen.push(key);
+        let mut d = Diagnostic::new(
+            fossil_graph_schema::Severity::Warning,
+            problem,
+            entry.call_span,
+        )
+        .file_absolute();
+        if let Some(help) = help {
+            d = d.with_help(help);
+        }
+        out.push(d);
+    }
+    out
 }
 
 /// Map one [`InferredColumn`] to a [`RecordField`] — the column→field lowering
@@ -1196,19 +1232,19 @@ mod tests {
 
         let system: Arc<dyn fossil_base::System> =
             Arc::new(fossil_base::test_support::NativeSystem::decoding());
-        let db = fossil_base::FossilDb::new(system);
+        let mut db = fossil_base::FossilDb::new(system);
         // The two `id`s differ in TYPE, which is the whole point — and that is
         // why the join is on `k` and not on them. `on = Left.id == Right.id`
         // compares an Integer with a String, and since the condition is typed
         // (`typecheck_stage`) that is a refusal, not a fixture. It was legal
         // here for as long as a stage's condition was walked for names only.
         fossil_base::test_support::register_inferred(
-            &db,
+            &mut db,
             "l.csv",
             &[("id", Primitive::Integer), ("k", Primitive::String)],
         );
         fossil_base::test_support::register_inferred(
-            &db,
+            &mut db,
             "r.csv",
             &[("id", Primitive::String), ("k", Primitive::String)],
         );

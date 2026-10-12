@@ -49,12 +49,11 @@ pub struct InferredDescriptor {
     /// Ordered columns; the order is the source's own and is significant.
     pub columns: Vec<InferredColumn>,
     /// An entity tag in RFC 9110's sense (§8.8.3): an opaque validator of the
-    /// state of the source this was read from, which may be weak. The cache
-    /// compares it; nothing interprets it. A host that can stat a file writes
+    /// state of the source this was read from, which may be weak. A host compares
+    /// it to decide whether to profile the source again; nothing interprets it. A host that can stat a file writes
     /// `mtime` + size, a host that has a strong `ETag` or a content digest
-    /// writes that instead, and a host that cannot cheaply tell writes `""` —
-    /// which [`crate::DescriptorCache::is_fresh`] reads as "never fresh", so
-    /// that source is re-introspected every time. It is NOT a hash of the bytes,
+    /// writes that instead, and a host that cannot cheaply tell writes `""`, which
+    /// is never fresh, so that source is profiled every time. It is NOT a hash of the bytes,
     /// and deliberately: hashing means reading the whole source to decide
     /// whether the source needs reading, which makes the cache cost more than
     /// the `DESCRIBE` it saves. `mtime` + size is two fields of one `stat`. Its

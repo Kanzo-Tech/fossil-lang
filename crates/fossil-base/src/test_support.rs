@@ -70,7 +70,6 @@ use crate::db::{Db, FossilDb};
 use crate::files::{SourceFile, register_document};
 use crate::providers::{CSV, DATA, JSON, PARQUET, Provider, RDF};
 use crate::system::{FsError, System};
-use fossil_descriptors_input::DescriptorCache;
 
 /// The `System` every test stands up: the real filesystem, the real clock, an
 /// introspected-schema table, and the provider rows it is given — the data rows
@@ -78,7 +77,6 @@ use fossil_descriptors_input::DescriptorCache;
 /// decoder below, or a crate's own table.
 #[derive(Debug)]
 pub struct NativeSystem {
-    descriptors: DescriptorCache,
     providers: &'static [&'static Provider],
 }
 
@@ -92,10 +90,7 @@ impl NativeSystem {
     /// A host that installs `providers`.
     #[must_use]
     pub fn with_providers(providers: &'static [&'static Provider]) -> Self {
-        Self {
-            descriptors: DescriptorCache::default(),
-            providers,
-        }
+        Self { providers }
     }
 
     /// A host that installs the data rows and the line decoder, [`TABLE`].
@@ -115,10 +110,6 @@ impl System for NativeSystem {
 
     fn now(&self) -> SystemTime {
         SystemTime::now()
-    }
-
-    fn descriptors(&self) -> Option<&DescriptorCache> {
-        Some(&self.descriptors)
     }
 
     fn providers(&self) -> &'static [&'static Provider] {
@@ -216,24 +207,24 @@ pub static TABLE: &[&Provider] = &[&CSV, &JSON, &PARQUET, &RDF, &SHEX];
 /// introspection of the
 /// file would have found; nothing here reads a file, because the point of the
 /// inferred path is that the host has already looked.
-pub fn register_inferred(db: &dyn Db, uri: &str, columns: &[(&str, Primitive)]) {
-    let Some(cache) = db.system().descriptors() else {
-        panic!("this host keeps no descriptor table");
-    };
-    cache.insert(fossil_descriptors_input::InferredDescriptor {
-        key: uri.into(),
-        columns: columns
-            .iter()
-            .map(
-                |(name, primitive)| fossil_descriptors_input::InferredColumn {
-                    name: (*name).into(),
-                    primitive: *primitive,
-                },
-            )
-            .collect(),
-        // Empty means "never fresh", which is right for a table nobody re-reads.
-        etag: String::new(),
-    });
+pub fn register_inferred(db: &mut dyn Db, uri: &str, columns: &[(&str, Primitive)]) {
+    crate::sources::describe_columns(
+        db,
+        fossil_descriptors_input::InferredDescriptor {
+            key: uri.into(),
+            columns: columns
+                .iter()
+                .map(
+                    |(name, primitive)| fossil_descriptors_input::InferredColumn {
+                        name: (*name).into(),
+                        primitive: *primitive,
+                    },
+                )
+                .collect(),
+            // Empty means "never fresh", which is right for a table nobody re-reads.
+            etag: String::new(),
+        },
+    );
 }
 
 /// A database whose host installs the line decoder.

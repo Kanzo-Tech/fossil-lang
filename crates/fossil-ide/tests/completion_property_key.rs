@@ -64,54 +64,18 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{Catalogue, Files, SourceFile, System};
+use fossil_base::{FossilDb, SourceFile};
 use lsp_types::CompletionItemKind;
 
-#[salsa::db]
-#[derive(Clone)]
-struct HostDb {
-    storage: salsa::Storage<Self>,
-    system: Arc<dyn System>,
-    files: Files,
-    catalogue: Catalogue,
-}
-
-impl std::fmt::Debug for HostDb {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HostDb").finish_non_exhaustive()
-    }
-}
-
-#[salsa::db]
-impl salsa::Database for HostDb {}
-
-#[salsa::db]
-impl fossil_base::Db for HostDb {
-    fn system(&self) -> &dyn System {
-        &*self.system
-    }
-    fn files(&self) -> &Files {
-        &self.files
-    }
-    fn catalogue(&self) -> &Catalogue {
-        &self.catalogue
-    }
-}
-
-fn host() -> HostDb {
-    HostDb {
-        storage: salsa::Storage::default(),
-        system: Arc::new(NativeSystem::with_providers(
-            fossil_descriptors_output::PROVIDERS,
-        )),
-        files: Files::default(),
-        catalogue: Catalogue::default(),
-    }
+fn host() -> FossilDb {
+    FossilDb::new(Arc::new(NativeSystem::with_providers(
+        fossil_descriptors_output::PROVIDERS,
+    )))
 }
 
 /// Intern `src` under a path NEXT TO the fixture document, so `io.shex("shop.shex")`
 /// resolves the way it does for a program on disk, and register what it names.
-fn program(db: &mut HostDb, src: &str) -> SourceFile {
+fn program(db: &mut FossilDb, src: &str) -> SourceFile {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join("property-key.fossil");
@@ -131,7 +95,7 @@ fn labels(items: &[lsp_types::CompletionItem], kind: CompletionItemKind) -> Vec<
         .collect()
 }
 
-fn fields(db: &HostDb, f: SourceFile, line: u32, character: u32) -> Vec<String> {
+fn fields(db: &FossilDb, f: SourceFile, line: u32, character: u32) -> Vec<String> {
     fossil_ide::completions(db, &[f], f, line, character)
         .iter()
         .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
@@ -253,7 +217,7 @@ fn a_member_access_offers_no_property_key() {
             CompletionItemKind::FUNCTION
         )
         .len(),
-        12,
+        6,
         "the relation verbs are untouched by this",
     );
 }

@@ -1,9 +1,9 @@
 //! Salsa `Db` trait + `FossilDb` implementation.
 //!
-//! The trait is intentionally **thin**: `system()`, `files()` and
-//! `catalogue()`. Descriptors and host capabilities flow through `&dyn System`
-//! rather than as separate composing traits. This is the verified pattern from
-//! `ruff_db` (and `ty_wasm` composes `Workspace { db, system }` over it).
+//! The trait is intentionally **thin**: `system()`, and one handle per input a
+//! host writes — `files()`, `sources()`, `catalogue()`. This is the pattern
+//! from `ruff_db` (and `ty_wasm` composes `Workspace { db, system }` over it):
+//! what changes a compile's answer is an input, never ambient host state.
 //!
 //! The registry does NOT flow through `System`, and used to. `System::providers`
 //! returned `&'static [&'static Provider]`, which is a table nothing can
@@ -14,12 +14,15 @@ use std::sync::Arc;
 
 use crate::files::Files;
 use crate::providers::Catalogue;
+use crate::sources::Sources;
 use crate::system::System;
 
 #[salsa::db]
 pub trait Db: salsa::Database {
     fn system(&self) -> &dyn System;
     fn files(&self) -> &Files;
+    /// What each source a program reads is — see [`crate::sources::described`].
+    fn sources(&self) -> &Sources;
     /// The provider rows installed in this database — see
     /// [`crate::providers::installed`], which is how a query reads them.
     fn catalogue(&self) -> &Catalogue;
@@ -31,6 +34,7 @@ pub struct FossilDb {
     storage: salsa::Storage<Self>,
     system: Arc<dyn System>,
     files: Files,
+    sources: Sources,
     catalogue: Catalogue,
 }
 
@@ -80,9 +84,11 @@ impl FossilDb {
             storage,
             system,
             files: Files::default(),
+            sources: Sources::default(),
             catalogue: Catalogue::default(),
         };
         let _ = db.files.registry(&db);
+        let _ = db.sources.registry(&db);
         let _ = db.catalogue.registry(&db);
         db
     }
@@ -99,6 +105,10 @@ impl Db for FossilDb {
 
     fn files(&self) -> &Files {
         &self.files
+    }
+
+    fn sources(&self) -> &Sources {
+        &self.sources
     }
 
     fn catalogue(&self) -> &Catalogue {

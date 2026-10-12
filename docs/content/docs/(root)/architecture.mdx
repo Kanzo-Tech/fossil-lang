@@ -191,13 +191,12 @@ does not.
 
 ### What would move the remaining edge
 
-`fossil-base → fossil-descriptors-input` exists for **one trait method**, `System::descriptors`,
-which hands out a `&DescriptorCache` (`crates/fossil-base/src/system.rs, descriptors`). Four crates, and the
-arrows nearly meet:
+`fossil-base → fossil-descriptors-input` exists for **one type**, the columns a source input
+carries (`crates/fossil-base/src/sources.rs, Described`). Four crates, and the arrows nearly meet:
 
 ```mermaid
 graph LR
-  B["fossil-base"] -->|System::descriptors| DI["fossil-descriptors-input"]
+  B["fossil-base"] -->|Described| DI["fossil-descriptors-input"]
   DI --> S["fossil-shex"]
   DO["fossil-descriptors-output"] --> S
   DO --> B
@@ -218,7 +217,7 @@ So the fold is blocked while that edge stands. Three ways out were costed:
 | the way out | what it costs |
 | --- | --- |
 | a generic or associated type on `System` | impossible, not merely expensive: the trait is used as `Arc<dyn System>` and as `&dyn System`, and either shape is object-safety's own counterexample |
-| the types down into `fossil-graph-schema`, the leaf both sides already see | no new crate — and a `Mutex<HashMap>` of host-owned mutable state inside the crate that depends on nothing but `serde`, which is this page's own mistake committed a second time |
+| the types down into `fossil-graph-schema`, the leaf both sides already see | no new crate; the objection was a `Mutex<HashMap>` of host state moving with them, and that table is a Salsa input in `fossil-base` now ([one database](/docs/design/incremental)), so what is left is a move |
 | a new leaf holding `DescriptorCache` + `InferredDescriptor` | it works, and it is the only one that does: a 25th crate, an import path changed in eight crates, and **nothing removed from `fossil-base`** |
 
 **What reverses this:** the fold itself. It removes a crate, so the third way nets zero on the count
