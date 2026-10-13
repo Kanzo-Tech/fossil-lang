@@ -1,8 +1,8 @@
 //! The host's connections — `@name/…` → a base URL — as a Salsa input.
 //!
 //! A location expands through them: the location of a document a program names,
-//! of every source it reads, and the run's routing. Those were functions handed
-//! a map, and a map handed beside the queries is memoised with nothing: a check
+//! of every source it reads, and the run's routing. A map handed beside the
+//! queries is memoised with nothing: a check
 //! that expanded `@warehouse/…` before the host said what `warehouse` is kept
 //! that answer after it did. Read through [`connections`], which registers a
 //! dependency, so [`set_connections`] re-runs whatever expanded one.

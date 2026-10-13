@@ -7,19 +7,12 @@
 //! [`Provider`](crate::Provider) row, the document is a
 //! [`SourceFile`](crate::SourceFile) input, and what comes back is
 //! [`OutputShapes`]. Every crate that wants to test *against a resolved shape*
-//! therefore needs a decoder, and reaching for the real `ShEx` one puts the
-//! dependency straight back in — which is what `0e6898d` cut out of
-//! `fossil-mir` on purpose, and what `fossil-hir`'s own test decoder was written
-//! to avoid.
+//! therefore needs a decoder, and a test that reaches for the real `ShEx` one
+//! is a test of the `ShEx` decoder as well as of whatever it meant to test.
 //!
-//! So the line format below was written three times: once in
-//! `fossil-hir`'s `shape_documents` tests (`fossil-base`'s own, while the
-//! query lived here), once in
-//! `fossil-hir/src/test_support.rs` (`#[cfg(test)]`, so no other crate could
-//! reach it), and a third was about to be written in `fossil-mir`'s
-//! `tests/lower_pg.rs`. A `#[cfg(test)]` module is invisible across a crate
-//! boundary, so "put it where the first one lives" was not available until this
-//! module was made a feature instead.
+//! The tests of `fossil-hir` and `fossil-mir` both need the same one, and a
+//! `#[cfg(test)]` module is invisible across a crate boundary — so the one
+//! decoder they share is a feature of the crate they both depend on.
 //!
 //! **This is not compiler logic** — the anti-pattern `CLAUDE.md` names for this
 //! crate. It is a reference implementation of the seam `fossil-base` itself

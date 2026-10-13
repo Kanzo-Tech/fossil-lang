@@ -5,17 +5,16 @@
 //! invalidates every reader.
 //!
 //! [`Files`] is the set of files the compiler may read, keyed by **resolved path
-//! string**. It was an empty placeholder whose own doc said it becomes this
-//! registry "once multi-file resolution is needed"; a shape document named by
-//! `io.shex("shop.shex")` is a second file, so it is needed now.
+//! string**: a shape document named by `io.shex("shop.shex")` is a second
+//! file beside the program.
 //!
 //! # Why the registry is itself a Salsa input
 //!
 //! The path→file map has to be a [`FileRegistry`] input rather than a plain
-//! `HashMap` on the side, and the reason is a *miss*, not a hit. `fossil-hir`
-//! resolves a path and reads the bytes through `System::read_file`, which
-//! registers nothing — so a query that asked for `shop.shex` before it existed
-//! memoized "not found" and **never re-ran when it appeared**. In an LSP that is
+//! `HashMap` on the side, and the reason is a *miss*, not a hit. A query that
+//! read the bytes through `System::read_file`, which registers nothing, and
+//! asked for `shop.shex` before it existed would memoize "not found" and
+//! **never re-run when it appeared**. In an LSP that is
 //! a diagnostic that never clears. [`file_at`] reads the map through the input's
 //! getter, so the *absence* of a path is a dependency on the map exactly as much
 //! as its presence is: registering a new file bumps the field's revision, and
@@ -98,8 +97,8 @@ impl Files {
 /// **The read registers a Salsa dependency, and that is the point.** A `None`
 /// from here is not a cached dead end: it is a dependency on the registry's
 /// contents, so [`register_file`] invalidates the readers that previously
-/// missed. Resolving a path with `System::read_file` instead — what the compiler
-/// did until now — memoized the miss forever.
+/// missed. Resolving a path with `System::read_file` instead memoizes the miss
+/// forever.
 #[must_use]
 pub fn file_at(db: &dyn Db, path: &str) -> Option<SourceFile> {
     db.files().registry(db).entries(db).get(path).copied()
@@ -169,10 +168,9 @@ mod tests {
         assert!(file_at(&db, "other.shex").is_none());
     }
 
-    /// The bug this registry exists to remove: a query that missed must
-    /// re-execute once the file it was looking for is registered. With
-    /// `System::read_file` the miss was memoized and nothing ever invalidated
-    /// it.
+    /// What this registry exists for: a query that missed must re-execute once
+    /// the file it was looking for is registered. Through `System::read_file`
+    /// the miss would be memoized and nothing would invalidate it.
     #[test]
     fn registering_a_file_invalidates_the_readers_that_missed_it() {
         let executions: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));

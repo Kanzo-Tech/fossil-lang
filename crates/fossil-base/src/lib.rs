@@ -1,8 +1,8 @@
 //! `fossil-base` — Salsa `Db` trait + `System` abstraction.
 //!
 //! The substrate. `cargo tree -i fossil-base` is the list of what consumes it,
-//! and there is deliberately no list here: the one that was written down named
-//! `fossil-codegen`, which has not existed for some time.
+//! and there is deliberately no list here: a written list goes stale the day a
+//! crate is renamed and nothing fails.
 //!
 //! **What a host writes is a Salsa input**, reached through a handle on `Db`:
 //! files, sources, connections and the provider catalogue. `System` keeps only what no

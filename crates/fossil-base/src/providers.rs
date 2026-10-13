@@ -33,9 +33,8 @@
 //! # Why the row type lives here
 //!
 //! Because the *host* supplies the table and `System` is here. A row that reads
-//! types carries a `fn` pointer into a schema language, and the compiler may not
-//! link one — `0e6898d` cut `ShEx` out of `fossil-mir` and the same cut applies to
-//! `fossil-hir`. So the rows that read rows are `&'static` constants in this
+//! types carries a `fn` pointer into a schema language, and this crate links
+//! none. So the rows that read rows are `&'static` constants in this
 //! crate (the compiler can name a `DuckDB` reader), the rows that read types come
 //! from the crate that owns the parser, and [`crate::system::System::providers`]
 //! is where a host hands over the assembled table. That split is what decides
@@ -47,14 +46,14 @@
 //! against [`crate::sources::Described`], which is *data* and therefore has no
 //! `fn` in it at all — there is nothing there to dispatch.
 //!
-//! # It is data, and it is now only data
+//! # It is data, and only data
 //!
 //! Nothing here decides anything about a program. The catalogue is a name, the
 //! extensions it accepts, the capabilities it declares, and two predicates over
 //! those; composing a Fossil compiler error out of it is `fossil_hir::refusals`,
 //! next to the checker that raises it.
 //!
-//! # The rows themselves are not written here any more
+//! # The rows themselves are generated
 //!
 //! `CSV`, `JSON`, `PARQUET`, `RDF`, `DATA` and [`NativeReader`] are **generated
 //! from `catalogue.bnf`** into `providers/generated.rs`, by `cargo xtask
@@ -93,8 +92,7 @@ pub enum RowReader {
     /// Something outside the reader materialises the relation (RDF, …) and the
     /// core only scans the result. Lowers to `fossil_mir::SourceFormat::Provider`
     /// and is executed by `fossil-df`. There is no `SourceProvider` trait and no
-    /// `fossil-provider-rdf` crate, which is what the comment this replaces
-    /// claimed.
+    /// provider crate: the row is the whole extension point.
     Materialised,
 }
 
@@ -123,13 +121,12 @@ pub enum Capability {
 /// named by a `&'static` whose `Eq`/`Hash` are `ptr::eq`/`ptr::hash`, so the
 /// entry's identity is its own address and nothing about its contents.
 ///
-/// `ShapeDecoder`, which this replaces, keyed identity on the address of its
-/// `decode` function. That cannot survive the merge and should not: a row that
-/// reads rows has no `decode`, so **every data row would have compared equal to
-/// every other**. The address of the ROW is the same escape hatch, defined for
-/// every row rather than for two thirds of them, and it is strictly finer —
-/// two rows that share one `decode` (a `shex` row and a hypothetical `shexc`
-/// row) are now two rows, which is what their two names already claimed.
+/// Not the address of a `decode` function: a row that reads rows has no
+/// `decode`, so **every data row would compare equal to every other**. The
+/// address of the ROW is the same escape hatch, defined for every row, and it
+/// is strictly finer — two rows that share one `decode` (a `shex` row and a
+/// hypothetical `shexc` row) are two rows, which is what their two names
+/// claim.
 ///
 /// The consequence, and it is enforced by the type: `Provider` is **not**
 /// `Copy` and **not** `Clone`. A copy has a different address and would be a
@@ -261,10 +258,9 @@ pub fn claimed(table: &[&'static Provider], uri: &str) -> bool {
 // it.** A bare string is a diagnostic (`fossil_hir::lower::check_provider`), not
 // a fallback.
 //
-// The alternative considered was killing `schema =` outright and taking every
-// document from a `type { … }` binding. It is not the same document: `schema =`
-// shapes the INPUT rows and `type { … }` is the OUTPUT contract, and nothing
-// says a program's two ends read one file.
+// `schema =` and a `type { … }` binding do not name the same document:
+// `schema =` shapes the INPUT rows and `type { … }` is the OUTPUT contract, and
+// nothing says a program's two ends read one file.
 
 // ===================================================================== the input
 
@@ -360,8 +356,8 @@ mod tests {
     static TABLE: &[&Provider] = &[&CSV, &JSON, &PARQUET, &RDF, &SHEX, &SHACL];
 
     /// Identity is the row's address, not its name and not its `decode`.
-    /// `SHEX` and `SHACL` share one `decode` here **on purpose**: under the
-    /// rule this replaces they would have been one row.
+    /// `SHEX` and `SHACL` share one `decode` here **on purpose**: identified by
+    /// their `decode` they would be one row.
     #[test]
     fn a_row_is_identified_by_its_address_not_by_its_decode() {
         // Never `assert_eq!` on the two `Option<fn>`: two `fn` pointers can
@@ -390,8 +386,8 @@ mod tests {
         assert_eq!(provider(TABLE, "shex").map(|p| p.name), Some("shex"));
         assert_eq!(provider(TABLE, "io.shacl").map(|p| p.name), Some("shacl"));
         assert!(provider(TABLE, "io.linkml").is_none());
-        // The pair that behaved identically until now: same extension, two
-        // different rows, and the name is what tells them apart.
+        // Same extension, two different rows, and the name is what tells them
+        // apart.
         assert!(SHEX.accepts("x.shexc"));
         assert!(!SHEX.accepts("x.ttl"));
         assert!(SHACL.accepts("x.ttl"));
@@ -418,10 +414,10 @@ mod tests {
         assert_eq!(extension_of(""), None);
     }
 
-    /// `.ttl` is claimed by `io.rdf` (rows) and `io.shacl` (types). Under the
-    /// extension-based selection this replaces, the answer depended on which
-    /// question was being asked and on table order; under dispatch by name there
-    /// is no question to ask — the program said which.
+    /// `.ttl` is claimed by `io.rdf` (rows) and `io.shacl` (types). Selected by
+    /// extension, the answer would depend on which question was being asked and
+    /// on table order; under dispatch by name there is no question to ask — the
+    /// program said which.
     #[test]
     fn one_extension_two_rows_and_the_name_is_the_only_thing_that_separates_them() {
         assert!(RDF.accepts("g.ttl") && SHACL.accepts("g.ttl"));

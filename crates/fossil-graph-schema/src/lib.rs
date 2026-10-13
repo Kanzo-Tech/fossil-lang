@@ -391,8 +391,7 @@ mod tests {
         assert_eq!(Primitive::from_xsd_iri("http://example.org/Custom"), None);
     }
 
-    /// The three spellings the tree carries reach the same variant. This is the
-    /// test that replaces the reconciliation the seven tables needed: a bare
+    /// The three spellings the tree carries reach the same variant: a bare
     /// local name, a `ShEx` `valueExpr` (full IRI) and a prefixed form are one
     /// lookup, so there is no second table to disagree with.
     #[test]

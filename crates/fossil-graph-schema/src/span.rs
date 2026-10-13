@@ -2,18 +2,12 @@
 //!
 //! # Why the leaf crate, and not `fossil-base`
 //!
-//! It lived in `fossil_base::diagnostic` beside [`crate::Shape`]'s consumers,
-//! and `fossil-base` carries salsa. The `ShEx` decoder was a crate of its own
-//! that depended on this one and not on that one, so the moment a shape
-//! document had to say WHERE it declares a predicate — the label
+//! A [`crate::Shape`] says WHERE its document declares a predicate — the label
 //! `shop:Order declares shop:total as xsd:float`, underlining a line of
-//! `shape.shex` — the decoder needed a span type it could not reach.
-//!
-//! The alternatives were a `(u32, u32)` on the shex side with a conversion at
-//! every use, which is what `HirSourcePipe::span` was until it was collapsed,
-//! or salsa in a WASM-clean crate. This is the same move F1 made for
-//! [`crate::Primitive`]: the shared vocabulary belongs in the leaf, and
-//! `fossil-base` re-exports it so no consumer's import changes.
+//! `shape.shex` — so the leaf needs a span type, and the leaf cannot reach
+//! `fossil-base`, which carries salsa. A bare `(u32, u32)` would need a
+//! conversion at every use. The shared vocabulary belongs in the leaf, as
+//! [`crate::Primitive`] does, and `fossil-base` re-exports it.
 
 use serde::{Deserialize, Serialize};
 

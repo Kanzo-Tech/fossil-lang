@@ -4,8 +4,7 @@
 //! Nothing a compile's answer depends on lives here. What a host writes — files,
 //! what each source is, the installed rows — is a Salsa input with a handle on
 //! `Db` (`/docs/design/incremental`); a table read beside Salsa is memoised with
-//! the answer and never invalidated, which is what the descriptor table that
-//! used to be here did.
+//! the answer and never invalidated.
 
 use std::path::Path;
 use std::time::SystemTime;
@@ -23,7 +22,7 @@ pub trait System: Send + Sync + std::fmt::Debug {
     /// The rows stay `&'static` because a row's identity is its address, and a
     /// `Vec<&'static Provider>` inside an input is exactly that. A table read
     /// from a file at run time cannot be `&'static`, which is why the read path
-    /// moved to the input and this method stayed a declaration.
+    /// is the input and this method is only a declaration.
     ///
     /// **This method is a seam that should close.** All but two implementations
     /// return the identical `fossil_hir::providers::PROVIDERS`, so "the host
@@ -46,8 +45,8 @@ pub enum FsError {
     Io(String),
 }
 
-// `NativeSystem` — a filesystem, a clock and the DEFAULT provider table — lived
-// here beside the trait it implements, and is `crate::test_support` now.
+// `NativeSystem` — a filesystem, a clock and the DEFAULT provider table — is
+// `crate::test_support`, not here beside the trait it implements.
 //
 // It has no production consumer, and that is not an accident: a host that
 // COMPILES a program has to install the rows that read types, and the trait
