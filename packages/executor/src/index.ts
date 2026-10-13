@@ -9,13 +9,17 @@
  *   const { report, files } = await run(program, { files, path });               // bytes in hand, for Node
  *
  * `host` is the `Host` from `@fossil-lang/types`: it vends `read` per connection and, into a job,
- * `write` on it. Recording the outcome is the host's.
+ * `write` on it. Recording the outcome is the host's. In a browser the run is in a worker the
+ * executor starts (`./worker.js`, emitted beside this entry); a host's CSP must allow it.
  */
 
 // The wasm-bindgen glue (`../pkg/fossil_df_wasm.js`) is imported ONLY from leaf
-// modules — `load.ts` (init) and `run.ts` (the executor) — never here in the
+// modules — `load.ts` (init) and `here.ts` (the executor) — never here in the
 // entry: importing the stateful glue from the package entry lets a
 // `sideEffects:false` bundler duplicate it, splitting `init()`'s wasm instance
 // from the one the executor uses. This entry only re-exports.
 export { initFossilExecutor, type InitInput } from './load.js';
-export { run, type CorpusFile, type FilesRun, type HostRun, type InMemoryRun, type RunOptions } from './run.js';
+export { run, type FilesRun, type HostRun, type InMemoryRun, type RunOptions } from './run.js';
+// What a run into memory answers, and what `@fossil-lang/corpus` attaches with `{ files }`: one type,
+// in `@fossil-lang/types`, so the reader needs no executor.
+export type { CorpusFile } from '@fossil-lang/types';
