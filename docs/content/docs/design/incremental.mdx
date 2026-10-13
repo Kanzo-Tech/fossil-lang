@@ -117,8 +117,16 @@ Two are still crates of their own:
 
 | crate | folds into | because |
 | --- | --- | --- |
-| `fossil-shex`, `fossil-descriptors-output` | `fossil-hir` | a shape document becomes a declared type by a `TryFrom` over rudof's own representation ([types declared in the program](/docs/design/declared)) |
+| `fossil-shex`, `fossil-descriptors-output` | `fossil-hir` | a shape document becomes a declared type: ShEx by a `TryFrom` over `shex_ast`'s compiled schema, `SchemaIR`, which resolves the references and labels `fossil-shex` resolves by hand; SHACL by fossil's own walk of the shapes graph, kept (below) ([types declared in the program](/docs/design/declared)) |
 | `fossil-descriptors-input`, `fossil-graph-schema` | `fossil-base`, `fossil-hir` | the errors are the substrate's, a primitive is the type system's, and a source's columns are an input |
+
+**SHACL stays fossil's own walk.** rudof's SHACL crates (`shacl_ast`, `shacl_ir`, `shacl_rdf`,
+measured at 0.2.9 on 2026-10-13) are on the 0.2 line while `shex_ast` is on 0.3, so their IRIs are
+another crate's type; and `shacl_ast` takes `iri_s` with its default features, which pull `reqwest`
+and with it `tokio` into the wasm closure — what the hard rule on `tokio` forbids. The walk over
+`oxrdf` is a few hundred lines that compile to wasm32 today. **What would reverse it:** a rudof
+SHACL release on the line `shex_ast` is on whose IRI crate builds for wasm32 without a network
+client.
 
 **What would reverse it:** a module whose consumers are not the crate it sits in — a second reader
 of the corpus format in Rust, say, which would want `fossil_df::corpus` without DataFusion.
