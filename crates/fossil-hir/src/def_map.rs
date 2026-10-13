@@ -336,8 +336,7 @@ impl<'db> DefMap<'db> {
     /// The `(provider, document)` pair a source's `schema =` argument names —
     /// `schema = io.shex("x.shex")`.
     ///
-    /// The pair, for the reason [`Self::output_shape_binding`] is a pair: the
-    /// provider is what selects the row that reads the document, and handing
+    /// A pair, because the provider is what selects the row that reads the document, and handing
     /// them out separately is how a caller comes to read one and forget the
     /// other. That is not hypothetical here — `crate::infer` did exactly that
     /// and passed `None` for the provider, which turned every destructuring RDF

@@ -13,7 +13,7 @@
 //! # A field's type
 //!
 //! A primitive of the lattice, written as the checker prints it
-//! ([`Primitive::from_name`]), is a literal of that datatype, exactly one.
+//! ([`fossil_graph_schema::Primitive::from_name`]), is a literal of that datatype, exactly one.
 //! `Ref<T>` is an edge to the type `T` names — declared or imported, through
 //! [`crate::def_map::DefMap::lookup_type`] like every other use of a type name.
 //! `Option<…>` is zero or one and `Seq<…>` zero or more, and either holds a
