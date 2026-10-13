@@ -20,12 +20,11 @@ It is thrown by `parseManifest`, inside `attach`, before any view is created.
 
 ## Why fossil refuses it
 
-`format` is the only version a corpus carries, and it is one string for the whole corpus. **Within
-`fossil/1` a field is added only if it is optional and a reader may ignore it**; anything that changes
-what a fixed column or a byte of a file means is `fossil/2`, and a `fossil/1` reader refuses it before
-reading a byte of Parquet ([/docs/format](/docs/format)). That is what lets a reader ignore every key
-it does not know: the format string is the one field it checks, so it is the one place an
-incompatible corpus can be stopped instead of misread.
+`format` is the only version a corpus carries, and it is one string for the whole corpus. Every
+reader of a corpus ships in the release of the writer that writes it, and a change to the format
+ships in both at once ([/docs/format](/docs/format#versions)), so a reader ignores every key it does
+not know. The format string is the one field it checks, so it is the one place a JSON file that is
+not a `fossil/1` corpus — another format, or no corpus at all — is stopped instead of misread.
 
 ## How to repair it
 

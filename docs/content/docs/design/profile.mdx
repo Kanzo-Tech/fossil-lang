@@ -112,4 +112,11 @@ The profiler and the mapping grammar are phase 2 of Kanzo Tasks, after the evalu
 resolver. Both are built: `fossil-profile` with its two hosts, introspect gone, and
 `fossil_ide::constrain`, the grammar of Fossil over a vocabulary whose types are imported or
 [declared in the program](/docs/design/declared). On keasy's side the executor runs in a worker of
-its own.
+its own, which is to move into the executor itself ([A run off the page](/docs/design/off-the-page)).
+
+## The corpus's profile is the same plan
+
+A run is to profile what it wrote with this plan, over the tables instead of the sources, and stores it in
+`fossil.json` for the readers of the corpus — [the corpus's own facts](/docs/design/facts) argues why
+the output and not the sources, and what the plan gains for it: its queries as data so DataFusion can
+run them too, the least, greatest and commonest values, and Parquet's names for the counts.

@@ -15,7 +15,9 @@ second file.
 
 So a type can be declared in the program, and an imported one is named by its name. The grammar is
 [`grammar.bnf`](/docs/book/grammar), `TypeDecl`; this page is why it is shaped as it is. All of it is
-built except the last section's conversions, which is what the `direction` above declares.
+built except the conversions onto rudof's types, which is what the `direction` above declares, and
+the stacked attributes, `@annotation` and `LangString`, which
+[Annotations and language-tagged strings](/docs/design/labels) argues and declares.
 
 ```
 @iri("https://schema.org/Person")
@@ -124,6 +126,33 @@ of the program.
 **What would reverse it:** a document that must be imported as it is and whose shapes' local names
 collide, often enough that declaring the type each time is the larger cost.
 
+## Several attributes stack above the field
+
+A field with one attribute keeps it on its own line, as above. A field — or a type — with several
+writes them on the lines above it, one per line, F#'s attribute on its own line, and a blank line may
+separate two fields:
+
+```
+@iri("https://schema.org/Person")
+type Laureate
+    @iri("https://schema.org/name")
+    name: Seq<LangString>
+
+    @iri("https://schema.org/birthDate")
+    @annotation("http://www.w3.org/2000/01/rdf-schema#label", "birth date"@en)
+    @annotation("http://www.w3.org/2000/01/rdf-schema#label", "fecha de nacimiento"@es)
+    birthDate: Date
+```
+
+The body is still indented and still one field per entry; only the attribute's line moved. The second
+attribute is `@annotation`, a ShEx annotation — a predicate and an RDF object — and the reason a field
+would carry several; [Annotations and language-tagged strings](/docs/design/labels) is the argument for
+it, for `"…"@en` and for `LangString`. The grammar is `grammar.bnf, DeclAttrs`.
+
+**What would reverse it:** a field whose attributes outgrow their lines often enough that the field's
+name is hard to find under them. Then the attributes move into the body of the field, and that is an
+indented block again, never braces.
+
 ## RDF is rudof's, through `From` and `Into`
 
 This is the part not built, and it is what the page's `direction` declares. The language does not
@@ -135,7 +164,9 @@ holds them: the XSD table both ways, and the names a declared field's type is re
 document then becomes declared types by a `TryFrom` over `shex_ast`'s compiled schema, `SchemaIR`
 ([One database, end to end](/docs/design/incremental) says where it lives), where
 `fossil_hir::shex` resolves references and labels by hand today. What Fossil supports of RDF is then the
-set of those conversions, and the page that lists it is generated from what has a `From`.
+set of those conversions, and the page that lists it is generated from what has a `From`. One
+measured limit: `shex_ast` 0.3.1 drops every annotation on its way to `SchemaIR`, so the conversion
+that carries them reads the AST ([Annotations and language-tagged strings](/docs/design/labels)).
 
 **What would reverse it:** an RDF concept Fossil needs that rudof does not model, or a rudof release
 whose types move under us faster than our own table would.
@@ -160,14 +191,15 @@ imported type. Then the difference is a field of the resolved type, never a bran
 
 The same review removes names that exist and run nothing, or say what another name already says.
 [What Fossil supports of RDF](/docs/book/rdf) is the page that says, for the rest, how far Fossil lines
-up with RDF today.
+up with RDF today. `core.lang` went with these — it lowered to its first argument, because a corpus had
+no place for a language tag — and its place is taken by `str.lang` and a corpus column for the tag,
+decided on [Annotations and language-tagged strings](/docs/design/labels).
 
 | Name | Why it goes | What brings it back |
 | --- | --- | --- |
 | `seq.map`, `seq.flatten`, `seq.take`, `seq.drop`, `seq.sort`, `seq.count` | No operator in `crates/fossil-mir/src/op.rs, Op` and no engine that runs them; six catalogue rows against six verbs that execute | An operator and a test that executes it, verb by verb |
 | `str.concat` | String interpolation says the same and lowers to the same `Concat` | A concatenation interpolation cannot write |
 | `parse.decimal` | Returns `Float`, as `parse.float` does | A `Decimal` type that keeps precision, as `xsd:decimal` |
-| `core.lang` | Lowers to its first argument: the tag type-checks and is dropped, because a corpus has no place for a language tag ([What Fossil supports of RDF](/docs/book/rdf)) | A corpus column for a literal's language, and a writer that fills it |
 
 ## Held by
 

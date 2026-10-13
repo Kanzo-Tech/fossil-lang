@@ -63,6 +63,24 @@ expression in an attribute argument. These are the languages, and the control ex
 | **Rust — `s.len()` ≡ `str::len(&s)`** | One catalogue entry reachable by two paths, which is the model for member-call dispatch by receiver type. |
 | **17 mapping languages and 12 schema-as-code systems** surveyed | 15 of the 17 treat a class IRI as an opaque string, and every one of them **derives** the shape from the mapping. Checking the mapping *against* the shape is the inversion, and it is the thesis. |
 
+## Annotations and language-tagged strings
+
+What [Annotations and language-tagged strings](/docs/design/labels) takes, each for one decision.
+
+| source | what it settles |
+| --- | --- |
+| **[ShEx 2.1](https://shex.io/shex-semantics/) §5.9, *Annotations*, and ShExC production [58]** | What an annotation is — `Annotation { predicate:IRIREF object:objectValue }`, on a Shape, an EachOf, a OneOf or a TripleConstraint, affecting no conformance — and how ShExC writes one, `"//" predicate (iri \| literal)`. `@annotation` is its two arguments in order, and `fossil.json` stores it as ShExJ verbatim. |
+| **[SHACL](https://www.w3.org/TR/shacl/) §2.3.2 and §2.3.2.1, `sh:name` and `sh:description`; §4.4.4, `sh:languageIn`** | That SHACL's labels are non-validating properties a processor ignores, that a local `sh:name` is to be preferred over a global label of the `rdf:Property`, «one value per language tag»; and that a shape's languages are «basic language ranges as per [BCP47]». |
+| **W3C Data Shapes WG, [ISSUE-112](https://www.w3.org/2014/data-shapes/track/issues/112)** (2015) | Why `sh:name` exists: `rdfs:label` on a property shape labels the shape, by RDFS's own definition, not the property in context. The counter-argument to reading `sh:name` as `rdfs:label`, recorded on what was discarded with what brings it back; and why annotations are never written as triples about the predicate. |
+| **[RDF 1.1 Concepts](https://www.w3.org/TR/rdf11-concepts/) §3.3, *Literals*** | That a literal has a language tag «if and only if the datatype IRI is `rdf:langString`», and that the tag «MUST be well-formed according to section 2.2.9 of [BCP47]» — which is the check, and why a reader that drops the tag writes ill-formed RDF. |
+| **BCP 47 — RFC 5646 §2.1.1 and §2.2.9, and RFC 4647 §2.1 and §3.3.1** | Well-formedness of a tag, its case-insensitivity, and the basic language ranges and basic filtering that SHACL's `sh:languageIn` and ShEx's language stems both match by. `oxilangtag`, already in the lock through `oxrdf`, implements the first. |
+| **[R2RML](https://www.w3.org/TR/r2rml/) §7.5, `rr:language`, and [RML](https://rml.io/specs/rml/) §6.5, `rml:languageMap`** | A constant tag and a tag read per row, the two things `str.lang`'s second argument is; and RML's fallback for an invalid tag, which is not taken. |
+| **[SPARQL 1.1 Query](https://www.w3.org/TR/sparql11-query/) §17.4.2.11, `STRLANG`, and production [145] `LANGTAG`** | The constructor `str.lang` is named for, and the lexical rule of `"…"@en`, which Turtle and ShExC share. |
+| **The Rust Reference, literal suffixes** | That a suffix is part of its literal's token, which is why the `@` of a tag must touch the quote and never lexes as an attribute. |
+| **[RDFa Core Initial Context](https://www.w3.org/2011/rdfa-context/rdfa-1.1)** | The W3C's list of predefined prefixes, which a predicate's CURIE is checked against and refused with — and whose `schema:` is `http://schema.org/`, the measured reason not to expand through it. |
+| **Delta Lake's protocol, *Protocol Evolution* and *Table Features*** | The version rule a format with readers outside its release needs: unrecognised fields are «never required in order to correctly interpret» a table, and a change that is not forward-compatible raises the version — for the tables that use it. It is the rule [the corpus](/docs/design/corpus#one-format-changed-in-place) takes up when such a reader exists, and the reason `fossil/2` is discarded until then. |
+| **`shex_ast` 0.3.1** (rudof) | That its AST carries annotations and its compact printer prints them as `//`, and that its conversion to `SchemaIR` drops them (`cnv_annotations` is a `TODO`) — so the decoder reads the AST. |
+
 ## RDF 1.2
 
 | source | what it settles |
@@ -189,6 +207,31 @@ parameter it takes is argued in [the dot](/docs/design/the-dot).
 | **HyUCC** (Papenbrock & Naumann, *A Hybrid Approach for Efficient Unique Column Combination Discovery*, BTW 2017) | What a candidate key is in a profile: a unique column combination, discovered on a sample and verified on the whole. |
 | **SPIDER** (Bauckmann, Leser & Naumann, ICDE 2006) and the **Metanome** profiling platform (Papenbrock et al., PVLDB 2015) | What an edge candidate is: an inclusion dependency between two sources' columns, tested over the pairs a type prunes. |
 | **RML** (Dimou et al., *RML: A Generic Language for Integrated RDF Mappings of Heterogeneous Data*, LDOW 2014) | The shape of the mapping spec a model fills: a source, a subject template, and per property a column, an expression or a join — from which Fossil is emitted. |
+
+## The corpus's own facts
+
+What [the corpus's own facts](/docs/design/facts) takes, each for one decision.
+
+| source | what it settles |
+| --- | --- |
+| **Delta Lake's protocol, per-file statistics** — `stats` on an `add` action: `numRecords`, `minValues`, `maxValues`, `nullCount` | That a table format keeps its column statistics in the log a reader reads first, beside the file they describe, so a reader decides without opening the file — which is why they go in `fossil.json`. And the contrast: Delta truncates string bounds because it only prunes with them. |
+| **Apache Parquet, `Statistics`** in `parquet.thrift` — `null_count`, `distinct_count`, `min_value`, `max_value` | The names of the counts, the corpus being Parquet; and that footer statistics are per row group, in the physical type, with `distinct_count` optional — `parquet` 58's Arrow writer leaves it empty. |
+| **Apache Iceberg**, manifest `value_counts`, `null_value_counts`, `lower_bounds`, `upper_bounds`, and Puffin statistics files | The other placement: bounds in the manifest, distinct-value sketches in a file of their own because a sketch is large — not taken, since exact counts and *k* values are small. |
+| **DuckDB `SUMMARIZE`** — `min`, `max`, `approx_unique`, `null_percentage`, … | What a reader takes today at every attach, and why an estimate cannot decide a key. |
+| **PostgreSQL `pg_stats`** — `null_frac`, `n_distinct`, `most_common_vals`, `most_common_freqs` | That a column's measurements are a relation of their own beside its schema, and that the commonest values with their frequencies are a statistic a planner and a person both read. |
+| **`information_schema.KEY_COLUMN_USAGE`**, as MySQL spells it — `REFERENCED_TABLE_NAME`, `REFERENCED_COLUMN_NAME` | The names of an inclusion's referenced side in `fossil_inclusions`. |
+| **SQL/PGQ**, a property graph's element tables and their labels | That a vertex table's label is its name, an edge table's its `label`, so `fossil_tables.label` is one column for every kind. |
+
+## A run off the page
+
+What [A run off the page](/docs/design/off-the-page) takes.
+
+| source | what it settles |
+| --- | --- |
+| **DuckDB-WASM's `AsyncDuckDB`** | The arrangement: the engine in a worker the library starts, the page's calls as messages, and the library's API unchanged by where it runs. |
+| **The HTML Standard, dedicated workers, `terminate()`**, and **WebAssembly's JS API**, `WebAssembly.Module` structured-cloneable and `memory.grow` with no shrink | That a terminated worker stops at once and frees its instance, that a compiled module is posted to each worker rather than compiled again, and that an instance's memory is only ever given back by ending it. |
+| **Vite's and webpack 5's `new Worker(new URL(…, import.meta.url))`** | The one form two bundlers emit a library's worker from, the same `import.meta.url` the executor's `.wasm` already resolves by. |
+| **Amazon S3, `AbortIncompleteMultipartUpload`** | What reclaims the parts of an upload a terminated worker could not abort. |
 
 ## Tooling
 
