@@ -11,10 +11,9 @@
 //! manifest finds everything it lists; a write that fails half way leaves
 //! Parquet with no manifest over it, which no reader opens.
 //!
-//! **One writer.** There were three — a native host that wrote a directory, the
-//! browser's in-memory map, and a tile container under both — and they wrote
-//! different corpora. This is the only function in the workspace that encodes
-//! a corpus's Parquet, and the only host that calls it is [`crate::Executor`].
+//! **One writer.** Two writers write two different corpora. This is the only
+//! function in the workspace that encodes a corpus's Parquet, and the only host
+//! that calls it is [`crate::Executor`].
 
 use std::sync::Arc;
 
@@ -67,8 +66,7 @@ pub enum WriteError {
     Json(#[from] serde_json::Error),
     /// A relation naming a vertex type the graph did not materialise. The
     /// schema the executor builds names only types it has, so this is fossil's
-    /// fault — `write/unknown-type`, retired after `v0.3.0-alpha.18`, had no
-    /// program that reached it.
+    /// fault, and it has no `write/` code of its own: no program reaches it.
     #[error("relation `{relation}` references vertex type `{vertex_type}`, which has no table")]
     UnknownType {
         relation: String,

@@ -19,9 +19,9 @@
 //!
 //! # One help per refusal, whichever path raised it
 //!
-//! `fossil check` (this crate) and `fossil run` (`fossil-df`'s descriptor) both
-//! call these, so the two paths cannot drift apart again — they once did, and
-//! the `run` one dropped the list.
+//! Every path that refuses a provider row — the lowering's checks and
+//! [`crate::shapes`]' decode — calls these, so no two paths can word one
+//! refusal differently, or drop the list.
 
 use fossil_base::{Capability, Provider};
 
@@ -179,8 +179,7 @@ mod tests {
         );
     }
 
-    /// **The installed list, whichever path raised it.** The call sites used to
-    /// word this differently, and the `fossil run` one dropped the list.
+    /// **The installed list, whichever path raised it.**
     #[test]
     fn an_unknown_constructor_always_carries_the_installed_list() {
         assert_eq!(

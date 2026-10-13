@@ -1,19 +1,18 @@
 //! What the one drain answers that a per-mapping loop cannot.
 //!
 //! [`fossil_mir::program_diagnostics`] exists because the question «what is
-//! wrong with this program» was answered three ways, and two of the three — the
-//! LSP's and the browser's — were a per-mapping loop and nothing else. Each
-//! test below is one class of diagnostic that loop could not reach, phrased as
-//! the user-visible consequence rather than as the query that produces it.
+//! wrong with this program» must have one answer, and a host's per-mapping loop
+//! gives a smaller one. Each test below is one class of diagnostic such a loop
+//! cannot reach, phrased as the user-visible consequence rather than as the
+//! query that produces it.
 //!
 //! **What this file cannot prove:** that any diagnostic here is the RIGHT
 //! diagnostic. It asserts reachability — that the drain gets to a message at
 //! all — because unreachability is the failure it exists against, and every
 //! message's own wording is fixed where it is emitted (`fossil-syntax`'s
 //! recovery corpus, `fossil-hir`'s diagnostic corpus). It also does not prove
-//! the three hosts stay collapsed: nothing stops someone writing a fourth loop.
-//! What makes that visible is that there is one `pub fn` and three call sites,
-//! not a test.
+//! the hosts keep calling it: nothing stops someone writing a loop of their
+//! own. What makes that visible is that there is one `pub fn`, not a test.
 
 // `{Row.id}` is fossil's interpolation hole, not a Rust format argument.
 #![allow(clippy::literal_string_with_formatting_args)]
@@ -250,26 +249,24 @@ People : Person from Users
     assert!(errors.is_empty(), "a declaration reported {errors:?}");
 }
 
-/// **An internal compiler error reached the browser, and it was found by
-/// accident.**
+/// **Garbage reaches no internal compiler error.**
 ///
-/// `crates/fossil-wasm/tests/shape_document.rs`'s `ShExC` fixture — a `ShEx`
-/// shape document, not fossil at all — was drained as a program before the
-/// provider catalogue silenced it, and three of its fourteen rows claimed
-/// `internal compiler error: mapping has no HIR at its DefMap index`. Reduced,
-/// the input is FOUR BYTES: `a:b` is a mapping header the parser recovers and
-/// `lower_to_hir` then declines, because there is no `from`. The three rows
-/// were the three lines that recovery turned into a `MAPPING` — the two
-/// `PREFIX` lines and the shape declaration.
+/// A `ShEx` shape document drained as a program — not fossil at all — has
+/// three lines that recovery turns into a `MAPPING`: the two `PREFIX` lines and
+/// the shape declaration. Reduced, the input is FOUR BYTES: `a:b` is a mapping
+/// header the parser recovers and `lower_to_hir` then declines, because there
+/// is no `from`. A slot per header that lowered, rather than per `MAPPING`
+/// node, would turn each into `internal compiler error: mapping has no HIR at
+/// its DefMap index`.
 ///
 /// Whatever else it deserves, garbage deserves a syntax error and not a claim
 /// that the compiler is broken. This asserts the class, not a count: no
 /// diagnostic anywhere in the drain says `internal compiler error`.
 ///
 /// **What this cannot prove** is that the ICE is unreachable in general. It is
-/// one `bug()` call among several, it is still there, and it still fires if
-/// `def_map` and `lower_to_hir` ever count `MAPPING` nodes differently — which
-/// is the only thing it was ever entitled to mean.
+/// one `bug()` call among several, and it fires if `def_map` and
+/// `lower_to_hir` ever count `MAPPING` nodes differently — which is the only
+/// thing it is entitled to mean.
 #[test]
 fn four_bytes_of_non_fossil_do_not_reach_an_internal_compiler_error() {
     for source in [
@@ -277,9 +274,7 @@ fn four_bytes_of_non_fossil_do_not_reach_an_internal_compiler_error() {
         "A : B\n",
         "A : B from\n",
         // The `ShExC` document of `fossil-wasm/tests/shape_document.rs`,
-        // verbatim. Sixteen rows, and it was fourteen with three ICEs among
-        // them; the two extra are the body of the third recovered mapping,
-        // which nothing reached while the header was being deleted.
+        // verbatim.
         "PREFIX ex:  <http://example.org/>\n\
          PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>\n\
          \n\
@@ -303,13 +298,13 @@ fn four_bytes_of_non_fossil_do_not_reach_an_internal_compiler_error() {
     }
 }
 
-/// **The ICE never fired on the mapping that was wrong.**
+/// **A broken mapping takes no neighbour's signature.**
 ///
-/// `HirFile::mappings` was built with a filter and read by position, so one
-/// header that did not lower shifted every later mapping's signature onto its
-/// predecessor. Here that meant `Broken`'s body was lowered against `Good`'s
-/// header, and `Good` — the mapping with nothing wrong with it — was the one
-/// that ran off the end of the vector and got the `bug()`.
+/// `HirFile::mappings` is read by position, so built with a filter, one header
+/// that did not lower would shift every later mapping's signature onto its
+/// predecessor: `Broken`'s body lowered against `Good`'s header, and `Good` —
+/// the mapping with nothing wrong with it — running off the end of the vector
+/// into the `bug()`.
 ///
 /// So this asserts the positive: the healthy sibling of a broken mapping still
 /// produces a graph. A test that only asserted the absence of the ICE would

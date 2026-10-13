@@ -7,8 +7,8 @@
 //! `properties`, which lists every one of them with the `role` of each the
 //! writer emits — the writer reads it off this table, which derives `serde` on
 //! [`Role`]'s projection for the purpose — and its types from
-//! `crates/fossil-df/src/corpus/fossil.schema.json`; the TypeScript projection this
-//! module also emitted went when the manifest started listing the columns.
+//! `crates/fossil-df/src/corpus/fossil.schema.json`, so there is no TypeScript
+//! projection: the manifest lists the columns.
 //!
 //! # Why a parser here and a lexer from next door
 //!
@@ -21,12 +21,12 @@
 //!
 //! # What a role is for
 //!
-//! A [`Role`] says what a column IS. Every reader that used to carry a
-//! hand-written list now names the roles it means, which is what makes the two
-//! surviving sets legibly different rather than accidentally different:
-//! a field listing hides *everything the writer emits*, and a viewer excludes
-//! only *the columns it already surfaces as named members*. Those are different
-//! questions and they were two literals.
+//! A [`Role`] says what a column IS. A reader names the roles it means rather
+//! than carrying a hand-written list, which is what makes two sets legibly
+//! different rather than accidentally different: a field listing hides
+//! *everything the writer emits*, and a viewer excludes only *the columns it
+//! already surfaces as named members*. Those are different questions, and two
+//! literals would hide it.
 
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -238,9 +238,9 @@ const RUST_HEADER: &str = "\
 //! The columns the writer emits, and what each one IS. `corpus.bnf` carries the
 //! rows and the argument; this is the Rust projection of them.
 //!
-//! **Read a set by the ROLES it means, not by a name you remember.** The two
-//! consumers that used to carry hand-written lists meant different things by
-//! \"the writer's columns\" and nothing said so — see `corpus.bnf`.
+//! **Read a set by the ROLES it means, not by a name you remember.** Two
+//! readers can mean different things by \"the writer's columns\", and a
+//! hand-written list says nothing about which — see `corpus.bnf`.
 ";
 
 /// The Rust table: `crates/fossil-df/src/corpus/generated.rs`.
@@ -255,7 +255,7 @@ pub fn emit_rust(columns: &[Column]) -> String {
     out.push_str(
         "\n/// What a column IS — never what a reader does with it.\n\
          ///\n\
-         /// A reader that used to carry a list now names the roles it means.\n\
+         /// A reader names the roles it means, never a list of names.\n\
          /// It is data in `fossil.json` too: a writer column's `role` in its\n\
          /// table's `properties`, spelled as the variant in lowercase.\n\
          #[derive(\n\

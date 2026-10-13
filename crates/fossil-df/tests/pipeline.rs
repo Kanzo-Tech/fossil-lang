@@ -1,12 +1,10 @@
 //! The relational operators the source pipeline needs, executed.
 //!
-//! `Op::Filter`, `Op::Project`, `Op::Join`, `Op::Distinct` and `Op::Union` were
-//! defined when the algebra was, and reached by nothing: the operator algebra was
-//! defined WHOLE and lowered in part on purpose, and the source pipeline is what starts paying that debt back.
-//! `fossil-hir` and `fossil-mir` emit five of them from a program now; this is
-//! the other half — it builds the op list by hand, which is the pattern this
-//! repo already uses for an operator no `.fossil` can produce yet, and asserts
-//! the **rows that come out**, not the plan that was built.
+//! `fossil-hir` and `fossil-mir` emit `Op::Filter`, `Op::Project`, `Op::Join`,
+//! `Op::Distinct`, `Op::Union` and `Op::GroupBy` from a program; this is the
+//! other half — it builds the op list by hand, which is the pattern this repo
+//! uses for an operator no `.fossil` can produce, and asserts the **rows that
+//! come out**, not the plan that was built.
 //!
 //! `cargo test`'s cwd is the crate root, so the sources are
 //! `tests/fixtures/{users,teams}.csv`.
@@ -85,8 +83,8 @@ fn eq<'db>(db: &'db dyn fossil_base::Db, lhs: Expr<'static>, rhs: Expr<'static>)
     }
 }
 
-/// The same key name on both sides — the shape the retired `on = .k` sugar
-/// produced, and now just one equality among the many that are legal.
+/// The same key name on both sides — one equality among the many that are
+/// legal.
 fn on_key<'db>(db: &'db dyn fossil_base::Db, left: &str, right: &str, key: &str) -> Expr<'db> {
     eq(db, col(left, key), col(right, key))
 }
@@ -215,12 +213,10 @@ async fn a_projection_restricts_the_row_to_the_columns_it_names() {
 /// `join(teams, on = users.id == teams.id)`: the two rows COMPOSE, whole, and a
 /// row with no partner on either side is not there.
 ///
-/// This asserted `["id", "name", "team"]` until 2026-08-19 — the join was
-/// `USING (id)` and identified the key, so the right side's copy was renamed
-/// away and dropped. It does not any more: both sides keep every column, and
-/// `users.id` and `teams.id` are two columns that happen to share a bare name.
-/// The rule that made them one is the same rule that could not plan
-/// `on = a.parent == b.id`, and it went with it.
+/// Not `USING (id)`, which identifies the key and drops the right side's copy:
+/// both sides keep every column, and `users.id` and `teams.id` are two columns
+/// that happen to share a bare name. A rule that made them one could not plan
+/// `on = a.parent == b.id`.
 #[tokio::test]
 async fn an_inner_join_composes_both_rows_whole() {
     let db = db();
@@ -260,12 +256,9 @@ async fn an_inner_join_composes_both_rows_whole() {
     assert_eq!(strings(&batch, 3), ["Blue", "Red"]);
 }
 
-/// **The defect this whole change is.** `on = users.id == teams.id` was the ONLY
-/// join this engine planned; two differently-named keys were refused with "a
-/// join key is one name on both sides … Two keys with different names are an
-/// extension this engine does not build". They are not an extension — the
-/// backend simply could not see which side a column came from, because the
-/// lowering discarded the binding. It carries it now, and this plans.
+/// **Two differently-named keys plan.** They are not an extension: the backend
+/// sees which side a column came from, because the lowering carries the
+/// binding.
 #[tokio::test]
 async fn a_join_whose_two_keys_are_named_differently_plans() {
     let db = db();
@@ -356,8 +349,8 @@ async fn the_three_operators_compose_in_one_chain() {
             input: 2,
             pred: Expr::BinOp {
                 op: BinOp::Eq,
-                // Deliberately UNQUALIFIED — the retired bare `.team`, which is
-                // still what a `FieldRef` lowers to. It resolves because only
+                // Deliberately UNQUALIFIED — what a bare-name `FieldRef`
+                // lowers to. It resolves because only
                 // one side has a `team`; a bare `id` here would be ambiguous
                 // and DataFusion would name both candidates.
                 lhs: Box::new(col("", "team")),
@@ -393,7 +386,7 @@ async fn the_three_operators_compose_in_one_chain() {
 
 /// The point of the whole thing: a vertex whose property came from the other
 /// side of a join. An `EmitVertex` reads the relation its `input` names, and
-/// with a pipeline in front of it that is no longer "the mapping's source".
+/// with a pipeline in front of it that is not "the mapping's source".
 #[tokio::test]
 async fn a_joined_relation_feeds_the_vertex_it_emits() {
     let db = db();
@@ -415,7 +408,7 @@ async fn a_joined_relation_feeds_the_vertex_it_emits() {
                 Box::new(Expr::LitString(SmolStr::new_static(
                     "https://example.org/user/",
                 ))),
-                // `users.id` and not a bare `id`: both sides carry one now, and
+                // `users.id` and not a bare `id`: both sides carry one, and
                 // the binding is what says which.
                 Box::new(col("users", "id")),
             ),
@@ -495,14 +488,13 @@ async fn an_outer_join_is_refused_by_name() {
     }
 }
 
-/// What still refuses a join, now that the equal-names rule is gone.
+/// What refuses a join.
 ///
-/// The three that survive are the three the qualification never stood in for: a
-/// join is an EQUIJOIN (a theta join or a constant comparison would silently
-/// become a nested loop over the product of two corpora), and a reference has
-/// to name a side that exists and a column that side has. The fourth case this
-/// used to carry — two differently-named keys — is
-/// `a_join_whose_two_keys_are_named_differently_plans` now.
+/// Three things the qualification does not stand in for: a join is an EQUIJOIN
+/// (a theta join or a constant comparison would silently become a nested loop
+/// over the product of two corpora), and a reference has to name a side that
+/// exists and a column that side has. Two differently-named keys are legal —
+/// `a_join_whose_two_keys_are_named_differently_plans`.
 #[tokio::test]
 async fn a_condition_that_is_not_an_equijoin_is_refused() {
     let db = db();
@@ -582,15 +574,13 @@ async fn a_condition_that_is_not_an_equijoin_is_refused() {
 }
 
 /// `Node.join(Node as Other, on = Node.parent == Other.id)` — the self-join, in
-/// the two ways it used to be impossible at once: the two keys are named
+/// the two ways a flat row could not hold at once: the two keys are named
 /// differently, and every column collides.
 ///
-/// This asserted the collision refusal until 2026-08-19 ("`users` and `again` both
-/// carry [\"name\"]"), on the reasoning that a join identifies the key and
-/// nothing else so any other shared name is an error. `fossil-hir` deleted that
-/// rule on 2026-08-14 (ruling 17) on the promise that qualification would do
-/// the work; this is the backend keeping it. The alias is what re-qualifies the
-/// right side — without it both are `users` and neither `users.name` resolves.
+/// A shared column name is not an error: `fossil-hir`'s `RowScope` keeps one
+/// entry per binding, and this is the backend keeping the same promise. The
+/// alias is what re-qualifies the right side — without it both are `users` and
+/// neither `users.name` resolves.
 #[tokio::test]
 async fn a_self_join_keeps_both_sides_apart_by_their_alias() {
     let db = db();
@@ -648,10 +638,9 @@ async fn a_self_join_keeps_both_sides_apart_by_their_alias() {
 
 /// An operator that is defined and not executed fails as itself.
 ///
-/// It was `GroupBy`, «the next verb of the six and not here yet», and it is
-/// here. `Rename` takes over: no verb of the catalogue lowers to it, so it is
-/// the honest stand-in rather than a retired one — and when a verb does, this
-/// test moves again, which is the whole point of standing for the rest.
+/// `Rename` is the stand-in: no verb of the catalogue lowers to it. When a verb
+/// does, this test moves to another, which is the whole point of standing for
+/// the rest.
 #[tokio::test]
 async fn an_unexecuted_operator_fails_as_itself() {
     let db = db();
@@ -716,8 +705,8 @@ async fn distinct_over_a_union_drops_the_shared_row() {
 /// side's — which is the whole reason `Op::Union` carries one.
 ///
 /// The projection is written against `everyone`, a name no `Op::Source` below
-/// it uses. Before the field existed the plan kept the left side's qualifier
-/// and this select resolved against nothing.
+/// it uses. Keeping the left side's qualifier instead, this select would
+/// resolve against nothing.
 #[tokio::test]
 async fn a_union_is_addressed_by_its_own_relation() {
     let db = db();

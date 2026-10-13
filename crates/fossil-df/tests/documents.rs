@@ -5,10 +5,10 @@
 //! [`fossil_hir::shape_documents::shape_document`], which is keyed by a
 //! [`SourceFile`] input, so the document has to be IN the database before any
 //! query goes looking for it; putting it there is a host job
-//! ([`fossil_base::register_file`] takes `&mut dyn Db`). The checker used to
-//! read the document with `System::read_file`, which registers no dependency:
-//! editing the `.shex` re-ran nothing, and a document missing when first asked
-//! stayed missing forever. The host here is the check half of
+//! ([`fossil_base::register_file`] takes `&mut dyn Db`). Read with
+//! `System::read_file`, which registers no dependency, editing the `.shex`
+//! would re-run nothing, and a document missing when first asked would stay
+//! missing forever. The host here is the check half of
 //! `tests/support/native.rs`; the executor registers the same way through
 //! `Executor::register_document`.
 
@@ -194,8 +194,8 @@ fn a_program_that_names_no_document_registers_nothing() {
 
 /// **This is what the fan-out cost buys.** Editing the document's text —
 /// through the input, not the disk — re-runs the decode and the checker,
-/// and the diagnostic changes. With `System::read_file` the edit was
-/// invisible: nothing depended on it, so nothing re-ran.
+/// and the diagnostic changes. With `System::read_file` the edit would be
+/// invisible: nothing would depend on it, so nothing would re-run.
 #[test]
 fn editing_the_document_rechecks_the_program_and_the_diagnostic_changes() {
     let dir = program_dir(DEMANDS_INTEGER);

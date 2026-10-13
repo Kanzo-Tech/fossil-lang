@@ -1,6 +1,5 @@
-//! **The native test host** — what the deleted `fossil` binary did around the
-//! compiler, kept for the tests that need a whole host and not a hand-built
-//! database.
+//! **The native test host** — what a host does around the compiler, for the
+//! tests that need a whole host and not a hand-built database.
 //!
 //! Two halves, and they are two hosts on purpose:
 //!
@@ -9,8 +8,8 @@
 //!   `profile::profile_and_register` describes before the compile,
 //!   and every shape document the program names registered from disk. It is the
 //!   editor's view of a program: forward-propagated source types, every
-//!   diagnostic, and [`render_diagnostics`] drawing them as `fossil check` drew
-//!   them.
+//!   diagnostic, and [`render_diagnostics`] drawing them as a terminal host
+//!   would.
 //! - **run** — [`fossil_df::Executor`], the one host that writes a corpus. The
 //!   program's directory is loaded into an in-memory store under [`AUTHORITY`],
 //!   the program is compiled AT its URL there, so every relative source and
@@ -152,7 +151,7 @@ impl miette::Diagnostic for Rendered {
     }
 }
 
-/// Render every diagnostic as `fossil check` rendered it, into one stable
+/// Render every diagnostic as a terminal host renders it, into one stable
 /// string: miette graphical, unicode, no colour, width 100.
 ///
 /// The `NamedSource` carries the program's FILE NAME and not its path — an

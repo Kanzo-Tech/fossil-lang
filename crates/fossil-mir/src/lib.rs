@@ -12,7 +12,7 @@
 //! # Failure discipline
 //!
 //! Lowering never substitutes a default for something it could not resolve, and
-//! never panics (the LSP lowers on every keystroke). It taints instead — see
+//! never panics (the editor lowers on every keystroke). It taints instead — see
 //! [`graph::MirGraph::error`].
 //!
 //! The algebra is Min Oo & Hartig's operational semantics for knowledge-graph

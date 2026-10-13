@@ -95,9 +95,8 @@ fn every_expr_template_binds_on_a_real_duckdb() {
     );
     // The catalogue is not allowed to become all-`Op` without anyone noticing:
     // an empty loop would pass the assertion above silently. Derived rather
-    // than the literal `35` it was — that number described a catalogue of 48
-    // surface rows and went stale the first time one was deleted, and what this
-    // needs to know is that EVERY `Expr` row reached the engine.
+    // than a literal, which goes stale the first time a row is deleted: what
+    // this needs to know is that EVERY `Expr` row reached the engine.
     let expr_rows = stdlib()
         .iter()
         .filter(|e| matches!(e.lowering, LoweringKind::Expr(_)))

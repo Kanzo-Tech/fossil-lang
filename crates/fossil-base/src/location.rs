@@ -1,25 +1,14 @@
 //! **The one rule that turns a reference a program writes into a location a
 //! reader can open**, and the anchor it needs to do it.
 //!
-//! # There were three of these, and they disagreed
+//! # One rule, for every reference a program writes
 //!
 //! A `.fossil` program names files: `io.shex("shop.shex")`, `io.csv("data/items.csv")`,
-//! `io.rdf("@warehouse/people.ttl")`. Until this module there were three
-//! separate answers to "relative to what":
-//!
-//! | what resolved | against what | where |
-//! |---|---|---|
-//! | `io.shex("shop.shex")` | the program's directory | the native host's `documents::registry_key`, mirroring `fossil_hir`'s own resolution (both are `fossil_hir::documents::registry_key` now) |
-//! | provider sources, `@conn` | the program's directory, **falling back to the cwd** | the native host's `resolve_ref` |
-//! | `io.csv("data/items.csv")` under `run` | the process's cwd, and only that | the `DataFusion` executor, which was handed the written path verbatim |
-//!
-//! None of the three is theoretical. Inside ONE program `io.shex("x.shex")` and
-//! `io.csv("data/x.csv")` resolved against different directories. `check`
-//! pre-introspected against `path.parent()` while `run` executed against the
-//! cwd, so the two commands disagreed about where the same file was. And a
-//! program changed meaning when you `cd`: running
-//! `docs/programs/hello/hello.fossil` from the repository root looked for
-//! `<root>/data/people.csv`.
+//! `io.rdf("@warehouse/people.ttl")`. Every one of them resolves here — the
+//! document a check decodes, the source a run reads, the `@conn` a host
+//! expands. Two rules let ONE program resolve `io.shex("x.shex")` and
+//! `io.csv("data/x.csv")` against different directories, and let `check` and
+//! a run disagree about where the same file is.
 //!
 //! # The rule
 //!
@@ -69,8 +58,7 @@ pub fn split_alias(raw: &str) -> Option<(&str, &str)> {
 /// A program path with no parent (a bare `hello.fossil`, or an in-memory name
 /// the browser interned) anchors to the empty path, and `Path::new("").join(x)`
 /// is `x` — so a program with no directory resolves its references to
-/// themselves, which is the only answer available and the one every host was
-/// already giving.
+/// themselves, which is the only answer available.
 #[must_use]
 pub fn program_dir(program_path: &str) -> PathBuf {
     Path::new(program_path)
@@ -83,8 +71,8 @@ pub fn program_dir(program_path: &str) -> PathBuf {
 /// the program that wrote it, and what its `@conn` aliases name.
 ///
 /// The two travel **together**, in one `Copy` value, and that is the point.
-/// They were separate parameters, and half the code paths carried only the
-/// connection map — which is not an omission a reader can see, because a path
+/// As separate parameters, a code path can carry only the connection map —
+/// which is not an omission a reader can see, because a path
 /// resolved against nothing still *looks* like a path and still opens a file
 /// whenever the cwd happens to be right. Carrying them as one value is what
 /// makes "resolved without an anchor" fail to compile instead of failing on
@@ -324,10 +312,10 @@ mod tests {
         );
     }
 
-    /// A relative path resolves the same whether or not the file is there. The
-    /// rule this replaced consulted the filesystem — `if joined.exists()` —
-    /// and fell back to the cwd when it did not, which made a missing file
-    /// report a path the program never named.
+    /// A relative path resolves the same whether or not the file is there.
+    /// Consulting the filesystem — `if joined.exists()` — and falling back to
+    /// the cwd would make a missing file report a path the program never
+    /// named.
     #[test]
     fn a_missing_file_resolves_where_the_program_said_it_would() {
         let c = conns(&[]);

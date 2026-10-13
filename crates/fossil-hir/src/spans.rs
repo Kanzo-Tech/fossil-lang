@@ -34,33 +34,27 @@
 //! this — see `crates/fossil-hir/src/body.rs`'s `mapping_cst_node`
 //! documentation.
 //!
-//! It used to walk the barrier itself, in parallel with `body`, and assign its
-//! own `ExprId`s from a different rule. See [`spans`].
+//! It does not walk the barrier itself: it reads `body`, so the two cannot
+//! number `ExprId`s by different rules. See [`spans`].
 //!
 //! # `ExprId` convention
 //!
 //! `ExprId(i)` is the i'th LOWERED property's RHS expression — the index into
 //! `crate::body::HirBody::properties`, and nothing else. It is not the position
-//! among the CST's `PROPERTY` children, and this module used to assume it was.
+//! among the CST's `PROPERTY` children.
 //!
 //! # A span per REFERENCE, and it is not an expression arena
 //!
-//! This paragraph used to defer subexpression spans to «when the Pratt-lowered
-//! expression tree extends `HirExpr`». That condition had been met for some
-//! time — `HirExpr` carries `Call`, `Ternary`, `BinOp` and `Interpolation` with
-//! sub-expressions in them — and the table had not followed, so the finest
-//! range the compiler could point at was a whole right-hand side. Two things
-//! wanted one, and both were about a NAME rather than about an arbitrary node:
+//! A whole right-hand side is too coarse for two things, and both are about a
+//! NAME rather than about an arbitrary node:
 //!
-//! - **The caret on a typo.** `name = User.nmae` underlined `User.nmae`.
+//! - **The caret on a typo.** `name = User.nmae` underlines `nmae`, not
+//!   `User.nmae`.
 //! - **`fossil_ide::code_action`'s did-you-mean quick-fix**, which builds a
 //!   `WorkspaceEdit` from `Diagnostic::did_you_mean`'s `(wrong_span,
-//!   replacement)`. NOTHING populated that field — every caller of
-//!   `with_did_you_mean` in the workspace was a test — so the action could not
-//!   fire on a real diagnostic, and it compiled and passed its own tests
-//!   throughout.
+//!   replacement)`.
 //!
-//! So what landed is [`crate::body::HirBody::ref_spans`] and [`Spans::ref_span`]
+//! So the table is [`crate::body::HirBody::ref_spans`] and [`Spans::ref_span`]
 //! — the range of each reference's name token, per property, keyed by
 //! `(binding, name)` — and NOT an id per HIR node. The arena is the general
 //! mechanism and it is not proportionate to two carets: `HirExpr` is a
@@ -69,7 +63,7 @@
 //! that decision open is a diagnostic that must blame a node with no name — an
 //! operand of an arithmetic expression, a branch of a ternary. There is none
 //! today, and the fallback is honest when there is: a lookup that finds nothing
-//! yields the right-hand side, which is where every caret was.
+//! yields the right-hand side.
 //!
 //! # Offset semantics: mapping-relative
 //!
@@ -85,7 +79,7 @@
 //! sibling-mapping edits (only the mapping's own content moves spans;
 //! shifts in OTHER mappings don't cause `Spans(M_k)` to re-execute).
 //!
-//! The diagnostic-emission layer (`crate::check::compatible`, the LSP host)
+//! The diagnostic-emission layer (`crate::check::compatible`, the editor host)
 //! is responsible for converting mapping-relative
 //! offsets to file-absolute when needed. The conversion is a single
 //! lookup of the mapping's start offset in the file CST and an add.
@@ -93,7 +87,7 @@
 //! # Lookup complexity
 //!
 //! [`Spans::get`] is a linear scan over `Vec<(ExprId, Span)>`. Typical
-//! mapping has ≤50 expressions; for the LSP hover hot path the lookup is
+//! mapping has ≤50 expressions; for the hover hot path the lookup is
 //! one `expr_id` per request. If profiling later shows this hot, swap for
 //! `HashMap<u32, Span>` or sorted-Vec + binary search — the public API
 //! shape (`spans(db, m).get(db, expr_id)`) stays unchanged.
@@ -141,8 +135,7 @@ impl<'db> Spans<'db> {
     /// caret on the reference that is CORRECT.
     ///
     /// `None` when the reference is not there — a caller falls back to
-    /// [`Self::get`], which is the whole right-hand side and is where every
-    /// caret was before this existed.
+    /// [`Self::get`], which is the whole right-hand side.
     #[must_use]
     pub fn ref_span(
         self,
@@ -162,21 +155,16 @@ impl<'db> Spans<'db> {
 /// Per-mapping spans query — an ACCESSOR over [`crate::body::HirBody`]'s
 /// `expr_spans`, which is where the ranges are recorded.
 ///
-/// This used to walk the CST a second time and number the properties by their
-/// POSITION among the `PROPERTY` children, via an `.enumerate()`. Its own
-/// comment said the opposite — «Skip properties that wouldn't have lowered to
-/// an `ExprId` … Spans matches `body()`'s indexing» — and the code did not skip
-/// anything: the counter advanced on every CST child, lowered or not. `body()`
-/// numbers densely over the ones that DID lower, so the two agreed exactly
-/// until one property failed to lower, and then every id after it was off by
-/// one. The checker mints ids with `body()`'s numbering and looks them up here,
-/// so a type error underlined the wrong property — silently, and most often on
-/// the corpus's retired spellings, which are precisely the properties that
-/// parse and do not lower.
+/// Not a second walk of the CST numbering the properties by their POSITION
+/// among the `PROPERTY` children: `body()` numbers densely over the ones that
+/// DID lower, so a second numbering agrees exactly until one property fails to
+/// lower, and then every id after it is off by one — and the checker mints ids
+/// with `body()`'s numbering and looks them up here, so a type error would
+/// underline the wrong property, silently.
 ///
-/// Reading `body` rather than `mapping_cst_node` also removes a walk: the
-/// per-mapping invalidation barrier is unchanged,
-/// because `body` reads the same barrier and this query now reads only `body`.
+/// Reading `body` rather than `mapping_cst_node` also saves a walk: the
+/// per-mapping invalidation barrier is the same, because `body` reads it and
+/// this query reads only `body`.
 #[salsa::tracked(returns(copy))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn spans<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> Spans<'db> {
@@ -196,7 +184,7 @@ pub fn spans<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> Spa
 /// The span every diagnostic about the mapping AS A WHOLE belongs on: the
 /// target shape it names and could not resolve, two of its predicates sharing a
 /// short name, a predicate its shape requires and its body never wrote. None of
-/// those blames one expression, and all three used to carry
+/// those blames one expression, and none may carry
 /// `Span { start: 0, end: 0 }`.
 ///
 /// **A zero-width span here is not "no underline".** The default
@@ -277,8 +265,7 @@ pub fn rebase_to_file<'db>(
             // Each part is shifted by ITS OWN frame, not by the diagnostic's.
             // A `SpanLabel` on a two-mapping report points at the OTHER mapping
             // and is therefore already file-absolute, inside a diagnostic that
-            // is not — see `fossil_base::SpanLabel`. The two used to be one
-            // decision because there was only one span.
+            // is not — see `fossil_base::SpanLabel`.
             for label in &mut d.labels {
                 if label.frame == fossil_base::SpanFrame::MappingRelative {
                     label.span = label.span.shifted(base);
@@ -322,16 +309,13 @@ mod tests {
     /// slices the mapping's own text with the recorded span and compares the
     /// slice to the right-hand side written in the fixture.
     ///
-    /// There were THREE notions of `ExprId` and they were equal only while
-    /// every property lowered. This query numbered by CST position, from an
-    /// `.enumerate()`, under a comment claiming it matched `body()`;
-    /// `body()` numbers densely over the properties that DID lower; and
-    /// `fossil_ide::hover` used the CST position for BOTH the id and an index
-    /// into `properties`. One property that parses and does not lower — every
-    /// retired spelling in the corpus is one — makes the CST longer than the
-    /// HIR and shifts everything behind it. A type error then underlined a
-    /// different property and a hover named a different predicate, and neither
-    /// failed loudly: both point somewhere plausible.
+    /// A numbering by CST position and `body()`'s dense numbering over the
+    /// properties that DID lower are equal only while every property lowers.
+    /// One property that parses and does not lower — every retired spelling is
+    /// one — makes the CST longer than the HIR and shifts everything behind it:
+    /// a type error would underline a different property and a hover would
+    /// name a different predicate, and neither would fail loudly — both point
+    /// somewhere plausible.
     ///
     /// # What it CANNOT prove
     ///
@@ -341,7 +325,7 @@ mod tests {
     ///   refuse to lower are exactly the ones being removed. What is asserted
     ///   here is the invariant that makes the skew impossible — one span per
     ///   LOWERED property, recorded where the property is lowered — not a
-    ///   reproduction of the old failure.
+    ///   reproduction of the skew.
     /// - **That the spans are the right ranges** for any purpose other than
     ///   agreeing with each other. A `body()` that consistently recorded the
     ///   key instead of the value would pass the length check; the slice
@@ -574,10 +558,9 @@ Second : B from users
     /// the whole of it — opening quote to closing quote — and be non-zero
     /// width.
     ///
-    /// It was a backtick template, and this asserted backtick-to-backtick. The
-    /// delimiter is the only thing that changed: what is being pinned is that
-    /// the span is the EXPR node's own `text_range()`, which is
-    /// delimiter-inclusive, and not the run of text inside it.
+    /// What is being pinned is that the span is the EXPR node's own
+    /// `text_range()`, which is delimiter-inclusive, and not the run of text
+    /// inside it.
     #[test]
     fn spans_for_the_interpolated_subject() {
         const SRC: &str = "\
@@ -621,9 +604,6 @@ User : Person from users
     /// reference. The recorded mapping-relative span MUST cover
     /// `users.name` — the binding AND the column, because the reference is
     /// both — and be non-zero width.
-    ///
-    /// It was `name = .name` and asserted the five characters of `.name`,
-    /// leading dot included. There is no leading dot: the row has a name.
     #[test]
     fn spans_for_a_qualified_reference() {
         const SRC: &str = "\

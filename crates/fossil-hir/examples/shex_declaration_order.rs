@@ -1,16 +1,13 @@
 //! Does declaration order survive the parse, and is `ShExDescriptor::shapes()` stable?
 //!
-//! `type { A, B } := io.shex(...)` bound **by order** when this was written, so
-//! the order had to exist and be the file's; it binds by local name now, and
-//! the order still decides what the output model lists first. Two things are
-//! measured here:
+//! `type { A, B } := io.shex(...)` binds by local name, and the order still
+//! decides what the output model lists first. Two things are measured here:
 //!
 //! 1. Whether rudof's `Schema::shapes()` returns the shapes in the order the
 //!    document declares them, for both surface syntaxes (`ShExC` and `ShExJ`).
-//! 2. Whether `ShExDescriptor::shapes()` agrees. It was a `HashMap::values()`
-//!    when this example was written, and running it twice showed two different
-//!    orders — Rust seeds its hasher per process. The table is a `Vec` in
-//!    declaration order now; this is what holds it there.
+//! 2. Whether `ShExDescriptor::shapes()` agrees. A `HashMap::values()` would
+//!    give a different order per run — Rust seeds its hasher per process. The
+//!    table is a `Vec` in declaration order; this is what holds it there.
 //!
 //! The shapes are named so that declaration order, alphabetical order and IRI
 //! order all differ; otherwise a wrong order could pass by coincidence.

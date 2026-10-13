@@ -4,9 +4,9 @@
 //! **A multi-valued property is a table of its own**, a row per value, and every
 //! value is in it — through the whole native host, read back with `DuckDB`.
 //!
-//! A relational source spells `*` as repeated rows, and the vertex merge kept
-//! the first of them: a person with three nicknames came out with one. The RDF
-//! pivot spells it as a list, which no R2RML term map reads. Both are now the
+//! A relational source spells `*` as repeated rows, and a vertex merge that
+//! kept the first of them would give a person with three nicknames one. The
+//! RDF pivot spells it as a list, which no R2RML term map reads. Both are the
 //! same table — `src`, the value — and the vertex row carries neither.
 
 use fossil_df::corpus::manifest::{Manifest, PropertyTable};

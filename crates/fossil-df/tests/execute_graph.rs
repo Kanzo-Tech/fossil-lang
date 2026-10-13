@@ -1,25 +1,17 @@
-//! E2E del backend `DataFusion` (paso 3, edge phase): un programa con dos
-//! mappings (Person, Order) y un foreign-key interpolado (`placedBy` →
-//! Person) → [`fossil_df::execute_graph`] → dos tablas vertex + una tabla edge
-//! CSR/CSC con los `dense_id` resueltos por join en memoria.
+//! The `DataFusion` backend's edge phase, end to end: a program with two
+//! mappings (Person, Order) and an interpolated foreign key (`placedBy` →
+//! Person) → [`fossil_df::execute_graph`] → two vertex tables and one edge
+//! table, its `dense_id`s resolved by an in-memory join.
 //!
-//! Valida la barrera C4 (todos los vértices antes de cualquier arista) y que el
-//! edge-join calca el SQL del writer (`e.src_iri=s.subject`, `e.dst_iri=t.subject`,
-//! CSR `ORDER BY src_dense,dst_dense` / CSC `ORDER BY dst_dense,src_dense`).
-
-//! **This was RED and the premise has since been repaired** — the note is kept
-//! because the repair is the thing worth knowing.
+//! It holds the barrier (every vertex before any edge) and the edge join's
+//! order (`ORDER BY src_dense, dst_dense`).
 //!
-//! `placedBy` can only be an edge if the shape declares its range to be a shape
-//! (`ex:placedBy @ex:Person` in `graph.shex`); the template-skeleton guess that
-//! used to infer one is deleted. `expected_value_ty` turns a shape-ref
-//! constraint into an expectation of `Iri`, and an interpolation used to
-//! synthesise `String` everywhere but `@subject` — so the same document that
-//! made the executor emit the edge made the checker refuse the body with
-//! `expected Iri, got String`. `Checker::iri_position` is now set from the
-//! EXPECTATION as well as from the identity's key, `IriTemplate <: Iri`, and one
-//! typed document serves both halves. That is why this file registers
-//! `graph.shex` for the checker and passes the same text as the descriptor.
+//! `placedBy` is an edge because the shape declares its range to be a shape
+//! (`ex:placedBy @ex:Person` in `graph.shex`); nothing infers one from
+//! templates. The checker reads the same document: an interpolation where a
+//! reference is expected is the identity of a node, so one typed document
+//! serves both halves. That is why this file registers `graph.shex` for the
+//! checker and passes the same text as the descriptor.
 
 #![allow(clippy::literal_string_with_formatting_args)]
 

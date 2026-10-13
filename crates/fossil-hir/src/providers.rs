@@ -30,7 +30,7 @@ use crate::shex::{ShExDescriptor, ShExLoweringError};
 /// Both lower through the same constraint table, so the two forms of one schema
 /// say the same thing.
 ///
-/// They no longer produce EQUAL [`OutputShapes`], and the difference is
+/// They do not produce EQUAL [`OutputShapes`], and the difference is
 /// positions: [`fossil_graph_schema::PropertyConstraint::span`] says where the
 /// document declares a predicate, and only the compact form has an answer —
 /// offsets in JSON are not the document anyone is reading a report about.
@@ -71,13 +71,13 @@ mod tests {
     /// `ShExJ` is what a tool emits; if they did not decode to the same value,
     /// the choice of syntax would be a semantic choice.
     ///
-    /// # The claim narrowed, and the narrowing is the point
+    /// # Equal modulo position
     ///
-    /// It compared the two whole values, and cannot any more:
+    /// The two whole values are not equal:
     /// [`fossil_graph_schema::PropertyConstraint::span`] says WHERE the document
     /// declares a predicate, and a compact document has an answer where a JSON
-    /// one has `None`. The two still say the same thing; they are no longer
-    /// written in the same place, which is what a position is.
+    /// one has `None`. The two say the same thing; they are not written in the
+    /// same place, which is what a position is.
     ///
     /// So the comparison is modulo the position, spelled out rather than
     /// derived — clearing the field before comparing would make this test pass
@@ -261,9 +261,8 @@ ex:Contact {
         assert!(!SHEX.accepts("catalogue.ttl"));
     }
 
-    /// **The pair that behaved identically until now.** `io.shex("x.ttl")` and
-    /// `io.shacl("x.ttl")` were one answer, because the extension chose the row
-    /// and only one row claimed `.ttl`.
+    /// **Two rows, one extension.** Were the extension to choose the row,
+    /// `io.shex("x.ttl")` and `io.shacl("x.ttl")` would be one answer.
     #[test]
     fn shex_and_shacl_are_two_rows_and_the_name_is_what_separates_them() {
         let shex = provider(PROVIDERS, "io.shex").expect("installed");

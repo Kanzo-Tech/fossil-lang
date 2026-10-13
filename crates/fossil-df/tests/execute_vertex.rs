@@ -1,11 +1,11 @@
-//! E2E del backend `DataFusion` (paso 3, vertex phase): `hello.fossil` →
-//! [`fossil_df::execute_vertex`] → ejecuta el plan sobre un CSV real y comprueba
-//! la forma de tabla de vértice materializada (`dense_id` + subject + props + x/y/cluster).
-//! Valida MIR-PG → `LogicalPlan` → `read_csv` → `Projection`/sort → `collect()`
-//! → `dense_id` denso determinista.
+//! The `DataFusion` backend's vertex phase, end to end: `hello.fossil` →
+//! [`fossil_df::execute_vertex`] runs the plan over a real CSV and checks the
+//! materialised vertex table (`dense_id` + subject + props): MIR-PG →
+//! `LogicalPlan` → `read_csv` → `Projection`/sort → `collect()` → a dense,
+//! deterministic `dense_id`.
 //!
-//! El cwd de `cargo test` es la raíz del crate, así que la fuente se referencia
-//! como `tests/fixtures/users.csv` (relativa a `crates/fossil-df`).
+//! `cargo test`'s cwd is the crate root, so the source is
+//! `tests/fixtures/users.csv` (relative to `crates/fossil-df`).
 
 // `{users.id}` is a Fossil interpolation hole, not a Rust format arg.
 #![allow(clippy::literal_string_with_formatting_args)]

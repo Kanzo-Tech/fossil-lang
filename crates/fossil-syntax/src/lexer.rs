@@ -9,19 +9,18 @@
 //! pass needs them to measure leading columns.
 //!
 //! Every terminal of the lexical layer (grammar.bnf, § LEXICAL LAYER) has a
-//! variant here, and nothing here outlives its surface: the backtick, `${`,
-//! `<…>` and `|>` are not tokens, so a byte that used to open a retired
-//! spelling reaches the parser as itself.
+//! variant here, and nothing here is a token the grammar lacks: the backtick,
+//! `${`, `<…>` and `|>` are not tokens, so their bytes reach the parser as
+//! themselves.
 //!
 //! Critical ordering rules (logos uses longest-match, with declaration order as
 //! tiebreaker for equal-length matches):
 //!
 //! - Two-char operators come BEFORE their one-char prefixes
 //!   (`<=` before `<`, `>=` before `>`, `==` before `=`, `!=` before `!`,
-//!   `:=` before `:`). There is no `<<` and no `>>`, and no `|>`: the
-//!   triple term went with the RDF-specific surface, and `<` and `>` have one
-//!   reading each (`lexes_double_le_correctly` pins it). With `AbsIri` gone,
-//!   `<` no longer even opens: nothing else claims the byte.
+//!   `:=` before `:`). There is no `<<` and no `>>`, and no `|>`: `<` and
+//!   `>` have one reading each (`lexes_double_le_correctly` pins it), and `<`
+//!   opens nothing.
 //! - `Float` regex comes BEFORE `Integer` regex (longest-match selects
 //!   `Float` for `1.0` because both regexes start with the same digit).
 //! - All keyword `#[token]`s come BEFORE the `Ident` regex so the keyword
@@ -101,8 +100,8 @@ pub enum Token {
     False,
 
     // `null` is a literal for the same reason `true` is: without a token it
-    // arrives as `Ident`, and a literal that looks like an unresolved reference
-    // is the diagnostic `expressions` used to get for `true`.
+    // arrives as `Ident`, and a literal would be checked as an unresolved
+    // reference.
     #[token("null")]
     Null,
 
@@ -127,10 +126,8 @@ pub enum Token {
     // interpolation run by `crate::indent::carve_interpolations` when it has a
     // hole.
     //
-    // There was a `Template` here — the backtick literal and its `${` hole,
-    // a second spelling of this one differing only in the delimiter and in `${`
-    // for the hole. `"…{expr}…"` is the spelling; a backtick is no longer a
-    // token, so logos rejects the byte and the parser names it.
+    // `"…{expr}…"` is the one spelling: a backtick is not a token, so logos
+    // rejects the byte and the parser names it.
     //
     // A hole holds an expression, and an expression may hold a string: PEP
     // 701's rule, so `"…/{Row."Person.id"}"` is ONE literal. A regex cannot
@@ -138,11 +135,9 @@ pub enum Token {
     #[token("\"", string_end)]
     String,
 
-    // There was an `AbsIri` here — `<https://…>`, angle brackets included.
-    // Its two consumers, the vocabulary declaration and the property key, are
-    // bare names now, and a constant IRI is written as a STRING. The lexical win
-    // is that `<` and `>` have one reading each and this lexer no longer has to
-    // guess between a comparison and the start of an IRI.
+    // No `<https://…>` IRI token: a constant IRI is written as a STRING, so `<`
+    // and `>` have one reading each and this lexer never guesses between a
+    // comparison and the start of an IRI.
 
     // ───────────────────────────────────────────────────────────────────
     // Multi-character operators. Each MUST be declared before its one-char
@@ -163,9 +158,9 @@ pub enum Token {
     #[token(">=")]
     Ge,
 
-    // There is no `Pipe`. `a |> f()` was a second spelling of `a.f()`: with
-    // members resolved by the type of the receiver, the pipeline had nothing
-    // left that the dot could not do. `|` matches no rule, so it reaches the parser as
+    // There is no `Pipe`. `a |> f()` would be a second spelling of `a.f()`: with
+    // members resolved by the type of the receiver, a pipeline has nothing the
+    // dot cannot do. `|` matches no rule, so it reaches the parser as
     // an ERROR token carrying its text — which is what `parse_expression` pairs
     // with the `>` after it to refuse the form by name.
 
@@ -177,14 +172,11 @@ pub enum Token {
 
     /// Single colon — emitted as `SHAPE_SEP` by the indent pass.
     ///
-    /// The grammar gives it TWO readings, and disambiguation rule 3 is now the
+    /// The grammar gives it TWO readings, and disambiguation rule 3 is the
     /// whole of the rule: the mapping header's `Name : Shape`, and the ternary's
     /// `cond ? a : b`. Which one it is comes from the node, never from the
-    /// lexeme — there is no `T_COLON`, and there never was a token for it.
-    ///
-    /// The third reading — the CURIE's `ex:name` — went with the CURIE, and so
-    /// did the no-whitespace-before-the-colon check that existed only to keep
-    /// `a : b` out of a ternary (grammar.bnf, § DISAMBIGUATION RULES).
+    /// lexeme — there is no `T_COLON`, and whitespace around the colon means
+    /// nothing (grammar.bnf, § DISAMBIGUATION RULES).
     #[token(":")]
     Colon,
 
@@ -229,10 +221,6 @@ pub enum Token {
 
     #[token("?")]
     Question,
-    // `&` was `ShapeAnd`, the shape intersection's separator. The intersection
-    // was lowered by taking the first shape and dropping the rest without a
-    // word, so the token claimed a meaning the compiler did not keep.
-    //
     // Logos rejects any byte no rule above matches. Those bytes are NOT
     // dropped — see `raw_lex_lossless`.
 }
@@ -299,10 +287,10 @@ fn first_quote(s: &[u8]) -> Option<usize> {
 /// `None` is logos's «no rule matched here», and its range is kept rather than
 /// discarded. [`crate::indent::lex_with_indents`] turns each one into a
 /// `SyntaxKind::ERROR` token carrying the offending text, which is what lets
-/// `parse("#")` report the character. Before this existed, `#` vanished between
-/// the lexer and the parser: the token stream came back empty, `parse_program`
-/// broke on `None` immediately, and the LSP's Problems panel showed nothing at
-/// all for a file the user could see was wrong.
+/// `parse("#")` report the character. Dropped, `#` would vanish between the
+/// lexer and the parser: the token stream would come back empty,
+/// `parse_program` would break on `None` immediately, and the editor would
+/// show nothing at all for a file the user could see was wrong.
 #[must_use]
 pub fn raw_lex_lossless(input: &str) -> Vec<(Option<Token>, std::ops::Range<usize>)> {
     Token::lexer(input)
@@ -371,17 +359,15 @@ mod tests {
         );
     }
 
-    // ─── Retired spellings: what the lexer no longer claims ───────────
+    // ─── Spellings the grammar does not have: what the lexer does not claim ─
 
     #[test]
-    fn the_prefix_declaration_is_no_longer_one_token_run() {
-        // `prefix ex: <https://example.org/>` used to lex as
-        // `KwPrefix Ident Colon AbsIri`. Three of those four tokens are gone:
+    fn the_prefix_declaration_is_not_one_token_run() {
         // `prefix` is an ordinary identifier (grammar.bnf, § RESERVED KEYWORDS)
-        // and the angle brackets are a comparison and its operands.
-        // Nothing here says "vocabulary declaration" any more, which is what
-        // makes `items::parse_program`'s shape check the only thing that can
-        // recognise the retired line and name what replaces it.
+        // and the angle brackets are a comparison and its operands. Nothing
+        // here says "vocabulary declaration", which is what makes
+        // `items::parse_program`'s shape check the only thing that can
+        // recognise the line and name what to write instead.
         let kinds = just_kinds("prefix ex: <https://example.org/>\n");
         let non_trivia: Vec<_> = kinds
             .into_iter()
@@ -397,14 +383,10 @@ mod tests {
                 Token::Ident, // `https`
                 Token::Colon,
                 // AND THE REST OF THE LINE IS A COMMENT. `//` in the scheme is
-                // the comment opener, and with `AbsIri` gone nothing claims it
-                // first — so `//example.org/>` is trivia and the `>` never
-                // arrives as a token at all.
-                //
-                // The lexical win of dropping `ABS_IRI` is that `<` and `>` get
-                // one reading each. Nothing wrote THIS down, and it is the
-                // consequence that costs: EVERY absolute IRI in the old corpus
-                // comments out the rest of its own line.
+                // the comment opener, and no IRI token claims it first — so
+                // `//example.org/>` is trivia and the `>` never arrives as a
+                // token at all: every `<scheme://…>` comments out the rest of
+                // its own line.
                 // It is why `items::parse_property_lhs` refuses the
                 // form over the whole LINE rather than through its `>` — there
                 // is no `>` left to stop at, and nothing after the `//` to save.
@@ -435,22 +417,19 @@ mod tests {
 
     #[test]
     fn a_backtick_is_not_a_token() {
-        // The backtick literal was a second spelling of the quoted string and
-        // died with the CURIE-with-holes it carried.
         // Nothing claims the byte, so logos rejects it — and the lossless pass
         // keeps the range, which is what lets the parser say which character it
         // was rather than dropping it.
         assert_eq!(just_kinds("`"), vec![]);
         assert_eq!(raw_lex_lossless("`"), vec![(None, 0..1)]);
-        // `$` went with `${`: it was never a token on its own either.
+        // Nor is `$` a token on its own.
         assert_eq!(raw_lex_lossless("$"), vec![(None, 0..1)]);
     }
 
     #[test]
     fn an_absolute_iri_is_not_a_token() {
-        // `<https://example.org/>` was ONE `AbsIri`. It is now a comparison
-        // operator and its operands, which is the whole lexical win of dropping
-        // `ABS_IRI`: `<` has one reading.
+        // `<a>` is a comparison operator and its operands: `<` has one
+        // reading.
         let kinds = just_kinds("<a>");
         assert_eq!(kinds, vec![Token::Lt, Token::Ident, Token::Gt]);
     }
@@ -509,10 +488,9 @@ mod tests {
 
     #[test]
     fn ampersand_is_not_a_token() {
-        // `&` was the shape intersection's separator and the intersection is
-        // gone, so nothing claims the byte and logos rejects it. Pinning the
-        // absence is the half of the old `lexes_shape_and` worth keeping: the
-        // day something wants `&` back, this test is where it announces itself.
+        // Nothing claims the byte, so logos rejects it. Pinning the absence
+        // means the day something wants `&`, this test is where it announces
+        // itself.
         assert_eq!(just_kinds("&"), vec![]);
         // Rejected, but not lost: the lossless pass keeps the range so the
         // parser can say which character it was.
@@ -540,7 +518,7 @@ mod tests {
     fn lexes_at_attr() {
         assert_eq!(just_kinds("@dcat"), vec![Token::AtAttr]);
         assert_eq!(just_kinds("@_x"), vec![Token::AtAttr]);
-        // `@export` is no longer a keyword: it lexes as an ordinary attribute
+        // `@export` is not a keyword: it lexes as an ordinary attribute
         // marker, which no production accepts, so it is a parse error.
         assert_eq!(just_kinds("@export"), vec![Token::AtAttr]);
     }
@@ -577,12 +555,9 @@ mod tests {
 
     #[test]
     fn in_use_as_iri_and_prefix_are_ordinary_identifiers() {
-        // Five words this lexer used to reserve. The named-graph clause and
-        // the import took the first three, and both forms went — so a table
-        // with an `in` column, or a binding called `use`, parses like any
-        // other name. `iri` went with `@subject(iri = …)`: it
-        // named an argument of a form that is now an assignment. `prefix` went
-        // with the CURIE (grammar.bnf, § RESERVED KEYWORDS).
+        // No production takes any of these five as a keyword, so a table with
+        // an `in` column, or a binding called `use`, parses like any other
+        // name (grammar.bnf, § RESERVED KEYWORDS).
         assert_eq!(just_kinds("in"), vec![Token::Ident]);
         assert_eq!(just_kinds("use"), vec![Token::Ident]);
         assert_eq!(just_kinds("as"), vec![Token::Ident]);
@@ -612,8 +587,8 @@ mod tests {
 
     #[test]
     fn lexes_double_le_correctly() {
-        // `<<` is no longer a token of its own: the triple term went with the
-        // RDF-specific surface, so nothing claims it and it is two `<`.
+        // `<<` is not a token of its own: nothing claims it, so it is two
+        // `<`.
         assert_eq!(just_kinds("<<"), vec![Token::Lt, Token::Lt]);
         assert_eq!(just_kinds("<"), vec![Token::Lt]);
         assert_eq!(just_kinds("<="), vec![Token::Le]);

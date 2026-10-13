@@ -1,11 +1,10 @@
 //! E2E: an expression in a property position produces its column.
 //!
-//! This is the counterpart of the test that measured the hole. Until
-//! 2026-08-07, `slug = str.slug(users.name)` was dropped between the CST and
-//! the HIR: the compiler reported success and the column was simply not in the
-//! corpus. What is asserted here is the whole chain closing — the form in the
-//! HIR, the arm in the checker, the lowering to MIR, and the render on this
-//! engine — by the only evidence that cannot be faked: the values.
+//! Dropped anywhere between the CST and the engine, `slug = str.slug(users.name)`
+//! would compile, report success, and leave the column out of the corpus. What
+//! is asserted here is the whole chain — the form in the HIR, the arm in the
+//! checker, the lowering to MIR, and the render on this engine — by the only
+//! evidence that cannot be faked: the values.
 //!
 //! `cargo test`'s cwd is the crate root, so the source is
 //! `tests/fixtures/users.csv`.
@@ -23,9 +22,8 @@ const EXPR_SHEX: &str = include_str!("fixtures/expressions.shex");
 
 /// `str.slug` is a multi-call template (`trim(regexp_replace(lower(trim(…))))`)
 /// and `str.upper` is a single call, so one program covers both the nested and
-/// the flat shape of a `LoweringKind::Expr`. `str.slug` used to be a native
-/// Rust UDF this engine could not run at all — ruling 15 made it a template,
-/// and this test is where that becomes visible as values.
+/// the flat shape of a `LoweringKind::Expr`. `str.slug` is a template, not a
+/// native function, and this test is where that becomes visible as values.
 const CALLS: &str = "\
 type { Person } := io.shex(\"expr.shex\")
 
@@ -141,9 +139,8 @@ fn column<A: Array + 'static>(
 
 /// A comparison produces a boolean column, and its integer literal survives.
 ///
-/// F2 §2: `users.id >= 2` is the shape a filter predicate has, and until it
-/// lowered, `Expr::BinOp` and `Expr::LitBool` were constructed by nothing and
-/// the backend answered `unimplemented!()` for both.
+/// `users.id >= 2` is the shape a filter predicate has: `Expr::BinOp` and
+/// `Expr::LitBool` reach the backend, and render.
 #[tokio::test]
 async fn a_comparison_produces_a_boolean_column() {
     const COMPARES: &str = "\
@@ -195,7 +192,7 @@ User : Person from users
 
 /// A conditional produces one column whose value depends on the row.
 ///
-/// F2 §3: `cond ? a : b` renders as a two-armed CASE. Both branches have the
+/// `cond ? a : b` renders as a two-armed CASE. Both branches have the
 /// same type by the time it gets here — the checker refuses anything else, so
 /// the column has one type and a shape can check it.
 #[tokio::test]
@@ -248,12 +245,10 @@ User : Person from users
 /// Rust and `s.upper()` ≡ `str.upper(s)` in Python. It is a resolution rule and
 /// not a second way of saying the same thing, and the accepted cost is that
 /// both spellings will appear in the wild. The SOURCE-level pipeline
-/// (`User.where(...)`, a relation rather than a value) is F5.
+/// (`User.where(...)`, a relation rather than a value) is `run_source_pipeline.rs`.
 #[tokio::test]
 async fn the_value_path_and_the_type_path_are_the_same_program() {
-    // `a |> f()` was the third spelling here and ruling 7 of 2026-08-11 retired
-    // it; the claim it pinned — two spellings, one program — survives as the two
-    // paths to a member. `x.upper()` and `str.upper(x)` are one catalogue row
+    // Two spellings, one program: the two paths to a member. `x.upper()` and `str.upper(x)` are one catalogue row
     // reached two ways, and this is the test that they produce the same column
     // rather than merely resolving to the same name.
     const PIPED: &str = "\

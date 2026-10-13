@@ -5,10 +5,9 @@
 //! from `ruff_db` (and `ty_wasm` composes `Workspace { db, system }` over it):
 //! what changes a compile's answer is an input, never ambient host state.
 //!
-//! The registry does NOT flow through `System`, and used to. `System::providers`
-//! returned `&'static [&'static Provider]`, which is a table nothing can
-//! invalidate and no file can produce; it is a Salsa input now, reached the same
-//! way [`Files`] is.
+//! The registry does NOT flow through `System`: a `&'static [&'static Provider]`
+//! is a table nothing can invalidate and no file can produce. It is a Salsa
+//! input, reached the same way [`Files`] is.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};

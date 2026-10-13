@@ -27,10 +27,9 @@
 //!
 //! `Diagnostic` also carries an optional `did_you_mean: Option<DidYouMean>` —
 //! the STRUCTURED carrier for the Levenshtein replacement candidate that
-//! `fossil_hir::didyoumean::did_you_mean` computes. The candidate was once
-//! surfaced only inside the diagnostic message text (the "did you mean ..."
-//! suffix), which a quick-fix could only recover by parsing prose;
-//! `fossil_ide::code_action`'s did-you-mean quick-fix needs the
+//! `fossil_hir::didyoumean::did_you_mean` computes. In the message text alone
+//! (the "did you mean ..." suffix) a quick-fix could only recover it by parsing
+//! prose; `fossil_ide::code_action`'s did-you-mean quick-fix needs the
 //! `(wrong_span, replacement)` pair STRUCTURALLY so it can build a
 //! `WorkspaceEdit` without re-parsing the message string. This mirrors the
 //! `suggestion_source` precedent exactly — structured, not string-parsed.
@@ -298,9 +297,7 @@ impl Diagnostic {
 // `literal_string_with_formatting_args` flags the Fossil identity template
 // (`"https://example.org/u/{users.id}"`) in the test fixture as if it were an
 // inline-format-args candidate. It's literal Fossil source — not a Rust format
-// string. The hole was `${.id}` in a backtick string until the backtick went;
-// it is an ordinary expression in the one quoted spelling now, and clippy reads
-// the braces the same way either way.
+// string: the hole is an ordinary expression in a quoted string.
 #[allow(clippy::literal_string_with_formatting_args)]
 mod tests {
     use super::*;
@@ -318,11 +315,9 @@ mod tests {
     /// The field round-trips whatever it is handed; the fixture is a real
     /// split-mapping snippet because a reader reaches for it as the example of
     /// what `suggestion_source` carries, and an example in a spelling the parser
-    /// refuses teaches the refused spelling. It held five retired forms in one
-    /// line — a `prefix`-declared CURIE header, a backtick template, `${ex:}`,
-    /// `${.id}` and a leading dot — and is the shape
-    /// `fossil_hir::render_split_suggestion` actually emits now: a bound shape
-    /// NAME, the mapping's own `@subject`, and a QUALIFIED reference.
+    /// refuses teaches the refused spelling. It is the shape
+    /// `fossil_hir::render_split_suggestion` emits: a bound shape NAME, the
+    /// mapping's own `@subject`, and a QUALIFIED reference.
     #[test]
     fn diagnostic_with_suggestion_source_round_trips() {
         let snippet = "UserEmail1 : Person from users\n    \

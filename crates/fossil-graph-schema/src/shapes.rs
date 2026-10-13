@@ -6,15 +6,14 @@
 //! [`GraphSchema`] is the *output* contract: node types, edge types, columns. It
 //! is what a materializer consumes. But the checker needs something else — the
 //! per-shape constraint table it asks "given target shape `ex:Person`, what is
-//! the expected type and cardinality of predicate `p`?" — and until now the only
-//! spelling of that table was `fossil_hir::shex::ShapeBinding`, whose fields are
-//! `rudof_iri::IriS` and `shex_ast::ShapeExpr`. Reading it meant linking `ShEx`.
+//! the expected type and cardinality of predicate `p`?" — and a table whose
+//! fields were `rudof_iri::IriS` and `shex_ast::ShapeExpr` would make reading
+//! it mean linking `ShEx`.
 //!
-//! This module is the same table with no type from any schema language in it. A
+//! This module is that table with no type from any schema language in it. A
 //! `ShEx` decoder lowers into it; a SHACL decoder lowers into it; the compiler
-//! reads it and never learns which document it came from. That is the same cut
-//! `0e6898d` made for `fossil-mir` — the middle of the compiler is handed a
-//! value, not a parser.
+//! reads it and never learns which document it came from. The middle of the
+//! compiler is handed a value, not a parser.
 //!
 //! # The two contracts, and which is which
 //!
@@ -28,7 +27,7 @@
 //! # Structural equality is load-bearing
 //!
 //! Salsa memoizes an `OutputShapes` (`fossil_hir::shape_documents::shape_document`),
-//! and salsa 0.26 decides "did this change?" with `PartialEq` — `update_fallback`
+//! and salsa decides "did this change?" with `PartialEq` — `update_fallback`
 //! in `salsa/src/update.rs` compares the old and new values and skips the
 //! invalidation entirely when they are equal. So every type here derives
 //! `PartialEq + Eq`, and none of them may ever grow a field that compares by
@@ -54,10 +53,9 @@ use crate::{Cardinality, EdgeType, GraphSchema, NodeType, Primitive, Property, S
 ///
 /// It lives here because this crate is the one both sides of that rule share:
 /// the decoder that produces the IRIs and the schema that carries the names.
-/// There were three independent copies of this three-line function in the tree
-/// — in the MIR lowering, in the `ShEx` descriptor, and in the SHACL decoder
-/// (`fossil-hir/src/shacl.rs`); this is the one they collapse
-/// onto.
+/// Every reader that names something after an IRI — the decoders, the checker,
+/// the type display — calls this one, so no two of them can disagree about
+/// where a name starts.
 #[must_use]
 pub fn local_name(iri: &str) -> &str {
     iri.rsplit(['#', '/']).next().unwrap_or(iri)
@@ -131,14 +129,9 @@ pub struct Shape {
     pub span: Option<Span>,
 }
 
-// `closed` was a field here — `ShEx` `CLOSED` / SHACL `sh:closed` — and its doc
-// said «the checker reads it to decide whether an unlisted predicate is an
-// error». The checker never saw it: `ResolvedShape::from_shape` reads `iri` and
-// `properties` and drops the rest, so the only reader in the workspace was one
-// test of the `ShEx` decoder.
-//
-// It is deleted rather than wired, and the reason is that wiring it would
-// change nothing. A property key is a BARE NAME resolved against this table
+// There is no `closed` here — `ShEx` `CLOSED` / SHACL `sh:closed` — because
+// reading it would change nothing (`/docs/design/discarded`). A property key is
+// a BARE NAME resolved against this table
 // (`Checker::resolve_predicate`), so a key no predicate here
 // declares is already an error, with a did-you-mean over the ones that do —
 // unconditionally, for every shape. Openness has no way to be expressed from
@@ -212,21 +205,18 @@ impl PropertyConstraint {
     /// wants to *diagnose* an un-narrowed property can still tell the two apart,
     /// which a bare `Primitive::String` cannot.
     ///
-    /// # The checker agrees, and once did not
+    /// # The checker agrees
     ///
     /// `None` means "the document did not narrow the value type" — that is the
-    /// contract, and the type checker reads it that way. The two disagreed
-    /// once: `check.rs` resolved a missing expectation with
-    /// `unwrap_or_else(|| Ty::new(db, TyKind::Iri))`, the NARROWEST type in the
-    /// lattice, so a constraint the document declined to narrow rejected a
-    /// String. The choice was made in favour of this field's own reading —
-    /// `check.rs`'s `compatible` now short-circuits on
+    /// contract, and the type checker reads it that way: `check.rs`'s
+    /// `compatible` short-circuits on
     /// `expected.is_none_or(|e| subtypes(db, actual, e))`, so an absent
     /// expectation accepts anything.
     ///
-    /// Keep the two in step. `Some` narrows and `None` does not, and a default
-    /// reintroduced on the `fossil-hir` side would silently make this method
-    /// mean the opposite of what it says.
+    /// Keep the two in step. `Some` narrows and `None` does not. A default on
+    /// the `fossil-hir` side — `Iri`, say, the NARROWEST type in the lattice —
+    /// would make a constraint the document declined to narrow reject a String,
+    /// and silently make this method mean the opposite of what it says.
     #[must_use]
     pub fn datatype(&self) -> Option<Primitive> {
         self.term.as_ref().and_then(Term::primitive)
@@ -237,10 +227,10 @@ impl PropertyConstraint {
 /// collapse, and [`Occurs::collapse`] is the only way to get there.
 ///
 /// The rich form is a `(min, max)` pair rather than an enum of named cases
-/// because the named cases could disagree with themselves: the enum this
-/// replaces had both `Exact(n)` and `Range { min: n, max: Some(n) }` for the
-/// same cardinality, and its `is_single_valued` answered `true` for the first
-/// and `false` for the second. A pair cannot hold two spellings of one fact.
+/// because named cases can disagree with themselves: an enum with both
+/// `Exact(n)` and `Range { min: n, max: Some(n) }` has two spellings of one
+/// cardinality, and nothing stops its `is_single_valued` answering differently
+/// for each. A pair cannot hold two spellings of one fact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Occurs {
     /// Minimum number of values. `0` = optional.
@@ -289,10 +279,8 @@ impl Occurs {
 /// here, which is the point — a diagnostic renders from strings, and the middle
 /// of the compiler never has to name the language the document was written in.
 ///
-/// The one thing lost against the `ShEx`-typed original is the `OneOf` node
-/// itself, which the old `SuggestionSeed` cloned so the emitter could
-/// re-generate a split-into-N-mappings suggestion. [`Rejection::Disjunction`]
-/// carries the predicate IRIs of each branch instead: enough to *name* the split
+/// [`Rejection::Disjunction`] carries the predicate IRIs of each branch, not
+/// the document's `OneOf` node: enough to *name* the split
 /// in a diagnostic, not enough to re-emit the document's own syntax. Re-emitting
 /// syntax is the decoder's job, and it is the decoder that knows the syntax.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -382,8 +370,7 @@ impl OutputShapes {
     ///
     /// [`Rejection`]s are not consulted: this is the *lowering* of what was
     /// understood, and a caller that wants to refuse a partially-understood
-    /// document checks [`Self::rejections`] first. That was already true of the
-    /// `ShEx` original, which lowered the non-rejected parts of every shape.
+    /// document checks [`Self::rejections`] first.
     ///
     /// A node's label is [`local_name`] of its IRI; a property's or an edge's is
     /// [`PropertyConstraint::name`], the key a program writes, and two that
@@ -552,23 +539,16 @@ mod tests {
         );
     }
 
-    // -- Occurs::collapse over the five shapes the old enum could take -----
+    // -- Occurs::collapse over every cardinality a document can state -------
 
-    /// The enum this replaces had five variants; a later commit deletes it, and
-    /// this is the only thing that will catch a drift. Each row is the old
-    /// variant, its `(min, max)`, and what its `is_single_valued` answered.
-    ///
-    /// One deliberate divergence, and it is unreachable: the old `Exact(n)`
-    /// answered `true` for **every** `n`, so `Exact(3)` claimed to be
-    /// single-valued while `Range { min: 3, max: Some(3) }` — the same
-    /// cardinality — answered `false`. `Occurs` cannot hold that contradiction,
-    /// and it resolves to the `Range` answer. Nothing observes the difference:
-    /// `Cardinality::from_shex` only ever produced `Exact(1)` (`(None, None)`),
-    /// and `(Some(lo), None)` went to `Range { min: lo, max: Some(lo) }`.
+    /// Each row is a cardinality by the name a reader knows it under — exactly
+    /// `n`, `?`, `+`, `*` and a range — its `(min, max)`, and whether it is
+    /// single-valued. Exactly `n` for `n > 1` is NOT single-valued: three
+    /// values per subject are many values, whatever the spelling.
     #[test]
-    fn collapse_pins_every_shape_the_old_enum_could_take() {
+    fn collapse_pins_every_cardinality_a_document_can_state() {
         let cases: &[(&str, Occurs, bool)] = &[
-            // Exact(1) — `from_shex(None, None)`, the ShEx default.
+            // Exact(1) — the ShEx default when nothing is written.
             (
                 "Exact(1)",
                 Occurs {
@@ -577,7 +557,7 @@ mod tests {
                 },
                 true,
             ),
-            // Exact(0) — degenerate but single-valued under both rules.
+            // Exact(0) — degenerate, and single-valued.
             (
                 "Exact(0)",
                 Occurs {
@@ -586,7 +566,7 @@ mod tests {
                 },
                 true,
             ),
-            // Exact(3) — the divergence. Old: true. New: false. Unconstructible.
+            // Exact(3) — many values, so not single-valued.
             (
                 "Exact(3)",
                 Occurs {
@@ -649,8 +629,7 @@ mod tests {
         }
     }
 
-    /// `demands_one_or_more` is `min >= 1` for every one of the five, with no
-    /// divergence at all — the old `Exact(n) => n >= 1` is exactly `min >= 1`.
+    /// `demands_one_or_more` is `min >= 1` for every cardinality.
     #[test]
     fn demands_one_or_more_is_min_at_least_one() {
         let cases: &[(&str, Occurs, bool)] = &[

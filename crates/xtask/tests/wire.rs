@@ -131,7 +131,7 @@ fn the_parse_actually_read_the_schema() {
 /// the emitted TypeScript performs ([`problem::render`]) must equal `Problem`'s
 /// own `Display` for that data. It is what keeps a detail raised in
 /// `@fossil-lang/corpus` from reading differently from the same code raised in
-/// Rust, which five of them did before `DETAILS` was generated.
+/// Rust — which hand-written renderings do.
 ///
 /// It cannot prove that the TypeScript emitted for the segments renders as
 /// `render` does: that is two lines of `emit_ts`, read once.

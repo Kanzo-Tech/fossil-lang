@@ -556,7 +556,7 @@ async fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
         "the edges are not the (order, person) pairs the input named"
     );
 
-    // 9. fossil.json went last.
+    // 9. fossil.json is the last object written.
     let puts = out.puts.lock().expect("lock").clone();
     assert_eq!(
         puts.last().map(String::as_str),

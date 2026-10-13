@@ -102,8 +102,8 @@ fn no_crate_links_an_engine_without_declaring_it() {
     let mut failures = Vec::new();
     for (engine, declared) in &policy {
         let linkers = depgraph::reachers(&meta, engine, Edges::Linking);
-        // An engine no crate links is one only tests bring in — `duckdb`, since
-        // the language server went. The walk must still find it over some edge,
+        // An engine no crate links is one only tests bring in — `duckdb`. The
+        // walk must still find it over some edge,
         // or the ban outlived the dependency or the walk is broken.
         assert!(
             !depgraph::reachers(&meta, engine, Edges::Any).is_empty(),

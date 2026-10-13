@@ -1,34 +1,27 @@
 //! Target-shape resolution.
 //!
-//! Maps a mapping's declared shape IRI to a Phase-3-internal [`ResolvedShape`]
+//! Maps a mapping's declared shape IRI to a checker-internal [`ResolvedShape`]
 //! carrying the per-predicate constraint table, converted from the
 //! format-neutral [`fossil_graph_schema::Shape`].
 //!
 //! # The compiler is handed a value, not a parser
 //!
-//! This module used to name `ShExDescriptor`, `ShapeBinding`, `IriS` and
-//! `shex_ast::ShapeExpr`, which is how `fossil-hir` linked a schema language.
-//! It now names [`fossil_graph_schema::shapes`]'s vocabulary and nothing else:
-//! a host installs a [`fossil_base::Provider`] row, its decode lowers its own
-//! syntax into [`fossil_graph_schema::OutputShapes`], and the checker never
-//! learns which language the document was written in. Same cut `0e6898d` made
-//! for `fossil-mir`.
+//! This module names [`fossil_graph_schema::shapes`]'s vocabulary and no type
+//! of any schema language: a host installs a [`fossil_base::Provider`] row, its
+//! decode lowers its own syntax into [`fossil_graph_schema::OutputShapes`], and
+//! the checker never learns which language the document was written in.
 //!
 //! # The types the program has
 //!
 //! [`resolve_target_shape`] reads the type the PROGRAM has: one it declares
 //! (`crate::declared`), or one it imports with `type { … } := io.shex("…")`.
-//! For an import it reads the shape document. It used to take the descriptor as a borrowed
-//! ARGUMENT threaded in by the host; the in-query caller had nothing to thread
-//! and passed `ACCEPT_ALL_DEFAULT`, so backward checking was off for every
-//! program compiled through the checker — an axis with exactly one value.
-//!
-//! It then read the bytes with `System::read_file`, which registers no Salsa
-//! dependency: editing the document re-ran nothing, and in an LSP that is a
-//! diagnostic that never clears. The document is now a [`fossil_base::SourceFile`]
-//! **input** found through [`fossil_base::file_at`] and decoded by the tracked
-//! [`crate::shape_documents::shape_document`], so an edit to the `.shex` invalidates every
-//! mapping checked against it.
+//! For an import it reads the shape document — not a descriptor threaded in by
+//! the host, which an in-query caller has none of. The document is a
+//! [`fossil_base::SourceFile`] **input** found through [`fossil_base::file_at`]
+//! and decoded by the tracked [`crate::shape_documents::shape_document`], so an
+//! edit to the `.shex` invalidates every mapping checked against it; bytes read
+//! with `System::read_file` register no Salsa dependency, and in an editor that
+//! is a diagnostic that never clears.
 //!
 //! Having no type is an ERROR: a property key is a bare name whose meaning is
 //! the name of a predicate **a type declares**, so a program that neither
@@ -37,11 +30,9 @@
 //!
 //! # Every failure is reported at the BINDING, and none of them here
 //!
-//! Four more variants stood beside it — a document nothing registered, one no
-//! decoder reads, one that did not parse, one that does not declare the shape
-//! the mapping targets — each written so the commonest mistake, a misspelt
-//! shape name, would produce a message instead of a silent `None`. They are
-//! gone, and the reason is the ORDER, not the fixtures.
+//! A document nothing registered, one no decoder reads, one that did not
+//! parse, one that does not declare the shape the mapping targets: none of them
+//! is an error of this module, and the reason is the ORDER.
 //!
 //! A mapping header names a bare LOCAL name. [`crate::def_map`] binds those
 //! names BY NAME, against this module's own [`decoded_document`], before
@@ -51,19 +42,16 @@
 //! `None`, [`crate::lower`] reports it by cause (`unbound_shape_problem`, which
 //! carries the did-you-mean over the names the program bound) and leaves
 //! `shape_iri` empty — and an empty shape IRI reads here as «no shape clause».
-//! `Undeclared` was doubly unreachable on top of that: a binding hands over a
-//! shape the document DECLARES, so the IRI can only be one the document
-//! declares.
+//! And a binding hands over a shape the document DECLARES, so the IRI can only
+//! be one the document declares.
 //!
-//! Every way a program can fail to bring a shape in was driven through
-//! [`resolve_target_shape`] to settle it — the corpus is
-//! `a_document_that_cannot_answer_leaves_the_mapping_with_no_shape_clause`, one
-//! row per way, plus the no-`type`-line case beside it — and every one answered
-//! `None`. Not one reached a construction site.
+//! `a_document_that_cannot_answer_leaves_the_mapping_with_no_shape_clause`
+//! drives every way a program can fail to bring a shape in through
+//! [`resolve_target_shape`], one row per way, plus the no-`type`-line case
+//! beside it, and every one answers `None`.
 //!
-//! `None` therefore means two things that used to be one, and the second is
-//! the residue: a mapping with NO SHAPE CLAUSE, and a mapping whose shape name
-//! bound nothing and has already been told so.
+//! `None` therefore means two things: a mapping with NO SHAPE CLAUSE, and a
+//! mapping whose shape name bound nothing and has already been told so.
 //!
 //! # Why the failure is returned and not emitted here
 //!
@@ -121,7 +109,7 @@ pub struct Predicate {
     pub term: Option<Term>,
 }
 
-/// A mapping's resolved target shape — Phase-3-internal.
+/// A mapping's resolved target shape — checker-internal.
 #[derive(Debug, Clone)]
 pub struct ResolvedShape<'db> {
     /// Per-predicate constraint table.
@@ -257,7 +245,7 @@ impl<'db> ResolvedShape<'db> {
 /// The type a value must have to satisfy `c`, or `None` when the document did
 /// not narrow it.
 ///
-/// Three cases, and the third one used to be the opposite of what it says:
+/// Three cases:
 ///
 /// 1. **A narrowed literal** (`datatype: Some(p)`) expects that primitive.
 /// 2. **An edge** (`targets` non-empty) expects a [`TyKind::Ref`] to the shapes
@@ -267,14 +255,11 @@ impl<'db> ResolvedShape<'db> {
 ///    about its value — expects NOTHING. The checker enforces the cardinality
 ///    and leaves the type alone.
 ///
-/// Case 3 is the one that reads backwards. A missing value type resolved to the
-/// NARROWEST type in the lattice while this module's own field doc said `None`
-/// meant "any value", the WIDEST. Both could not be right: a shape that
-/// declines to narrow the value must not reject a `String`, or `name = .name`
-/// fails against `ex:name .` — a constraint that constrains nothing.
-/// `PropertyConstraint::datatype`'s doc in `fossil-graph-schema` records the
-/// contradiction and asks whoever rewrites this to choose deliberately; this is
-/// the choice. A shape that does not narrow the value does not narrow it.
+/// Case 3 is `None` — "any value", the WIDEST type, and not the narrowest: a
+/// shape that declines to narrow the value must not reject a `String`, or
+/// `name = Row.name` fails against `ex:name .` — a constraint that constrains
+/// nothing. `PropertyConstraint::datatype`'s doc in `fossil-graph-schema` says
+/// the same. A shape that does not narrow the value does not narrow it.
 fn expected_value_ty<'db>(db: &'db dyn fossil_base::Db, c: &PropertyConstraint) -> Option<Ty<'db>> {
     if let Some(p) = c.datatype() {
         return Some(Ty::new(db, TyKind::Primitive(p)));
@@ -282,9 +267,9 @@ fn expected_value_ty<'db>(db: &'db dyn fossil_base::Db, c: &PropertyConstraint) 
     if c.targets.is_empty() {
         None
     } else {
-        // The constraint's destinations ARE the type. This used to answer
-        // `TyKind::Iri` — «some IRI» — which made every reference in the
-        // language one type, so an edge to the wrong shape type-checked.
+        // The constraint's destinations ARE the type. «Some IRI» would make
+        // every reference in the language one type, so an edge to the wrong
+        // shape would type-check.
         Some(Ty::reference(db, c.targets.iter().map(SmolStr::from)))
     }
 }
@@ -367,8 +352,8 @@ pub fn suggested_alias(predicate_iri: &str) -> SmolStr {
 /// document. Both steps are Salsa-visible — [`fossil_base::file_at`] reads the
 /// registry input (so registering the file later invalidates a reader that
 /// missed) and [`crate::shape_documents::shape_document`] is tracked on the file's text
-/// (so editing the document re-runs the checker). Neither was true of the
-/// `System::read_file` this replaces.
+/// (so editing the document re-runs the checker). Neither is true of
+/// `System::read_file`.
 ///
 /// # The row is chosen by NAME
 ///
@@ -451,9 +436,6 @@ fn malformed_cause(shapes: &OutputShapes) -> Option<SmolStr> {
 
 /// Peel `Seq` wrappers to the inner [`Primitive`], if any — the datatype
 /// carried on a vertex property column.
-///
-/// It peeled `Optional` too, and that variant is gone: nothing but a test ever
-/// built one.
 #[must_use]
 pub fn inner_primitive<'db>(db: &'db dyn fossil_base::Db, ty: Ty<'db>) -> Option<Primitive> {
     match ty.kind(db) {
@@ -484,7 +466,8 @@ pub fn resolve_target_shape<'db>(
     }
 
     // The type that introduced THIS shape — not the first document the file
-    // happens to name; the fixture that holds it is
+    // happens to name, or a program with two documents would resolve its second
+    // mapping against the wrong one; the fixture is
     // `docs/programs/multi-document`.
     let entry = crate::def_map::def_map(db, file).type_of_shape(db, shape_iri.as_str())?;
     resolve_type(db, file, entry)
@@ -583,10 +566,9 @@ pub fn program_shapes(
 ///
 /// [`Rejection::Disjunction`] carries the offending shape IRI; the other
 /// variants are conservatively associated with every shape (they describe
-/// schema-wide problems the consuming mapping should still see). That is the
-/// rule the `ShEx`-typed predecessor applied, kept verbatim — narrowing
-/// [`Rejection::UnresolvedRef`] by its `in_shape` is now possible and is a
-/// separate change with its own test.
+/// schema-wide problems the consuming mapping should still see). Narrowing
+/// [`Rejection::UnresolvedRef`] by its `in_shape` is possible, and would be a
+/// change with its own test.
 fn rejection_targets(rejection: &Rejection, shape_iri: &str) -> bool {
     match rejection {
         Rejection::Disjunction { shape_iri: s, .. } => s == shape_iri,
@@ -618,9 +600,9 @@ mod tests {
         }
     }
 
-    /// A constraint the document did not narrow expects NOTHING — it used to
-    /// expect `Iri`, the narrowest type there is, so a shape that constrains
-    /// nothing rejected a `String`.
+    /// A constraint the document did not narrow expects NOTHING — expecting
+    /// `Iri`, the narrowest type there is, a shape that constrains nothing
+    /// would reject a `String`.
     #[test]
     fn an_un_narrowed_constraint_expects_nothing() {
         let db = new_db();
@@ -632,9 +614,9 @@ mod tests {
     }
 
     /// The two cases that DO expect something: a narrowed literal expects its
-    /// primitive, and an edge expects an IRI, because the only thing a
-    /// reference to another node can be is an IRI. That second case is where
-    /// the old `Iri` default was right, and it is now the only place it fires.
+    /// primitive, and an edge expects a reference to the shapes it names,
+    /// because the only thing a reference to another node can be is an IRI —
+    /// of a node of one of those shapes.
     #[test]
     fn a_narrowed_literal_and_an_edge_each_expect_their_own_type() {
         let db = new_db();
@@ -735,7 +717,7 @@ User : Person from users
 
     /// The registry key is the document path joined onto the PROGRAM's
     /// directory, and a host has to compute the same string or every lookup
-    /// misses. It is [`crate::documents::registry_key`] on both sides now —
+    /// misses. It is [`crate::documents::registry_key`] on both sides —
     /// this is the half that lives where the LOOKUP happens, and
     /// `crate::documents`' own tests cover the two references (a scheme, a
     /// `@conn` alias) a hand-rolled key got wrong. A key that stops matching
@@ -770,19 +752,15 @@ User : Person from users
     /// already been reported at the binding by the time a mapping asks for its
     /// target shape.
     ///
-    /// # This is the measurement the deletion rests on, so it is a test
+    /// # This is the measurement the module's error-free shape rests on
     ///
-    /// It grew from four rows to nine, one per way a program can fail to bring
-    /// a shape in, because the construction sites the four deleted variants had
-    /// are the kind of dead code `grep` reports as live: the `Err(…)` lines
-    /// still existed in the source right up to the commit that removed them,
-    /// and only running a program through this function could say whether
-    /// control reached them. Nine did not. **Add a row here before concluding
-    /// that some tenth way would have.**
+    /// Nine rows, one per way a program can fail to bring a shape in: only
+    /// running a program through this function can say whether control
+    /// reaches a failure here, and none does. **Add a row here before
+    /// concluding that some tenth way would.**
     ///
-    /// `None` exactly, and not `!Some(_)`: the previous spelling was
-    /// hedging against an `Err` this function can no longer produce, and the
-    /// absence of that `Err` is the whole claim.
+    /// `None` exactly, and not `!Some(_)`: this function produces no `Err`,
+    /// and that absence is the whole claim.
     #[test]
     fn a_document_that_cannot_answer_leaves_the_mapping_with_no_shape_clause() {
         let good = src_naming("person.shex");
