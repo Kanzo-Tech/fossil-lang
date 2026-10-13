@@ -45,8 +45,8 @@ advance, and it names every file.
 ```
 
 A reader refuses a `format` other than `fossil/1` before it reads a byte of Parquet, and ignores a
-key it does not know: a field added within `fossil/1` is optional, and changing what a fixed column
-means is `fossil/2`. `packages/corpus/guards/manifest.mjs` is the whole of a reader of it, and it is
+key it does not know; the reader and the writer of a release agree on the rest
+([Versions](/docs/format#versions)). `packages/corpus/guards/manifest.mjs` is the whole of a reader of it, and it is
 `JSON.parse`.
 
 What each table carries:

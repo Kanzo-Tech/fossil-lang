@@ -1,0 +1,158 @@
+---
+title: A run off the page, a corpus from memory
+description: "In a browser, run runs in a worker the executor owns — the host's calls cross back to the page as messages, a failure crosses with its code, title and data, and the signal terminates the worker — with the same signature it has in Node, where it runs in-process; and attach reads the files a run into memory answered, with no host and no URL."
+direction:
+  summary: "A host calls run and attach and nothing else: the executor keeps the page's thread free by itself, and a corpus answered in memory is attached as a corpus at a URL is, so no host carries a worker protocol or a buffer registry of its own."
+---
+
+A run is DataFusion over wasm reading every source and writing every Parquet in one call, and on a
+page's main thread that call holds the thread for as long as it takes: the page cannot paint and its
+Stop cannot be pressed. keasy found this and solved it on its side — `run-worker.ts`, a hundred and
+seventy lines of message protocol, and `run.worker.ts` booting the executor in a worker of its own —
+and then solved the next step on its side too: a preview answered into memory is attached by
+`memory-corpus.ts`, which registers each file with DuckDB-WASM under a prefix and points `attach` at
+the prefix as if it were a URL.
+
+Both are the boundary violation [Three hosts](/docs/design/three-hosts#the-test-for-the-host-boundary)
+names: a host re-deriving what the library knows. Where a run's thread goes is the executor's
+knowledge — it is the executor's module that holds the thread — and what a corpus's files are called
+in an engine is `attach`'s. So both move here, and keasy's copies are deleted.
+
+## `run` runs in a worker, and its signature does not change
+
+```ts
+// the same call in a browser and in Node
+const report = await run(program, { host, into: { job }, signal });
+const { report, files } = await run(program, { host, into: 'memory', limit: 200, profiled, signal });
+```
+
+**In a browser, `run` starts a module worker the executor owns, and the run happens there.**
+`@fossil-lang/executor` ships the worker beside its entry and starts it with
+`new Worker(new URL('./worker.js', import.meta.url), { type: 'module' })`, the form Vite and webpack 5
+recognise and emit as an asset, as they already emit the executor's `.wasm` from the same
+`import.meta.url`. The page compiles the module once — `WebAssembly.compileStreaming`, cached as the
+boot is today — and posts the compiled `WebAssembly.Module` to each worker, which instantiates it
+without fetching or compiling again; a `Module` is structured-cloneable for exactly this.
+
+**In Node, `run` runs in-process, as it does now.** Node has no page to keep painting, and a build
+script or a test is better served by a stack trace than a message port. **Which one is decided by the
+platform, not by an option**: where `globalThis.Worker` is a constructor the run is in a worker, and
+where it is not — Node — it is not. There is no `runInWorker`, no `{ worker: false }` and no second
+entry: one door, as [Three hosts](/docs/design/three-hosts#a-run-where-it-reads-where-it-writes-and-how-much)
+has it, with where it runs a fact of the host. That is DuckDB-WASM's own arrangement: `AsyncDuckDB`
+on the page, the database in a worker it starts, and the page's calls as messages to it.
+
+**One worker per run, terminated when the run ends.** A wasm instance's memory grows and never
+shrinks, and a run's peak is measured in gigabytes
+([Three hosts](/docs/design/three-hosts#what-the-wasm-writer-holds-and-how-it-says-no) — 684 MiB for
+Vermont, 2.7 GiB at the budget's edge). An executor kept on the page, or in a worker kept warm, holds
+that peak for the life of the tab; a worker terminated with its run gives it back. Two runs at once
+are two workers, each under its own 2 GiB pool.
+
+### What crosses, and how
+
+The worker holds the executor; **the page keeps the two things only it has, the `Host` and the
+`signal`**, and each crosses as messages over the worker's port:
+
+| from | message | what it carries |
+| --- | --- | --- |
+| page | `run` | `program`, `into`, `limit`, `profiled`, and for a run over bytes `files` and `path` — `files` copied, so the caller's buffers stay the caller's |
+| worker | `ask` | `connections` or `credentials(scope, access)`, with an id |
+| page | `answer` / `refuse` | the host's answer to that id, or its failure as below |
+| worker | `done` | the `RunReport`, and into memory the `CorpusFile[]`, their buffers **transferred**, each once |
+| worker | `failed` | the run's failure, as below |
+
+**A host call is the host's call, with a signal.** The worker's `Host` answers `connections({ signal })`
+and `credentials(scope, access, { signal })` by asking the page; the page calls the caller's `host` with
+a signal of its own, which it aborts when the run ends however it ends, so a credential request still
+in flight when the worker is terminated is cancelled rather than left to resolve into nothing.
+
+**A failure crosses with its code, its title and its data.** An `Error` loses its class in a
+structured clone, so each side sends the failure as data and the other rebuilds it:
+
+- a `FossilError` crosses as its `Problem` and is rebuilt with `FossilError.from` — code, `data`,
+  `detail`, `related` and causes, the same object the wasm crates build in Rust
+  ([One error](/docs/design/errors));
+- any other failure — a host's refusal, keasy's `ApiError` coded `store/refused` or `store/silent` —
+  crosses as its `name`, `message`, and its own `code`, `title` and `data` when it has them (`data` as
+  JSON), and is rebuilt as an `Error` carrying them as own properties. That matters in the worker:
+  fossil reads a cause's `code` and `data` off whatever a host call rejected with, so a refusal
+  rebuilt from its message alone would leave the run's `document/unread` or `storage/host-silent`
+  with no store code under it.
+
+**The signal terminates the worker.** An abort on the page calls `worker.terminate()`, rejects with
+`signal.reason`, and aborts the host calls still in flight. Termination is immediate — it does not
+wait for DataFusion to reach an `await`, which a CPU-bound sort may not do for seconds — and it frees
+the instance's memory with it. What it leaves is what any stopped run leaves: `fossil.json` is written
+last, so there is no corpus. **The cost:** a worker cannot clean up after itself, so a multipart upload
+the writer had started under a job's prefix is abandoned rather than aborted, and reclaiming its parts
+is the store's lifecycle rule (`AbortIncompleteMultipartUpload` on S3), as it already is for a tab that
+closed mid-run. In Node the signal reaches the run as it does now.
+
+**A worker that cannot start rejects as `module/unreachable`**, the code a module that cannot be
+fetched already has, with the event's message as its detail; a worker that dies — a trap, an
+uncaught error — rejects as `internal/bug` with what the `error` event said.
+
+**What would reverse it:** a host that must run on its main thread where a worker exists — a page
+whose CSP refuses `worker-src`, measured as a host we serve. Then the platform test grows that case;
+it does not become an option every caller passes. And a preview whose worker boot is measured as
+most of its time would keep one worker warm — and pay its memory back by terminating it after the
+largest runs.
+
+## `attach` reads a corpus from memory
+
+```ts
+const { report, files } = await run(program, { host, into: 'memory', limit: 200 });
+await using corpus = await attach('preview', { engine, files });
+```
+
+**`files` is the third place a corpus can be**, beside `host` (a job's, under its credential) and
+`url` (a corpus at a URL), and `attach` takes exactly one of the three. It registers each file with
+the engine under a prefix of this attachment's own — so a second preview under the same name does not
+take the files of the one it replaces, whose detach comes later — reads `fossil.json` from there, and
+makes every view exactly as for a URL. Detaching gives back the catalog and then the files. A failed
+attach drops what it registered, and the attach's failure is the one reported.
+
+**The engine registers bytes.** `Engine` gains `registerFileBuffer(name, bytes)`: it registers a copy
+of `bytes` under `name`, replacing whatever was there — DuckDB-WASM's `registerFileBuffer` transfers
+the buffer to its worker and would detach the caller's, so the copy is the engine's to make, and the
+same `files` can be attached twice. kanzo-ui's engine already has exactly this method, so an engine
+that satisfies the type today still does.
+
+**`CorpusFile` moves to `@fossil-lang/types`**, `{ path, bytes }`, so `@fossil-lang/corpus` reads what
+`@fossil-lang/executor` answers without depending on the executor — the reader stays TypeScript with
+no WASM behind it, as its package says.
+
+**What would reverse it:** an engine that can read the bytes in place, without a registry — then
+`files` is read through it and the prefix goes. The parameter stays.
+
+## What it touches
+
+| Where | What changes |
+| --- | --- |
+| `@fossil-lang/executor` | `run` in a worker where the platform has one, in-process otherwise; `worker.ts` the worker's side, the protocol above in one module both sides import; the compiled module posted once per worker; `initFossilExecutor` compiles on the page; `CorpusFile` re-exported from `@fossil-lang/types` rather than declared |
+| `@fossil-lang/types` | `CorpusFile`; `Engine.registerFileBuffer`; the failure-as-data shape and its rebuild, on `/internal` where the executor and nothing on the barrel needs it |
+| `@fossil-lang/corpus` | `attach(name, { engine, files })`, exactly one of `host`, `url` and `files`, `api/invalid-argument` otherwise |
+| `fossil-df-wasm` | nothing: the worker instantiates the same module |
+| crates | nothing |
+
+## The migration
+
+**fossil, 0.3.0-alpha.32.** Both doors in one release. *Breaking:* an `Engine` must have
+`registerFileBuffer` (kanzo-ui's has); a browser host's CSP must allow the executor's worker
+(`worker-src 'self'`, or wherever the bundle serves its assets).
+
+**keasy.** Delete `run-worker.ts`, `run.worker.ts` and `run-worker.test.ts`: `executor.ts`'s `runInto`
+calls `run` as it does now, and the worker is fossil's. Delete `memory-corpus.ts` and its test: the
+preview attaches with `attach(name, { engine, files })`. What keasy's tests asserted about the
+protocol — a host refusal keeping `store/refused` through the worker, an abort reaching the run — moves
+into fossil's tests of `run`, where the protocol now lives.
+
+## Open questions
+
+1. **The platform test.** `globalThis.Worker` as a constructor decides it, so Deno and Bun, which have
+   one, run in a worker too. Settled the other way by a server-side host on either runtime that wants
+   a stack trace more than a free thread.
+2. **Whether alpha.32 carries all four designs of this batch** — annotations and language tags, the
+   views and the corpus's stats, the worker and `attach` from memory — or ships them as they land.
+   Settled by the user.

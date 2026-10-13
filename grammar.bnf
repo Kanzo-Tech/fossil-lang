@@ -191,7 +191,7 @@ LBRACE, RBRACE := '{' '}'
    appropriate `id`.
 
    Three names are accepted, by three productions, and the position tells
-   them apart: `@iri` and `@annotate` above a type declaration and before each
+   them apart: `@iri` and `@annotation` above a type declaration and before each
    of its fields, `@subject` as the first line of a mapping body. Any other
    name is an error. *)
 AT_ATTR        := '@' IDENT
@@ -341,8 +341,8 @@ Field               := DeclAttrs IDENT SHAPE_SEP TypeExpr NEWLINE
            name: Seq<LangString>
 
            @iri("https://schema.org/birthDate")
-           @annotate("http://www.w3.org/2000/01/rdf-schema#label", "birth date"@en)
-           @annotate("http://www.w3.org/2000/01/rdf-schema#label", "fecha de nacimiento"@es)
+           @annotation("http://www.w3.org/2000/01/rdf-schema#label", "birth date"@en)
+           @annotation("http://www.w3.org/2000/01/rdf-schema#label", "fecha de nacimiento"@es)
            birthDate: Date
 
    The NEWLINE that ends an attribute line is the only new token in a body,
@@ -352,14 +352,14 @@ Field               := DeclAttrs IDENT SHAPE_SEP TypeExpr NEWLINE
    (a blank line touches no indentation and is no NEWLINE), so a body may
    space its fields without a production saying so.
 
-   `@iri` is still exactly one per type and per field, and `@annotate` any
+   `@iri` is still exactly one per type and per field, and `@annotation` any
    number. Both are the checker's to count, as `@iri`'s absence already is:
    the grammar admits attributes, and their arity is a fact of the name.
 
    AHEAD OF THE PARSER: it accepts one `IriAttr` on the field's own line,
-   and no `@annotate` at all. *)
+   and no `@annotation` at all. *)
 DeclAttrs           := DeclAttr+ (NEWLINE DeclAttr+)* NEWLINE?
-DeclAttr            := IriAttr | AnnotateAttr
+DeclAttr            := IriAttr | AnnotationAttr
 IriAttr             := AT_ATTR LPAREN STRING RPAREN
 
 (* An annotation: a predicate and an RDF object, ShEx 2.1's Annotation
@@ -380,8 +380,8 @@ IriAttr             := AT_ATTR LPAREN STRING RPAREN
    are not spelled; `/docs/design/discarded` says what brings each back.
 
    The token's text decides the production, as rule 6 says: `@iri` takes one
-   argument and `@annotate` two. *)
-AnnotateAttr        := AT_ATTR LPAREN STRING COMMA AnnotationObject RPAREN
+   argument and `@annotation` two. *)
+AnnotationAttr      := AT_ATTR LPAREN STRING COMMA AnnotationObject RPAREN
 AnnotationObject    := STRING | LANG_STRING
 
 (* The type of a field, in the names the checker already prints: a primitive
@@ -693,11 +693,11 @@ Interpolation       := INTERP_OPEN Expression RBRACE
 (*       `type`.  One token of lookahead, and the word stays available as  *)
 (*       a column name.                                                    *)
 (*                                                                         *)
-(*  6. `@iri` and `@annotate` vs `@subject`                              *)
+(*  6. `@iri` and `@annotation` vs `@subject`                              *)
 (*     - All three lex as AT_ATTR; position decides. At top level, above a *)
 (*       `type IDENT`, and at the start of a line inside a declaration's   *)
 (*       body → DeclAttr, and the token's text picks IriAttr or            *)
-(*       AnnotateAttr. As the first line inside a mapping body →           *)
+(*       AnnotationAttr. As the first line inside a mapping body →         *)
 (*       SubjectAssign. No name is valid in another's position, and no     *)
 (*       fourth name is valid anywhere.                                    *)
 (*     - Inside a declaration's body, a line that starts with AT_ATTR is   *)

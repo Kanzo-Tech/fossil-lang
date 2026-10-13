@@ -16,7 +16,7 @@ second file.
 So a type can be declared in the program, and an imported one is named by its name. The grammar is
 [`grammar.bnf`](/docs/book/grammar), `TypeDecl`; this page is why it is shaped as it is. All of it is
 built except the conversions onto rudof's types, which is what the `direction` above declares, and
-the stacked attributes, `@annotate` and `LangString`, which
+the stacked attributes, `@annotation` and `LangString`, which
 [Annotations and language-tagged strings](/docs/design/labels) argues and declares.
 
 ```
@@ -139,13 +139,13 @@ type Laureate
     name: Seq<LangString>
 
     @iri("https://schema.org/birthDate")
-    @annotate("http://www.w3.org/2000/01/rdf-schema#label", "birth date"@en)
-    @annotate("http://www.w3.org/2000/01/rdf-schema#label", "fecha de nacimiento"@es)
+    @annotation("http://www.w3.org/2000/01/rdf-schema#label", "birth date"@en)
+    @annotation("http://www.w3.org/2000/01/rdf-schema#label", "fecha de nacimiento"@es)
     birthDate: Date
 ```
 
 The body is still indented and still one field per entry; only the attribute's line moved. The second
-attribute is `@annotate`, a ShEx annotation — a predicate and an RDF object — and the reason a field
+attribute is `@annotation`, a ShEx annotation — a predicate and an RDF object — and the reason a field
 would carry several; [Annotations and language-tagged strings](/docs/design/labels) is the argument for
 it, for `"…"@en` and for `LangString`. The grammar is `grammar.bnf, DeclAttrs`.
 

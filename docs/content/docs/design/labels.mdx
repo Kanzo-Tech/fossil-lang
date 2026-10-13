@@ -15,7 +15,7 @@ Both are solved problems in RDF, and this page takes the solutions as they are. 
 annotation, a predicate and an RDF object** — `// rdfs:label "birth date"@en` in ShExC. **A string in
 a language is an `rdf:langString`**, a lexical form and a BCP 47 tag. Nothing here is built; the
 grammar is written, ahead of the parser as [the grammar](/docs/book/grammar) always is —
-`grammar.bnf, DeclAttrs`, `grammar.bnf, AnnotateAttr` and `grammar.bnf, LANG_STRING` — and this
+`grammar.bnf, DeclAttrs`, `grammar.bnf, AnnotationAttr` and `grammar.bnf, LANG_STRING` — and this
 page is why it is shaped as it is and what it costs.
 
 ## What an annotation is
@@ -53,22 +53,24 @@ qualifier, and it is still an annotation.
 
 ```
 @iri("https://schema.org/Person")
-@annotate("http://www.w3.org/2000/01/rdf-schema#label", "Nobel laureate"@en)
+@annotation("http://www.w3.org/2000/01/rdf-schema#label", "Nobel laureate"@en)
 type Laureate
     @iri("https://schema.org/name")
     name: Seq<LangString>
 
     @iri("https://schema.org/birthDate")
-    @annotate("http://www.w3.org/2000/01/rdf-schema#label", "birth date"@en)
-    @annotate("http://www.w3.org/2000/01/rdf-schema#label", "fecha de nacimiento"@es)
+    @annotation("http://www.w3.org/2000/01/rdf-schema#label", "birth date"@en)
+    @annotation("http://www.w3.org/2000/01/rdf-schema#label", "fecha de nacimiento"@es)
     birthDate: Date
 ```
 
-**`@annotate(predicate, object)`** is ShExC's `// predicate object` in this language's attribute
+**`@annotation(predicate, object)`** is ShExC's `// predicate object` in this language's attribute
 form: the attribute namespace is where a declaration's metadata already lives (`@iri`), and the
 argument pair is ShExJ's `{ predicate, object }` in order. It goes where `@iri` goes — above a type,
-before a field — and any number of times; `@iri` stays exactly one. The name is the user's and is
-[open below](#open-questions).
+before a field — and any number of times; `@iri` stays exactly one. **The name is `@annotation`**,
+ShEx's own noun for the thing (§5.9), beside the two nouns the language already has, `@iri` and
+`@subject`; a verb, `@annotate`, would be the one attribute named for what the writer does rather than
+for what the declaration carries.
 
 **Attributes stack.** A field with one attribute keeps it on its own line (`@iri(…) name: String`, as
 [Types declared in the program](/docs/design/declared) shows); a field with several writes them on the
@@ -83,10 +85,11 @@ writes is whole for the reason the declared-types page gives: a name nobody wrot
 `"rdfs:label"` would not even fail on its own — it is a well-formed absolute IRI whose scheme is
 `rdfs` — so the checker refuses a predicate whose scheme is a prefix of the W3C's
 [RDFa Core Initial Context](https://www.w3.org/2011/rdfa-context/rdfa-1.1), naming the IRI it
-abbreviates, and the same check holds `@iri`. Expanding through that context instead is the user's
-shorter spelling and the first [open question](#open-questions); the evidence against expanding is
-that the context maps `schema:` to `http://schema.org/` while every program here writes
-`https://schema.org/`, so the expansion would mint a different IRI from the one the program means.
+abbreviates, and the same check holds `@iri`. **There are no prefixes**, and that is decided:
+expanding through that context would be a rule about strings that look like something else, and the
+context maps `schema:` to `http://schema.org/` while every program here writes `https://schema.org/`,
+so the expansion would mint a different IRI from the one the program means
+([discarded](/docs/design/discarded)).
 
 **The object is a literal.** A plain string is `xsd:string`, and `"…"@en` is a language-tagged one,
 the `LANG_STRING` token: Turtle's, SPARQL's (production [145] `LANGTAG`) and ShExC's spelling, with the
@@ -117,20 +120,31 @@ on a property shape, `sh:name` and `sh:description`, SHACL's own two; on any sha
 predicate is outside SHACL's namespace and is not `rdf:type` — `rdfs:label`, `rdfs:comment`,
 `skos:prefLabel` — because §2.3.2 says a processor ignores them and ShEx admits any predicate.
 
-**`sh:name` stays `sh:name`.** It is not normalised to `rdfs:label`, and the reason is the debate that
-created it. The Shapes WG's
+**`sh:name` is read as `rdfs:label`.** A field's label has one predicate in the corpus whichever
+document it came from: a ShEx shape writes `// rdfs:label "…"`, a program writes
+`@annotation("…rdf-schema#label", …)`, and a SHACL property shape's `sh:name` becomes the same
+annotation, its object — language tag and all — unchanged. So a reader asks for one predicate and
+never carries a preference list between two words for one thing, and the three sources of a label
+meet in the decoder, once, rather than in every reader. On a property shape that writes both, both are
+kept, `sh:name`'s first: SHACL §2.3.2.1 says a tool SHOULD prefer the locally specified label, and
+first is the one a reader that takes one per language takes. `sh:description` is carried as itself
+until the [open question](#open-questions) on it is settled.
+
+The cost is the distinction the Shapes WG drew. Its
 [ISSUE-112](https://www.w3.org/2014/data-shapes/track/issues/112), raised 2015-11-05, was that SHACL's
 draft let a property constraint carry an `rdfs:label` «to provide a human-readable label for the
 property in the scope where it appears», while RDFS says `R rdfs:label L` «states that L is a human
-readable label for R» — for the *shape*, not the property in a context. The group closed it by inventing
-`sh:name` and `sh:description`. Rewriting `sh:name` to `rdfs:label` would undo exactly that resolution,
-and lose the one distinction it made: a local name in a context, against a label of the resource. So
-the corpus carries the predicate the document wrote, as it carries a shape's `datatype` verbatim, and
-the preference between `sh:name` and `rdfs:label` is the reader's — SHACL's own SHOULD says which way.
+readable label for R» — for the *shape*, not the property in a context — and the group closed it by
+inventing `sh:name`. Inside a corpus that distinction has nothing to hold on to: an annotation there is
+already scoped to the column it sits on, never stated about the predicate IRI (it makes no triple, as
+below), so `rdfs:label` on a column *is* the local name ISSUE-112 wanted, and the shape it would have
+labelled is not in the corpus at all. The counter-argument is recorded with what brings it back on
+[what was discarded](/docs/design/discarded).
 
-**What would reverse it:** a second reader that has to re-implement the same preference list. Then the
-list is a convention of [the corpus format](/docs/format), stated once, and still not a rewrite of what
-the document said.
+**What would reverse it:** a consumer that reads the corpus's annotations back *as a shapes graph* —
+a SHACL engine, or [the ShEx round trip](#back-out-as-shex) carried to SHACL — where the annotation is
+again about a shape and `rdfs:label` again means the shape's label. Then the predicate is kept as the
+document wrote it, and the normalisation moves into the reader that wants one word.
 
 ## In the corpus
 
@@ -148,14 +162,13 @@ Annotation, verbatim:
 
 `object` is ShExJ's `objectValue`: an IRI is a bare string, a literal is `ObjectLiteral`,
 `{ value, language?, type? }`, where `type` is the datatype IRI — ShExJ's word, which is not the
-column's `type` beside it, and is the second [open question](#open-questions). A program's annotations
+column's `type` beside it, and is the first [open question](#open-questions). A program's annotations
 only ever produce the two literal forms; a document's may carry the others, and they pass through.
 
-**It is additive within `fossil/1`.** The field is optional, absent when there is nothing to say, and a
-reader that ignores it reads the same graph: it loses names, never meaning. That is the rule
-[the format](/docs/format) already states, and Delta Lake's protocol states it the same way — «clients
-can assume that unrecognized actions, fields, and/or metadata domains are never required in order to
-correctly interpret the transaction log».
+**It is `fossil/1`, changed in place.** The field is optional and absent when there is nothing to say,
+and the reader that reads it ships in the same release as the writer that writes it — the rule
+[the corpus](/docs/design/corpus#one-format-changed-in-place) now states for every change to the
+format, this one and the language column below alike.
 
 **Annotations are not triples.** `triples` is the corpus's data as RDF; an annotation is about the
 schema. Writing `schema:birthDate rdfs:label "fecha de nacimiento"@es` would state a *global* label of
@@ -174,7 +187,7 @@ the data's.
 Fossil writes no ShEx today. When a declared type is converted onto rudof's types — the
 [declared-types direction](/docs/design/declared) — an annotation is `shex_ast`'s `Annotation`, and
 `shex_ast`'s compact printer already prints one as `//` after its triple constraint or its shape
-(`ShExCompactPrinter::pp_annotation`). The round trip is then `@annotate` → `fossil.json`'s ShExJ →
+(`ShExCompactPrinter::pp_annotation`). The round trip is then `@annotation` → `fossil.json`'s ShExJ →
 `// predicate object`, with no field renamed on the way; that ShExJ is what the corpus stores is the
 reason it is stored verbatim.
 
@@ -246,15 +259,15 @@ the compiler naming something nobody wrote. And one value per language is the or
 exception — SHACL §2.3.2.1 says `sh:name` «should only have one value per language tag» — so a
 language-tagged property is multi-valued in practice even when each language has one.
 
-**It is not additive within `fossil/1`.** A `fossil/1` reader that does not know `lang` reads the value
-column, sees `datatype` `rdf:langString` and writes a literal with no tag — which RDF 1.1 Concepts §3.3
-forbids («if and only if the datatype IRI is `rdf:langString`, a non-empty language tag»). A field a
-reader cannot ignore is a version, by fossil's rule and by Delta Lake's («the protocol version will be
-increased whenever non-forward-compatible changes are made»). So the decision is the one Delta's table
-features make: **a corpus that has a `LangString` property is `fossil/2`**, and one that has none is
-`fossil/1`, byte for byte as before. A `fossil/1` reader refuses the first before reading Parquet,
-which is what the `format` field is for. The format page carries this as a design question until the
-user rules ([open below](#open-questions)).
+**It is `fossil/1`, and the reader changes with the writer.** A reader that did not know `lang`
+would read the value column, see `datatype` `rdf:langString` and write a literal with no tag — which
+RDF 1.1 Concepts §3.3 forbids («if and only if the datatype IRI is `rdf:langString`, a non-empty
+language tag»). That is not answered by a second format string and a reader that branches on it. It is
+answered by the reader that knows `lang` — `@fossil-lang/corpus`'s `triples` and the guards — shipping
+in the same release as the writer that writes it, which is the only way a corpus reaches a reader
+today; [the corpus](/docs/design/corpus#one-format-changed-in-place) argues the rule and says what
+would bring a second version back. A corpus with no `LangString` property is byte for byte what it
+was.
 
 ### The RDF view
 
@@ -290,19 +303,19 @@ answer, never in `fossil.json`.
 
 ```
 @iri("https://schema.org/Person")
-@annotate("http://www.w3.org/2000/01/rdf-schema#label", "Nobel laureate"@en)
-@annotate("http://www.w3.org/2000/01/rdf-schema#label", "galardonado con el Nobel"@es)
+@annotation("http://www.w3.org/2000/01/rdf-schema#label", "Nobel laureate"@en)
+@annotation("http://www.w3.org/2000/01/rdf-schema#label", "galardonado con el Nobel"@es)
 type Laureate
     @iri("https://schema.org/name")
     name: Seq<LangString>
 
     @iri("https://schema.org/birthDate")
-    @annotate("http://www.w3.org/2000/01/rdf-schema#label", "birth date"@en)
-    @annotate("http://www.w3.org/2000/01/rdf-schema#label", "fecha de nacimiento"@es)
+    @annotation("http://www.w3.org/2000/01/rdf-schema#label", "birth date"@en)
+    @annotation("http://www.w3.org/2000/01/rdf-schema#label", "fecha de nacimiento"@es)
     birthDate: Date
 
     @iri("https://nobel.example/vocab/awarded")
-    @annotate("http://www.w3.org/2000/01/rdf-schema#label", "awarded"@en)
+    @annotation("http://www.w3.org/2000/01/rdf-schema#label", "awarded"@en)
     awarded: Seq<Ref<Prize>>
 
 @iri("https://nobel.example/vocab/Prize")
@@ -334,7 +347,7 @@ Prizes : Prize from PrizeRow
 
 ```jsonc
 {
-  "format": "fossil/2",
+  "format": "fossil/1",
   "vertex_tables": [{
     "name": "Laureate",
     "iri": "https://schema.org/Person",
@@ -390,16 +403,16 @@ Prizes : Prize from PrizeRow
 and no triple for an annotation.
 
 **What Ask shows.** A reader asks the catalog for the header of `birthDate` in the person's language
-and falls back to the field's name — the choice, and the preference of `sh:name` over `rdfs:label`, are
-the reader's:
+and falls back to the field's name. There is one predicate to ask for, whether the label came from the
+program, a ShEx annotation or a SHACL `sh:name`:
 
 ```sql
 SELECT coalesce(
   (SELECT o_value FROM "nobel".fossil_annotations
     WHERE table_name = 'Laureate' AND column_name = 'birthDate'
-      AND predicate IN ('http://www.w3.org/ns/shacl#name', 'http://www.w3.org/2000/01/rdf-schema#label')
+      AND predicate = 'http://www.w3.org/2000/01/rdf-schema#label'
       AND lower(o_lang) = 'es'
-    ORDER BY predicate = 'http://www.w3.org/ns/shacl#name' DESC LIMIT 1),
+    LIMIT 1),
   'birthDate')
 ```
 
@@ -411,30 +424,37 @@ under `en`, from `property/Laureate_name.parquet` filtered on `lang`.
 
 | Where | What changes |
 | --- | --- |
-| `fossil-syntax` | `LANG_STRING` in the lexer, the `@` read as the literal's suffix when it touches the quote; `DeclAttrs` — several attributes, stacked or inline — and `@annotate` in the parser; a CST node for each |
+| `fossil-syntax` | `LANG_STRING` in the lexer, the `@` read as the literal's suffix when it touches the quote; `DeclAttrs` — several attributes, stacked or inline — and `@annotation` in the parser; a CST node for each |
 | `fossil-graph-schema` | `Primitive::LangString` and `rdf:langString` in its XSD table both ways; `annotations` on `Shape` and `PropertyConstraint`, and `languages` on `PropertyConstraint`; the wire types `@fossil-lang/types` generates from them |
-| `fossil-hir` | `shex.rs` carries a shape's and a triple constraint's annotations, `rdf:langString` and language value sets; `shacl.rs` carries `sh:name`, `sh:description` and the non-SHACL predicates, `sh:datatype rdf:langString` and `sh:languageIn`; `declared.rs` lowers `@annotate`; the checker types `LangString`, checks a constant tag with `oxilangtag` (a direct dependency then, through `cargo deny` and the wasm gate), refuses a CURIE predicate and `"x".lang("en")`; `fossil-ide` shows a field's annotations on hover |
+| `fossil-hir` | `shex.rs` carries a shape's and a triple constraint's annotations, `rdf:langString` and language value sets; `shacl.rs` reads `sh:name` as an `rdfs:label` annotation, carries `sh:description` and the non-SHACL predicates, `sh:datatype rdf:langString` and `sh:languageIn`; `declared.rs` lowers `@annotation`; the checker types `LangString`, checks a constant tag with `oxilangtag` (a direct dependency then, through `cargo deny` and the wasm gate), refuses a CURIE predicate and `"x".lang("en")`; `fossil-ide` shows a field's annotations on hover |
 | `catalogue.bnf` | one row, `str.lang`, lowered to a two-field struct the writer splits; `LangString` in the type table both profiling hosts read |
 | `fossil-mir` | a `LangString` property lowers to a property table whatever its cardinality; the value is the struct, projected into two columns |
-| `fossil-df` | the writer's third property column and its per-row tag check; `annotations` on `VertexTable`, `EdgeTable` and `Property` in `manifest.rs`; `Format` writing `fossil/2` when a `LangString` property exists; `fossil.schema.json` and `corpus.bnf`'s `language` role regenerated |
-| `@fossil-lang/corpus` | accepts `fossil/2`; `fossil_annotations`; `triples` fills `o_lang` and `rdf:langString`; the guards learn the `language` role and `rdf:langString` in `declared-term` |
+| `fossil-df` | the writer's third property column and its per-row tag check; `annotations` on `VertexTable`, `EdgeTable` and `Property` in `manifest.rs`; `fossil.schema.json` and `corpus.bnf`'s `language` role regenerated |
+| `@fossil-lang/corpus` | `fossil_annotations`; `triples` fills `o_lang` and `rdf:langString`; the guards learn the `language` role and `rdf:langString` in `declared-term` — all in the release whose writer writes them, and `FOSSIL_FORMAT` stays `fossil/1` |
 | `codemirror-fossil` | a highlight for the new token, through the legend the wasm ships |
 | kanzo-ui | Ask and `@kanzo-tech/graph` read `fossil_annotations` and filter `lang` |
+
+## The migration
+
+**fossil, 0.3.0-alpha.32.** Everything in the table above, in one release: the grammar, the checker,
+the decoders, the writer's `annotations` and language column, and the reader and guards that read
+them. `fossil/1` is still the format string, and a corpus with no annotation and no `LangString`
+property is unchanged.
+
+**keasy.** Nothing breaks: no program it holds writes `@annotation`, and a corpus it attaches with
+no annotations has an empty `fossil_annotations`. What it gains is a column header in the person's
+language — Ask's and the graph's — from `fossil_annotations`, once kanzo-ui reads it, and a
+multilingual name filtered on `lang`. A program that used `core.lang` already failed to check, since
+the row went with [the review of the catalogue](/docs/design/declared).
 
 ## Open questions
 
 These are the user's to settle, and each names what settles it.
 
-1. **The predicate's spelling.** Whole IRIs, as decided above, or a CURIE expanded through the RDFa
-   Core Initial Context, as the user's own example wrote (`"rdfs:label"`). Settled by the user's
-   ruling; the cost of the second is the `schema:` → `http://schema.org/` mismatch and a context
-   Fossil would then pin, and the cost of the first is line length.
-2. **`type` or `datatype` in the stored object.** ShExJ says `type`; the manifest says `datatype` for a
+1. **`type` or `datatype` in the stored object.** ShExJ says `type`; the manifest says `datatype` for a
    column's datatype IRI. Verbatim ShExJ is decided above because a ShExJ reader then reads it
    unchanged; settled the other way by a reader of `fossil.json` that confuses the two.
-3. **The attribute's name.** `@annotate`, the user's verb, beside two nouns (`@iri`, `@subject`);
-   `@annotation` is ShEx's noun. Settled by the user.
-4. **`fossil/2` when used, or `fossil/1` with the tag dropped for old readers** — writing the value
-   column with no `datatype`, so a `fossil/1` reader writes `xsd:string` and a new one reads `lang`.
-   The second keeps one version and breaks «the term is the shape's, verbatim». Settled by whether a
-   `fossil/1` reader that must keep working exists.
+2. **`sh:description` as `rdfs:comment`.** The same argument that reads `sh:name` as `rdfs:label`
+   reads SHACL's other non-validating property, ISSUE-112's twin, as `rdfs:comment` — one predicate
+   for a description whichever document wrote it. It is not decided because it was not asked: settled
+   by the user's ruling on the pair.
