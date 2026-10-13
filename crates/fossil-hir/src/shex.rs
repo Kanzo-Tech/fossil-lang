@@ -66,7 +66,8 @@ pub mod spans;
 use std::collections::HashMap;
 
 use fossil_graph_schema::{
-    GraphSchema, Occurs, OutputShapes, PropertyConstraint, Rejection, Shape as OutputShape, Term,
+    Annotation, AnnotationObject, GraphSchema, ObjectLiteral, Occurs, OutputShapes,
+    PropertyConstraint, RDF_LANG_STRING, Rejection, Shape as OutputShape, Term,
 };
 use prefixmap::{IriRef, PrefixMap};
 use rudof_iri::IriS;
@@ -93,6 +94,8 @@ pub struct ShapeBinding {
     /// `OneOf` nodes are NOT included here (their rejection is logged in
     /// [`ShExDescriptor::lowering_errors`]).
     pub constraints: Vec<ResolvedConstraint>,
+    /// The shape's own annotations, `// predicate object` after its `}`.
+    pub annotations: Vec<Annotation>,
 }
 
 /// One predicate-cardinality pair from a resolved [`ShapeBinding`].
@@ -108,6 +111,11 @@ pub struct ResolvedConstraint {
     /// How many values the predicate may carry, decoded from `ShEx`'s
     /// `(min, max)` integer encoding by [`occurs_from_shex`].
     pub cardinality: Occurs,
+    /// The triple constraint's annotations.
+    pub annotations: Vec<Annotation>,
+    /// A language value set's ranges — `[@en @es~]` — as
+    /// [`PropertyConstraint::languages`] holds them.
+    pub languages: Vec<String>,
 }
 
 /// Decode `ShEx`'s `(min, max)` `Option<i32>` encoding into [`Occurs`].
@@ -188,6 +196,9 @@ fn term_of(
     let Some(ShapeExpr::NodeConstraint(nc)) = value_expr else {
         return Ok(None);
     };
+    if language_set(value_expr).is_some() {
+        return Ok(Some(Term::Literal(Some(RDF_LANG_STRING.to_string()))));
+    }
     Ok(match (nc.datatype(), nc.node_kind()) {
         (Some(dt), _) => Some(Term::Literal(Some(
             resolve_iri_ref(&dt, prefixmap)?.to_string(),
@@ -196,6 +207,70 @@ fn term_of(
         (None, Some(NodeKind::Literal)) => Some(Term::Literal(None)),
         _ => None,
     })
+}
+
+/// A value set made only of languages — `[@en @es]`, `[@en~]`, `[@~]` — as the
+/// basic language ranges it admits: a language-tagged string, whatever its
+/// tag's case (RFC 4647 basic filtering, which ShEx's stems and SHACL's
+/// `sh:languageIn` share). `None` for any other value expression.
+fn language_set(value_expr: Option<&ShapeExpr>) -> Option<Vec<String>> {
+    use shex_ast::{LangOrWildcard, ValueSetValue};
+    let Some(ShapeExpr::NodeConstraint(nc)) = value_expr else {
+        return None;
+    };
+    let values = nc.values().filter(|v| !v.is_empty())?;
+    let stem = |stem: &LangOrWildcard| match stem {
+        LangOrWildcard::Lang(lang) => lang.as_str().to_string(),
+        LangOrWildcard::Wildcard => "*".to_string(),
+    };
+    values
+        .iter()
+        .map(|v| match v {
+            ValueSetValue::Language { language_tag } => Some(language_tag.as_str().to_string()),
+            ValueSetValue::LanguageStem { stem: s }
+            | ValueSetValue::LanguageStemRange { stem: s, .. } => Some(stem(s)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A `ShEx` annotation as the vocabulary carries it: the predicate resolved
+/// through the document's prefixes, an IRI object likewise, and a literal
+/// with its tag or its datatype. One that does not resolve is left out — the
+/// document's own prefixes are the only ones it could expand through.
+fn annotations_of(
+    annotations: Option<&Vec<shex_ast::Annotation>>,
+    prefixmap: &PrefixMap,
+) -> Vec<Annotation> {
+    use shex_ast::ObjectValue;
+    annotations
+        .into_iter()
+        .flatten()
+        .filter_map(|a| {
+            let predicate = resolve_iri_ref(&a.predicate(), prefixmap).ok()?.to_string();
+            let object = match a.object() {
+                ObjectValue::IriRef(iri) => {
+                    AnnotationObject::Iri(resolve_iri_ref(&iri, prefixmap).ok()?.to_string())
+                }
+                ObjectValue::Literal(lit) => {
+                    let language = lit.lang().map(|l| l.as_str().to_string());
+                    let datatype = if language.is_some() {
+                        None
+                    } else {
+                        let dt = resolve_iri_ref(&lit.datatype(), prefixmap).ok()?.to_string();
+                        // A plain string is `xsd:string`, and says nothing more.
+                        (dt != "http://www.w3.org/2001/XMLSchema#string").then_some(dt)
+                    };
+                    AnnotationObject::Literal(ObjectLiteral {
+                        value: lit.lexical_form(),
+                        language,
+                        datatype,
+                    })
+                }
+            };
+            Some(Annotation { predicate, object })
+        })
+        .collect()
 }
 
 /// The predicate IRIs a single `OneOf` branch constrains, in order.
@@ -403,11 +478,14 @@ impl ShExDescriptor {
                                 &prefixmap.qualify(&c.predicate),
                             )
                         }),
+                        annotations: c.annotations.clone(),
+                        languages: c.languages.clone(),
                     })
                     .collect(),
                 span: self.source.as_deref().and_then(|src| {
                     crate::shex::spans::shape_span(src, &prefixmap.qualify(&binding.iri))
                 }),
+                annotations: binding.annotations.clone(),
             })
             .collect();
         let rejections = self
@@ -557,6 +635,7 @@ fn lower_shape_decl(
     Some(ShapeBinding {
         iri: shape_iri,
         constraints,
+        annotations: annotations_of(shape.annotations.as_ref(), prefixmap),
     })
 }
 
@@ -621,6 +700,7 @@ fn walk_triple_expr(
             value_expr,
             min,
             max,
+            annotations,
             ..
         } => {
             let pred_iri = match resolve_iri_ref(predicate, prefixmap) {
@@ -644,6 +724,8 @@ fn walk_triple_expr(
                 term,
                 targets,
                 cardinality: occurs_from_shex(*min, *max),
+                annotations: annotations_of(annotations.as_ref(), prefixmap),
+                languages: language_set(value).unwrap_or_default(),
             });
         }
         TripleExpr::EachOf { expressions, .. } => {
@@ -832,6 +914,42 @@ shop:Order {
             property.span.and_then(|s| s.slice(SRC)),
             Some("shop:total"),
             "the range is the predicate as the document spells it"
+        );
+    }
+
+    /// A shape's and a triple constraint's annotations are carried, resolved
+    /// through the document's prefixes; a language value set is a
+    /// `LangString` whose ranges are the set.
+    #[test]
+    fn annotations_and_a_language_set_are_carried() {
+        use fossil_graph_schema::{Annotation, RDFS_LABEL};
+        const SRC: &str = r#"PREFIX ex: <https://ex.org/>
+PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+ex:Person {
+  ex:name [@en @es~] + // rdfs:label "name"@en ;
+  ex:born xsd:date // rdfs:label "fecha de nacimiento"@es
+} // rdfs:label "person"
+"#;
+        let shapes = ShExDescriptor::from_shex_source(SRC)
+            .expect("the document parses")
+            .to_output_shapes();
+        let person = shapes.shapes().next().expect("one shape");
+        assert_eq!(
+            person.annotations,
+            [Annotation::literal(RDFS_LABEL, "person", None)]
+        );
+        let name = &person.properties[0];
+        assert_eq!(name.datatype(), Some(Primitive::LangString));
+        assert_eq!(name.languages, ["en", "es"]);
+        assert_eq!(
+            name.annotations,
+            [Annotation::literal(RDFS_LABEL, "name", Some("en"))]
+        );
+        assert_eq!(
+            person.properties[1].annotations,
+            [Annotation::literal(RDFS_LABEL, "fecha de nacimiento", Some("es"))]
         );
     }
 
@@ -1581,6 +1699,8 @@ shop:Order {
             iri: Some(iri.into()),
             term: term(name),
             cardinality,
+            annotations: Vec::new(),
+            languages: Vec::new(),
         };
         let edge = |label: &str, iri: &str, destination: &str, cardinality| EdgeType {
             label: label.into(),
@@ -1588,6 +1708,7 @@ shop:Order {
             source: "Order".into(),
             destination: destination.into(),
             cardinality,
+            annotations: Vec::new(),
         };
 
         assert_eq!(
@@ -1634,11 +1755,13 @@ shop:Order {
                             Cardinality::Multi
                         ),
                     ],
+                    annotations: Vec::new(),
                 },
                 NodeType {
                     label: "Person".into(),
                     iri: Some("http://example.org/Person".into()),
                     properties: vec![],
+                    annotations: Vec::new(),
                 },
             ]
         );

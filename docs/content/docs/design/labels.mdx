@@ -286,7 +286,7 @@ case-insensitive and RDF 1.1 lets a syntax lower-case them, so a reader compares
 
 | What | Where | Code (proposed) |
 | --- | --- | --- |
-| A constant tag that is not well-formed BCP 47 (RFC 5646 §2.2.9) — `"x"@english-language` | checker, with `oxilangtag`, already in the lock through `oxrdf` | `syntax/invalid-language-tag` |
+| A constant tag that is not well-formed BCP 47 (RFC 5646 §2.2.9) — `"x"@abcdefghi`, a nine-letter language | checker, with `oxilangtag`, already in the lock through `oxrdf` | `syntax/invalid-language-tag` |
 | A constant tag outside the shape's `sh:languageIn` or ShEx language set | checker | `type/language-not-allowed` |
 | A `LangString` field assigned a `String`, or `str.lang` given a non-string | checker | [`type/property-mismatch`](/docs/errors/type/property-mismatch), `type/argument-mismatch` |
 | `"x".lang("en")` | checker | `type/needless-lang` |

@@ -120,33 +120,34 @@ pub(crate) fn parse_program(p: &mut Parser) {
         }
         match p.current() {
             None => break,
-            // `@iri("…")` above a `type` declaration. LL(1) survives it because
-            // `AT_ATTR` has exactly ONE derivation here: `SubjectAssign` and a
-            // field's `IriAttr` live inside a body, which is reached only
-            // through `INDENT` (disambiguation rule 6). Any other name, and an
-            // `@iri` above an import, is consumed whole and refused, so the
-            // item under it still parses as what it is.
-            Some(SyntaxKind::AT_ATTR) if p.current_text() != Some(crate::attr::IRI) => {
+            // `@iri("…")` and `@annotation(…)` above a `type` declaration.
+            // LL(1) survives them because `AT_ATTR` has exactly ONE derivation
+            // here: `SubjectAssign` and a field's attributes live inside a
+            // body, which is reached only through `INDENT` (disambiguation
+            // rule 6). Any other name, and an attribute above an import, is
+            // consumed whole and refused, so the item under it still parses as
+            // what it is.
+            Some(SyntaxKind::AT_ATTR) if !is_decl_attr(p.current_text()) => {
                 let found = p.current_text().unwrap_or("@").to_string();
                 parse_misplaced_attr(
                     p,
                     found,
                     "at the top level",
-                    "the attribute at the top level is `@iri(\"…\")`, above a `type` \
-                     declaration. `@subject = <expr>` is the first line of a MAPPING BODY — it \
-                     assigns the identity of the rows a mapping writes, and outside one there are \
-                     no rows.",
+                    "the attributes at the top level are `@iri(\"…\")` and `@annotation(…)`, \
+                     above a `type` declaration. `@subject = <expr>` is the first line of a \
+                     MAPPING BODY — it assigns the identity of the rows a mapping writes, and \
+                     outside one there are no rows.",
                 );
             }
-            Some(SyntaxKind::AT_ATTR)
-                if p.peek_text(4) == Some("type") && p.peek_kind(5) == Some(SyntaxKind::LBRACE) =>
-            {
+            Some(SyntaxKind::AT_ATTR) if above_an_import(p) => {
+                let found = p.current_text().unwrap_or("@").to_string();
                 parse_misplaced_attr(
                     p,
-                    crate::attr::IRI.to_string(),
+                    found,
                     "above a `type` import",
-                    "an imported type takes its IRI from the document that declares it. `@iri` \
-                     names the IRI of a type DECLARED under it, `type <Name>` and its fields.",
+                    "an imported type takes its IRI and its annotations from the document that \
+                     declares it. `@iri` and `@annotation` belong to a type DECLARED under them, \
+                     `type <Name>` and its fields.",
                 );
             }
             Some(SyntaxKind::AT_ATTR) => parse_type_decl(p),
@@ -294,9 +295,10 @@ fn parse_import_member(p: &mut Parser) {
 }
 
 // ───────────────────────────────────────────────────────────────────────
-// TypeDecl := IriAttr 'type' IDENT NEWLINE INDENT Field+ DEDENT
+// TypeDecl := DeclAttrs 'type' IDENT NEWLINE INDENT Field+ DEDENT
 //
 //   @iri("https://schema.org/Person")
+//   @annotation("http://www.w3.org/2000/01/rdf-schema#label", "person"@en)
 //   type Person
 //       @iri("https://schema.org/name")  name: String
 //
@@ -308,16 +310,16 @@ fn parse_import_member(p: &mut Parser) {
 // ───────────────────────────────────────────────────────────────────────
 fn parse_type_decl(p: &mut Parser) {
     p.start(SyntaxKind::TYPE_DECL);
-    if p.current() == Some(SyntaxKind::AT_ATTR) {
-        parse_iri_attr(p);
-    } else {
-        let name = p.peek_text(1).unwrap_or("type").to_string();
-        missing_iri(p, name);
-    }
+    let attrs = parse_decl_attrs(p, "above a `type` declaration");
     p.skip_trivia();
+    let is_type = p.current() == Some(SyntaxKind::IDENT) && p.current_text() == Some("type");
+    if is_type {
+        let name = p.peek_text(1).unwrap_or("type").to_string();
+        attrs.check(p, name);
+    }
     // The contextual `type`, checked by TEXT: it is an ordinary identifier, and
     // that is what keeps it usable as a column name.
-    if p.current() == Some(SyntaxKind::IDENT) && p.current_text() == Some("type") {
+    if is_type {
         p.bump();
     } else {
         malformed(
@@ -355,6 +357,109 @@ fn parse_type_decl(p: &mut Parser) {
     p.finish();
 }
 
+/// Is `text` the name of an attribute a declaration takes — `@iri` or
+/// `@annotation`?
+fn is_decl_attr(text: Option<&str>) -> bool {
+    matches!(text, Some(crate::attr::IRI | crate::attr::ANNOTATION))
+}
+
+/// Do the attributes starting here stand above a `type { … }` import? Skips
+/// each `AT_ATTR` and its parenthesised arguments, then looks at what follows:
+/// one token of lookahead past the attributes, as rule 6 has it.
+fn above_an_import(p: &Parser) -> bool {
+    let mut i = 0;
+    while p.peek_kind(i) == Some(SyntaxKind::AT_ATTR) {
+        i += 1;
+        if p.peek_kind(i) == Some(SyntaxKind::LPAREN) {
+            let mut depth = 0usize;
+            loop {
+                match p.peek_kind(i) {
+                    None => return false,
+                    Some(SyntaxKind::LPAREN) => depth += 1,
+                    Some(SyntaxKind::RPAREN) => {
+                        depth -= 1;
+                        if depth == 0 {
+                            i += 1;
+                            break;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+        }
+    }
+    p.peek_text(i) == Some("type") && p.peek_kind(i + 1) == Some(SyntaxKind::LBRACE)
+}
+
+/// What a run of attributes held, for the checks a declaration owes them.
+struct DeclAttrs {
+    iris: usize,
+    /// An attribute of another kind was written, and refused: a missing `@iri`
+    /// is then not a second report about the same line.
+    misplaced: bool,
+}
+
+impl DeclAttrs {
+    /// `@iri` is exactly one per type and per field (grammar.bnf, `DeclAttrs`);
+    /// `@annotation` any number.
+    fn check(&self, p: &mut Parser, name: String) {
+        match self.iris {
+            0 if !self.misplaced => missing_iri(p, name),
+            0 | 1 => {}
+            _ => malformed(
+                p,
+                Problem::DuplicateIri { name },
+                "a type and a field each have one IRI. Keep the one that names the predicate \
+                 or the class meant, and put anything else said about it in an `@annotation`.",
+            ),
+        }
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// DeclAttrs := DeclAttr+ (NEWLINE DeclAttr+)* NEWLINE?
+// DeclAttr  := IriAttr | AnnotationAttr
+//
+// On the line of what they describe, or stacked on the lines above it. A
+// stacked attribute starts its line at the same column as the field, so the
+// indent pass emits nothing for it, and a NEWLINE is trivia: the run is simply
+// every `AT_ATTR` before the name.
+// ───────────────────────────────────────────────────────────────────────
+fn parse_decl_attrs(p: &mut Parser, place: &str) -> DeclAttrs {
+    let mut attrs = DeclAttrs {
+        iris: 0,
+        misplaced: false,
+    };
+    loop {
+        p.skip_trivia();
+        if p.current() != Some(SyntaxKind::AT_ATTR) {
+            return attrs;
+        }
+        match p.current_text() {
+            Some(crate::attr::IRI) => {
+                attrs.iris += 1;
+                parse_iri_attr(p);
+            }
+            Some(crate::attr::ANNOTATION) => parse_annotation_attr(p),
+            // `@subject` here is not an unknown name, it is a known one in the
+            // wrong place, and only the parser knows which place.
+            found => {
+                let found = found.unwrap_or("@").to_string();
+                attrs.misplaced = true;
+                parse_misplaced_attr(
+                    p,
+                    found,
+                    place,
+                    "the attributes in this position are `@iri(\"…\")` and `@annotation(…)`. \
+                     `@subject` is the first line of a MAPPING BODY — it assigns the identity of \
+                     the rows a mapping writes, and a declaration writes no rows.",
+                );
+            }
+        }
+    }
+}
+
 /// Anchors inside a declaration's body: the start of the next field — its
 /// `@iri`, or the name of one that forgot it — and the body's end.
 const FIELD_ANCHORS: &[SyntaxKind] = &[SyntaxKind::DEDENT, SyntaxKind::AT_ATTR, SyntaxKind::IDENT];
@@ -381,19 +486,16 @@ fn parse_fields(p: &mut Parser) {
 }
 
 // ───────────────────────────────────────────────────────────────────────
-// Field := IriAttr IDENT SHAPE_SEP TypeExpr NEWLINE
+// Field := DeclAttrs IDENT SHAPE_SEP TypeExpr NEWLINE
 //
 // A field with no `@iri` is still parsed whole, so the refusal names it and the
 // next field is not lost to recovery.
 // ───────────────────────────────────────────────────────────────────────
 fn parse_field(p: &mut Parser) {
     p.start(SyntaxKind::FIELD);
-    if p.current() == Some(SyntaxKind::AT_ATTR) {
-        parse_iri_attr(p);
-    } else {
-        let name = p.current_text().unwrap_or_default().to_string();
-        missing_iri(p, name);
-    }
+    let attrs = parse_decl_attrs(p, "before a field of a `type` declaration");
+    let name = p.current_text().unwrap_or_default().to_string();
+    attrs.check(p, name);
     recover::expect_or_recover(p, SyntaxKind::IDENT, FIELD_ANCHORS);
     recover::expect_or_recover(p, SyntaxKind::SHAPE_SEP, FIELD_ANCHORS);
     p.skip_trivia();
@@ -436,27 +538,34 @@ fn parse_type_expr(p: &mut Parser) {
 // ───────────────────────────────────────────────────────────────────────
 fn parse_iri_attr(p: &mut Parser) {
     p.start(SyntaxKind::IRI_ATTR);
-    // The token is an `AT_ATTR`; the NAME decides which attribute this is
-    // (disambiguation rule 6). `@subject` here is not an unknown name, it is a
-    // known one in the wrong place, and only the parser knows which place. At
-    // top level `parse_program` has already refused every other name, so the
-    // place is a field's.
-    if p.current_text() != Some(crate::attr::IRI) {
-        let found = p.current_text().unwrap_or("@").to_string();
-        malformed(
-            p,
-            Problem::MisplacedAttribute {
-                attribute: found,
-                place: "before a field of a `type` declaration".to_string(),
-            },
-            "the only attribute in this position is `@iri(\"…\")`. `@subject` is the first line \
-             of a MAPPING BODY — it assigns the identity of the rows a mapping writes, and a \
-             declaration writes no rows.",
-        );
-    }
-    p.bump(); // AT_ATTR
+    p.bump(); // AT_ATTR, `@iri` — `parse_decl_attrs` read its name
     recover::expect_or_recover(p, SyntaxKind::LPAREN, IRI_ANCHORS);
     recover::expect_or_recover(p, SyntaxKind::STRING, IRI_ANCHORS);
+    recover::expect_or_recover(p, SyntaxKind::RPAREN, IRI_ANCHORS);
+    p.finish();
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// AnnotationAttr   := AT_ATTR LPAREN STRING COMMA AnnotationObject RPAREN
+// AnnotationObject := STRING | LANG_STRING
+//
+// ShEx's `// predicate object`, as this language's attribute: the predicate is
+// a whole IRI in a string, as `@iri`'s is, and the object a constant literal.
+// Whether the predicate is a prefixed name, and whether the tag is well-formed,
+// is the checker's.
+// ───────────────────────────────────────────────────────────────────────
+fn parse_annotation_attr(p: &mut Parser) {
+    p.start(SyntaxKind::ANNOTATION_ATTR);
+    p.bump(); // AT_ATTR, `@annotation`
+    recover::expect_or_recover(p, SyntaxKind::LPAREN, IRI_ANCHORS);
+    recover::expect_or_recover(p, SyntaxKind::STRING, IRI_ANCHORS);
+    recover::expect_or_recover(p, SyntaxKind::COMMA, IRI_ANCHORS);
+    p.skip_trivia();
+    if p.current() == Some(SyntaxKind::LANG_STRING) {
+        p.bump();
+    } else {
+        recover::expect_or_recover(p, SyntaxKind::STRING, IRI_ANCHORS);
+    }
     recover::expect_or_recover(p, SyntaxKind::RPAREN, IRI_ANCHORS);
     p.finish();
 }
@@ -501,6 +610,7 @@ fn parse_misplaced_attr(p: &mut Parser, attribute: String, place: &str, help: &s
 /// run past the line.
 const IRI_ANCHORS: &[SyntaxKind] = &[
     SyntaxKind::RPAREN,
+    SyntaxKind::AT_ATTR,
     SyntaxKind::IDENT,
     SyntaxKind::INDENT,
     SyntaxKind::DEDENT,
@@ -974,6 +1084,113 @@ mod disambiguation {
             ]
             .map(|(n, i)| (n.to_string(), i.to_string())),
             "every field carries its own `@iri`, and two that end alike are two fields",
+        );
+    }
+
+    /// `/docs/design/labels`'s declaration: attributes stacked above a field
+    /// and above the type, `@annotation` beside `@iri`, a language-tagged
+    /// object, and a blank line between two fields — one `FIELD` each, every
+    /// attribute a child of what it describes.
+    #[test]
+    fn stacked_attributes_belong_to_the_field_under_them() {
+        let src = "@iri(\"https://schema.org/Person\")\n\
+                   @annotation(\"http://www.w3.org/2000/01/rdf-schema#label\", \"Nobel laureate\"@en)\n\
+                   type Laureate\n    \
+                   @iri(\"https://schema.org/name\")\n    \
+                   name: Seq<LangString>\n\
+                   \n    \
+                   @iri(\"https://schema.org/birthDate\")\n    \
+                   @annotation(\"http://www.w3.org/2000/01/rdf-schema#label\", \"birth date\"@en)\n    \
+                   @annotation(\"http://www.w3.org/2000/01/rdf-schema#label\", \"fecha\")\n    \
+                   birthDate: Date\n";
+        assert!(messages(src).is_empty(), "got {:?}", messages(src));
+        let root = parse_str(src);
+        assert_eq!(root.text().to_string(), src, "the tree is lossless");
+        let decl = find_first_kind(&root, SyntaxKind::TYPE_DECL)
+            .and_then(TypeDecl::cast)
+            .expect("a TYPE_DECL");
+        assert_eq!(decl.name().as_deref(), Some("Laureate"));
+        let own: Vec<_> = decl
+            .annotations()
+            .map(|a| (a.predicate_text(), a.object_value()))
+            .collect();
+        assert_eq!(
+            own,
+            [(
+                Some("http://www.w3.org/2000/01/rdf-schema#label".into()),
+                Some(("Nobel laureate".into(), Some("en".into())))
+            )]
+        );
+        let fields: Vec<_> = decl
+            .fields()
+            .map(|f| {
+                (
+                    f.name().unwrap_or_default().to_string(),
+                    f.iri_attr().and_then(|a| a.iri()).unwrap_or_default().to_string(),
+                    f.annotations()
+                        .filter_map(|a| a.object_value())
+                        .map(|(v, t)| (v.to_string(), t.map(|t| t.to_string())))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            fields,
+            [
+                ("name".to_string(), "https://schema.org/name".to_string(), vec![]),
+                (
+                    "birthDate".to_string(),
+                    "https://schema.org/birthDate".to_string(),
+                    vec![
+                        ("birth date".to_string(), Some("en".to_string())),
+                        ("fecha".to_string(), None)
+                    ]
+                ),
+            ]
+        );
+    }
+
+    /// `@iri` is one per field; a second is refused by name.
+    #[test]
+    fn a_second_iri_is_refused() {
+        let src = "@iri(\"https://e.org/T\")\n\
+                   type T\n    \
+                   @iri(\"https://e.org/a\")\n    \
+                   @iri(\"https://e.org/b\")\n    \
+                   a: String\n";
+        assert_eq!(
+            messages(src),
+            [Problem::DuplicateIri {
+                name: "a".to_string()
+            }]
+        );
+    }
+
+    /// An annotation alone is not an IRI: the field still needs one.
+    #[test]
+    fn an_annotation_does_not_stand_for_the_iri() {
+        let src = "@iri(\"https://e.org/T\")\n\
+                   type T\n    \
+                   @annotation(\"http://www.w3.org/2000/01/rdf-schema#label\", \"a\") a: String\n";
+        assert_eq!(
+            messages(src),
+            [Problem::MissingIri {
+                name: "a".to_string()
+            }]
+        );
+    }
+
+    /// An `@annotation` above an import is refused as `@iri` is.
+    #[test]
+    fn an_annotation_above_an_import_is_refused() {
+        let src = "@annotation(\"http://www.w3.org/2000/01/rdf-schema#label\", \"x\")\n\
+                   type { Person } := io.shex(\"m.shex\")\n";
+        assert_eq!(
+            messages(src),
+            [Problem::MisplacedAttribute {
+                attribute: "@annotation".to_string(),
+                place: "above a `type` import".to_string(),
+            }],
         );
     }
 

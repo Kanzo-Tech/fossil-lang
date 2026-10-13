@@ -357,6 +357,7 @@ const fn token_to_kind(t: Token) -> SyntaxKind {
         Token::True | Token::False => SyntaxKind::BOOL,
         Token::Null => SyntaxKind::NULL,
         Token::String => SyntaxKind::STRING,
+        Token::LangString => SyntaxKind::LANG_STRING,
         Token::AtAttr => SyntaxKind::AT_ATTR,
         // Multi-char operators
         Token::Define => SyntaxKind::DEFINE,

@@ -37,7 +37,9 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Cardinality, EdgeType, GraphSchema, NodeType, Primitive, Property, Span, Term};
+use crate::{
+    Annotation, Cardinality, EdgeType, GraphSchema, NodeType, Primitive, Property, Span, Term,
+};
 
 /// The local name of an IRI — the substring after the last `#` or `/`.
 ///
@@ -127,6 +129,10 @@ pub struct Shape {
     /// into that document's text. `None` on the same terms as
     /// [`PropertyConstraint::span`].
     pub span: Option<Span>,
+    /// The shape's annotations — ShEx's on the shape, SHACL's non-validating
+    /// triples on the node shape, a declaration's `@annotation` above `type`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<Annotation>,
 }
 
 // There is no `closed` here — `ShEx` `CLOSED` / SHACL `sh:closed` — because
@@ -188,6 +194,33 @@ pub struct PropertyConstraint {
     /// `fossil_hir::shex::spans`, which is a lookup over text and explains at length
     /// why that is not a second parser.
     pub span: Option<Span>,
+    /// The predicate's annotations in this shape. A label is one predicate
+    /// whichever document gave it: a decoder writes SHACL's `sh:name` and
+    /// `sh:description` as [`crate::RDFS_LABEL`] and [`crate::RDFS_COMMENT`]
+    /// (`/docs/design/labels`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<Annotation>,
+    /// The basic language ranges a language-tagged value's tag must match —
+    /// SHACL's `sh:languageIn`, ShEx's language value set. Empty is any tag.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub languages: Vec<String>,
+}
+
+/// Does `tag` match one of `ranges` by RFC 4647's basic filtering (§3.3.1)?
+/// An empty list admits every tag, and `*` matches any. Tags compare without
+/// case (RFC 5646 §2.1.1). It is the one reading of `sh:languageIn` and of a
+/// ShEx language stem, which are the same thing.
+#[must_use]
+pub fn language_matches(tag: &str, ranges: &[String]) -> bool {
+    ranges.is_empty()
+        || ranges.iter().any(|range| {
+            let (tag, range) = (tag.to_ascii_lowercase(), range.to_ascii_lowercase());
+            range == "*"
+                || tag == range
+                || tag
+                    .strip_prefix(range.as_str())
+                    .is_some_and(|rest| rest.starts_with('-'))
+        })
 }
 
 impl PropertyConstraint {
@@ -387,16 +420,25 @@ impl OutputShapes {
                 let name = c.name.clone();
                 let cardinality = c.occurs.collapse();
                 if c.targets.is_empty() {
+                    // An un-narrowed value is a string column: the permissive
+                    // walking-skeleton default the `ShEx` lowering already
+                    // applied to every `valueExpr` it could not read.
+                    let datatype = c.datatype().unwrap_or(Primitive::String);
                     properties.push(Property {
                         name,
-                        // An un-narrowed value is a string column: the
-                        // permissive walking-skeleton default the `ShEx`
-                        // lowering already applied to every `valueExpr` it could
-                        // not read.
-                        datatype: c.datatype().unwrap_or(Primitive::String),
+                        datatype,
                         iri: Some(c.predicate.clone()),
                         term: c.term.clone(),
-                        cardinality,
+                        // A language-tagged value is a property table whatever
+                        // its count: that is where its tag has a column with a
+                        // fixed name (`/docs/format`).
+                        cardinality: if datatype == Primitive::LangString {
+                            Cardinality::Multi
+                        } else {
+                            cardinality
+                        },
+                        annotations: c.annotations.clone(),
+                        languages: c.languages.clone(),
                     });
                 } else {
                     for t in &c.targets {
@@ -406,6 +448,7 @@ impl OutputShapes {
                             source: label.clone(),
                             destination: local_name(t).to_string(),
                             cardinality,
+                            annotations: c.annotations.clone(),
                         });
                     }
                 }
@@ -414,6 +457,7 @@ impl OutputShapes {
                 label,
                 iri: Some(shape.iri.clone()),
                 properties,
+                annotations: shape.annotations.clone(),
             });
         }
         GraphSchema { nodes, edges }
@@ -432,6 +476,8 @@ mod tests {
             targets: Vec::new(),
             occurs,
             span: None,
+            annotations: Vec::new(),
+            languages: Vec::new(),
         }
     }
 
@@ -443,6 +489,8 @@ mod tests {
             targets: targets.iter().map(|t| (*t).to_string()).collect(),
             occurs,
             span: None,
+            annotations: Vec::new(),
+            languages: Vec::new(),
         }
     }
 
@@ -451,6 +499,7 @@ mod tests {
             iri: iri.into(),
             properties,
             span: None,
+            annotations: Vec::new(),
         }
     }
 

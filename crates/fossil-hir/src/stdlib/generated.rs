@@ -297,6 +297,25 @@ pub(super) fn rows() -> Vec<RegistryEntry> {
             LoweringKind::Expr(SmolStr::new("upper(%0)")),
         ),
         RegistryEntry::new(
+            "str.lang",
+            vec![
+                ParamSpec {
+                    name: SmolStr::new("text"),
+                    ty: SigTy::Scalar(ScalarTy::String),
+                    arity: Arity::One,
+                    named: false,
+                },
+                ParamSpec {
+                    name: SmolStr::new("tag"),
+                    ty: SigTy::Scalar(ScalarTy::String),
+                    arity: Arity::One,
+                    named: false,
+                },
+            ],
+            SigTy::Scalar(ScalarTy::LangString),
+            LoweringKind::Expr(SmolStr::new("row(%0, %1)")),
+        ),
+        RegistryEntry::new(
             "str.slug",
             vec![ParamSpec {
                 name: SmolStr::new("text"),

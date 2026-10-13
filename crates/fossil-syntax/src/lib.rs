@@ -28,6 +28,8 @@ pub mod attr {
     pub const SUBJECT: &str = "@subject";
     /// `@iri("…")` — above a `type` declaration and before each of its fields.
     pub const IRI: &str = "@iri";
+    /// `@annotation("…", …)` — wherever `@iri` goes, any number of times.
+    pub const ANNOTATION: &str = "@annotation";
 }
 pub use parser::{Cst, CstRoot, parse};
 

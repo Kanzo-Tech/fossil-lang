@@ -43,6 +43,8 @@ pub fn datafusion_name(duckdb_name: &str) -> Option<&'static str> {
         "upper" => "upper",
         // Shared, and reached only through a template.
         "regexp_replace" => "regexp_replace",
+        // `str.lang`'s two-field struct, by position in both engines.
+        "row" => "struct",
         // The two that differ.
         //
         // `string_to_array` lives in the NESTED function package, not the

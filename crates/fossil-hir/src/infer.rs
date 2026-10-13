@@ -1315,6 +1315,8 @@ mod tests {
                 occurs: Occurs::ONE,
                 // A test fixture, not a document: no text to point into.
                 span: None,
+                annotations: Vec::new(),
+                languages: Vec::new(),
             };
         let shape = Shape {
             iri: "https://example.org/Beam".to_string(),
@@ -1329,6 +1331,7 @@ mod tests {
                 constraint("https://example.org/seeAlso", Some(Primitive::AnyUri), &[]),
             ],
             span: None,
+            annotations: Vec::new(),
         };
 
         let TyKind::Record(rec) = record_from_shape(&db, &shape).kind(&db) else {

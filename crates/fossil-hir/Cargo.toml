@@ -34,6 +34,7 @@ prefixmap = { workspace = true }
 # (`/docs/design/incremental` says why not rudof's SHACL crates).
 oxttl = { workspace = true }
 oxrdf = { workspace = true }
+oxilangtag = { workspace = true }
 salsa = { workspace = true }
 indexmap = { workspace = true }
 rowan = { workspace = true }

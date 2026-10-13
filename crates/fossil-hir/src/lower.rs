@@ -355,6 +355,10 @@ pub enum HirExpr {
     ColumnRef { binding: SmolStr, column: SmolStr },
     /// `"hello"` → literal text without surrounding quotes.
     StringLit(SmolStr),
+    /// `"birth date"@en` → a constant `rdf:langString`: the lexical form,
+    /// unquoted, and the tag as written. The checker holds the tag to BCP 47;
+    /// the run builds it as `str.lang` builds a per-row one.
+    LangStringLit { value: SmolStr, tag: SmolStr },
     /// `null` — the absence of a value.
     ///
     /// Its type is [`crate::ty::TyKind::Null`], which is comparable with
@@ -2153,6 +2157,13 @@ fn lower_expr_inner(
                     )
                 })
                 .collect();
+            if let Some(s) = toks.iter().find(|t| t.kind() == SyntaxKind::LANG_STRING) {
+                let (value, tag) = fossil_syntax::ast::split_lang_string(s.text());
+                return Some(HirExpr::LangStringLit {
+                    value: unescape_braces(value),
+                    tag: tag.into(),
+                });
+            }
             if let Some(s) = toks.iter().find(|t| t.kind() == SyntaxKind::STRING) {
                 let raw = s.text();
                 let inner_text = raw.trim_start_matches('"').trim_end_matches('"');

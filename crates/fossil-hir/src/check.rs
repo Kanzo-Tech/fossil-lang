@@ -98,6 +98,10 @@ impl<'db> TypeckOutput<'db> {
     }
 }
 
+/// `str.lang` — the one row whose arguments the checker reads as constants
+/// as well as types (`/docs/design/labels`).
+const LANG: &str = "str.lang";
+
 /// The ONE Salsa-tracked checker entry per mapping.
 ///
 /// Reads `body` + `spans` + the source row + the target shape,
@@ -377,6 +381,9 @@ impl Checker<'_> {
         };
         let actual = self.expr.synth(expr_id, &prop.value);
         self.expr.expected_ref = None;
+        if let PropertyKey::Name(name) = &prop.key {
+            self.check_constant_language(expr_id, name, &prop.value);
+        }
 
         if let (Some(actual), Some((expected, property, declared_at))) = (actual, expectation) {
             // `constraint.occurs` is deliberately NOT read here. The count a
@@ -396,6 +403,39 @@ impl Checker<'_> {
                     document,
                     shape: type_name,
                 }),
+            );
+        }
+    }
+
+    /// A constant tag — `"x"@en`, or `Row.x.lang("en")` — outside the
+    /// languages the shape admits (`sh:languageIn`, a ShEx language set) is
+    /// refused here; a tag read from a column is the writer's to check.
+    fn check_constant_language(&mut self, expr_id: ExprId, name: &SmolStr, value: &HirExpr) {
+        let tag = match value {
+            HirExpr::LangStringLit { tag, .. } => tag,
+            HirExpr::Call { func, args } if func.as_str() == LANG => match args.as_slice() {
+                [_, HirExpr::StringLit(tag)] => tag,
+                _ => return,
+            },
+            _ => return,
+        };
+        let Some(languages) = self.resolved_shape.as_ref().and_then(|shape| {
+            shape
+                .constraints
+                .iter()
+                .find(|c| c.name == *name)
+                .map(|c| c.languages.clone())
+        }) else {
+            return;
+        };
+        if !fossil_graph_schema::language_matches(tag, &languages) {
+            let _ = self.expr.error_at(
+                expr_id,
+                Problem::LanguageNotAllowed {
+                    property: name.to_string(),
+                    tag: tag.to_string(),
+                    languages,
+                },
             );
         }
     }
@@ -1244,6 +1284,15 @@ impl<'db> Expr<'db> {
                 Ty::new(db, TyKind::Primitive(Primitive::String)),
                 ProvenanceKind::Literal,
             ),
+            // A constant `rdf:langString`. Its tag is constant, so the checker
+            // holds it to BCP 47 here rather than leaving it to the run.
+            HirExpr::LangStringLit { tag, .. } => {
+                self.refuse_ill_formed_tag(expr_id, tag);
+                (
+                    Ty::new(db, TyKind::Primitive(Primitive::LangString)),
+                    ProvenanceKind::Literal,
+                )
+            }
             // T-Interp: the holes are typed like the expressions they are, and
             // the interpolation's own type comes from where it sits — IRI under
             // `iri =`, a string anywhere else.
@@ -1725,6 +1774,26 @@ impl<'db> Expr<'db> {
             return Ty::new(db, TyKind::Error(eg));
         };
 
+        if func.as_str() == LANG
+            && let [text, HirExpr::StringLit(tag)] = args
+        {
+            // `"x".lang("en")` is the literal `"x"@en`: one spelling per
+            // term, the rule a quoted member already follows.
+            if let HirExpr::StringLit(value) = text {
+                let eg = self.error_at(
+                    expr_id,
+                    Problem::NeedlessLang {
+                        call: format!("\"{value}\".lang(\"{tag}\")"),
+                        literal: format!("\"{value}\"@{tag}"),
+                    },
+                );
+                return Ty::new(db, TyKind::Error(eg));
+            }
+            // A constant tag on a column is `rr:language`: checked now, as the
+            // literal's is.
+            self.refuse_ill_formed_tag(expr_id, tag);
+        }
+
         let params = &entry.sig.params;
         // **A signature's REQUIRED positions are the ones a call has to fill**,
         // and they are not all of them: an [`Arity::Optional`] parameter may be
@@ -1822,6 +1891,24 @@ impl<'db> Expr<'db> {
             },
             |s| s.to_ty(db),
         )
+    }
+
+    /// A constant language tag that is not BCP 47 (RFC 5646 §2.2.9), refused
+    /// where it is written: RDF 1.1 Concepts §3.3 gives every
+    /// language-tagged string a well-formed tag.
+    fn refuse_ill_formed_tag(&mut self, expr_id: ExprId, tag: &str) {
+        if !crate::terms::well_formed_language_tag(tag) {
+            let span = self.span_of(expr_id);
+            let d = Diagnostic::new(
+                Severity::Error,
+                Problem::InvalidLanguageTag {
+                    tag: tag.to_string(),
+                },
+                span,
+            )
+            .with_help(crate::declared::LANGUAGE_TAG_HELP);
+            self.raise(d);
+        }
     }
 
     /// T-Comp (`/docs/design/typing`): `Γ ⊢ a : τ`, `Γ ⊢ b : τ`, τ comparable

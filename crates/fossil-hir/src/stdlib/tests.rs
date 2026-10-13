@@ -210,7 +210,7 @@ fn expected_stdlib_names() -> Vec<&'static str> {
         "math.max",
         "math.abs",
         "math.round",
-        // str/ (12) — every operation on a string. `normalize_unicode` is NOT
+        // str/ (13) — every operation on a string. `normalize_unicode` is NOT
         // among them: it is not in the language.
         "str.length",
         "str.slice",
@@ -224,6 +224,7 @@ fn expected_stdlib_names() -> Vec<&'static str> {
         "str.upper",
         "str.slug",
         "str.strip_html",
+        "str.lang",
         // No validate/ and no anon/ — see `the_deleted_names_are_gone`.
     ]
 }
@@ -250,8 +251,8 @@ fn catalog_is_bidirectionally_complete() {
         missing.is_empty() && extra.is_empty(),
         "catalog must equal the declared set exactly.\n  MISSING: {missing:?}\n  EXTRA: {extra:?}"
     );
-    // 6 + 5 + 6 + 12 = 29 surface functions.
-    assert_eq!(catalog.len(), 29);
+    // 6 + 5 + 6 + 13 = 30 surface functions.
+    assert_eq!(catalog.len(), 30);
     // The FOUR io/ constructors on top, `io.rdf` among them: it reads rows like
     // the other three, and without a signature a program writing `io.rdf(...)`
     // in a value position would get no diagnostic. The signatures come off
@@ -259,7 +260,7 @@ fn catalog_is_bidirectionally_complete() {
     //
     // `io.shex` and `io.shacl` are still absent, and deliberately: they give
     // back a shape document, which `SigTy` has no spelling for.
-    assert_eq!(r.iter().count(), 29 + 4);
+    assert_eq!(r.iter().count(), 30 + 4);
 }
 
 /// **Every name the language has deleted, pinned so that none can come back.**

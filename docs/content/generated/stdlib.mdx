@@ -64,6 +64,7 @@ Source: `catalogue.bnf`, all of it. Change it and re-run the command. */}
 | --- | --- | --- |
 | `contains` | `(text: String, needle: String) -> Bool` | `contains(%0, %1)` |
 | `ends_with` | `(text: String, suffix: String) -> Bool` | `ends_with(%0, %1)` |
+| `lang` | `(text: String, tag: String) -> LangString` | `row(%0, %1)` |
 | `length` | `(text: String) -> Integer` | `length(%0)` |
 | `lower` | `(text: String) -> String` | `lower(%0)` |
 | `replace` | `(text: String, needle: String, replacement: String) -> String` | `replace(%0, %1, %2)` |

@@ -58,6 +58,7 @@ ast_node!(ImportMember, IMPORT_MEMBER);
 ast_node!(TypeDecl, TYPE_DECL);
 ast_node!(Field, FIELD);
 ast_node!(IriAttr, IRI_ATTR);
+ast_node!(AnnotationAttr, ANNOTATION_ATTR);
 ast_node!(TypeExpr, TYPE_EXPR);
 
 /// The `IDENT` tokens directly under `node`, trivia and nested nodes skipped.
@@ -104,6 +105,11 @@ impl TypeDecl {
         self.0.children().find_map(IriAttr::cast)
     }
 
+    /// The `@annotation(…)`s above the declaration, in written order.
+    pub fn annotations(&self) -> impl Iterator<Item = AnnotationAttr> {
+        self.0.children().filter_map(AnnotationAttr::cast)
+    }
+
     /// The declared name — `Person` in `type Person`: the `IDENT` after the
     /// contextual `type`.
     #[must_use]
@@ -127,6 +133,11 @@ impl Field {
     #[must_use]
     pub fn iri_attr(&self) -> Option<IriAttr> {
         self.0.children().find_map(IriAttr::cast)
+    }
+
+    /// The `@annotation(…)`s of the field, in written order.
+    pub fn annotations(&self) -> impl Iterator<Item = AnnotationAttr> {
+        self.0.children().filter_map(AnnotationAttr::cast)
     }
 
     /// The field's name — what a mapping body writes as a property key.
@@ -162,6 +173,63 @@ impl IriAttr {
                     .unwrap_or(text);
                 smol_str::SmolStr::from(inner)
             })
+    }
+}
+
+/// A `STRING` token's text with its quotes stripped and nothing else: an
+/// attribute's strings have no hole, and an IRI has no escape worth decoding.
+fn unquote(text: &str) -> &str {
+    text.strip_prefix('"')
+        .and_then(|s| s.strip_suffix('"'))
+        .unwrap_or(text)
+}
+
+/// A `LANG_STRING` token's text split into its lexical form, unquoted, and its
+/// tag: `"birth date"@en` is `("birth date", "en")`.
+#[must_use]
+pub fn split_lang_string(text: &str) -> (&str, &str) {
+    text.rfind("\"@").map_or((text, ""), |at| {
+        (unquote(&text[..=at]), &text[at + 2..])
+    })
+}
+
+impl AnnotationAttr {
+    /// The predicate, unquoted — the attribute's first string.
+    #[must_use]
+    pub fn predicate(&self) -> Option<crate::SyntaxToken> {
+        self.strings().next()
+    }
+
+    /// The object — the second string, plain or language-tagged.
+    #[must_use]
+    pub fn object(&self) -> Option<crate::SyntaxToken> {
+        self.strings().nth(1)
+    }
+
+    /// The predicate's text, unquoted.
+    #[must_use]
+    pub fn predicate_text(&self) -> Option<smol_str::SmolStr> {
+        self.predicate()
+            .map(|t| smol_str::SmolStr::from(unquote(t.text())))
+    }
+
+    /// The object as a lexical form and, for a `LANG_STRING`, its tag.
+    #[must_use]
+    pub fn object_value(&self) -> Option<(smol_str::SmolStr, Option<smol_str::SmolStr>)> {
+        let token = self.object()?;
+        Some(if token.kind() == SyntaxKind::LANG_STRING {
+            let (value, tag) = split_lang_string(token.text());
+            (value.into(), Some(tag.into()))
+        } else {
+            (unquote(token.text()).into(), None)
+        })
+    }
+
+    fn strings(&self) -> impl Iterator<Item = crate::SyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .filter(|t| matches!(t.kind(), SyntaxKind::STRING | SyntaxKind::LANG_STRING))
     }
 }
 

@@ -103,6 +103,9 @@ fn write_expr(out: &mut String, expr: &HirExpr) {
         HirExpr::StringLit(s) => {
             let _ = write!(out, "\"{s}\"");
         }
+        HirExpr::LangStringLit { value, tag } => {
+            let _ = write!(out, "\"{value}\"@{tag}");
+        }
         HirExpr::Call { func, args } => write_call(out, func, args),
         // `Person(User.email)` — an edge is spelled as the TYPE applied to the
         // identity of the node it reaches, which is a call shape whose callee is

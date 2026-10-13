@@ -12,7 +12,9 @@
 //! offsets, trivia and error recovery are only visible there.
 
 pub mod items;
-pub use items::{Field, ImportMember, IriAttr, ShapeExpr, TypeDecl, TypeExpr};
+pub use items::{
+    AnnotationAttr, Field, ImportMember, IriAttr, ShapeExpr, TypeDecl, TypeExpr, split_lang_string,
+};
 
 use crate::kind::{SyntaxKind, SyntaxNode};
 
