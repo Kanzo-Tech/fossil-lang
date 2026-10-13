@@ -32,9 +32,9 @@ pub enum ParseDiagnostic {
     /// A form the grammar HAS, written incompletely, where naming the missing
     /// token would say less than naming the production.
     ///
-    /// `@subject` where `@rename` goes and a `Rename` with no `as` are both
-    /// this: the parser knows which production it is in and can quote it, while
-    /// `expected IDENT, found STRING` throws that away.
+    /// `@subject` where `@iri` goes and a field with no `@iri` are both this:
+    /// the parser knows which production it is in and can quote it, while
+    /// `expected AT_ATTR, found IDENT` throws that away.
     Malformed {
         problem: Problem,
         help: Option<String>,

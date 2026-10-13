@@ -8,8 +8,8 @@ shape/name-collision
  2 │ 
    ╰────
   help: a short name is the last segment of the predicate IRI, and fossil never picks between two.
-        Give one of them another name above the binding: @rename(Person, "http://xmlns.com/
-        foaf/0.1/name" as foaf_name)
+        Declare `Person` in the program instead, where each field writes its own name beside its
+        IRI: `foaf_name`, say, for `http://xmlns.com/foaf/0.1/name`
 shape/name-collision
 
   × two predicates of Person are both called `name`

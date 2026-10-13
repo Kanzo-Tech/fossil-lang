@@ -74,7 +74,5 @@ fn decode(
     document: &str,
 ) -> Result<OutputDescriptorKind, Failure> {
     let shapes = fossil_hir::shapes::decoded_document(db, file, constructor, document)?;
-    Ok(OutputDescriptorKind::Lowered(
-        shapes.to_graph_schema(&def_map(db, file).renames(db)),
-    ))
+    Ok(OutputDescriptorKind::Lowered(shapes.to_graph_schema()))
 }

@@ -190,8 +190,8 @@ fn document_name_under_cursor(token: &SyntaxToken) -> Option<(SyntaxNode, Wanted
 /// The shape is the mapping's own target, [`resolve_target_shape`] — the
 /// document that declared it, not the first one the file names — and a
 /// property key resolves through the checker's `predicates` table, the same
-/// one hover and `fossil-mir` read, so a renamed predicate lands where the
-/// checker says it is.
+/// one hover and `fossil-mir` read, so a key lands where the checker says it
+/// is.
 fn document_targets(
     db: &dyn fossil_base::Db,
     file: SourceFile,
@@ -262,24 +262,13 @@ fn type_binding_range(
         })
 }
 
-/// The names between `{` and `}` of a `TYPE_DEF` — `Person`, `Order` in
-/// `type { Person, Order } := io.shex("shop.shex")`.
-///
-/// The IDENTs after the closing brace belong to the constructor (`io`, `shex`),
-/// so the scan stops there.
+/// The names a `TYPE_DEF` introduces — `Person`, `Order` in
+/// `type { Person, Order } := io.shex("shop.shex")`, `City` in
+/// `type { Place as City } := …`.
 fn brace_members(node: &SyntaxNode) -> Vec<String> {
-    let mut members = Vec::new();
-    let mut inside = false;
-    for token in node
-        .descendants_with_tokens()
-        .filter_map(fossil_syntax::SyntaxElement::into_token)
-    {
-        match token.kind() {
-            SyntaxKind::LBRACE => inside = true,
-            SyntaxKind::RBRACE => break,
-            SyntaxKind::IDENT if inside => members.push(token.text().to_string()),
-            _ => {}
-        }
-    }
-    members
+    node.children()
+        .filter_map(fossil_syntax::ast::ImportMember::cast)
+        .filter_map(|m| m.name())
+        .map(|n| n.to_string())
+        .collect()
 }

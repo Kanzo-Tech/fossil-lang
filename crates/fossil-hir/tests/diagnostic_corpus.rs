@@ -413,7 +413,6 @@ fn run_shape_fixture(bucket: &str, document: &Shape, rejections: &[Rejection]) -
             "users",
             "\"https://example.org/u/{users.id}\"",
             disjuncts,
-            &[],
         );
         let _ = writeln!(out, "  suggestion:");
         for line in suggestion.lines() {
@@ -579,7 +578,6 @@ fn a_split_branch_with_no_predicate_still_parses() {
         "users",
         "\"https://example.org/u/{users.id}\"",
         &[vec!["http://example.org/email".to_string()], vec![]],
-        &[],
     );
     let full = format!(
         "type {{ Contact }} := io.shex(\"contact.shex\")\nusers := io.csv(\"users.csv\")\n{suggestion}"
@@ -612,7 +610,6 @@ fn the_generated_split_suggestion_compiles() {
             vec!["http://example.org/email".to_string()],
             vec!["http://example.org/phone".to_string()],
         ],
-        &[],
     );
 
     // 2. The generated split names a shape and reads a source. Prepend the
@@ -782,7 +779,7 @@ fn resolved_constraints_never_leak_unknown_or_inferenceid() {
     }
 }
 
-// ===== The collision repair is code, and the compiler has to accept it back ==
+// ===== A collision names the repair, and the repair is a declaration ======
 
 /// Two predicates whose last IRI segments coincide. Both become unwritable and
 /// the checker says so — a property key is the bare last segment of a predicate
@@ -796,8 +793,6 @@ prop http://example.org/name string 1 1
 prop http://xmlns.com/foaf/0.1/name string 0 1
 ";
 
-/// The program that trips it. `foaf_name` is what the repair will make writable;
-/// until then the shape declares two `name`s and neither can be written.
 const COLLIDING_PROGRAM: &str = "\
 type { Person } := io.shex(\"colliding.shex\")
 User := io.csv(\"u.csv\")
@@ -807,42 +802,11 @@ People : Person from User
     name = User.name
 ";
 
-/// The `@rename(…)` clause out of a diagnostic's `help:`, verbatim.
-///
-/// Extracted by scanning rather than by re-rendering, and that is the point of
-/// the test: what is fed back to the parser is the exact text a reader would
-/// copy off their terminal.
-///
-/// It read the MESSAGE until the collision report grew labels. The repair is
-/// prose about what to do, which is what `Diagnostic::help` is; the message is
-/// now the one sentence naming the shape and the colliding name, and the two
-/// IRIs it used to carry are under the lines of the document that declare them.
-fn rename_clause(helps: &[String]) -> String {
-    let m = helps
-        .iter()
-        .find(|m| m.contains("@rename("))
-        .unwrap_or_else(|| panic!("no `help:` recommended a `@rename`; got {helps:#?}"));
-    let start = m.find("@rename(").expect("just matched");
-    let end = start + m[start..].find(')').expect("the clause is parenthesised") + 1;
-    m[start..end].to_string()
-}
-
-/// **The recommendation has to be true.**
-///
-/// `Checker::surface_name_collisions` has told authors to write
-/// `@rename(<Type>, "<iri>" as <name>)` since before there was a production for
-/// it: `AT_ATTR` at top level fell through to `bump_as_error`, so the one repair
-/// the compiler names did not parse. Two things had to change for this test to
-/// be possible — the production (grammar.bnf, `TypeDef := RenameAttr* 'type' …`)
-/// and the message, which said `<Type>` where a real bound name has to go.
-///
-/// This is the same shape as `the_generated_split_suggestion_compiles`: a
-/// compiler that emits source is answerable for that source. It goes further,
-/// because parsing is not the claim — the claim is that the repair REPAIRS, so
-/// the assertion is that the collision is gone and the renamed key resolves.
+/// The collision is reported, and its help sends the author to the repair the
+/// language has: declaring the type, where a field's name sits beside its IRI.
+/// It names the bound type and the second IRI, and proposes a name for it.
 #[test]
-fn the_recommended_rename_parses_and_repairs_the_collision() {
-    // 1. The collision, reported.
+fn a_collision_names_the_declaration_that_repairs_it() {
     let mut db = new_db();
     let file = SourceFile::new(
         &db,
@@ -851,71 +815,16 @@ fn the_recommended_rename_parses_and_repairs_the_collision() {
     );
     register_document(&mut db, "colliding.shex", COLLIDING_DOCUMENT);
     let mapping = def_map(&db, file).mappings(&db)[0];
-    let before: Vec<String> = read_by_check(&db, mapping)
+    let diagnostics = read_by_check(&db, mapping);
+    let collision = diagnostics
         .iter()
-        .map(Diagnostic::message)
-        .collect();
+        .find(|d| d.message().contains("both called `name`"))
+        .unwrap_or_else(|| panic!("the two predicates must collide; got {diagnostics:#?}"));
+    let help = collision.help.clone().expect("a collision says what to do");
     assert!(
-        before.iter().any(|m| m.contains("both called `name`")),
-        "the two predicates must collide to begin with; got {before:#?}"
-    );
-
-    // 2. The repair, taken from the `help:` and put where it says.
-    let helps: Vec<String> = read_by_check(&db, mapping)
-        .iter()
-        .filter_map(|d| d.help.clone())
-        .collect();
-    let clause = rename_clause(&helps);
-    assert!(
-        clause.contains("Person"),
-        "the clause names the bound TYPE, not a `<Type>` placeholder: {clause}"
-    );
-    let repaired = format!("{clause}\n{COLLIDING_PROGRAM}");
-
-    // 3. The repaired program, checked through the production path.
-    let mut db2 = new_db();
-    let file2 = SourceFile::new(&db2, repaired.clone(), "colliding.fossil".to_string());
-    register_document(&mut db2, "colliding.shex", COLLIDING_DOCUMENT);
-    let mappings = def_map(&db2, file2).mappings(&db2).clone();
-    assert_eq!(
-        mappings.len(),
-        1,
-        "the repaired program must still parse into its one mapping:\n{repaired}"
-    );
-    let after: Vec<String> = read_by_check(&db2, mappings[0])
-        .iter()
-        .map(Diagnostic::message)
-        .collect();
-    assert!(
-        !after.iter().any(|m| m.contains("both called `name`")),
-        "the repair must repair: the collision is still reported.\n\
-         program:\n{repaired}\ndiagnostics: {after:#?}"
-    );
-
-    // 4. And the renamed key is now writable — a repair that silences the
-    //    message without making the predicate reachable would pass step 3.
-    let alias = clause
-        .rsplit_once(" as ")
-        .and_then(|(_, tail)| tail.strip_suffix(')'))
-        .expect("the clause ends `as <name>)`")
-        .to_string();
-    let with_use = format!("{repaired}    {alias} = User.name\n");
-    let mut db3 = new_db();
-    let file3 = SourceFile::new(&db3, with_use.clone(), "colliding.fossil".to_string());
-    register_document(&mut db3, "colliding.shex", COLLIDING_DOCUMENT);
-    let m3 = def_map(&db3, file3).mappings(&db3)[0];
-    let diags: Vec<String> = read_by_check(&db3, m3)
-        .iter()
-        .map(Diagnostic::message)
-        .collect();
-    assert!(
-        !diags.iter().any(|m| m.contains(&alias)),
-        "`{alias}` must resolve to the renamed predicate.\n\
-         program:\n{with_use}\ndiagnostics: {diags:#?}"
-    );
-    assert_eq!(
-        body(&db3, m3).properties(&db3).len(),
-        3,
-        "@subject, name and foaf_name all survive the lowering"
+        help.contains("Declare `Person` in the program")
+            && help.contains("`foaf_name`")
+            && help.contains("http://xmlns.com/foaf/0.1/name"),
+        "the help names the type to declare, a field name and its IRI: {help}"
     );
 }

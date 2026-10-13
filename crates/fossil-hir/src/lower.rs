@@ -549,162 +549,11 @@ pub fn lower_to_hir<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> HirF
             }
             fossil_syntax::SyntaxKind::TYPE_DEF => {
                 check_provider(db, sink, &child, fossil_base::Capability::ReadTypes);
-                check_renames(db, sink, file, &child);
             }
             _ => {}
         }
     }
     HirFile::new(db, mappings, source_pipes, diagnostics.into_vec())
-}
-
-/// **Every `@rename` above a `type` binding, checked against the binding and
-/// against the document** — with a real span, because this is the one place
-/// that has the nodes.
-///
-/// `crate::def_map::def_map` reads the same attributes and does not report on
-/// them: it is signatures-only, so it silently keeps the renames that match a
-/// bound name and drops the rest.
-/// «Drops the rest» is the failure this function exists to stop — a `@rename`
-/// that renames nothing is a line the author wrote to fix a collision, which
-/// then still collides, and the diagnostic they get is about the collision they
-/// thought they had repaired.
-///
-/// Two ways to write one nobody can act on, and each gets its own message:
-///
-/// 1. **The name is not one this binding introduces** — `@rename(Persn, …)`
-///    above `type { Person }`. A did-you-mean over the names it does introduce.
-/// 2. **The predicate is not one the shape declares.** This is the valuable one
-///    and it is why the check reads the document: the repair is written by
-///    copying an IRI out of a diagnostic, and an IRI copied wrong is invisible —
-///    the rename simply never fires and the short name stays what it was.
-///
-/// A binding whose document could not be read is NOT reported here. It has
-/// already been reported, as a `ShapeBindError`, against the binding itself; a
-/// second message per rename would be N messages about one missing file.
-fn check_renames(
-    db: &dyn fossil_base::Db,
-    sink: &mut Diagnostics,
-    file: SourceFile,
-    type_def: &fossil_syntax::SyntaxNode,
-) {
-    use fossil_syntax::SyntaxKind;
-
-    let renames = crate::def_map::parse_renames(type_def);
-    if renames.is_empty() {
-        return;
-    }
-    let dm = def_map(db, file);
-    // The names THIS binding introduces, in order — not the file's, because a
-    // `@rename` is scoped to the binding it sits on (grammar.bnf, TypeDef).
-    let members: Vec<SmolStr> = {
-        let toks: Vec<_> = type_def
-            .descendants_with_tokens()
-            .filter_map(fossil_syntax::SyntaxElement::into_token)
-            .collect();
-        let open = toks.iter().position(|t| t.kind() == SyntaxKind::LBRACE);
-        let close = toks.iter().position(|t| t.kind() == SyntaxKind::RBRACE);
-        match (open, close) {
-            (Some(o), Some(c)) if c > o => toks[o + 1..c]
-                .iter()
-                .filter(|t| t.kind() == SyntaxKind::IDENT)
-                .map(|t| SmolStr::from(t.text()))
-                .collect(),
-            _ => Vec::new(),
-        }
-    };
-
-    // One `RENAME` node per entry, in the same order `parse_renames` walked
-    // them, so each diagnostic underlines its own line rather than the whole
-    // attribute.
-    let rename_nodes: Vec<fossil_syntax::SyntaxNode> = type_def
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::RENAME_ATTR)
-        .flat_map(|a| a.children())
-        .filter(|c| c.kind() == SyntaxKind::RENAME)
-        .collect();
-
-    for (i, r) in renames.iter().enumerate() {
-        let node = rename_nodes.get(i).unwrap_or(type_def);
-        if !members.contains(&r.type_name) {
-            let suggestion =
-                crate::didyoumean::did_you_mean(&r.type_name, members.iter().map(SmolStr::as_str));
-            let help = suggestion.map_or_else(
-                || "a rename renames a predicate OF one bound type".to_string(),
-                |s| format!("did you mean `{s}`?"),
-            );
-            diagnose(
-                sink,
-                node,
-                Problem::RenameUnknownType {
-                    shape: r.type_name.to_string(),
-                    introduced: members.iter().map(ToString::to_string).collect(),
-                },
-                Some(help),
-            );
-            continue;
-        }
-        // The document, through the bound name. A name that bound no shape has
-        // already said why.
-        let Some(shape_iri) = dm.lookup_type(db, r.type_name.as_str()) else {
-            continue;
-        };
-        // The PAIR, not the path: the constructor selects the row that reads
-        // the document, and `output_shape_binding` hands both over together so
-        // no caller can take one and forget the other.
-        let Some((constructor, document)) = dm.output_shape_binding(db) else {
-            continue;
-        };
-        let Ok(shapes) =
-            crate::shapes::decoded_document(db, file, constructor.as_deref(), document.as_str())
-        else {
-            continue;
-        };
-        let Some(shape) = shapes.lookup(shape_iri.as_str()) else {
-            continue;
-        };
-        if shape
-            .properties
-            .iter()
-            .any(|c| c.predicate == r.predicate.as_str())
-        {
-            continue;
-        }
-        let declared: Vec<&str> = shape
-            .properties
-            .iter()
-            .map(|c| c.predicate.as_str())
-            .collect();
-        let suggestion = crate::didyoumean::did_you_mean(&r.predicate, declared.iter().copied());
-        let full_iri = "the predicate is a FULL IRI, because two predicates that collide differ \
-                        only before their last segment";
-        let help = suggestion.map_or_else(
-            || {
-                if declared.is_empty() {
-                    format!("it declares none; {full_iri}")
-                } else {
-                    format!(
-                        "it declares {}; {full_iri}",
-                        declared
-                            .iter()
-                            .map(|d| format!("`{d}`"))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )
-                }
-            },
-            |s| format!("did you mean `{s}`?"),
-        );
-        diagnose(
-            sink,
-            node,
-            Problem::RenameUnknownPredicate {
-                shape: r.type_name.to_string(),
-                predicate: r.predicate.to_string(),
-                declared: declared.iter().map(ToString::to_string).collect(),
-            },
-            Some(help),
-        );
-    }
 }
 
 /// **The provider a binding names, checked against what its POSITION asks of
@@ -2208,8 +2057,8 @@ fn lower_property(
                         place: "in a mapping body".to_string(),
                     },
                     Some(
-                        "the only one is `@subject = <expr>`, the mapping's identity; `@rename` \
-                         goes above a `type` binding"
+                        "the only one is `@subject = <expr>`, the mapping's identity; `@iri` \
+                         goes above a `type` declaration and before each of its fields"
                             .to_string(),
                     ),
                 );

@@ -73,10 +73,11 @@ pub enum Token {
 
     // ───────────────────────────────────────────────────────────────────
     // Attribute marker — `AT_ATTR := '@' IDENT`. The grammar accepts exactly
-    // two names, told apart by POSITION: `@rename` above a type binding,
-    // `@subject` as the first line of a mapping body. This lexer emits one
-    // token for any name; `items::parse_rename_attr` and
-    // `items::parse_subject_assign` each check the name and refuse the other's.
+    // two names, told apart by POSITION: `@iri` above a type declaration and
+    // before each of its fields, `@subject` as the first line of a mapping
+    // body. This lexer emits one token for any name; `items::parse_iri_attr`
+    // and `items::parse_subject_assign` each check the name and refuse the
+    // other's.
     // ───────────────────────────────────────────────────────────────────
     #[regex(r"@[A-Za-z_][A-Za-z0-9_]*")]
     AtAttr,

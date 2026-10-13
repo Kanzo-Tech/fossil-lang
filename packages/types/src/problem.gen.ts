@@ -13,7 +13,7 @@ export type Code =
   | 'syntax/expected-token'
   | 'syntax/unexpected-token'
   | 'syntax/unknown-character'
-  | 'syntax/malformed-rename'
+  | 'syntax/missing-iri'
   | 'syntax/misplaced-attribute'
   | 'syntax/invalid-mapping-header'
   | 'syntax/invalid-property-name'
@@ -51,8 +51,6 @@ export type Code =
   | 'shape/cyclic-reference'
   | 'shape/unresolved-reference'
   | 'shape/binding-arity'
-  | 'shape/rename-unknown-type'
-  | 'shape/rename-unknown-predicate'
   | 'shape/more-than-one-output'
   | 'document/not-registered'
   | 'document/unparseable'
@@ -115,7 +113,7 @@ export const CODES: readonly Code[] = [
   'syntax/expected-token',
   'syntax/unexpected-token',
   'syntax/unknown-character',
-  'syntax/malformed-rename',
+  'syntax/missing-iri',
   'syntax/misplaced-attribute',
   'syntax/invalid-mapping-header',
   'syntax/invalid-property-name',
@@ -153,8 +151,6 @@ export const CODES: readonly Code[] = [
   'shape/cyclic-reference',
   'shape/unresolved-reference',
   'shape/binding-arity',
-  'shape/rename-unknown-type',
-  'shape/rename-unknown-predicate',
   'shape/more-than-one-output',
   'document/not-registered',
   'document/unparseable',
@@ -233,10 +229,11 @@ export interface ProblemData {
     character: string;
   };
   /**
-   * A `@rename` written incompletely; `missing` is the part it lacks.
+   * A declared type, or a field of one, written without its `@iri`; `name` is the type's or the
+   * field's.
    */
-  'syntax/malformed-rename': {
-    missing: string;
+  'syntax/missing-iri': {
+    name: string;
   };
   /**
    * An attribute written where it does not belong.
@@ -512,21 +509,6 @@ export interface ProblemData {
     name: string;
     named: number;
     position: number;
-  };
-  /**
-   * A `@rename` naming a type its binding does not introduce.
-   */
-  'shape/rename-unknown-type': {
-    introduced: string[];
-    shape: string;
-  };
-  /**
-   * A `@rename` naming a predicate its shape does not declare.
-   */
-  'shape/rename-unknown-predicate': {
-    declared: string[];
-    predicate: string;
-    shape: string;
   };
   /**
    * A program whose sources declare two different output shapes; one program writes one.
@@ -924,7 +906,7 @@ export const TITLES: { readonly [C in Code]: string } = {
   'syntax/expected-token': 'Expected another token',
   'syntax/unexpected-token': 'Unexpected token',
   'syntax/unknown-character': 'No token starts with this character',
-  'syntax/malformed-rename': 'A malformed rename',
+  'syntax/missing-iri': 'A declaration without its IRI',
   'syntax/misplaced-attribute': 'An attribute in the wrong place',
   'syntax/invalid-mapping-header': 'Not a mapping header',
   'syntax/invalid-property-name': 'Not a property name',
@@ -962,8 +944,6 @@ export const TITLES: { readonly [C in Code]: string } = {
   'shape/cyclic-reference': 'A cyclic shape reference',
   'shape/unresolved-reference': 'An unresolved shape reference',
   'shape/binding-arity': 'More names than shapes',
-  'shape/rename-unknown-type': 'A rename of a type the binding does not introduce',
-  'shape/rename-unknown-predicate': 'A rename of a predicate the shape does not declare',
   'shape/more-than-one-output': 'More than one output shape',
   'document/not-registered': 'A document is not registered',
   'document/unparseable': 'A document does not parse',
@@ -1027,7 +1007,7 @@ export type DetailedCode =
   | 'syntax/expected-token'
   | 'syntax/unexpected-token'
   | 'syntax/unknown-character'
-  | 'syntax/malformed-rename'
+  | 'syntax/missing-iri'
   | 'syntax/misplaced-attribute'
   | 'syntax/invalid-mapping-header'
   | 'syntax/number-out-of-range'
@@ -1055,8 +1035,6 @@ export type DetailedCode =
   | 'shape/cyclic-reference'
   | 'shape/unresolved-reference'
   | 'shape/binding-arity'
-  | 'shape/rename-unknown-type'
-  | 'shape/rename-unknown-predicate'
   | 'shape/more-than-one-output'
   | 'document/not-registered'
   | 'document/unread'
@@ -1111,7 +1089,7 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'syntax/expected-token': (d) => `expected ${d.expected}, found ${d.found}`,
   'syntax/unexpected-token': (_) => `unexpected token`,
   'syntax/unknown-character': (d) => `unexpected character \`${d.character}\` — no token starts with it`,
-  'syntax/malformed-rename': (d) => `this \`@rename\` has no ${d.missing}: a rename is \`@rename(Type, "<predicate IRI>" as <name>)\``,
+  'syntax/missing-iri': (d) => `\`${d.name}\` has no \`@iri\`: a declared type and each of its fields write their IRI`,
   'syntax/misplaced-attribute': (d) => `\`${d.attribute}\` does not belong ${d.place}`,
   'syntax/invalid-mapping-header': (d) => `this is not a mapping header — ${d.reason} — so nothing is produced from it. A mapping is \`Name : Shape from <source>\``,
   'syntax/number-out-of-range': (d) => `\`${d.literal}\` does not fit in ${d.kind}: ${d.reason}`,
@@ -1139,8 +1117,6 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'shape/cyclic-reference': (d) => `cyclic shape graph not supported: ${d.path.join(' -> ')}`,
   'shape/unresolved-reference': (d) => `unresolved shape reference \`${d.reference}\` in shape \`${d.shape}\``,
   'shape/binding-arity': (d) => `the binding names ${d.named} shape(s) and the document declares ${d.declared}, so \`${d.name}\`, at position ${d.position}, binds nothing`,
-  'shape/rename-unknown-type': (d) => `\`@rename\` names \`${d.shape}\`, which this \`type\` binding does not introduce`,
-  'shape/rename-unknown-predicate': (d) => `\`${d.shape}\` declares no predicate \`${d.predicate}\`, so this rename never fires`,
   'shape/more-than-one-output': (d) => `a program may declare only one output shape; found \`${d.first}\` and \`${d.second}\``,
   'document/not-registered': (d) => `the document \`${d.document}\` is not registered`,
   'document/unread': (d) => `${d.documents.length} document(s) could not be read: ${d.documents.join(', ')}`,

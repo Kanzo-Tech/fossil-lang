@@ -1,0 +1,147 @@
+PROGRAM
+  TYPE_DEF
+    IDENT "type"
+    LBRACE "{"
+    IMPORT_MEMBER
+      IDENT "Place"
+      IDENT "as"
+      IDENT "City"
+    RBRACE "}"
+    DEFINE ":="
+    EXPR
+      POSTFIX_EXPR
+        POSTFIX_EXPR
+          LITERAL_EXPR
+            IDENT "io"
+          DOT "."
+          IDENT "shex"
+        LPAREN "("
+        ARG_LIST
+          ARG
+            LITERAL_EXPR
+              STRING "\"places.shex\""
+        RPAREN ")"
+  TYPE_DECL
+    IRI_ATTR
+      AT_ATTR "@iri"
+      LPAREN "("
+      STRING "\"https://schema.org/Person\""
+      RPAREN ")"
+    IDENT "type"
+    IDENT "Person"
+    FIELD
+      IRI_ATTR
+        AT_ATTR "@iri"
+        LPAREN "("
+        STRING "\"https://schema.org/name\""
+        RPAREN ")"
+      IDENT "name"
+      SHAPE_SEP ":"
+      TYPE_EXPR
+        IDENT "String"
+    FIELD
+      IRI_ATTR
+        AT_ATTR "@iri"
+        LPAREN "("
+        STRING "\"https://shop.example/vocab/name\""
+        RPAREN ")"
+      IDENT "handle"
+      SHAPE_SEP ":"
+      TYPE_EXPR
+        IDENT "String"
+    FIELD
+      IRI_ATTR
+        AT_ATTR "@iri"
+        LPAREN "("
+        STRING "\"https://schema.org/birthDate\""
+        RPAREN ")"
+      IDENT "born"
+      SHAPE_SEP ":"
+      TYPE_EXPR
+        IDENT "Option"
+        LT "<"
+        TYPE_EXPR
+          IDENT "Date"
+        GT ">"
+    FIELD
+      IRI_ATTR
+        AT_ATTR "@iri"
+        LPAREN "("
+        STRING "\"https://schema.org/knowsAbout\""
+        RPAREN ")"
+      IDENT "topics"
+      SHAPE_SEP ":"
+      TYPE_EXPR
+        IDENT "Seq"
+        LT "<"
+        TYPE_EXPR
+          IDENT "String"
+        GT ">"
+    FIELD
+      IRI_ATTR
+        AT_ATTR "@iri"
+        LPAREN "("
+        STRING "\"https://schema.org/homeLocation\""
+        RPAREN ")"
+      IDENT "livesIn"
+      SHAPE_SEP ":"
+      TYPE_EXPR
+        IDENT "Ref"
+        LT "<"
+        TYPE_EXPR
+          IDENT "City"
+        GT ">"
+  SOURCE_DEF
+    IDENT "User"
+    DEFINE ":="
+    EXPR
+      POSTFIX_EXPR
+        POSTFIX_EXPR
+          LITERAL_EXPR
+            IDENT "io"
+          DOT "."
+          IDENT "csv"
+        LPAREN "("
+        ARG_LIST
+          ARG
+            LITERAL_EXPR
+              STRING "\"users.csv\""
+        RPAREN ")"
+  MAPPING
+    MAPPING_HEADER
+      IDENT "Users"
+      SHAPE_SEP ":"
+      SHAPE_EXPR
+        IDENT "Person"
+      KW_FROM "from"
+      EXPR
+        LITERAL_EXPR
+          IDENT "User"
+    MAPPING_BODY
+      PROPERTY
+        PROPERTY_LHS
+          AT_ATTR "@subject"
+        ASSIGN "="
+        EXPR
+          INTERP_STRING_EXPR
+            STRING_OPEN "\""
+            STRING_TEXT "https://shop.example/user/"
+            INTERPOLATION
+              INTERP_OPEN "{"
+              POSTFIX_EXPR
+                LITERAL_EXPR
+                  IDENT "User"
+                DOT "."
+                IDENT "id"
+              RBRACE "}"
+            STRING_CLOSE "\""
+      PROPERTY
+        PROPERTY_LHS
+          IDENT "name"
+        ASSIGN "="
+        EXPR
+          POSTFIX_EXPR
+            LITERAL_EXPR
+              IDENT "User"
+            DOT "."
+            IDENT "name"

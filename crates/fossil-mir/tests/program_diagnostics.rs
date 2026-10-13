@@ -222,6 +222,34 @@ People : Person from Users
     assert!(errors.is_empty(), "a clean program reported {errors:?}");
 }
 
+/// A declared type parses and nothing below the parser reads it yet, so beside
+/// a clean program it adds no diagnostic — neither a refusal of the form nor an
+/// error about a name nothing bound.
+#[test]
+fn a_declared_type_beside_a_clean_program_reports_nothing() {
+    let program = "\
+type { Person } := io.shex(\"p.shex\")
+
+@iri(\"https://example.org/City\")
+type City
+    @iri(\"https://example.org/name\")  name: String
+    @iri(\"https://example.org/tags\")  tags: Option<Seq<String>>
+
+Users := io.csv(\"users.csv\")
+
+People : Person from Users
+    @subject = \"https://example.org/person/{Users.id}\"
+    name = Users.name
+";
+    let (db, file) = test_support::db_with_document_at("t.fossil", program, "p.shex", SHAPE);
+    let errors: Vec<_> = program_diagnostics(&db, file)
+        .into_iter()
+        .filter(|d| d.severity == fossil_graph_schema::Severity::Error)
+        .map(|d| d.problem)
+        .collect();
+    assert!(errors.is_empty(), "a declaration reported {errors:?}");
+}
+
 /// **An internal compiler error reached the browser, and it was found by
 /// accident.**
 ///

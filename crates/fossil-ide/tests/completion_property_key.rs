@@ -8,11 +8,9 @@
 //!
 //! **The label.** It offered `constraint.predicate`, the raw predicate IRI. A
 //! property key is never the IRI: it is
-//! [`fossil_graph_schema::short_name`] of it — the `@rename` the program
-//! addressed to that predicate, else the last segment. Accepting
+//! [`fossil_graph_schema::local_name`] of it, the last segment. Accepting
 //! `https://shop.example/voc#email` writes a line the parser refuses
-//! (`PropertyLhs := IDENT`), and accepting `name` where the program wrote
-//! `@rename(Person, "…#name" as full_name)` writes one the checker refuses.
+//! (`PropertyLhs := IDENT`).
 //!
 //! **The position.** It fired wherever the cursor was inside a mapping whose
 //! shape resolved — the header, the right-hand side of `=`, and after a member
@@ -114,16 +112,6 @@ Users : Person from User
     email = User.email
 ";
 
-/// The same program with the repair the compiler recommends for a colliding
-/// predicate, addressed to `shop:name`.
-const RENAMED: &str = "\
-@rename(Person, \"https://shop.example/voc#name\" as full_name)
-type { Person, Order } := io.shex(\"shop.shex\")
-User := io.csv(\"users.csv\")
-Users : Person from User
-    email = User.email
-";
-
 /// A fresh, still-empty line inside the body — four spaces and nothing else,
 /// which is what an editor leaves after `Enter` on an indented line.
 ///
@@ -181,21 +169,6 @@ fn the_key_position_offers_the_name_a_program_writes() {
     // The cursor mid-name, which is what an editor re-requesting on every
     // keystroke actually sends.
     assert_eq!(fields(&db, f, 3, 6), vec!["email", "name"]);
-}
-
-/// **The label, and the half that is silent.** `local_name` and `short_name`
-/// agree on every predicate no `@rename` names, so a fixture without one cannot
-/// tell them apart. This is the one that can: the program renames
-/// `shop:name`, and `name` is a key the checker refuses.
-#[test]
-fn a_renamed_predicate_is_offered_under_its_rename() {
-    let mut db = host();
-    let f = program(&mut db, RENAMED);
-    assert_eq!(
-        fields(&db, f, 4, 9),
-        vec!["email", "full_name"],
-        "`@rename` is what makes the key writable, so it is what the key is",
-    );
 }
 
 /// **The position.** After a member access the receiver's members are the

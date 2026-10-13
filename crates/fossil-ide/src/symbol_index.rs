@@ -17,7 +17,7 @@
 use std::ops::Range;
 
 use fossil_base::SourceFile;
-use fossil_syntax::ast::{Mapping, SourceDef};
+use fossil_syntax::ast::{ImportMember, Mapping, SourceDef};
 use fossil_syntax::{SyntaxKind, SyntaxNode};
 use smol_str::SmolStr;
 
@@ -93,17 +93,14 @@ impl SymbolIndex {
                     range: node_range(&item),
                 });
             }
-            // `{ A, B } := io.rdf(…)` binds one name per `IDENT` before the
-            // `:=`. There is no `MultiSourceDef` AST node to cast to, so the
-            // tokens are read directly, and each name gets its OWN range rather
-            // than the shared node's — it is the only thing that tells `A` from
-            // `B` when both live in one node.
+            // `{ A, B } := io.rdf(…)` binds one name per member, and each name
+            // gets its OWN range rather than the shared node's — it is the only
+            // thing that tells `A` from `B` when both live in one node.
             if item.kind() == SyntaxKind::MULTI_SOURCE_DEF {
                 for token in item
-                    .children_with_tokens()
-                    .filter_map(rowan::NodeOrToken::into_token)
-                    .take_while(|t| t.kind() != SyntaxKind::DEFINE)
-                    .filter(|t| t.kind() == SyntaxKind::IDENT)
+                    .children()
+                    .filter_map(ImportMember::cast)
+                    .filter_map(|m| m.name_token())
                 {
                     let r = token.text_range();
                     entries.push(SymbolEntry {

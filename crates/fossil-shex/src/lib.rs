@@ -66,8 +66,7 @@ pub mod spans;
 use std::collections::HashMap;
 
 use fossil_graph_schema::{
-    GraphSchema, Occurs, OutputShapes, PropertyConstraint, Rejection, Renames,
-    Shape as OutputShape, Term,
+    GraphSchema, Occurs, OutputShapes, PropertyConstraint, Rejection, Shape as OutputShape, Term,
 };
 use prefixmap::{IriRef, PrefixMap};
 use rudof_iri::IriS;
@@ -429,12 +428,10 @@ impl ShExDescriptor {
     ///
     /// One path, not two: this is [`Self::to_output_shapes`] followed by
     /// [`OutputShapes::to_graph_schema`], so a `ShEx` document and a decoded
-    /// document that says the same thing cannot lower differently. `renames`
-    /// travels with it for the same reason — it governs the column label, and a
-    /// forwarding method that dropped it would be a third answer.
+    /// document that says the same thing cannot lower differently.
     #[must_use]
-    pub fn to_graph_schema(&self, renames: &Renames) -> GraphSchema {
-        self.to_output_shapes().to_graph_schema(renames)
+    pub fn to_graph_schema(&self) -> GraphSchema {
+        self.to_output_shapes().to_graph_schema()
     }
 
     /// Build the resolved constraint table from an already-parsed schema.
@@ -1574,7 +1571,7 @@ shop:Order {
 
         let g = ShExDescriptor::from_reader(ORDER_SCHEMA.as_bytes())
             .expect("schema parses")
-            .to_graph_schema(&Renames::default());
+            .to_graph_schema();
 
         // The term the document declares, verbatim, beside the lattice's reading.
         let xsd = |local: &str| {

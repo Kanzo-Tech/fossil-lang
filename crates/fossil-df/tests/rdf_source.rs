@@ -154,7 +154,7 @@ async fn io_rdf_shex_descriptor_yields_typed_multivalued_edges() {
     let descriptor = OutputDescriptorKind::Lowered(
         ShExDescriptor::from_reader(KB_SHEX.as_bytes())
             .expect("parse ShEx")
-            .to_graph_schema(&fossil_graph_schema::Renames::default()),
+            .to_graph_schema(),
     );
 
     let ctx = SessionContext::new();

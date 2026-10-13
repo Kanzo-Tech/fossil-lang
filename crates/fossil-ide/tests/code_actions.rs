@@ -169,7 +169,6 @@ Contact : Contact from contacts
         "contacts",
         "\"https://example.org/contact/{contacts.id}\"",
         &disjuncts,
-        &[],
     );
 
     // The mapping block runs from `Contact :` to end-of-file.

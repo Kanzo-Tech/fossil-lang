@@ -22,7 +22,7 @@ There is no native language server. One existed, and why it went and what would 
 
 | you ask for | and it answers |
 | --- | --- |
-| a property key, in the body | the target shape's own predicates — a renamed predicate under its rename, with the full IRI as the entry's detail |
+| a property key, in the body | the target shape's own predicates, each under its last segment, with the full IRI as the entry's detail |
 | a column, after `Source.` | the fields the host read off the source with DuckDB-WASM, each with its inferred type |
 | a member, after any other dot | only the catalogue rows that receiver has, spelled bare: `where`, not `seq.where` |
 | a name, away from any dot | every row, spelled in full, because there is no receiver to narrow by |

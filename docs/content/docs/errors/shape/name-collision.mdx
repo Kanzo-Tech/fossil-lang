@@ -32,13 +32,10 @@ document other people share.
 
 ## How to repair it
 
-- **Rename one of them above the binding.** The `help` is the line to paste: an `@rename` naming
-  the bound type, the second predicate's full IRI, and an alias taken from its vocabulary
-  (`foaf_name` here). Both keys are then writable:
-
-<Program src="rename/rename.fossil" title="rename.fossil" />
-
-- **The alias is yours to choose.** Any name that collides with nothing works; a rename that names a
-  predicate the shape does not declare is reported as
-  [`shape/rename-unknown-predicate`](/docs/errors/shape/rename-unknown-predicate) rather than
-  silently doing nothing. [Naming what you produce](/docs/book/what-you-produce) walks through it.
+- **Declare the type in the program.** A declaration writes each field's name beside its IRI, so
+  `shop:name` and `foaf:name` are two fields with two names and collide nowhere. The `help` names the
+  bound type, the second predicate's full IRI, and a field name taken from its vocabulary
+  (`foaf_name` here). The parser reads a declaration and the checker does not yet;
+  [Types declared in the program](/docs/design/declared) is where that is going.
+- **Change the document**, if it is yours: a predicate the shape does not need is a line to delete.
+  [Naming what you produce](/docs/book/what-you-produce) walks through the rule.

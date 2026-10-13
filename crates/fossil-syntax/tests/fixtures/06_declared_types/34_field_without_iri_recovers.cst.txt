@@ -1,0 +1,28 @@
+PROGRAM
+  TYPE_DECL
+    IRI_ATTR
+      AT_ATTR "@iri"
+      LPAREN "("
+      STRING "\"https://example.org/Person\""
+      RPAREN ")"
+    IDENT "type"
+    IDENT "Person"
+    FIELD
+      IDENT "name"
+      SHAPE_SEP ":"
+      TYPE_EXPR
+        IDENT "String"
+    FIELD
+      IRI_ATTR
+        AT_ATTR "@iri"
+        LPAREN "("
+        STRING "\"https://example.org/born\""
+        RPAREN ")"
+      IDENT "born"
+      SHAPE_SEP ":"
+      TYPE_EXPR
+        IDENT "Option"
+        LT "<"
+        TYPE_EXPR
+          IDENT "Date"
+        GT ">"

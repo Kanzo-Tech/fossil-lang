@@ -86,22 +86,22 @@
       "x-detail": "\"unexpected character `{character}` — no token starts with it\""
     },
     {
-      "description": "A `@rename` written incompletely; `missing` is the part it lacks.",
+      "description": "A declared type, or a field of one, written without its `@iri`; `name` is the type's or the field's.",
       "properties": {
         "code": {
           "enum": [
-            "syntax/malformed-rename"
+            "syntax/missing-iri"
           ],
           "type": "string"
         },
         "data": {
           "properties": {
-            "missing": {
+            "name": {
               "type": "string"
             }
           },
           "required": [
-            "missing"
+            "name"
           ],
           "type": "object"
         }
@@ -110,9 +110,9 @@
         "code",
         "data"
       ],
-      "title": "A malformed rename",
+      "title": "A declaration without its IRI",
       "type": "object",
-      "x-detail": "\"this `@rename` has no {missing}: a rename is \\\n         `@rename(Type, \\\"<predicate IRI>\\\" as <name>)`\""
+      "x-detail": "\"`{name}` has no `@iri`: a declared type and each of its fields write their IRI\""
     },
     {
       "description": "An attribute written where it does not belong.",
@@ -1394,82 +1394,6 @@
       "title": "More names than shapes",
       "type": "object",
       "x-detail": "\"the binding names {named} shape(s) and the document declares {declared}, so `{name}`, \\\n         at position {position}, binds nothing\""
-    },
-    {
-      "description": "A `@rename` naming a type its binding does not introduce.",
-      "properties": {
-        "code": {
-          "enum": [
-            "shape/rename-unknown-type"
-          ],
-          "type": "string"
-        },
-        "data": {
-          "properties": {
-            "introduced": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "shape": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "introduced",
-            "shape"
-          ],
-          "type": "object"
-        }
-      },
-      "required": [
-        "code",
-        "data"
-      ],
-      "title": "A rename of a type the binding does not introduce",
-      "type": "object",
-      "x-detail": "\"`@rename` names `{shape}`, which this `type` binding does not introduce\""
-    },
-    {
-      "description": "A `@rename` naming a predicate its shape does not declare.",
-      "properties": {
-        "code": {
-          "enum": [
-            "shape/rename-unknown-predicate"
-          ],
-          "type": "string"
-        },
-        "data": {
-          "properties": {
-            "declared": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "predicate": {
-              "type": "string"
-            },
-            "shape": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "declared",
-            "predicate",
-            "shape"
-          ],
-          "type": "object"
-        }
-      },
-      "required": [
-        "code",
-        "data"
-      ],
-      "title": "A rename of a predicate the shape does not declare",
-      "type": "object",
-      "x-detail": "\"`{shape}` declares no predicate `{predicate}`, so this rename never fires\""
     },
     {
       "description": "A program whose sources declare two different output shapes; one program writes one.",

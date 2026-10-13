@@ -53,7 +53,7 @@ export const fossil: Grammar = {
       ],
     },
     slot: {
-      // `@subject`, `@rename` — the language's own namespace, against the bare names the shape
+      // `@subject`, `@iri` — the language's own namespace, against the bare names the shape
       // declares. Marked as a keyword because that is what it is.
       patterns: [{ match: "@[A-Za-z_][A-Za-z0-9_]*", name: "keyword.control.fossil" }],
     },

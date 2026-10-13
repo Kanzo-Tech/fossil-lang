@@ -182,7 +182,7 @@ you meant.
 
 **`pᵢ` is a bare name.** It is the last segment of a predicate IRI the shape declares. Two predicates
 whose last segments coincide are an error naming both IRIs; the compiler never disambiguates, and
-the repair is `@rename` in the program. [What was discarded](/docs/design/discarded) carries the
+the repair is declaring the type in the program ([Types declared in the program](/docs/design/declared)). [What was discarded](/docs/design/discarded) carries the
 measurement that settles it.
 
 **Closure is a property of the shape, not a flag.** An undeclared property is an error *if and only

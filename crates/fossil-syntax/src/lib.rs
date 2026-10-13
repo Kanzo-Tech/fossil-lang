@@ -26,8 +26,8 @@ pub use kind::{FossilLang, SyntaxElement, SyntaxKind, SyntaxNode, SyntaxToken};
 pub mod attr {
     /// `@subject = "…"` — a mapping's identity.
     pub const SUBJECT: &str = "@subject";
-    /// `@rename(Shape, "iri" as name)` — above a `type` binding.
-    pub const RENAME: &str = "@rename";
+    /// `@iri("…")` — above a `type` declaration and before each of its fields.
+    pub const IRI: &str = "@iri";
 }
 pub use parser::{Cst, CstRoot, parse};
 

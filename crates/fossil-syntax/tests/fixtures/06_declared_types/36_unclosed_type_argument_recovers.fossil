@@ -1,0 +1,4 @@
+@iri("https://example.org/Doc")
+type Doc
+    @iri("https://example.org/tags")  tags: Option<String
+    @iri("https://example.org/name")  name: String

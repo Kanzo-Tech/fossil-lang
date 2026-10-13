@@ -28,7 +28,7 @@ completeness.
 | **F#'s `CsvProvider<…>` plus `.Load(…)`** | The one place fossil departs, and why: F# separates the type from the file because a type is reused across files. Here a binding *is* one concrete source, so `User := io.csv(…)` binds both and the separation would be ceremony. |
 | **SQL's delimited identifier** (ISO/IEC 9075, `"…"`), as `DataFusion` and `DuckDB` implement it, and **`jq`'s `."a.b"`** | The spelling of a member whose name is not an identifier: `KnowsRow."Person.id"`, the text between the quotes is the name. The backtick spelling (Kotlin, Scala, Spark SQL, MySQL, BigQuery) is the alternative in [what was discarded](/docs/design/discarded). |
 | **`DuckDB`'s `read_csv_auto`** | What a header that names one column twice is called: the second `Person.id` is `Person.id_1`, compared without case, and a generated name that is taken grows another suffix (`a\|a\|a_1` → `a, a_1, a_1_1`). It is the engine that describes a source, so the executor reads the file under its names (`crates/fossil-df/src/lib.rs, unique_column_names`). |
-| **Prisma `@map`** | The shape of the repair when a derived name is wrong: an attribute above the declaration, all constants, in the program rather than in the vocabulary — which is `@rename`. |
+| **Prisma `@map`** | The shape of the repair when a derived name is wrong: an attribute above the declaration, all constants, in the program rather than in the vocabulary. It was `@rename`, which a declared type replaced ([discarded](/docs/design/discarded)). |
 
 ## Identity
 
@@ -58,7 +58,7 @@ expression in an attribute argument. These are the languages, and the control ex
 | **CUE** | The model for import soundness — what it means for a document to be accepted without silently losing what it declared. |
 | **RDFC-1.0** | Canonicalisation, and therefore what "a fixed point modulo canonical form" means as an acceptance test. |
 | **LinkML** and **TypeSpec** | Both put closure and cardinality in an emitter flag rather than in the type, and both demonstrate that round-tripping is then impossible **by construction**. That is why those live in the type here and never in a flag. |
-| **schema.org** | The measured cost of a vocabulary you do not control: 82 terms carrying `supersededBy`, 24 morphological renames, and a typo frozen forever as a global identifier. It is the argument for `@rename` living in the program. |
+| **schema.org** | The measured cost of a vocabulary you do not control: 82 terms carrying `supersededBy`, 24 morphological renames, and a typo frozen forever as a global identifier. It is the argument for the repair living in the program, which is where a declared type puts it. |
 | **Haskell §3.11** and **Scala §6.19** | Both define the left of `<-` as the **element** and the right as the collection. Borrowing that arrow for a source binding, where the left names the relation, would say the opposite of what it means. |
 | **Rust — `s.len()` ≡ `str::len(&s)`** | One catalogue entry reachable by two paths, which is the model for member-call dispatch by receiver type. |
 | **17 mapping languages and 12 schema-as-code systems** surveyed | 15 of the 17 treat a class IRI as an opaque string, and every one of them **derives** the shape from the mapping. Checking the mapping *against* the shape is the inversion, and it is the thesis. |

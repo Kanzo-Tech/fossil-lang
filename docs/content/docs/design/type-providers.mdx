@@ -66,12 +66,10 @@ avoid anything that lets **a small change in the sample cause a large change in 
 The citation is the *Types from data* row in [prior art](/docs/design/prior-art); automatic
 disambiguation is [discarded](/docs/design/discarded) with what would bring it back.
 
-The repair is a rename, in the shape of Prisma's `@map`:
-
-<Program src="rename/rename.fossil" region="repair" title="rename.fossil" />
-
-It lives in the program rather than in the document being read for one plain reason: **the vocabulary
-may not be yours.** A local naming problem must not become an edit to a document other people share.
+The repair is to declare the type in the program, where each field's name is written beside its IRI
+([Types declared in the program](/docs/design/declared)). It lives in the program rather than in the
+document being read for one plain reason: **the vocabulary may not be yours.** A local naming problem
+must not become an edit to a document other people share.
 
 ## Why the provider is named inside the program
 

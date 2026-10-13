@@ -240,29 +240,13 @@ pub struct TypeEntry {
     /// registry row; dispatching on the document's extension instead would make
     /// `io.shex("x.ttl")` and `io.shacl("x.ttl")` the same program.
     pub constructor: Option<SmolStr>,
-    /// `@rename(Person, "http://xmlns.com/foaf/0.1/name" as foaf_name)` — the
-    /// renames written above this binding and addressed to THIS name, as
-    /// `(predicate IRI, the name to write instead)` in source order.
-    ///
-    /// Empty for every binding that carries none, which is almost all of them:
-    /// a rename is the repair for two predicates whose last IRI segments
-    /// coincide, and the repair is the exception. Property keys are bare names
-    /// on the bet that such a collision is rare; a vocabulary where it is the
-    /// norm is what would reverse that and bring qualification back.
-    ///
-    /// Addressed to a NAME and not to the file: one `type { … }` line binds
-    /// several names, `@rename`'s first argument says which, and two shapes in
-    /// one document can each have a colliding `name` needing different repairs.
-    /// [`crate::shapes::ResolvedShape::short_names`] applies them.
-    pub renames: Vec<(SmolStr, SmolStr)>,
     /// The whole `type { Person } := io.shex("shape.shex")` item, file-absolute
     /// and trivia-trimmed — [`SourceEntry::span`]'s twin, and the same
     /// [`item_span`].
     ///
     /// A diagnostic about the SHAPE rather than about one property belongs
     /// here: two predicates that collide make the shape unwritable, and the
-    /// binding is where the reader chose it and where the `@rename` repair
-    /// goes.
+    /// binding is where the reader chose it.
     pub span: Span,
 }
 
@@ -392,55 +376,6 @@ impl<'db> DefMap<'db> {
             .and_then(|e| e.shape_iri.clone())
     }
 
-    /// The `@rename`s addressed to the binding that introduced `shape_iri`, as
-    /// `(predicate IRI, the name to write instead)`.
-    ///
-    /// Keyed by the SHAPE and not by the local name, because that is what the
-    /// caller has: a mapping header names a type, `lower_to_hir` resolves it to
-    /// a shape IRI, and by the time [`crate::check`] has a `ResolvedShape` the
-    /// local name is behind it. Empty when the file has no rename for that
-    /// shape, which is the ordinary case.
-    #[must_use]
-    pub fn renames_for_shape(
-        self,
-        db: &'db dyn fossil_base::Db,
-        shape_iri: &str,
-    ) -> Vec<(SmolStr, SmolStr)> {
-        self.types(db)
-            .iter()
-            .find(|e| e.shape_iri.as_deref() == Some(shape_iri))
-            .map_or_else(Vec::new, |e| e.renames.clone())
-    }
-
-    /// Every `@rename` the file wrote, addressed by shape — what the WRITER
-    /// needs, where [`Self::renames_for_shape`] is what the checker needs.
-    ///
-    /// The two halves used to be one: the checker read the table and
-    /// `OutputShapes::to_graph_schema` did not, so a repaired collision
-    /// type-checked under its new name and shipped under the old one. This is
-    /// the whole table because a document declares several shapes and the run
-    /// lowers all of them at once.
-    #[must_use]
-    pub fn renames(self, db: &'db dyn fossil_base::Db) -> fossil_graph_schema::Renames {
-        fossil_graph_schema::Renames::new(
-            self.types(db)
-                .iter()
-                .filter(|e| !e.renames.is_empty())
-                .filter_map(|e| {
-                    e.shape_iri.as_ref().map(|iri| {
-                        (
-                            iri.to_string(),
-                            e.renames
-                                .iter()
-                                .map(|(p, n)| (p.to_string(), n.to_string()))
-                                .collect(),
-                        )
-                    })
-                })
-                .collect(),
-        )
-    }
-
     /// Why a type name bound nothing. `None` when it bound a shape.
     #[must_use]
     pub fn lookup_type_error(
@@ -563,26 +498,13 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                     document.as_deref(),
                     &members,
                 );
-                // The `@rename` attributes above this binding, sorted by the
-                // name each addresses. A rename addressed to a name the binding
-                // does not introduce belongs to nobody and is dropped HERE —
-                // `crate::lower` reports it, over the same nodes, with a real
-                // span. This query stays diagnostic-free: one mistake gets one
-                // report, and the lowering is where the span is.
-                let renames = parse_renames(&item);
                 for (name, (shape_iri, shape_error)) in members.into_iter().zip(bound) {
-                    let mine = renames
-                        .iter()
-                        .filter(|r| r.type_name == name)
-                        .map(|r| (r.predicate.clone(), r.rename_to.clone()))
-                        .collect();
                     types.push(TypeEntry {
                         name,
                         shape_iri,
                         shape_error,
                         document: document.clone(),
                         constructor: ctor.clone(),
-                        renames: mine,
                         // Every name a `type { A, B }` line binds shares the
                         // line's span, because they share the binding — the
                         // same answer the destructuring source gives.
@@ -984,121 +906,20 @@ pub(crate) fn named_arg_names(node: &SyntaxNode) -> Vec<(SmolStr, Span)> {
     })
 }
 
-/// One `"…" as name` read off a `RENAME_ATTR`, with the name it is addressed
-/// to.
-///
-/// Public to the crate because [`crate::lower`] validates the same three fields
-/// against the binding and the shape document, with the CST node in hand so the
-/// diagnostic has a real span. Two readers, one shape, and the reading is here
-/// because this is where the CST is already being walked.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RenameAttr {
-    /// The `IDENT` after `@rename(` — one of the names the binding introduces.
-    pub type_name: SmolStr,
-    /// The predicate IRI, unquoted. A full IRI and never a short name: the two
-    /// predicates being told apart differ only BEFORE their last segment, so
-    /// the last segment cannot identify either.
-    pub predicate: SmolStr,
-    /// The `IDENT` after `as` — what to write in a property key instead.
-    pub rename_to: SmolStr,
-}
-
-/// Every `RENAME_ATTR` above one `TYPE_DEF`, flattened to one entry per
-/// `RENAME`.
-///
-/// `RenameAttr*` is part of the `TypeDef` production (grammar.bnf, `TypeDef`), so
-/// these are CHILDREN of the node and not siblings of it — which is what makes a
-/// rename belong to one binding rather than to the file.
-///
-/// **That distinction is load-bearing and it is not decoration.**
-/// [`DefMap::output_shape_binding`] returns the document of the FIRST `type`
-/// binding in the file, a `find_map` over all of them; if a `@rename` were
-/// file-scoped it would inherit that flattening and a two-binding program would
-/// silently apply one binding's repair to the other's shape. Scoped to the node,
-/// it cannot.
-pub(crate) fn parse_renames(type_def: &fossil_syntax::SyntaxNode) -> Vec<RenameAttr> {
-    use fossil_syntax::SyntaxKind;
-    let mut out = Vec::new();
-    for attr in type_def
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::RENAME_ATTR)
-    {
-        // The attribute's own IDENT is the one that is NOT inside a `RENAME`:
-        // `@rename(Person, "…" as foaf_name)` has `Person` as a direct token
-        // child and `foaf_name` nested one level down.
-        let Some(type_name) = attr
-            .children_with_tokens()
-            .filter_map(fossil_syntax::SyntaxElement::into_token)
-            .find(|t| t.kind() == SyntaxKind::IDENT)
-            .map(|t| SmolStr::from(t.text()))
-        else {
-            continue;
-        };
-        for rename in attr.children().filter(|c| c.kind() == SyntaxKind::RENAME) {
-            let toks: Vec<_> = rename
-                .children_with_tokens()
-                .filter_map(fossil_syntax::SyntaxElement::into_token)
-                .filter(|t| {
-                    !matches!(
-                        t.kind(),
-                        SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT
-                    )
-                })
-                .collect();
-            let predicate = toks.iter().find(|t| t.kind() == SyntaxKind::STRING);
-            // The LAST `IDENT` is the new name; the first is the contextual
-            // `as`, which is an ordinary identifier and lexes as one.
-            let rename_to = toks.iter().rev().find(|t| t.kind() == SyntaxKind::IDENT);
-            if let (Some(predicate), Some(rename_to)) = (predicate, rename_to)
-                && rename_to.text() != "as"
-            {
-                out.push(RenameAttr {
-                    type_name: type_name.clone(),
-                    predicate: SmolStr::from(
-                        predicate
-                            .text()
-                            .trim_start_matches('"')
-                            .trim_end_matches('"'),
-                    ),
-                    rename_to: SmolStr::from(rename_to.text()),
-                });
-            }
-        }
-    }
-    out
-}
-
-/// The brace-list names of a destructuring binding — the IDENTs strictly
-/// between `{` and `}`.
+/// The names a destructuring binding introduces, one per `IMPORT_MEMBER`:
+/// the name after `as` when there is one, else the member's own.
 ///
 /// Serves `MULTI_SOURCE_DEF` (`{ A, B } := …`) and `TYPE_DEF`
-/// (`type { A, B } := …`) alike. Scoping to the braces rather than to "before
-/// the binder" is what makes one function cover both: a `TYPE_DEF` carries the
-/// contextual `type` IDENT before its `{`, and taking everything before the
-/// binder would bind a phantom member called `type`.
+/// (`type { Place as City } := …`) alike, because both hold the same member
+/// list (grammar.bnf, `ImportMember`). A member whose name did not parse
+/// introduces nothing.
+///
+/// The members still bind by POSITION below, whatever the shape name before an
+/// `as` says: binding by that name is the lowering's, and it has not landed.
 fn parse_brace_member_names(node: &fossil_syntax::SyntaxNode) -> Vec<SmolStr> {
-    use fossil_syntax::SyntaxKind;
-    let toks: Vec<_> = node
-        .descendants_with_tokens()
-        .filter_map(fossil_syntax::SyntaxElement::into_token)
-        .filter(|t| {
-            !matches!(
-                t.kind(),
-                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT
-            )
-        })
-        .collect();
-    let Some(open) = toks.iter().position(|t| t.kind() == SyntaxKind::LBRACE) else {
-        return Vec::new();
-    };
-    let close = toks
-        .iter()
-        .position(|t| t.kind() == SyntaxKind::RBRACE)
-        .unwrap_or(toks.len());
-    toks[open + 1..close.max(open + 1)]
-        .iter()
-        .filter(|t| t.kind() == SyntaxKind::IDENT)
-        .map(|t| SmolStr::from(t.text()))
+    node.children()
+        .filter_map(fossil_syntax::ast::ImportMember::cast)
+        .filter_map(|m| m.name())
         .collect()
 }
 
@@ -1610,69 +1431,6 @@ b := io.parquet(\"b.parquet\")
                 delimiter: None,
             }),
             "`type` is contextual, so it is still a binding name"
-        );
-    }
-
-    /// `@rename` reaches the `DefMap`, and it reaches it ADDRESSED: one `type`
-    /// line binds several names, and each rename goes to the one it names.
-    ///
-    /// Sorting by name and not by file is the point. `output_shape_binding` is
-    /// a `find_map` over the file's bindings — it answers with the FIRST — so a
-    /// file-scoped rename table would inherit that flattening and apply one
-    /// binding's repair to another binding's shape without a word.
-    #[test]
-    fn a_rename_is_addressed_to_one_bound_name() {
-        let src = "@rename(uno, \"https://example.org/Zeta#name\" as zeta_name)\n\
-                   @rename(dos, \"https://example.org/Alpha#name\" as alpha_name)\n\
-                   type { uno, dos } := io.shex(\"two_shapes.shex\")\n";
-        let (db, file) = db_with_document(src, "two_shapes.shex", TWO_SHAPES);
-        let dm = def_map(&db, file);
-
-        let by_name = |n: &str| {
-            dm.types(&db)
-                .iter()
-                .find(|t| t.name == n)
-                .expect("bound")
-                .renames
-                .clone()
-        };
-        assert_eq!(
-            by_name("uno"),
-            vec![(
-                SmolStr::from("https://example.org/Zeta#name"),
-                SmolStr::from("zeta_name")
-            )],
-            "`uno`'s rename, and only `uno`'s"
-        );
-        assert_eq!(
-            by_name("dos"),
-            vec![(
-                SmolStr::from("https://example.org/Alpha#name"),
-                SmolStr::from("alpha_name")
-            )]
-        );
-        // And the shape-keyed accessor the checker uses reaches the same table:
-        // by the time a `ResolvedShape` exists the local name is behind it.
-        assert_eq!(
-            dm.renames_for_shape(&db, "https://example.org/Zeta"),
-            by_name("uno")
-        );
-    }
-
-    /// A rename addressed to a name the binding does not introduce belongs to
-    /// nobody, and is dropped HERE — `crate::lower::check_renames` reports it
-    /// over the same nodes, with a real span. This test pins the drop so the
-    /// report stays the only thing standing between it and silence.
-    #[test]
-    fn a_rename_addressed_to_an_unbound_name_binds_to_nothing() {
-        let src = "@rename(Persn, \"https://example.org/Zeta#name\" as z)\n\
-                   type { Person } := io.shex(\"two_shapes.shex\")\n";
-        let (db, file) = db_with_document(src, "two_shapes.shex", TWO_SHAPES);
-        let dm = def_map(&db, file);
-        assert!(
-            dm.types(&db)[0].renames.is_empty(),
-            "`Persn` is not `Person`, and a rename is not applied to a name it \
-             did not address"
         );
     }
 

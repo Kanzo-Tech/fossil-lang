@@ -110,8 +110,7 @@ pub struct ShapeConstraint<'db> {
 /// a row of [`ResolvedShape::short_names`]' table.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Predicate {
-    /// The short name: the `@rename` addressed to the predicate, else the last
-    /// segment of its IRI.
+    /// The short name: the last segment of the predicate's IRI.
     pub name: SmolStr,
     /// The predicate IRI, fully resolved.
     pub iri: SmolStr,
@@ -177,11 +176,11 @@ impl<'db> ResolvedShape<'db> {
     /// The shape's predicates by the SHORT NAME a program writes, and the
     /// collisions that make some of them unwritable.
     ///
-    /// The short name is [`fossil_graph_schema::short_name`] — the `@rename`
-    /// addressed to the predicate, else the last segment of its IRI. That is
-    /// the same function `OutputShapes::to_graph_schema` emits the column with,
-    /// which is what stops a renamed predicate being written under one name and
-    /// emitted under another.
+    /// The short name is [`fossil_graph_schema::local_name`] — the last
+    /// segment of the IRI. That is the same function
+    /// `OutputShapes::to_graph_schema` emits the column with, which is what
+    /// stops a predicate being written under one name and emitted under
+    /// another.
     ///
     /// **A collision is an error naming both IRIs, and never a numeric suffix.**
     /// The evidence is the authors' own: FSharp.Data's PLDI-2016 paper declares
@@ -190,31 +189,18 @@ impl<'db> ResolvedShape<'db> {
     /// apply that criterion to names — its collision scheme is `PascalCase2`,
     /// its singulariser produced `Purchasis` and `Sourcis`, and a minor version
     /// renamed members and broke a program in production. The repair here is
-    /// the author's and it is all constants: `@rename` above the type binding.
+    /// the author's: declare the type in the program, where each field writes
+    /// its own name beside its IRI.
     ///
     /// Both halves come back from one walk because the caller needs both: the
     /// table to resolve what the body wrote, and the collisions to say why a
     /// name it could not resolve is unwritable rather than unknown.
-    ///
-    /// `renames` is the repair, in the order the program wrote it: each entry is
-    /// `(predicate IRI, the name to use instead)`, read off the `@rename`
-    /// attributes above the `type` binding that introduced this shape's name
-    /// ([`crate::def_map::TypeEntry::renames`]). A predicate with a rename takes
-    /// it INSTEAD of its last segment, and the collision walk runs AFTER the
-    /// substitution — which is the only order in which the repair repairs
-    /// anything.
     #[must_use]
-    pub fn short_names(
-        &self,
-        renames: &[(SmolStr, SmolStr)],
-    ) -> (Vec<Predicate>, Vec<NameCollision>) {
+    pub fn short_names(&self) -> (Vec<Predicate>, Vec<NameCollision>) {
         let mut table: Vec<Predicate> = Vec::with_capacity(self.constraints.len());
         let mut collisions: Vec<NameCollision> = Vec::new();
         for c in &self.constraints {
-            let short = SmolStr::from(fossil_graph_schema::short_name(
-                c.predicate.as_str(),
-                renames,
-            ));
+            let short = SmolStr::from(fossil_graph_schema::local_name(&c.predicate));
             if let Some(first) = table.iter().find(|p| p.name == short) {
                 collisions.push(NameCollision {
                     name: short,
@@ -304,11 +290,9 @@ pub struct NameCollision {
 /// name the author never sees becoming the name they depend on.
 ///
 /// A suggestion is the opposite of that. The compiler REFUSES, and the repair
-/// is `@rename`, which the author writes into the program as a constant. So
-/// this may be wrong, and being wrong costs an edit rather than a silent
-/// rename. What it may NOT be is unusable: the diagnostic recommends a line
-/// that has to parse and has to repair, which is what
-/// `the_recommended_rename_parses_and_repairs_the_collision` pins.
+/// is a declared type, whose field names the author writes into the program as
+/// constants. So this may be wrong, and being wrong costs an edit rather than a
+/// silent rename.
 ///
 /// # The rule
 ///

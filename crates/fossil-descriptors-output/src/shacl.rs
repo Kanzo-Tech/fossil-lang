@@ -428,7 +428,7 @@ ex:PersonShape a sh:NodeShape ;
     fn the_graph_schema_is_what_the_direct_walk_used_to_produce() {
         let gs = decode_shacl("shapes.ttl", SHAPES)
             .expect("parses")
-            .to_graph_schema(&fossil_graph_schema::Renames::default());
+            .to_graph_schema();
         assert_eq!(gs.nodes.len(), 1);
         assert_eq!(gs.nodes[0].label, "Person");
         assert_eq!(gs.nodes[0].iri.as_deref(), Some("https://ex.org/Person"));

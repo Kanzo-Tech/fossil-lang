@@ -27,7 +27,7 @@ export const TAG_BY_NAME: Readonly<Partial<Record<TokenKind, Tag>>> = {
   KwOr: tags.logicOperator,
   KwNot: tags.logicOperator,
 
-  // `@subject`, `@rename` — a marker naming what the line is for. Not
+  // `@subject`, `@iri` — a marker naming what the line is for. Not
   // `annotation`: themes draw that as faint, comment-adjacent text, and these
   // are the most load-bearing words in a mapping.
   AtAttr: tags.special(tags.variableName),

@@ -183,8 +183,8 @@ pub fn semantic_tokens(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<Semant
 
 /// What the file itself declares, read once per walk.
 struct FileNames {
-    /// The names `type { … } := …` introduced — a call to one of them is an
-    /// edge to that shape, not a function.
+    /// The names `type { … } := …` and `type Name` introduced — a call to one
+    /// of them is an edge to that type, not a function.
     types: Vec<SmolStr>,
     /// Every string a binding reads as a reference: a source's URI, its
     /// `schema =` document, a `type` binding's document. These are the strings
@@ -204,8 +204,20 @@ impl FileNames {
             .chain(types.iter().map(|t| t.document.clone()))
             .flatten()
             .collect();
+        // A declaration is read off the CST: the def map does not hold one
+        // until the lowering does, and a highlighter needs only its name.
+        let declared = fossil_syntax::parse(db, file)
+            .root(db)
+            .syntax()
+            .children()
+            .filter_map(fossil_syntax::ast::TypeDecl::cast)
+            .filter_map(|d| d.name());
         Self {
-            types: types.iter().map(|t| t.name.clone()).collect(),
+            types: types
+                .iter()
+                .map(|t| t.name.clone())
+                .chain(declared)
+                .collect(),
             references,
         }
     }
@@ -278,8 +290,9 @@ fn classify(tok: &SyntaxToken, names: &FileNames) -> Option<(TokenType, u32)> {
         // ── the reserved words and the `@attr` marker ─────────────────
         //
         // `from`, `and`, `or`, `not` (grammar.bnf, § RESERVED KEYWORDS). The
-        // contextual ones — `type` before a destructuring, `as` in a rename or
-        // an alias — are IDENTs and are named by [`ident`] from their place.
+        // contextual ones — `type` before an import or a declaration, `as` in an
+        // import member or an alias — are IDENTs and are named by [`ident`] from
+        // their place.
         K::KW_FROM | K::KW_AND | K::KW_OR | K::KW_NOT | K::AT_ATTR => TokenType::Keyword,
 
         // ── operators (assignment, ternary, arithmetic, comparison) ───────
@@ -320,9 +333,11 @@ fn classify(tok: &SyntaxToken, names: &FileNames) -> Option<(TokenType, u32)> {
 /// | where | what |
 /// |---|---|
 /// | `type { Person, Order } := …` | `type` keyword, each member a type declaration |
+/// | `type { Place as City } := …` | `Place` a type, `as` keyword, `City` a type declaration |
+/// | `type Person` | `type` keyword, `Person` a type declaration |
+/// | `name: Option<Date>` in a declaration | `name` a property declaration, `Option` and `Date` types |
 /// | `Users : Person from …` | `Users` a variable declaration, `Person` a type |
 /// | `users := …`, `{ A, B } := …` | a variable declaration each |
-/// | `@rename(Person, "…" as foaf_name)` | `Person` a type, `as` keyword, `foaf_name` a property declaration |
 /// | `Node as Other` | `Node` a variable, `as` keyword, `Other` a variable declaration |
 /// | `email = …` in a body | a property — the shape's predicate |
 /// | `delimiter = "|"` in a call | a parameter |
@@ -335,12 +350,20 @@ fn ident(tok: &SyntaxToken, names: &FileNames) -> (TokenType, u32) {
     };
     match parent.kind() {
         _ if is_contextual_keyword(tok, parent.kind()) => (TokenType::Keyword, 0),
-        K::TYPE_DEF => (TokenType::Type, DECLARATION),
-        K::SOURCE_DEF | K::MULTI_SOURCE_DEF | K::MAPPING_HEADER => {
+        // The name before an `as` is the document's, and is used here; the
+        // name the member introduces is the last.
+        K::IMPORT_MEMBER if !is_last_ident(tok) => (TokenType::Type, 0),
+        K::IMPORT_MEMBER
+            if parent
+                .parent()
+                .is_some_and(|p| p.kind() == K::MULTI_SOURCE_DEF) =>
+        {
             (TokenType::Variable, DECLARATION)
         }
-        K::SHAPE_EXPR | K::RENAME_ATTR => (TokenType::Type, 0),
-        K::RENAME => (TokenType::Property, DECLARATION),
+        K::TYPE_DECL | K::IMPORT_MEMBER => (TokenType::Type, DECLARATION),
+        K::SOURCE_DEF | K::MAPPING_HEADER => (TokenType::Variable, DECLARATION),
+        K::SHAPE_EXPR | K::TYPE_EXPR => (TokenType::Type, 0),
+        K::FIELD => (TokenType::Property, DECLARATION),
         K::ALIAS_ARG if is_last_ident(tok) => (TokenType::Variable, DECLARATION),
         K::PROPERTY_LHS => (TokenType::Property, 0),
         K::NAMED_ARG => (TokenType::Parameter, 0),
@@ -356,13 +379,17 @@ fn ident(tok: &SyntaxToken, names: &FileNames) -> (TokenType, u32) {
     }
 }
 
-/// `type` before a destructuring's braces, and `as` — the middle IDENT of a
-/// rename (`"…" as name`) or of an alias (`Node as Other`).
+/// `type` before an import's braces or a declaration's name, and `as` — the
+/// middle IDENT of an import member (`Place as City`) or of an alias
+/// (`Node as Other`).
 fn is_contextual_keyword(tok: &SyntaxToken, parent: SyntaxKind) -> bool {
     match parent {
-        SyntaxKind::TYPE_DEF => !follows_sibling(tok, SyntaxKind::LBRACE),
-        SyntaxKind::RENAME => !is_last_ident(tok),
-        SyntaxKind::ALIAS_ARG => !is_last_ident(tok) && follows_sibling(tok, SyntaxKind::IDENT),
+        // Every other name of an import is inside an `IMPORT_MEMBER`.
+        SyntaxKind::TYPE_DEF => true,
+        SyntaxKind::TYPE_DECL => !follows_sibling(tok, SyntaxKind::IDENT),
+        SyntaxKind::IMPORT_MEMBER | SyntaxKind::ALIAS_ARG => {
+            !is_last_ident(tok) && follows_sibling(tok, SyntaxKind::IDENT)
+        }
         _ => false,
     }
 }
@@ -547,8 +574,11 @@ Users : Person from users
 ";
 
     const SHOP: &str = "\
-@rename(Person, \"http://x/name\" as foaf_name)
-type { Person, Order } := io.shex(\"@MinIO dev/shop.shex\")
+type { Place as City, Order } := io.shex(\"@MinIO dev/shop.shex\")
+@iri(\"https://shop.example/Person\")
+type Person
+    @iri(\"http://x/name\") foaf_name: String
+    @iri(\"https://shop.example/livesIn\") livesIn: Option<Ref<City>>
 User := io.csv(\"@MinIO dev bucket/people.csv\", delimiter = \"|\")
 Adults := User.where(User.age >= 18).join(User as Other, on = User.id == Other.id)
 Orders : Order from Adults
@@ -568,8 +598,8 @@ Orders : Order from Adults
         assert!(modifier_names(0).is_empty());
     }
 
-    /// The shape names are types wherever they are written: declared in the
-    /// destructuring, named by a mapping header and a `@rename`, and applied
+    /// The type names are types wherever they are written: declared by a
+    /// `type` line, named by a mapping header or a field's type, and applied
     /// as an edge — a call the grammar cannot tell from a function's.
     #[test]
     fn a_shape_name_is_a_type_everywhere_it_is_written() {
@@ -582,21 +612,30 @@ Orders : Order from Adults
         assert_eq!(
             person,
             vec![
-                ("type", vec![]),              // @rename(Person, …)
-                ("type", vec!["declaration"]), // type { Person, … }
+                ("type", vec!["declaration"]), // type Person
                 ("type", vec![]),              // Person(User.email)
             ],
             "{all:?}"
         );
         assert_eq!(kinds_of(&all, "Order"), vec!["type", "type"], "{all:?}");
         assert_eq!(kind_of(&all, "Order").1, vec!["declaration"]);
+        // `Place` is the document's name, `City` the program's.
+        assert_eq!(kind_of(&all, "Place"), ("type", vec![]));
+        assert_eq!(kind_of(&all, "City"), ("type", vec!["declaration"]));
+        for t in ["String", "Option", "Ref"] {
+            assert_eq!(kind_of(&all, t), ("type", vec![]), "`{t}`: {all:?}");
+        }
     }
 
     /// `type` and `as` are contextual: IDENTs to the lexer, keywords by place.
     #[test]
     fn the_contextual_keywords_are_keywords_in_their_place() {
         let all = spans(SHOP);
-        assert_eq!(kind_of(&all, "type").0, "keyword");
+        assert_eq!(
+            kinds_of(&all, "type"),
+            vec!["keyword", "keyword"],
+            "{all:?}"
+        );
         assert_eq!(kinds_of(&all, "as"), vec!["keyword", "keyword"], "{all:?}");
         assert_eq!(
             kind_of(&all, "foaf_name"),

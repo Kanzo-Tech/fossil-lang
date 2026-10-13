@@ -1,0 +1,4 @@
+@iri("https://example.org/Doc")
+type Doc
+    @iri("https://example.org/tags")     tags: Option<Seq<String>>
+    @iri("https://example.org/related")  related: Seq<Ref<Doc>>

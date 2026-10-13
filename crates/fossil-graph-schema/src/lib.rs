@@ -57,8 +57,7 @@ pub mod span;
 
 pub use problem::{CODES, Failure, Foreign, Problem, Related, Severity, TEMPLATES};
 pub use shapes::{
-    Occurs, OutputShapes, PropertyConstraint, Rejection, Renames, SUBJECT_COLUMN, Shape,
-    local_name, short_name,
+    Occurs, OutputShapes, PropertyConstraint, Rejection, SUBJECT_COLUMN, Shape, local_name,
 };
 pub use span::Span;
 

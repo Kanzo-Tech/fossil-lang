@@ -75,8 +75,7 @@ impl OutputDescriptorKind {
     /// independent of the source schema language. `Lowered` already is one;
     /// `AcceptAll` is empty
     /// (no node/edge typing → every predicate stays a vertex property, the
-    /// walking-skeleton behaviour). The program's `@rename`s were applied when
-    /// the document was decoded.
+    /// walking-skeleton behaviour).
     #[must_use]
     pub fn to_graph_schema(&self) -> GraphSchema {
         match self {

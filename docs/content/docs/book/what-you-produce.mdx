@@ -1,6 +1,6 @@
 ---
 title: Naming what you produce
-description: Point a program at a ShEx or a SHACL document, learn what names you get from it, and rename one when two predicates end in the same word.
+description: Point a program at a ShEx or a SHACL document, learn what names you get from it, and what happens when two predicates end in the same word.
 ---
 
 Every fossil program begins by naming the document that describes its output. Property names come
@@ -61,18 +61,15 @@ something you were already writing.
 
 Vocabularies mix, and two of them can perfectly well end in the same word:
 
-<Program src="rename/mixed.shex" title="mixed.shex" />
+<Program src="errors/shape/name-collision/shape.shex" title="shape.shex" />
 
 `shop:name` and `foaf:name` both want to be called `name`. fossil does not pick, and it does not
 number them. It stops, and it names both IRIs:
 
 <Program src="errors/shape/name-collision/expected/diagnostic.txt" title="program.fossil" />
 
-The repair goes above the binding, and it is all constants — an IRI and the word you want instead.
-Both are then writable, and which one you mean is on the page:
-
-<Program src="rename/rename.fossil" title="rename.fossil" />
-
-The rename lives in your program rather than in the shape document for one plain reason: **the
-vocabulary may not be yours.** `foaf:` belongs to somebody else, and a local naming problem should not
-turn into an edit to a document other people share.
+The repair is to declare the type in the program rather than import it, so that each field writes
+its own name beside its IRI and two IRIs ending alike are two fields with two names. The parser reads
+a declaration, and the checker does not yet: [Types declared in the program](/docs/design/declared)
+is where that is going. Until it arrives, a document whose predicates collide cannot be written
+against, and fossil says so rather than choosing for you.

@@ -116,47 +116,43 @@ syntax_kinds! {
     /// `{ A, B, ... } := io.rdf(uri, schema = shex)` — a destructuring source
     /// definition binding N members (one per declared shape) to a single source.
     MULTI_SOURCE_DEF,
-    /// `type { A, B } := io.shex("s.shex")` — a type binding. The same
-    /// destructuring as `MULTI_SOURCE_DEF`, in type position, and binding is
-    /// POSITIONAL: the Nth name binds the Nth shape the document declares.
+    /// `type { Place as City } := io.shex("places.shex")` — a type import. The
+    /// same member list as `MULTI_SOURCE_DEF`, in type position, one
+    /// [`SyntaxKind::IMPORT_MEMBER`] per name (grammar.bnf, `TypeDef`).
     ///
     /// The binder is `:=` — one binder, and what is being bound is read off the
     /// left-hand side (grammar.bnf, DEFINE). Every `=` in the
     /// grammar is an ASSIGNMENT: a body property, `@subject`, a named argument.
-    /// Naming a shape document is MANDATORY: a bare
-    /// property key takes its name from a predicate that a shape declares, so a
-    /// program with no `type` binding cannot write a single property.
-    ///
-    /// A `TYPE_DEF` may carry [`SyntaxKind::RENAME_ATTR`] children BEFORE its
-    /// `type` token — `RenameAttr*` is part of this production
-    /// (grammar.bnf, `TypeDef`), not a top-level item of its own, because a
-    /// `@rename` renames a predicate OF ONE BINDING and there is nowhere else
-    /// for it to hang.
     TYPE_DEF,
-    /// `@rename(Person, "http://xmlns.com/foaf/0.1/name" as foaf_name)` —
-    /// `RenameAttr := AT_ATTR LPAREN IDENT (COMMA Rename)+ RPAREN`
-    /// (gone from `grammar.bnf` on 2026-10-12, and outstanding here).
+    /// `Place` or `Place as City` — `ImportMember := IDENT ('as' IDENT)?`
+    /// (grammar.bnf, `ImportMember`), inside a `TYPE_DEF` or a
+    /// `MULTI_SOURCE_DEF`.
     ///
-    /// The repair for two predicates whose last IRI segments coincide, in the
-    /// shape of Prisma's `@map`: all constants, above the declaration, and in
-    /// the PROGRAM rather than in the `.shex` because the vocabulary may not be
-    /// yours. Its `IDENT` is one of the names the binding below it introduces.
+    /// The first `IDENT` is the LOCAL NAME of a shape the document declares;
+    /// the one after `as`, when there is one, is the name the program uses.
+    /// `as` is contextual here as in [`SyntaxKind::ALIAS_ARG`]: an `IDENT`
+    /// followed by a bare `IDENT`, which nothing else in a member list can be.
+    IMPORT_MEMBER,
+    /// `@iri("…") type Person` and its indented fields — `TypeDecl := IriAttr
+    /// 'type' IDENT NEWLINE INDENT Field+ DEDENT` (grammar.bnf, `TypeDecl`).
+    ///
+    /// An output type written in the program. Its `IRI_ATTR` is a child, so a
+    /// declaration whose IRI is missing still has a node to hang the refusal
+    /// on, and the IRI travels with the type it names.
+    TYPE_DECL,
+    /// `@iri("https://schema.org/name") name: String` — `Field := IriAttr IDENT
+    /// SHAPE_SEP TypeExpr NEWLINE` (grammar.bnf, `Field`).
+    FIELD,
+    /// `@iri("…")` — `IriAttr := AT_ATTR LPAREN STRING RPAREN` (grammar.bnf,
+    /// `IriAttr`), above a `TYPE_DECL` and at the start of each `FIELD`.
     ///
     /// It shares its `AT_ATTR` token with `@subject` and POSITION tells them
-    /// apart (disambiguation rule 6; grammar.bnf, § DISAMBIGUATION RULES):
-    /// `@rename` above a `type` binding, `@subject` as the first line of a
-    /// mapping body. Neither name is valid in the other's position and no third
-    /// name is valid anywhere.
-    RENAME_ATTR,
-    /// One `"…" as name` inside a [`SyntaxKind::RENAME_ATTR`] —
-    /// `Rename := STRING 'as' IDENT` (gone from `grammar.bnf` on 2026-10-12, and outstanding here).
-    ///
-    /// The first of the two places `as` survives, and one of the two that make
-    /// it CONTEXTUAL rather than reserved: it is recognised between a `STRING`
-    /// and a bare `IDENT`, where no expression could continue, so one token of
-    /// lookahead settles it and `as` stays an ordinary identifier everywhere
-    /// else (rule 7; grammar.bnf, § DISAMBIGUATION RULES).
-    RENAME,
+    /// apart (disambiguation rule 6; grammar.bnf, § DISAMBIGUATION RULES).
+    IRI_ATTR,
+    /// `String`, `Option<Date>`, `Seq<Ref<City>>` — `TypeExpr := IDENT (LT
+    /// TypeExpr GT)?` (grammar.bnf, `TypeExpr`). The argument is a nested
+    /// `TYPE_EXPR`; which names take one is the checker's.
+    TYPE_EXPR,
     MAPPING,
     MAPPING_HEADER,
     MAPPING_BODY,
@@ -206,8 +202,8 @@ syntax_kinds! {
     /// name for the same source so the two sides can be told apart, and the
     /// mapping body then writes `Other.label` next to `Node.label`.
     ///
-    /// Same one-token lookahead as [`SyntaxKind::RENAME`]: an operand followed
-    /// by a bare `IDENT`, which no expression can continue.
+    /// Same one-token lookahead as [`SyntaxKind::IMPORT_MEMBER`]: an operand
+    /// followed by a bare `IDENT`, which no expression can continue.
     ALIAS_ARG,
 
     // ─── Error / sentinel ─────────────────────────────────────────────

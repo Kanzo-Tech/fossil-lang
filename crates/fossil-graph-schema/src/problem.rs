@@ -302,13 +302,11 @@ catalogue! {
     #[error("unexpected character `{character}` — no token starts with it")]
     UnknownCharacter { character: String },
 
-    /// A `@rename` written incompletely; `missing` is the part it lacks.
-    "syntax/malformed-rename", "A malformed rename",
-    #[error(
-        "this `@rename` has no {missing}: a rename is \
-         `@rename(Type, \"<predicate IRI>\" as <name>)`"
-    )]
-    MalformedRename { missing: String },
+    /// A declared type, or a field of one, written without its `@iri`; `name`
+    /// is the type's or the field's.
+    "syntax/missing-iri", "A declaration without its IRI",
+    #[error("`{name}` has no `@iri`: a declared type and each of its fields write their IRI")]
+    MissingIri { name: String },
 
     /// An attribute written where it does not belong.
     "syntax/misplaced-attribute", "An attribute in the wrong place",
@@ -538,16 +536,6 @@ catalogue! {
          at position {position}, binds nothing"
     )]
     BindingArity { name: String, named: u64, declared: u64, position: u64 },
-
-    /// A `@rename` naming a type its binding does not introduce.
-    "shape/rename-unknown-type", "A rename of a type the binding does not introduce",
-    #[error("`@rename` names `{shape}`, which this `type` binding does not introduce")]
-    RenameUnknownType { shape: String, introduced: Vec<String> },
-
-    /// A `@rename` naming a predicate its shape does not declare.
-    "shape/rename-unknown-predicate", "A rename of a predicate the shape does not declare",
-    #[error("`{shape}` declares no predicate `{predicate}`, so this rename never fires")]
-    RenameUnknownPredicate { shape: String, predicate: String, declared: Vec<String> },
 
     /// A program whose sources declare two different output shapes; one
     /// program writes one.

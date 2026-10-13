@@ -7,13 +7,17 @@
 //!
 //! ```text
 //! Program       := TopLevel*
-//! TopLevel      := SourceDef | MultiSourceDef | TypeDef | Mapping
+//! TopLevel      := SourceDef | MultiSourceDef | TypeDef | TypeDecl | Mapping
 //! SourceDef     := IDENT DEFINE Expression
-//! MultiSourceDef:= LBRACE IDENT (COMMA IDENT)* RBRACE DEFINE Expression
-//! TypeDef       := RenameAttr* 'type'
-//!                  LBRACE IDENT (COMMA IDENT)* RBRACE DEFINE Expression
-//! RenameAttr    := AT_ATTR LPAREN IDENT (COMMA Rename)+ RPAREN
-//! Rename        := STRING 'as' IDENT
+//! MultiSourceDef:= LBRACE ImportMember (COMMA ImportMember)* RBRACE
+//!                  DEFINE Expression
+//! TypeDef       := 'type' LBRACE ImportMember (COMMA ImportMember)* RBRACE
+//!                  DEFINE Expression
+//! ImportMember  := IDENT ('as' IDENT)?
+//! TypeDecl      := IriAttr 'type' IDENT NEWLINE INDENT Field+ DEDENT
+//! Field         := IriAttr IDENT SHAPE_SEP TypeExpr NEWLINE
+//! IriAttr       := AT_ATTR LPAREN STRING RPAREN
+//! TypeExpr      := IDENT (LT TypeExpr GT)?
 //! Mapping       := MappingHeader INDENT MappingBody DEDENT
 //! MappingHeader := IDENT SHAPE_SEP ShapeExpr KW_FROM Expression
 //! ShapeExpr     := IDENT
@@ -217,8 +221,8 @@ impl Parser {
     /// reason: a contextual keyword is told from an identifier by its spelling
     /// and nothing else. `current_text` covers `type` at the start of an item;
     /// this one covers `as`, which is contextual in the MIDDLE of a form —
-    /// `"…" as name` and `Node as Other` — so the decision needs a token the
-    /// parser has not reached yet.
+    /// `Node as Other` — and a declaration's name, which follows the `type`
+    /// the parser has not consumed yet.
     pub(crate) fn peek_text(&self, offset: usize) -> Option<&str> {
         self.peek(offset).map(|t| t.text.as_str())
     }

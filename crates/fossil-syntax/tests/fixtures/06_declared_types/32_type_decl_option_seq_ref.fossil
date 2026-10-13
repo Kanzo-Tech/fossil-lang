@@ -1,0 +1,17 @@
+// A declared type: two fields whose IRIs end alike, and each of the three
+// constructors. `City` is imported by its local name.
+type { Place as City } := io.shex("places.shex")
+
+@iri("https://schema.org/Person")
+type Person
+    @iri("https://schema.org/name")          name: String
+    @iri("https://shop.example/vocab/name")  handle: String
+    @iri("https://schema.org/birthDate")     born: Option<Date>
+    @iri("https://schema.org/knowsAbout")    topics: Seq<String>
+    @iri("https://schema.org/homeLocation")  livesIn: Ref<City>
+
+User := io.csv("users.csv")
+
+Users : Person from User
+    @subject = "https://shop.example/user/{User.id}"
+    name = User.name

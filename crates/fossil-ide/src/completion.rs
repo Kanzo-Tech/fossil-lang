@@ -16,8 +16,7 @@
 //! 2. **shape properties** — the output contract of the mapping the cursor is
 //!    in, offered in the ONE position a property key can be written: the left
 //!    of a property line ([`Scope::PropertyKey`]). Each is labelled
-//!    [`fossil_graph_schema::short_name`] of its predicate IRI — the `@rename`
-//!    the program addressed to it, else the last segment — because that is
+//!    [`fossil_graph_schema::local_name`] of its predicate IRI because that is
 //!    what `PropertyLhs := IDENT` accepts and what the checker resolves a key
 //!    against. It offered the raw `constraints[].predicate` IRI, wherever the
 //!    cursor was inside a mapping whose shape resolved.
@@ -48,7 +47,7 @@
 
 use fossil_base::SourceFile;
 use fossil_graph_schema::Primitive;
-use fossil_hir::def_map::{MappingLoc, def_map};
+use fossil_hir::def_map::MappingLoc;
 use fossil_hir::render_ty_kind;
 use fossil_hir::shapes::resolve_target_shape;
 use fossil_hir::stdlib::{FunctionRegistry, Receiver, ScalarTy};
@@ -490,16 +489,11 @@ const fn scalar_of(primitive: Primitive) -> Option<ScalarTy> {
 /// **The label** was `constraint.predicate`, the raw predicate IRI, so every
 /// item it offered wrote a line the parser refuses: `PropertyLhs := IDENT`, and
 /// `https://shop.example/voc#email` is not one. The name is
-/// [`ResolvedShape::short_names`] — [`fossil_graph_schema::short_name`] over
-/// the `@rename` table off the `type` binding, else the IRI's last segment.
-/// That is the same table [`fossil_hir::check`] resolves a written key against
-/// and the same one `OutputShapes::to_graph_schema` emits the column under, so
-/// what is offered, what compiles and what ships are one name. [`local_name`]
-/// would have been the plausible wrong answer: it agrees on every predicate no
-/// `@rename` names, so it fails only on the one program the rename exists for,
-/// and it fails by offering a key the checker rejects.
+/// [`ResolvedShape::short_names`], the IRI's last segment: the same table
+/// [`fossil_hir::check`] resolves a written key against and the same name
+/// `OutputShapes::to_graph_schema` emits the column under, so what is offered,
+/// what compiles and what ships are one name.
 ///
-/// [`local_name`]: fossil_graph_schema::local_name
 /// [`ResolvedShape::short_names`]: fossil_hir::shapes::ResolvedShape::short_names
 ///
 /// **The position** was «the cursor is inside a mapping whose shape resolves»,
@@ -509,8 +503,8 @@ const fn scalar_of(primitive: Primitive) -> Option<ScalarTy> {
 ///
 /// A predicate dropped for a short-name COLLISION is not offered: `short_names`
 /// keeps the first and reports the rest, and a name that resolves to two IRIs
-/// is exactly the key the checker refuses. The repair — `@rename` — is what
-/// puts it back, under the name the program chose.
+/// is exactly the key the checker refuses. The repair — declaring the type in
+/// the program — is what puts it back, under the name the program chose.
 fn shape_property_completions(
     db: &dyn fossil_base::Db,
     scope: &Scope<'_>,
@@ -524,10 +518,7 @@ fn shape_property_completions(
     let Some(shape) = resolve_target_shape(db, *mapping) else {
         return;
     };
-    let renames = shape_iri_of(db, *mapping).map_or_else(Vec::new, |iri| {
-        def_map(db, mapping.file(db)).renames_for_shape(db, &iri)
-    });
-    let (table, _collisions) = shape.short_names(&renames);
+    let (table, _collisions) = shape.short_names();
     for fossil_hir::shapes::Predicate {
         name,
         iri: predicate,
@@ -548,19 +539,6 @@ fn shape_property_completions(
             ..Default::default()
         });
     }
-}
-
-/// The fully-resolved shape IRI a mapping targets — the key a `@rename` is
-/// addressed by — or `None` when its header did not lower.
-///
-/// Mirrors `fossil_hir::check`'s own `shape_iri_of`, which is private to the
-/// checker. It adds no Salsa fan-out: `resolve_target_shape` has already
-/// evaluated `lower_to_hir` for this file on the line above.
-fn shape_iri_of(db: &dyn fossil_base::Db, mapping: MappingLoc<'_>) -> Option<SmolStr> {
-    fossil_hir::lower::lower_to_hir(db, mapping.file(db))
-        .mapping(db, mapping.index(db))
-        .map(|m| m.shape_iri.clone())
-        .filter(|iri| !iri.is_empty())
 }
 
 /// Source 3: the COLUMNS of the row the receiver names.
@@ -606,9 +584,10 @@ fn source_field_completions(
     }
 }
 
-/// Resolve the cursor's enclosing mapping to its [`def_map`] `MappingLoc`
-/// (mirrors `hover::resolve_hover_target`'s filter-then-nth contract,
-/// without the property-level resolution).
+/// Resolve the cursor's enclosing mapping to its
+/// [`fossil_hir::def_map::def_map`] `MappingLoc` (mirrors
+/// `hover::resolve_hover_target`'s filter-then-nth contract, without the
+/// property-level resolution).
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Salsa-handle lifetime contract
 fn enclosing_mapping_loc<'db>(
     db: &'db dyn fossil_base::Db,
