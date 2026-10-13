@@ -863,9 +863,9 @@ mod disambiguation {
         );
     }
 
-    /// Whitespace around the colon means nothing (grammar.bnf, § DISAMBIGUATION
-    /// RULES, rule 3): `a:b` with no spaces is an ordinary ternary, because
-    /// there is no prefixed name to tell it from.
+    /// Whitespace around the colon means nothing
+    /// (grammar.bnf, § DISAMBIGUATION RULES, rule 3): `a:b` with no spaces is an
+    /// ordinary ternary, because there is no prefixed name to tell it from.
     #[test]
     fn rule3_a_tight_ternary_colon_is_still_a_ternary() {
         let src = "Users : Person from User\n    x = cond ? a:b\n";
