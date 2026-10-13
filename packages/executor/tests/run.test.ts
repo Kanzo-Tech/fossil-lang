@@ -3,7 +3,7 @@
  * (documents → sources → run → write) against a host that vends
  * `read` on one connection and `write` on the job, and a stubbed `fetch` that
  * answers as S3 does — HEAD, ranged GET, PUT — and only to signed requests.
- * No network, no server.
+ * No network, no server. Into memory, the same reads and no write.
  */
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
@@ -135,7 +135,7 @@ describe('run', () => {
     const { gets, puts } = stubFetch(FIXTURES);
     const { host, asks } = recordingHost();
 
-    const report = await run(PROGRAM, { host, job: 'job-1' });
+    const report = await run(PROGRAM, { host, into: { job: 'job-1' } });
 
     expect(report.location).toBe(JOB);
     // The relation exists only because the read shape document was the output
@@ -167,7 +167,7 @@ describe('run', () => {
     const { puts } = stubFetch({});
     const { host } = recordingHost();
 
-    const failure = await run(PROGRAM, { host, job: 'job-1' }).catch((e: FossilError) => e);
+    const failure = await run(PROGRAM, { host, into: { job: 'job-1' } }).catch((e: FossilError) => e);
     expect(failure).toMatchObject({ name: 'FossilError', code: 'document/unread', data: { documents: [expect.stringContaining('graph.shex')] } });
     expect((failure as FossilError).problem).toMatchObject({
       code: 'document/unread',
@@ -180,7 +180,7 @@ describe('run', () => {
     const { puts } = stubFetch(FIXTURES);
     const { host } = recordingHost();
 
-    await expect(run(PROGRAM, { host, job: 'job-2' })).rejects.toThrow(
+    await expect(run(PROGRAM, { host, into: { job: 'job-2' } })).rejects.toThrow(
       expect.objectContaining({ name: 'FossilError', code: 'storage/no-credential', data: { scope: 'job job-2', access: 'write' } }),
     );
     expect(puts).toEqual([]);
@@ -195,7 +195,7 @@ describe('run', () => {
         throw Object.assign(new Error('no such job'), { name: 'ApiError', code: 'job/not-found', data: { job: 'job-1' } });
       },
     };
-    const failure = (await run(PROGRAM, { host, job: 'job-1' }).catch((e: FossilError) => e)) as FossilError;
+    const failure = (await run(PROGRAM, { host, into: { job: 'job-1' } }).catch((e: FossilError) => e)) as FossilError;
     expect(failure.problem).toMatchObject({
       code: 'document/unread',
       cause: { code: 'storage/host-refused', cause: { name: 'ApiError', code: 'job/not-found', data: { job: 'job-1' } } },
@@ -203,6 +203,74 @@ describe('run', () => {
     const stored = JSON.parse(JSON.stringify(failure.problem)) as Problem;
     const refused = FossilError.from(stored).cause as FossilError;
     expect(refused.cause).toMatchObject({ name: 'ApiError', code: 'job/not-found', data: { job: 'job-1' } });
+  });
+});
+
+/** `fossil.json` out of a run into memory. */
+function manifestOf(files: { path: string; bytes: Uint8Array }[]) {
+  const json = files.find((f) => f.path === 'fossil.json');
+  if (json === undefined) throw new Error('no fossil.json');
+  return JSON.parse(new TextDecoder().decode(json.bytes)) as {
+    vertex_tables: { name: string; record_count: number }[];
+    edge_tables: { name: string; record_count: number }[];
+  };
+}
+
+describe('run into memory, through a host', () => {
+  it('reads through the connection, asks for no write, and answers the corpus', async () => {
+    const { gets, puts } = stubFetch(FIXTURES);
+    const { host, asks } = recordingHost();
+
+    const { report, files } = await run(PROGRAM, { host, into: 'memory' });
+
+    expect(report.location).toBe('memory://corpus/');
+    expect(files.map((f) => f.path).sort()).toEqual([
+      'edge/Order_placedBy_Person.parquet',
+      'fossil.json',
+      'vertex/Order.parquet',
+      'vertex/Person.parquet',
+    ]);
+    for (const path of Object.keys(FIXTURES)) {
+      expect(gets).toContain(`http://localhost:9000${path}`);
+    }
+    expect(asks).toContainEqual({ scope: { connection: 'lake' }, access: 'read' });
+    expect(asks.filter((a) => a.access === 'write')).toEqual([]);
+    expect(puts).toEqual([]);
+  });
+
+  it('passes `limit` through: each source read to it, and the edge to a vertex outside the sample counted', async () => {
+    stubFetch(FIXTURES);
+    const { host } = recordingHost();
+
+    const { report, files } = await run(PROGRAM, { host, into: 'memory', limit: 2 });
+
+    const manifest = manifestOf(files);
+    expect(manifest.vertex_tables.map((v) => [v.name, v.record_count])).toEqual([
+      ['Person', 2],
+      ['Order', 2],
+    ]);
+    // The first two orders were placed by users 3 and 1; the first two users are 1 and 2.
+    expect(report.dropped).toEqual([{ table: 'Order_placedBy_Person', dropped: 1 }]);
+    expect(manifest.edge_tables[0]?.record_count).toBe(1);
+  });
+
+  it('refuses a host run that names no `into` — `{ host, job }` is not an alias', async () => {
+    stubFetch(FIXTURES);
+    const { host, asks } = recordingHost();
+    // @ts-expect-error — `job` is `into: { job }`.
+    const refused = run(PROGRAM, { host, job: 'job-1' });
+    await expect(refused).rejects.toMatchObject({ name: 'FossilError', code: 'api/invalid-argument', data: { argument: 'into' } });
+    expect(asks.filter((a) => a.access === 'write')).toEqual([]);
+  });
+
+  it('refuses a limit that is not a whole number of rows', async () => {
+    stubFetch(FIXTURES);
+    const { host } = recordingHost();
+    await expect(run(PROGRAM, { host, into: 'memory', limit: 1.5 })).rejects.toMatchObject({
+      name: 'FossilError',
+      code: 'api/invalid-argument',
+      data: { argument: 'limit' },
+    });
   });
 });
 
@@ -218,14 +286,14 @@ describe('run, when stopped or when several documents fail', () => {
         return inner.credentials(scope, access, options);
       },
     };
-    await expect(run(PROGRAM, { host, job: 'job-1', signal: stop.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(run(PROGRAM, { host, into: { job: 'job-1' }, signal: stop.signal })).rejects.toMatchObject({ name: 'AbortError' });
   });
 
   it('keeps every unread document’s problem, not only the first', async () => {
     stubFetch({});
     const { host } = recordingHost();
     const program = ['type { Person } := io.shex("@lake/a.shex")', 'type { Order } := io.shex("@lake/b.shex")', ''].join('\n');
-    const e = await run(program, { host, job: 'job-1' }).catch((x: unknown) => x);
+    const e = await run(program, { host, into: { job: 'job-1' } }).catch((x: unknown) => x);
     expect(e).toMatchObject({ code: 'document/unread', data: { documents: [expect.any(String), expect.any(String)] } });
     const cause = (e as Error).cause as AggregateError;
     expect(cause.errors.map((x: { code: string }) => x.code)).toEqual(['storage/unreachable', 'storage/unreachable']);

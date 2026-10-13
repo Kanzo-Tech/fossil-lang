@@ -89,6 +89,16 @@ describe('run over files', () => {
     );
   });
 
+  it('refuses to write a run over files into a job: there is no host to vend the write', async () => {
+    // @ts-expect-error — a run over files writes into memory, and the types say so.
+    const refused = run(PROGRAM, { files: await files(), path: PATH, into: { job: 'job-1' } });
+    await expect(refused).rejects.toMatchObject({
+      name: 'FossilError',
+      code: 'api/invalid-argument',
+      data: { argument: 'into' },
+    });
+  });
+
   it('runs the full vertex+edge path in wasm and emits valid Parquet', async () => {
     const result = await run(PROGRAM, { files: await files(), path: PATH });
 
