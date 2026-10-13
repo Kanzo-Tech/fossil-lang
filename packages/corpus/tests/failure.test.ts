@@ -36,6 +36,7 @@ function scripted(manifest: string, fails: (sql: string) => boolean = () => fals
       return answer(text.includes('read_text') ? [manifest] : []);
     },
     registerFiles: async () => {},
+    registerFileBuffer: async () => {},
     async dropFiles(names) {
       dropped.push([...names]);
     },

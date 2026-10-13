@@ -94,6 +94,31 @@ describe('triples', () => {
     );
   });
 
+  it("writes a language-tagged value as an rdf:langString with its property table's tag", async () => {
+    await query(`CREATE SCHEMA IF NOT EXISTS odd`);
+    await query(`CREATE OR REPLACE TABLE odd.L AS SELECT 0::UINTEGER AS dense_id, '${EX}curie' AS subject`);
+    await query(`CREATE OR REPLACE TABLE odd.L_name AS SELECT * FROM (VALUES
+      (0::UINTEGER, 'Marie Curie', 'en'), (0::UINTEGER, 'Maria Skłodowska-Curie', 'pl')) AS t(src, name, lang)`);
+    const got = await triples({
+      format: 'fossil/1',
+      vertex_tables: [vertex('L', undefined, [])],
+      edge_tables: [],
+      property_tables: [{
+        name: 'L_name', path: '', record_count: 2, source: { key: 'src', references: 'L' },
+        properties: [
+          { name: 'src', type: 'uint32', role: 'endpoint' },
+          { name: 'name', type: 'string', iri: `${EX}name`, term_type: 'http://www.w3.org/ns/r2rml#Literal',
+            datatype: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#langString' },
+          { name: 'lang', type: 'string', role: 'language' },
+        ],
+      }],
+    });
+    expect([...got].sort()).toEqual([
+      `${nt.iri(`${EX}curie`)} ${nt.iri(`${EX}name`)} ${nt.tagged('Maria Skłodowska-Curie', 'pl')}`,
+      `${nt.iri(`${EX}curie`)} ${nt.iri(`${EX}name`)} ${nt.tagged('Marie Curie', 'en')}`,
+    ].sort());
+  });
+
   it('maps nothing that has no IRI, and nothing at an end with no table', async () => {
     await query(`CREATE SCHEMA IF NOT EXISTS odd`);
     await query(`CREATE OR REPLACE TABLE odd.A AS SELECT 0::UINTEGER AS dense_id, '${EX}a' AS subject, 'v' AS label`);

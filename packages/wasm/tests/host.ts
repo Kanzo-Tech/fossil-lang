@@ -90,6 +90,7 @@ export function describingEngine(
       return tableOf(columns);
     },
     registerFiles: async () => {},
+    registerFileBuffer: async () => {},
     dropFiles: async () => {},
   };
 }

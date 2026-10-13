@@ -123,6 +123,7 @@ describe('a cleanup that fails', () => {
         throw dropFailed;
       },
       registerFiles: async () => {},
+      registerFileBuffer: async () => {},
       dropFiles: async () => {},
     };
     const { host } = countingHost(() => [s3(JOB, 'A')]);
@@ -144,6 +145,7 @@ describe('a cleanup that fails', () => {
         return table('Success', []);
       },
       registerFiles: async () => {},
+      registerFileBuffer: async () => {},
       dropFiles: async () => {},
     };
     const { host } = countingHost(() => [s3('s3://b/one/', 'A'), s3('s3://b/two/', 'B')]);
