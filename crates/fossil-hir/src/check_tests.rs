@@ -593,6 +593,7 @@ Contact : Person from users
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("personas.shex"),
+                file: None,
                 span: None,
             }),
         );
@@ -668,6 +669,7 @@ Orders : Order from Purchase
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("personas.shex"),
+                file: None,
                 span: None,
             }),
         );
@@ -757,6 +759,7 @@ Orders : Order from Purchase
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("shape.shex"),
+                file: None,
                 span: None,
             }),
         );
@@ -862,6 +865,7 @@ Orders : Order from Purchase
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("shape.shex"),
+                file: None,
                 span: None,
             }),
         );
@@ -921,6 +925,7 @@ fn a_wrong_type_with_no_repair_says_nothing() {
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("personas.shex"),
+                file: None,
                 span: None,
             }),
         );
@@ -1065,6 +1070,7 @@ fn a_disjunction_rejection_attaches_to_the_consuming_mapping() {
         constraints: Vec::new(),
         rejections: vec![disjunction_rejection()],
         document: smol_str::SmolStr::from("personas.shex"),
+        file: None,
         span: None,
     };
     let mut cx = build_checker(&db, first_mapping(&db, file), None, Some(shape));

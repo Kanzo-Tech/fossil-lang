@@ -1,68 +1,29 @@
-//! `textDocument/definition` — goto-def across the open-file set **and across
-//! the language boundary into the shape document**.
+//! `textDocument/definition` — where a name a program writes is declared.
 //!
-//! # The boundary this crosses is a LANGUAGE, not a prefix
+//! The two names a mapping body writes most are a type's: the **type name** in
+//! a header (`Users : Person from Adults`) and a **property key**
+//! (`name = User.name`). Both are declared where the type is — in the program
+//! for a declared type, in the shape document for an imported one — and the
+//! answer comes from the mapping's resolved type, which knows its own file
+//! ([`fossil_hir::shapes::ResolvedShape::file`]). This module never asks which
+//! kind of type it is looking at. Every other name goes through the
+//! [`crate::WorkspaceIndex`] over the open files.
 //!
-//! Goto-def used to be pure name resolution inside the open-file set: a token,
-//! a [`crate::WorkspaceIndex`] lookup, a byte range. That worked because the
-//! two things worth jumping to — a `prefix` declaration and a mapping header —
-//! were both `.fossil`. `prefix` is gone — it is an ordinary identifier now, and
-//! there is no vocabulary declaration left to introduce — and with it the
-//! only reason a Fossil program ever referred to a name in another Fossil file.
+//! # Precision
 //!
-//! What replaced it is bigger. Ruling 3 of 2026-08-11 makes naming a shape
-//! document MANDATORY, and a property key is the **last segment
-//! of a predicate IRI the document declares**. So the two names a body writes
-//! most are both defined in a file that is not a Fossil program:
-//!
-//! - a **shape name** in a header — `Users : Person from Adults` — is one of
-//!   the names `type { Person } := io.shex("shop.shex")` introduced, and what
-//!   it denotes is a shape inside `shop.shex`;
-//! - a **property key** — `name = User.name` — denotes a predicate inside that
-//!   same document.
-//!
-//! Neither has a definition anywhere in the `.fossil` file. Answering "no
-//! definition" for the two commonest identifiers in a program is worse than
-//! answering imprecisely, which is what the rest of this module is about.
-//!
-//! # Precision: the decoder's own spans
-//!
-//! The decoded shape carries where the document declares it and each of its
-//! predicates — [`fossil_graph_schema::Shape::span`] and
-//! [`fossil_graph_schema::PropertyConstraint::span`], found by
-//! `fossil_hir::shex::spans` with rudof's own prefix spellings. When there is no span
-//! (`ShExJ`, SHACL), the answer is still the right FILE with a `0..0` range —
-//! the top of the document. That is the honest degraded answer, and it is
-//! deliberately not a `None`: an editor that opens `shop.shex` at line 1 has
-//! taken the user to the definition's file, which is most of the value;
-//! answering nothing takes them nowhere.
-//!
-//! [`NavigationTarget`] carries no precision flag, because no consumer could
-//! act on one — the host translates `{file, range}` into an
-//! `lsp_types::Location` and nothing else. `0..0` IS the flag, and it
-//! is one every consumer already understands.
+//! A declaration carries its span: the type's name and each field's, or the
+//! decoder's own spans in a document. Where a decoder has none (`ShExJ`,
+//! SHACL), the answer is the right file with a `0..0` range — the top of the
+//! document, which takes the reader to the definition's file rather than
+//! nowhere. `0..0` is the precision flag, and every consumer already reads it.
 //!
 //! # Domain boundary
 //!
 //! Returns Fossil-domain [`NavigationTarget`]s (`{ file, range: Range<u32> }`),
-//! NEVER `lsp_types::Location` — the byte→UTF-16 range translation happens in
-//! the host via [`crate::position::position`], so this stays
-//! transport-free and WASM-clean. No new Salsa query is added: the
-//! `WorkspaceIndex` is a plain struct built by a CST walk, and the two document
-//! paths read queries that the checker already runs for this file
-//! (`resolve_target_shape`, `typecheck_mapping`), so the per-mapping `body()`
-//! fan-out is unchanged.
-//!
-//! # Nothing here does index arithmetic
-//!
-//! There were three notions of `ExprId` in the tree and one of them was a
-//! position among the CST's `PROPERTY` children used to index the HIR's dense
-//! `properties` vector. This module never needs one: a property key is resolved
-//! by its TEXT against the checker's `predicates` table, so a property that
-//! parses and does not lower shifts nothing. The only index taken is the
-//! mapping's, which is the per-kind dense index `def_map` and `body()` both
-//! contract to, and it is taken by the same filter-then-position
-//! walk they use.
+//! never `lsp_types::Location`: the byte→UTF-16 translation is the host's,
+//! through [`crate::position::position`], so this stays transport-free and
+//! wasm-clean. A property key resolves by its text against the checker's
+//! `predicates` table, so nothing here indexes into a body.
 
 use std::ops::Range;
 
@@ -73,7 +34,6 @@ use fossil_syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
 use crate::WorkspaceIndex;
 use crate::position::token_at_position;
-use fossil_hir::documents::registry_key;
 
 /// A goto-def navigation target: the owning file + the byte range.
 ///
@@ -97,12 +57,12 @@ pub struct NavigationTarget {
 /// `files` is the host's open-file set (the LSP `LspState.files` or the
 /// wasm workspace's open files); `file` is the file the cursor is in.
 ///
-/// Three positions are recognised, and the first two leave the `.fossil` file:
+/// Three positions are recognised, and the first two go where the type is
+/// declared — the program for a declared type, the document for an imported one:
 ///
-/// 1. **a shape name** in a mapping header → the shape inside the document its
-///    `type { … } := io.shex("…")` binding names, or — when the document is not
-///    registered — that binding line;
-/// 2. **a property key** → the predicate inside the same document;
+/// 1. **a shape name** in a mapping header → the type's declaration, or — when
+///    the document an import names is not registered — that binding line;
+/// 2. **a property key** → the field or predicate that declares it;
 /// 3. **anything else** → the [`WorkspaceIndex`] over the open files, which is
 ///    what resolves a mapping name.
 ///
@@ -184,8 +144,8 @@ fn document_name_under_cursor(token: &SyntaxToken) -> Option<(SyntaxNode, Wanted
     Some((mapping, wanted))
 }
 
-/// Resolve a name that lives in the shape document, and answer with a place in
-/// that document.
+/// Resolve a name the mapping's type declares, and answer with the place it is
+/// declared — wherever [`ResolvedShape::file`](fossil_hir::shapes::ResolvedShape::file) says that is.
 ///
 /// The shape is the mapping's own target, [`resolve_target_shape`] — the
 /// document that declared it, not the first one the file names — and a
@@ -216,7 +176,7 @@ fn document_targets(
             Wanted::Predicate(_) => Vec::new(),
         };
     };
-    let Some(doc_file) = fossil_base::file_at(db, &registry_key(db, file, &shape.document)) else {
+    let Some(home) = shape.file else {
         return Vec::new();
     };
     let span = match wanted {
@@ -238,7 +198,7 @@ fn document_targets(
         }
     };
     vec![NavigationTarget {
-        file: doc_file,
+        file: home,
         range: span.map_or(0..0, Into::into),
     }]
 }

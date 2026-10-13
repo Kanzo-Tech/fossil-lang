@@ -138,6 +138,11 @@ pub struct ResolvedShape<'db> {
     /// copy per predicate would be the same string N times with N chances to
     /// disagree.
     pub document: SmolStr,
+    /// The file the declaration is in — the program for a declared type, the
+    /// registered document for an imported one — so a reader that goes to a
+    /// definition asks the shape where it lives instead of knowing which kind of
+    /// type it is. `None` when the document is named and not registered.
+    pub file: Option<fossil_base::SourceFile>,
     /// What the decoder could not lower, filtered to this shape;
     /// [`crate::check::Checker::surface_shape_lowering_errors`] surfaces these
     /// as diagnostics on the consuming mapping.
@@ -145,6 +150,22 @@ pub struct ResolvedShape<'db> {
 }
 
 impl<'db> ResolvedShape<'db> {
+    /// A diagnostic's label at a declaration of this shape: where it is, in the
+    /// document that declares it. `None` for a type declared in `program`
+    /// itself, where the diagnostic's own underline is already in the file the
+    /// reader is looking at.
+    #[must_use]
+    pub fn label_at(
+        &self,
+        span: Option<Span>,
+        program: fossil_base::SourceFile,
+    ) -> Option<(Span, SmolStr)> {
+        if self.file == Some(program) {
+            return None;
+        }
+        Some((span?, self.document.clone()))
+    }
+
     /// Build a [`ResolvedShape`] from a decoded [`Shape`].
     ///
     /// Plain-Rust helper. What identifies the shape is its IRI, and the checker
@@ -156,6 +177,7 @@ impl<'db> ResolvedShape<'db> {
         shape: &Shape,
         rejections: Vec<Rejection>,
         document: SmolStr,
+        file: Option<fossil_base::SourceFile>,
     ) -> Self {
         let constraints = shape
             .properties
@@ -173,6 +195,7 @@ impl<'db> ResolvedShape<'db> {
             constraints,
             span: shape.span,
             document,
+            file,
             rejections,
         }
     }
@@ -472,15 +495,17 @@ pub fn resolve_target_shape<'db>(
     // failure here would have failed there — where it is reported, by cause —
     // and a shape the lookup misses cannot exist, because the IRI came out of
     // this document's declaration list.
-    let (shapes, document) = if entry.declared {
+    let (shapes, document, home) = if entry.declared {
         (
             hir.declared(db).clone(),
             SmolStr::from(file.path(db).as_str()),
+            Some(file),
         )
     } else {
         let document = entry.document.clone()?;
         let shapes = decoded_document(db, file, entry.constructor.as_deref(), &document).ok()?;
-        (shapes, document)
+        let home = fossil_base::file_at(db, &crate::documents::registry_key(db, file, &document));
+        (shapes, document, home)
     };
     let shape = shapes.lookup(shape_iri.as_str())?;
 
@@ -493,7 +518,9 @@ pub fn resolve_target_shape<'db>(
         .cloned()
         .collect();
 
-    Some(ResolvedShape::from_shape(db, shape, rejections, document))
+    Some(ResolvedShape::from_shape(
+        db, shape, rejections, document, home,
+    ))
 }
 
 /// Every type the program has, as one [`OutputShapes`]: its declarations, then

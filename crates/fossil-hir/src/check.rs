@@ -364,7 +364,7 @@ impl Checker<'_> {
                     Some((
                         constraint.value_ty,
                         name.clone(),
-                        constraint.span.map(|span| (span, shape.document.clone())),
+                        shape.label_at(constraint.span, self.expr.file),
                     ))
                 })
             }
@@ -459,12 +459,10 @@ impl Checker<'_> {
         // the fallback for a mapping whose type name bound nothing, which has
         // already been told so.
         let bound_at = def_map(db, self.expr.file).lookup_type_span(db, type_name.as_str());
+        let program = self.expr.file;
         let declared_at = |iri: &SmolStr| {
             let shape = self.resolved_shape.as_ref()?;
-            Some((
-                shape.constraint_for(iri.as_str())?.span?,
-                shape.document.clone(),
-            ))
+            shape.label_at(shape.constraint_for(iri.as_str())?.span, program)
         };
         for c in collisions {
             let NameCollision {
@@ -556,10 +554,10 @@ impl Checker<'_> {
             .map(|(_, iri)| {
                 (
                     iri.clone(),
-                    shape
-                        .constraint_for(iri.as_str())
-                        .and_then(|c| c.span)
-                        .map(|span| (span, shape.document.clone())),
+                    shape.label_at(
+                        shape.constraint_for(iri.as_str()).and_then(|c| c.span),
+                        self.expr.file,
+                    ),
                 )
             })
             .collect();

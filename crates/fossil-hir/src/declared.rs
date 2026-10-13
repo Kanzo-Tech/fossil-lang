@@ -112,16 +112,13 @@ fn lower_decl(
             term,
             targets,
             occurs,
-            // A span is a byte range into a DOCUMENT, and a declaration's
-            // document is the program: a label there would be a second
-            // underline in the file the first one is already in.
-            span: None,
+            span: Some(field_name_span(&field)),
         });
     }
     Some(Shape {
         iri: iri.to_string(),
         properties,
-        span: None,
+        span: decl_name_span(decl),
     })
 }
 

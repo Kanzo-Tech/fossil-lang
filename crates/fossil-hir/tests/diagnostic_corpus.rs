@@ -347,6 +347,7 @@ fn run_shape_fixture(bucket: &str, document: &Shape, rejections: &[Rejection]) -
         document,
         rejections.to_vec(),
         smol_str::SmolStr::from("person.shex"),
+        None,
     );
     if resolved.constraints.is_empty() {
         let _ = writeln!(
