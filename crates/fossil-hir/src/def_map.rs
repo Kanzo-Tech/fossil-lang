@@ -311,16 +311,33 @@ pub struct TypeEntry {
 /// [`MappingLoc`] everywhere a query reads it, and a header that has no name yet
 /// is still a mapping with a body to check. This table holds only the headers
 /// that name one.
+///
+/// It holds no position: an edit to one mapping's body moves every mapping
+/// after it, and a position here would change the def map on that edit and
+/// re-lower every sibling. Where a mapping is written is read off the CST when
+/// it is asked for ([`MappingName::spans`]), as rust-analyzer keeps its item
+/// tree apart from its source map.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct MappingName<'db> {
     /// The name the header writes.
     pub name: SmolStr,
     /// The mapping it names.
     pub loc: MappingLoc<'db>,
-    /// The whole mapping, header and body, file-absolute and trivia-trimmed.
-    pub span: Span,
-    /// The name token alone.
-    pub name_span: Span,
+}
+
+impl MappingName<'_> {
+    /// The whole mapping, header and body, file-absolute and trivia-trimmed,
+    /// and its name token alone.
+    #[must_use]
+    pub fn spans(&self, db: &dyn fossil_base::Db) -> Option<(Span, Span)> {
+        let file = self.loc.file(db);
+        let root = fossil_syntax::parse(db, file).root(db).syntax();
+        let item = mapping_nodes(&root).nth(self.loc.index(db))?;
+        let header = item
+            .children()
+            .find(|c| c.kind() == SyntaxKind::MAPPING_HEADER)?;
+        Some((item_span(&item), token_span(&first_ident(&header)?)))
+    }
 }
 
 /// Which table a written name is looked up in.
@@ -380,21 +397,21 @@ impl<'db> Definition<'db> {
 
     /// The whole item that binds it, file-absolute.
     #[must_use]
-    pub const fn span(self) -> Span {
+    pub fn span(self, db: &dyn fossil_base::Db) -> Span {
         match self {
             Self::Source(e) => e.span,
             Self::Type(e) => e.span,
-            Self::Mapping(e) => e.span,
+            Self::Mapping(e) => e.spans(db).map_or(Span::new(0, 0), |(item, _)| item),
         }
     }
 
     /// The name alone, where the program writes it.
     #[must_use]
-    pub const fn name_span(self) -> Span {
+    pub fn name_span(self, db: &dyn fossil_base::Db) -> Span {
         match self {
             Self::Source(e) => e.name_span,
             Self::Type(e) => e.name_span,
-            Self::Mapping(e) => e.name_span,
+            Self::Mapping(e) => e.spans(db).map_or(Span::new(0, 0), |(_, name)| name),
         }
     }
 
@@ -412,7 +429,7 @@ impl<'db> Definition<'db> {
     pub fn declaration(self, db: &'db dyn fossil_base::Db, file: SourceFile) -> Declaration {
         let local = Declaration {
             file,
-            span: Some(self.name_span()),
+            span: Some(self.name_span(db)),
         };
         let Self::Type(entry) = self else {
             return local;
@@ -495,7 +512,7 @@ impl<'db> DefMap<'db> {
             .chain(self.types(db).iter().map(Definition::Type))
             .chain(self.mapping_names(db).iter().map(Definition::Mapping))
             .collect();
-        all.sort_by_key(|d| (d.span().start, d.name_span().start));
+        all.sort_by_key(|d| (d.span(db).start, d.name_span(db).start));
         all
     }
 
@@ -809,8 +826,6 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                     mapping_names.push(MappingName {
                         name: SmolStr::from(token.text()),
                         loc,
-                        span: item_span(&item),
-                        name_span: token_span(&token),
                     });
                 }
                 mapping_idx += 1;

@@ -46,8 +46,8 @@ pub fn document_symbols(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<Docum
                 kind: kind_of(def.namespace()),
                 tags: None,
                 deprecated: None,
-                range: range(li, def.span()),
-                selection_range: range(li, def.name_span()),
+                range: range(li, def.span(db)),
+                selection_range: range(li, def.name_span(db)),
                 children: None,
             }
         })
