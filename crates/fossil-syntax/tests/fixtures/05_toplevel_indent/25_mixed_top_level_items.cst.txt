@@ -2,7 +2,8 @@ PROGRAM
   TYPE_DEF
     IDENT "type"
     LBRACE "{"
-    IDENT "Person"
+    IMPORT_MEMBER
+      IDENT "Person"
     RBRACE "}"
     DEFINE ":="
     EXPR

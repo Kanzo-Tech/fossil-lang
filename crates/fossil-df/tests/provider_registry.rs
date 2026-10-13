@@ -2,7 +2,7 @@
 //! the two diagnostics a mismatch produces.
 //!
 //! The check host in `tests/support/native.rs` installs
-//! `fossil_descriptors_output::PROVIDERS` and registers the documents a program
+//! `fossil_hir::providers::PROVIDERS` and registers the documents a program
 //! names from disk, so a `.ttl` sitting beside the program is enough; nothing
 //! here registers a document by hand, which would be testing its own
 //! registration.
@@ -68,8 +68,8 @@ const fn is_provider_refusal(p: &Problem) -> bool {
 }
 
 /// The registry as a host lists it to a connector UI.
-fn formats() -> Vec<fossil_lineage::Format> {
-    fossil_lineage::formats(fossil_descriptors_output::PROVIDERS)
+fn formats() -> Vec<fossil_hir::lineage::Format> {
+    fossil_hir::lineage::formats(fossil_hir::providers::PROVIDERS)
 }
 
 /// A real `ShExC` document declaring `ex:Person` with one `ex:name`.
@@ -125,9 +125,9 @@ fn the_wire_contract_finally_reports_a_schema_provider() {
             .unwrap_or_else(|| panic!("{name}"))
             .kind
     };
-    assert_eq!(kind("csv"), fossil_lineage::FormatKind::Data);
-    assert_eq!(kind("shex"), fossil_lineage::FormatKind::Schema);
-    assert_eq!(kind("shacl"), fossil_lineage::FormatKind::Schema);
+    assert_eq!(kind("csv"), fossil_hir::lineage::FormatKind::Data);
+    assert_eq!(kind("shex"), fossil_hir::lineage::FormatKind::Schema);
+    assert_eq!(kind("shacl"), fossil_hir::lineage::FormatKind::Schema);
 }
 
 // ------------------------------------------------------------- the SHACL row
@@ -154,7 +154,7 @@ fn the_shacl_document_decodes_to_the_predicates_the_program_writes() {
     let ttl = std::fs::read_to_string(programs_dir().join("catalogue/catalogue.ttl"))
         .expect("the document is on disk");
     let shapes =
-        fossil_descriptors_output::decode_shacl("catalogue.ttl", &ttl).expect("the row decodes it");
+        fossil_hir::shacl::decode_shacl("catalogue.ttl", &ttl).expect("the row decodes it");
     let product = shapes
         .lookup("https://shop.example/voc#Product")
         .expect("`sh:targetClass shop:Product` is the shape's IRI");
@@ -373,9 +373,9 @@ fn a_schema_argument_on_a_data_provider_names_both() {
 // ------------------------------------- once per mistake, and never zero times
 
 /// **A binding's diagnostic is reported ONCE**, whatever the mapping count.
-/// Salsa accumulates over a query's whole dependency subtree and `lower_to_hir`
-/// is in every mapping's, so one mistake in a three-mapping program came out
-/// three times — and there is no mapping it belongs to.
+/// `lower_to_hir` is read by every mapping, so a collector that reads it per
+/// mapping prints one mistake in a three-mapping program three times — and
+/// there is no mapping it belongs to.
 #[test]
 fn a_binding_diagnostic_is_reported_once_not_once_per_mapping() {
     let diagnostics = check_program(&[

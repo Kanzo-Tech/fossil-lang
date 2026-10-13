@@ -1,8 +1,8 @@
 ---
 title: Profile, and the mapping a model proposes
-description: "fossil's half of Kanzo Tasks: one sans-IO profiler inside the wasm gate, run by both hosts on their own DuckDB, which replaced introspect; and a mapping spec in RML's shape from which Fossil is emitted, so a model never writes syntax."
+description: "fossil's half of Kanzo Tasks: one sans-IO profiler inside the wasm gate, run by both hosts on their own DuckDB, which replaced introspect; and the mapping a model proposes, written in Fossil under a grammar whose names are the profile's and the types'."
 direction:
-  summary: "A mapping a model proposes is a spec in RML's shape, whose every name comes from a profile, and Fossil is emitted from it."
+  summary: "A mapping a model proposes is Fossil written under a grammar whose every name comes from a profile or a declared type, so a name that does not exist cannot be decoded."
 ---
 
 Kanzo's assistant and its Ask become one pattern, a *Task*: a small model in the browser fills a
@@ -45,17 +45,17 @@ while let Some(query) = plan.next_query() { // DESCRIBE, counts, inclusions
 let profile = plan.finish();                // types, keys, inclusions, samples
 ```
 
-`fossil-lsp` runs it natively with the `duckdb` crate
-(`crates/fossil-lsp/src/profile.rs, profile_and_register`). The browser reaches it through
+The browser reaches it through
 `fossil-wasm`'s `Profiler` and runs each query on the page's DuckDB-WASM: `runProfiler` in
 `@fossil-lang/wasm` is the loop (`packages/wasm/src/profile.ts, runProfiler`), and
 `@fossil-lang/profile` reads each source under its credential and hands the plan its name
-(`packages/profile/src/index.ts, profile`). The two hosts share the code, and only the engine
-differs ([Three hosts](/docs/design/three-hosts)).
+(`packages/profile/src/index.ts, profile`). `fossil-df`'s tests run the same plan on the native
+`duckdb` crate, so the code is shared and only the engine differs
+([Three hosts](/docs/design/three-hosts)).
 
-**It is inside the wasm gate, on purpose.** The engine stays with the host: `fossil-lsp` links
-DuckDB, and nothing that depends on `fossil-profile` links one through it — its own tests take DuckDB
-on a dev edge. So `fossil-profile` is a dependency of `fossil-wasm`, and the gate has watched it from
+**It is inside the wasm gate, on purpose.** The engine stays with the host, and nothing that
+depends on `fossil-profile` links one through it — its own tests and `fossil-df`'s take DuckDB on a
+dev edge. So `fossil-profile` is a dependency of `fossil-wasm`, and the gate has watched it from
 its first commit (`crates/xtask/src/main.rs, wasm_check`). A `native` feature carrying the engine
 was the other shape, and cargo's feature unification is why it is not: one dependent enabling it
 links DuckDB into every build of the crate, the wasm one included.
@@ -105,8 +105,8 @@ returns — RML's, not one of ours ([discarded](/docs/design/discarded)).
 
 ## Order
 
-The profiler and the mapping spec are phase 2 of Kanzo Tasks, after the evaluation set and Ask's
-resolver. `fossil-profile` with its two hosts is built, and introspect is gone. Still to come: the
-spec and its emitter with their round trips; and, on keasy's side, the executor moved off the page's
-main thread into a worker of its own — `run` constructs `FossilExecutor` in whatever realm calls it,
-and keasy calls it from the page.
+The profiler and the mapping grammar are phase 2 of Kanzo Tasks, after the evaluation set and Ask's
+resolver. Both are built: `fossil-profile` with its two hosts, introspect gone, and
+`fossil_ide::constrain`, the grammar of a mapping over a vocabulary. On keasy's side the executor runs
+in a worker of its own. What comes next is the types the grammar's vocabulary reads, declared in the
+program rather than in a `.shex` ([Types declared in the program](/docs/design/declared)).

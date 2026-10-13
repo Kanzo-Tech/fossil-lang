@@ -32,14 +32,11 @@ test-support = []
 [dependencies]
 salsa = { workspace = true }
 thiserror = { workspace = true }
-smol_str = { workspace = true }
-# The `System` trait hands out a
-# `&fossil_descriptors_input::DescriptorCache`, keyed by the source URI the
-# program writes. Verified before adding it: fossil-descriptors-input has NO
-# dependency on fossil-base — no cycle. The fossil-base → fossil-descriptors-input
-# direction matches the existing fossil-hir → fossil-descriptors-input
-# direction; descriptors-input remains a leaf data crate.
-fossil-descriptors-input = { path = "../fossil-descriptors-input" }
+# The `serde` feature, and `schemars`, for `sources::InferredDescriptor`: a host
+# sends the columns it found as JSON, and `@fossil-lang/types` is generated
+# from the struct.
+smol_str = { workspace = true, features = ["serde"] }
+schemars = { workspace = true }
 # Three modules name it in a public signature, so it is API and not just tests:
 # `providers` (the `DecodeTypes` row returns `OutputShapes` and `Rejection`),
 # `diagnostic` (`Span` is re-exported from there) and `system`. The
@@ -51,6 +48,11 @@ fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 # and nothing else, which is exactly why the vocabulary lives there rather
 # than beside a parser.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
+# A host's profile arrives as JSON, and both hosts that take one — the editor's
+# workspace and the executor — read it through `sources::columns_from_json` and
+# `sources::refusal_from_json`, so the decode is written once.
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 # The eight crates that use `test_support` turn the feature on here; an

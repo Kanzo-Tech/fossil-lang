@@ -9,7 +9,7 @@
 //! pivot spells it as a list, which no R2RML term map reads. Both are now the
 //! same table — `src`, the value — and the vertex row carries neither.
 
-use fossil_sinks::manifest::{Manifest, PropertyTable};
+use fossil_df::corpus::manifest::{Manifest, PropertyTable};
 
 #[path = "support/native.rs"]
 mod native;
@@ -111,7 +111,7 @@ const RDF_TTL: &str = r#"@prefix ex: <https://ex.org/> .
 <https://ex.org/person/2> a ex:Person ; ex:name "Linus" .
 "#;
 
-const RDF_PROGRAM: &str = r#"type { PersonShape } := io.shex("people.shex")
+const RDF_PROGRAM: &str = r#"type { Person as PersonShape } := io.shex("people.shex")
 
 { Person } := io.rdf("people.ttl", schema = io.shex("people.shex"))
 

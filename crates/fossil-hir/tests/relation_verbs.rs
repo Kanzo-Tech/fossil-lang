@@ -1,34 +1,18 @@
 //! **What a stage of a source pipeline is told when it does not lower.**
 //!
-//! `crate::lower::lower_source_stage` used to dispatch on the verb's TEXT, with
-//! three arms and a catch-all, and the catch-all said one thing about two
-//! different situations. A user writing `pedidos.sort(pedidos.id)` was told
-//! `sort` *"is not a relation verb fossil lowers"* — false twice over: `sort`
-//! IS a relation verb, the catalogue declares it with a `PlanOp` of its own,
-//! and what it lacks is a lowering. The message even read its COUNT from the
-//! registry while reading its LIST of implemented verbs from a string literal,
-//! so half of it could go stale without the other half moving.
-//!
-//! The two situations are two answers now, and this file is what holds them
-//! apart. It is the same distinction `catalogue.bnf`'s header argues for the
-//! `io.` half — *"declared but not linked here" and "no such name" are
-//! different answers* — arrived at from the other side of the catalogue.
+//! Every verb the catalogue declares has a lowering, so a stage that does not
+//! lower has a name the catalogue does not have, or arguments its row refuses.
+//! This file owns those refusals; `source_pipeline_row.rs` owns the row
+//! algebra of the verbs that do lower.
 //!
 //! # What this file does NOT prove
 //!
-//! - **That the six unlowered verbs should stay unlowered.** The gap is
-//!   deliberate — the catalogue already carries their signatures, so the day one
-//!   gains a lowering its arguments are checked by the code that checks
-//!   `str.trim`'s. This pins the message, not the gap.
-//! - **That a fourteenth `PlanOp` is impossible.** That is the compiler's, not
-//!   this file's: the `match` in `lower_source_stage` is exhaustive and has no
-//!   wildcard, so a new variant fails to build. A test cannot assert a
-//!   compile error, and a test that tried would be asserting its own mock.
-//! - **That the lowered verbs do the right thing.** `source_pipeline_row.rs`
-//!   owns the row algebra; this owns the refusals.
+//! - **That a new `PlanOp` is lowered.** That is the compiler's: the `match`
+//!   in `lower_source_stage` is exhaustive and has no wildcard, so a new
+//!   variant fails to build.
 
 use fossil_base::test_support::{db_with_document, register_inferred};
-use fossil_base::{Diagnostic, FossilDb, SourceFile};
+use fossil_base::{FossilDb, SourceFile};
 use fossil_graph_schema::Primitive;
 use fossil_hir::lower::lower_to_hir;
 
@@ -60,12 +44,15 @@ fn program(pipe: &str) -> String {
 }
 
 fn diagnostics(pipe: &str) -> Vec<String> {
-    let (db, file): (FossilDb, SourceFile) = db_with_document(&program(pipe), "v.shex", DOCUMENT);
-    register_inferred(&db, "o.csv", COLUMNS);
-    register_inferred(&db, "p.csv", COLUMNS);
-    let _ = lower_to_hir(&db, file);
-    lower_to_hir::accumulated::<Diagnostic>(&db, file)
+    let (mut db, file): (FossilDb, SourceFile) =
+        db_with_document(&program(pipe), "v.shex", DOCUMENT);
+    register_inferred(&mut db, "o.csv", COLUMNS);
+    register_inferred(&mut db, "p.csv", COLUMNS);
+    // The lowering's own, then the parse's it reads.
+    lower_to_hir(&db, file)
+        .diagnostics(&db)
         .iter()
+        .chain(fossil_syntax::parse(&db, file).diagnostics(&db))
         .map(|d| {
             d.help.as_ref().map_or_else(
                 || d.message(),
@@ -90,37 +77,6 @@ fn one_about(pipe: &str, needle: &str) -> String {
 }
 
 #[test]
-fn a_catalogued_verb_with_no_lowering_says_which_of_the_two_things_is_true() {
-    let m = one_about(
-        "derived := pedidos.sort(pedidos.id)",
-        "does not implement yet",
-    );
-    assert!(
-        m.contains("`sort` is a relation verb the lowering does not implement yet"),
-        "the verb has to be named, and named as catalogued: {m}"
-    );
-    assert!(
-        !m.contains("is not a relation verb"),
-        "this is the sentence that was false, and it must not come back: {m}"
-    );
-}
-
-#[test]
-fn the_message_lists_the_implemented_verbs_from_the_registry() {
-    let m = one_about("derived := pedidos.sort(pedidos.id)", "implemented today");
-    // Alphabetical because `verb_names` sorts, and all six because the filter
-    // is over the table rather than over a literal. It read `join`, `select`,
-    // `where` until `distinct` and `union` gained lowerings, and then `group_by`
-    // arrived and moved it again — which is the whole reason the list is
-    // derived. Six of them is the whole of the direction `design/algebra`
-    // declares.
-    assert!(
-        m.contains("implemented today: `distinct`, `group_by`, `join`, `select`, `union`, `where`"),
-        "the list must come from the registry, not from a format string: {m}"
-    );
-}
-
-#[test]
 fn a_name_the_catalogue_does_not_have_is_a_different_answer() {
     let m = one_about(
         "derived := pedidos.slugify(pedidos.id)",
@@ -130,14 +86,22 @@ fn a_name_the_catalogue_does_not_have_is_a_different_answer() {
         m.contains("`slugify` is not a relation verb"),
         "an uncatalogued name is refused by name: {m}"
     );
-    // And it is told what there IS, from the table — twelve names, not a count
-    // and not three of them. It named `aggregate` until `group_by` took the
-    // aggregations into itself and that row was deleted; `count` is the
-    // catalogued-and-unlowered one it stands for now.
+    // And it is told what there IS, from the table — the names, not a count.
     assert!(
-        m.contains("`sort`") && m.contains("`where`") && m.contains("`count`"),
+        m.contains("the catalogue has `distinct`, `group_by`, `join`, `select`, `union`, `where`"),
         "the catalogue's own list is what a reader needs here: {m}"
     );
+}
+
+#[test]
+fn a_verb_the_catalogue_dropped_is_not_a_relation_verb() {
+    // `sort` was catalogued with no lowering and is gone (`/docs/design/declared`);
+    // it is refused like any other name the catalogue does not have.
+    let m = one_about(
+        "derived := pedidos.sort(pedidos.id)",
+        "is not a relation verb",
+    );
+    assert!(m.contains("`sort` is not a relation verb"), "{m}");
 }
 
 #[test]

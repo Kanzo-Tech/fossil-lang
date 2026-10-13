@@ -11,7 +11,6 @@ you are mid-line: you have a value, you want to know what you can do to it.
 | [`seq`](#a-relation) | a relation — filter, project, join, aggregate |
 | [`str`](#a-string) | a string |
 | [`math`](#a-number) | a number |
-| [`core`](#core) | the two that belong nowhere else |
 | [`parse`](#parse) | text you want as something else |
 | [`io`](#io) | nothing — the readers are what make the thing |
 
@@ -75,11 +74,7 @@ these four by reading the table above.
 `math.round` takes no `digits` argument, and it is the one row taking a `Float` and handing back an
 `Integer`.
 
-## `core`
-
-<include>../../generated/stdlib.mdx#core</include>
-
-`core.lang("Bonjour", tag = "fr")` is a language-tagged literal. There is no `dir` argument.
+## Nullable values
 
 A column the source declares as nullable is a `T?`, and a shape that requires a value will not take
 one. There is no operator that turns one into the other: `core.require` did that by raising, and
@@ -96,9 +91,6 @@ raising is what the execution engine has no spelling for.
 `parse.year` is XPath's `xs:gYear` constructor and takes text as it does: XPath casts no integer to
 `xs:gYear`, so an integer column does not fill an `xsd:gYear` slot without saying which text it is.
 The year lands as its integer, under the shape's `xsd:gYear` datatype.
-
-`parse.decimal` differs from `parse.float` in refusing what will not fit: `'1e400'` is an error there
-and an infinity here.
 
 There is no `parse.json`: it needed a JSON extraction the execution engine does not ship, and
 schema-directed parsing — a path and a `T`, rather than a path and a `String` — is what the row

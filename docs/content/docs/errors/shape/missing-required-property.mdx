@@ -25,8 +25,8 @@ every row. fossil reads the shape as a type, so it can say it before anything ru
 
 This is the backward half of the check. Checking each line the body has cannot catch a line it does
 not have, so the shape's required predicates are walked as well, and each one the body never names
-is reported. The names compared are the names a body writes, `@rename` included: a predicate renamed
-and written under its new name counts as written. Cardinality is carried at full resolution for this
+is reported. The names compared are the names a body writes — each predicate's last segment.
+Cardinality is carried at full resolution for this
 reason — see [inference from shapes](/docs/design/shapes) and [typing](/docs/design/types).
 
 ## How to repair it

@@ -9,16 +9,16 @@
 //! reported by `missing_documents`, registered under its key — and the run's
 //! output descriptor is decoded from that registration. The assertion on the
 //! vertex table's `iri` is the guard that the document was READ: a bare header
-//! name is bound positionally against it, and a run that skipped it writes no
+//! name is bound by name against it, and a run that skipped it writes no
 //! type IRI.
 
 #![allow(clippy::literal_string_with_formatting_args)]
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use fossil_df::Executor;
-use fossil_sinks::manifest::Manifest;
+use fossil_df::corpus::manifest::Manifest;
 use fossil_storage::{Access, Host, Scope, Storage, StorageCredential};
 use futures::TryStreamExt;
 use futures::future::BoxFuture;
@@ -103,7 +103,7 @@ const EXECUTOR_SHEX: &str = include_str!("fixtures/executor.shex");
 
 /// `program` compiled, with every document it names registered — what
 /// `resolveDocuments` leaves behind.
-fn executor(program: &str, connections: HashMap<String, String>) -> Executor {
+fn executor(program: &str, connections: BTreeMap<String, String>) -> Executor {
     let mut exec = Executor::new(program);
     exec.set_connections(connections);
     for missing in exec.missing_documents() {
@@ -132,7 +132,7 @@ fn manifest(files: &HashMap<String, Vec<u8>>) -> Manifest {
 #[tokio::test]
 async fn csv_program_runs_through_the_storage_seam() {
     let (mut storage, out) = storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
-    let report = executor(PROGRAM, HashMap::new())
+    let report = executor(PROGRAM, BTreeMap::new())
         .execute(&mut storage, DEST)
         .await
         .expect("executor runs the CSV program");
@@ -155,7 +155,7 @@ async fn csv_program_runs_through_the_storage_seam() {
     assert_eq!(v.record_count, 3);
 
     // The document was READ, not merely named: a bare header name is bound
-    // positionally against the shape document, so this IRI exists only if
+    // by name against the shape document, so this IRI exists only if
     // `executor.shex` reached the checker.
     assert_eq!(
         v.iri.as_deref(),
@@ -186,10 +186,10 @@ Order : Order from orders
 
 #[test]
 fn inputs_list_each_distinct_source_with_its_format() {
-    let srcs: Vec<_> = executor(TWO_SOURCE_PROGRAM, HashMap::new())
+    let srcs: Vec<_> = executor(TWO_SOURCE_PROGRAM, BTreeMap::new())
         .inputs()
         .into_iter()
-        .filter(|s| s.role == fossil_lineage::Role::Data)
+        .filter(|s| s.role == fossil_hir::lineage::Role::Data)
         .collect();
     let uris: Vec<&str> = srcs.iter().map(|s| s.location.as_str()).collect();
     assert!(uris.contains(&"https://data.example.com/users.csv"));
@@ -207,7 +207,7 @@ async fn the_report_names_the_destination_and_the_drops() {
         ("https://data.example.com/orders.csv", "orders.csv"),
     ])
     .await;
-    let report = executor(TWO_SOURCE_PROGRAM, HashMap::new())
+    let report = executor(TWO_SOURCE_PROGRAM, BTreeMap::new())
         .execute(&mut storage, DEST)
         .await
         .expect("executor runs the two-source program");
@@ -250,7 +250,7 @@ Person : Person from users
 #[tokio::test]
 async fn a_destination_no_store_covers_is_refused() {
     let (mut storage, _) = storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
-    let refused = executor(PROGRAM, HashMap::new())
+    let refused = executor(PROGRAM, BTreeMap::new())
         .execute(&mut storage, "s3://elsewhere/run-2/")
         .await
         .expect_err("refused");
@@ -272,7 +272,7 @@ async fn a_program_that_does_not_compile_fails_with_its_diagnostics() {
         "",
     );
     let (mut storage, _) = storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
-    let refused = executor(&broken, HashMap::new())
+    let refused = executor(&broken, BTreeMap::new())
         .execute(&mut storage, DEST)
         .await
         .expect_err("a program with no subject does not run");
@@ -316,7 +316,7 @@ async fn a_source_that_names_no_file_fails_as_source_not_found() {
             storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
         let refused = executor(
             &program,
-            HashMap::from([(
+            BTreeMap::from([(
                 "ldbc".to_string(),
                 "https://data.example.com/ldbc".to_string(),
             )]),
@@ -340,7 +340,7 @@ async fn at_conn_source_alias_resolves_through_the_ref_map() {
     // both `inputs()` (enumeration) and `execute()` (the read) must agree.
     let exec = executor(
         CONN_PROGRAM,
-        HashMap::from([(
+        BTreeMap::from([(
             "mybucket".to_string(),
             "https://data.example.com".to_string(),
         )]),
@@ -349,7 +349,7 @@ async fn at_conn_source_alias_resolves_through_the_ref_map() {
     let listed: Vec<_> = exec
         .inputs()
         .into_iter()
-        .filter(|i| i.role == fossil_lineage::Role::Data)
+        .filter(|i| i.role == fossil_hir::lineage::Role::Data)
         .collect();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].location, "https://data.example.com/users.csv");
@@ -375,11 +375,11 @@ Person : Person from users
 ";
 
 /// A document is keyed by what the program wrote and located through the
-/// connection map, and it stays missing until it is registered.
+/// connections, and it stays missing until it is registered.
 #[test]
 fn a_document_is_missing_until_registered() {
     let mut exec = Executor::new(CONN_DOCUMENT_PROGRAM);
-    exec.set_connections(HashMap::from([(
+    exec.set_connections(BTreeMap::from([(
         "vocab".to_string(),
         "https://shapes.example.com/v1".to_string(),
     )]));
@@ -421,7 +421,7 @@ fn a_union_of_two_mappings_runs_with_no_tokio_runtime() {
     futures::executor::block_on(async {
         let (mut storage, out) =
             storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
-        executor(UNION_PROGRAM, HashMap::new())
+        executor(UNION_PROGRAM, BTreeMap::new())
             .execute(&mut storage, DEST)
             .await
             .expect("the union runs on one future");

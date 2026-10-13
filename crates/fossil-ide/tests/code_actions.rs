@@ -21,11 +21,11 @@
 //! **The disjunct predicates are written out here rather than decoded from a
 //! `ShEx` document, and that is the crate boundary, not a shortcut.** What
 //! crosses out of the decoder is `Rejection::Disjunction` — plain strings — and
-//! the `ShEx`-to-`Rejection` half is `fossil-shex`'s own test. This file owes
+//! the `ShEx`-to-`Rejection` half is `fossil_hir::shex`'s own test. This file owes
 //! the half after it: renderer → `suggestion_source` → code action → an edited
 //! document that still compiles. Reaching for a `ShExDescriptor` here would
-//! test the decoder twice and this boundary not at all, which is why there is
-//! no `fossil-shex` dev-dependency to reach for.
+//! test the decoder twice and this boundary not at all, which is why this
+//! file names no `fossil_hir::shex` type.
 
 // The split snippet + IRI templates are LITERAL Fossil source, not Rust
 // format-string args.
@@ -153,7 +153,7 @@ Contact : Contact from contacts
     // The two disjuncts of an `ex:Contact` `OneOf` over (`ex:email` | `ex:phone`),
     // in the vocabulary the checker actually hands the renderer: a
     // `Rejection::Disjunction` carries each branch's predicate IRIs and nothing
-    // `ShEx`-typed. `fossil-shex` builds these in `rejection_of`; that lowering
+    // `ShEx`-typed. `fossil_hir::shex` builds these in `rejection_of`; that lowering
     // is its own crate's test, and what this file owes is the half after it.
     let disjuncts = vec![
         vec!["http://example.org/email".to_string()],
@@ -169,7 +169,6 @@ Contact : Contact from contacts
         "contacts",
         "\"https://example.org/contact/{contacts.id}\"",
         &disjuncts,
-        &[],
     );
 
     // The mapping block runs from `Contact :` to end-of-file.
@@ -224,7 +223,7 @@ Contact : Contact from contacts
     for m in mappings {
         let r = fossil_hir::typecheck_mapping(&db, m);
         assert!(
-            r.is_ok(),
+            r.checked(&db).is_ok(),
             "the split-mapping edit must re-compile cleanly (no new type errors); \
              mapping failed in edited doc:\n{edited}",
         );

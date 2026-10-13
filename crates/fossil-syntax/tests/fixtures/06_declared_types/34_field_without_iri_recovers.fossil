@@ -1,0 +1,4 @@
+@iri("https://example.org/Person")
+type Person
+    name: String
+    @iri("https://example.org/born")  born: Option<Date>

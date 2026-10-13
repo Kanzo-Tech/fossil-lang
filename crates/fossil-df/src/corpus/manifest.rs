@@ -1,0 +1,525 @@
+//! `fossil.json` — the one document a `fossil/1` corpus carries.
+//!
+//! A corpus is this file and Parquet: one table per vertex type under
+//! `vertex/`, one per relation under `edge/`, one per multi-valued property
+//! under `property/`, and `fossil.json` at the root,
+//! written **last** — its presence is the commit. The structs below are the
+//! format. The writer, [`crate::write()`], builds a [`Manifest`] and serialises it; nothing in the
+//! workspace parses one back, and a reader in another language checks itself
+//! against `fossil.schema.json` beside this file, which
+//! `crates/xtask/tests/wire.rs` derives from these structs.
+//!
+//! The vocabulary is SQL/PGQ's rather than `GraphAr`'s: a vertex table and an
+//! edge table, a `key`, a `source` and a `destination` that each name the key
+//! column and the vertex table it `references`. `/docs/design/corpus` is the
+//! argument.
+//!
+//! # Versions
+//!
+//! Inside `fossil/1` only optional fields a reader may ignore are added.
+//! Changing what a fixed column or a byte means is `fossil/2`. A reader refuses
+//! a `format` it does not know before it reads a byte of Parquet, and ignores
+//! any field it does not know.
+
+use datafusion::arrow::datatypes::DataType;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
+
+use super::generated::ColumnRole;
+
+/// The format a corpus is written in.
+pub const FOSSIL_FORMAT: &str = "fossil/1";
+
+/// [`Manifest::format`]: a unit that serialises as [`FOSSIL_FORMAT`] and
+/// deserialises nothing else, so no writer can emit another string and a
+/// reader refuses an unknown format before it reads a byte of Parquet. The
+/// schema says the same thing as a `const`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Format;
+
+impl Serialize for Format {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(FOSSIL_FORMAT)
+    }
+}
+
+impl<'de> Deserialize<'de> for Format {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let format = String::deserialize(deserializer)?;
+        if format == FOSSIL_FORMAT {
+            Ok(Self)
+        } else {
+            Err(serde::de::Error::invalid_value(
+                serde::de::Unexpected::Str(&format),
+                &FOSSIL_FORMAT,
+            ))
+        }
+    }
+}
+
+impl JsonSchema for Format {
+    fn is_referenceable() -> bool {
+        false
+    }
+
+    fn schema_name() -> String {
+        "Format".to_owned()
+    }
+
+    fn json_schema(_: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        schemars::schema::SchemaObject {
+            const_value: Some(FOSSIL_FORMAT.into()),
+            ..Default::default()
+        }
+        .into()
+    }
+}
+
+/// R2RML's term type of an IRI, as [`Property::term_type`] holds it.
+pub const RR_IRI: &str = "http://www.w3.org/ns/r2rml#IRI";
+
+/// R2RML's term type of a literal, as [`Property::term_type`] holds it.
+pub const RR_LITERAL: &str = "http://www.w3.org/ns/r2rml#Literal";
+
+/// The manifest's path under a corpus's root.
+pub const MANIFEST_FILE: &str = "fossil.json";
+
+/// Rows per Parquet row group, in every table of a corpus.
+///
+/// `DuckDB`'s own default, set explicitly because parquet-rs defaults to
+/// 1,048,576 — which at a million vertices is one row group and no pruning by
+/// the statistics a `dense_id` range reads. A reader prunes on the footer's
+/// statistics; nothing reads this number back.
+pub const ROW_GROUP_ROWS: usize = 122_880;
+
+/// The whole of `fossil.json`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Manifest {
+    /// The format the corpus is written in.
+    pub format: Format,
+    /// One per vertex type, in the order the compiled schema lists them.
+    pub vertex_tables: Vec<VertexTable>,
+    /// One per relation, in the order the compiled schema lists them.
+    pub edge_tables: Vec<EdgeTable>,
+    /// One per multi-valued property, in the order the compiled schema lists
+    /// their types and, inside a type, them. Absent when there is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub property_tables: Vec<PropertyTable>,
+}
+
+/// One vertex type's table.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct VertexTable {
+    /// The type's label: the name of the table and its PGQ label.
+    pub name: String,
+    /// The type's IRI, when the program's shape document gives one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iri: Option<String>,
+    /// The table's Parquet file, relative to the corpus root.
+    pub path: String,
+    /// The key column: `dense_id`, global and gapless across every vertex table,
+    /// and one contiguous range of it per table, in manifest order.
+    pub key: String,
+    /// The identity column: `subject`, unique within the table.
+    pub identity: String,
+    /// Rows in the file.
+    pub record_count: u64,
+    /// The sources the table's rows were derived from — PROV-O's
+    /// `prov:wasDerivedFrom` — each as the program wrote it (`@conn/path`, or a
+    /// path), never the location it resolved to. Sorted. Absent when there is
+    /// none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub derived_from: Vec<String>,
+    /// Every column of the file, in file order.
+    pub properties: Vec<Property>,
+}
+
+/// One relation's table.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct EdgeTable {
+    /// `<Src>_<label>_<Dst>`, unique: the label repeats across relations.
+    pub name: String,
+    /// The relation's label, e.g. `placedBy`.
+    pub label: String,
+    /// The relation's IRI, when the program's shape document gives one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iri: Option<String>,
+    /// The table's Parquet file, relative to the corpus root.
+    pub path: String,
+    /// The column holding the source vertex's `dense_id`, and its table.
+    pub source: Endpoint,
+    /// The column holding the destination vertex's `dense_id`, and its table.
+    pub destination: Endpoint,
+    /// Rows in the file.
+    pub record_count: u64,
+    /// The sources the table's rows were derived from — PROV-O's
+    /// `prov:wasDerivedFrom` — each as the program wrote it (`@conn/path`, or a
+    /// path), never the location it resolved to. Sorted. Absent when there is
+    /// none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub derived_from: Vec<String>,
+    /// Every column of the file, in file order.
+    pub properties: Vec<Property>,
+}
+
+/// One multi-valued property's table, a row per value: first normal form,
+/// because a cell is one RDF term (R2RML §10.2) and an array is no Core SQL.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct PropertyTable {
+    /// `<Type>_<property>`.
+    pub name: String,
+    /// The table's Parquet file, relative to the corpus root.
+    pub path: String,
+    /// The column holding the `dense_id` of the vertex the value belongs to,
+    /// and its table.
+    pub source: Endpoint,
+    /// Rows in the file.
+    pub record_count: u64,
+    /// The sources the table's rows were derived from — PROV-O's
+    /// `prov:wasDerivedFrom` — each as the program wrote it (`@conn/path`, or a
+    /// path), never the location it resolved to. Sorted. Absent when there is
+    /// none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub derived_from: Vec<String>,
+    /// Every column of the file, in file order: the source's key, then the
+    /// value, which carries the property's IRI and term.
+    pub properties: Vec<Property>,
+}
+
+/// One end of a relation, or of a property's values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Endpoint {
+    /// The table's column.
+    pub key: String,
+    /// The vertex table whose `key` it holds.
+    pub references: String,
+}
+
+/// One column.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Property {
+    /// The column name, as in the Parquet schema.
+    pub name: String,
+    /// Its type, in the spelling [`data_type_name`] writes.
+    #[serde(rename = "type")]
+    pub data_type: String,
+    /// The predicate IRI the program mapped it from, when there is one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub iri: Option<String>,
+    /// The RDF term type the shape declares for the values, as R2RML's IRI —
+    /// [`RR_IRI`] or [`RR_LITERAL`] — which a mapping states as `rr:termType`.
+    /// Absent where no shape declares one, and a reader then takes R2RML's
+    /// default: a literal of the column's natural datatype (R2RML §10.2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub term_type: Option<String>,
+    /// The literal datatype the shape declares, as the IRI it wrote — a
+    /// mapping's `rr:datatype`. Absent where it declares none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub datatype: Option<String>,
+    /// Whether a row may hold no value. Absent is `false`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub nullable: bool,
+    /// What the column IS, for a column the writer emits — `corpus.bnf`'s role, so
+    /// a reader names the roles it means rather than the names it remembers.
+    /// Absent on a column of the program's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<ColumnRole>,
+}
+
+impl Manifest {
+    /// The document as it is written: pretty JSON with a trailing newline.
+    ///
+    /// # Errors
+    /// Never for these types; `serde_json`'s signature is fallible.
+    pub fn to_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(self).map(|mut s| {
+            s.push('\n');
+            s
+        })
+    }
+
+    /// The JSON Schema of the document — what `fossil.schema.json` holds.
+    ///
+    /// # Panics
+    /// Never: a derived schema always serialises.
+    #[must_use]
+    pub fn json_schema() -> String {
+        // An absent optional is absent, never `null`: the writer skips it.
+        let schema = schemars::r#gen::SchemaSettings::draft07()
+            .with(|s| s.option_add_null_type = false)
+            .into_generator()
+            .into_root_schema_for::<Self>();
+        let mut text = serde_json::to_string_pretty(&schema).expect("a derived schema serialises");
+        text.push('\n');
+        text
+    }
+}
+
+/// A vertex table's path: `vertex/<name>.parquet`.
+#[must_use]
+pub fn vertex_path(name: &str) -> String {
+    format!("vertex/{name}.parquet")
+}
+
+/// A relation's table name: `<Src>_<label>_<Dst>`.
+#[must_use]
+pub fn edge_table_name(source: &str, label: &str, destination: &str) -> String {
+    format!("{source}_{label}_{destination}")
+}
+
+/// An edge table's path: `edge/<name>.parquet`.
+#[must_use]
+pub fn edge_path(name: &str) -> String {
+    format!("edge/{name}.parquet")
+}
+
+/// A multi-valued property's table name: `<Type>_<property>`.
+#[must_use]
+pub fn property_table_name(vertex: &str, property: &str) -> String {
+    format!("{vertex}_{property}")
+}
+
+/// A property table's path: `property/<name>.parquet`.
+#[must_use]
+pub fn property_path(name: &str) -> String {
+    format!("property/{name}.parquet")
+}
+
+/// The manifest's spelling of an Arrow type.
+///
+/// `float` and `double` are `corpus.bnf`'s spellings; the integer widths are
+/// exact. A list is `list<…>` of its item. `uint32` is the key's and the
+/// endpoints' type.
+#[must_use]
+pub fn data_type_name(dt: &DataType) -> String {
+    match dt {
+        DataType::Boolean => "bool".to_string(),
+        DataType::Int8 => "int8".to_string(),
+        DataType::Int16 => "int16".to_string(),
+        DataType::Int32 => "int32".to_string(),
+        DataType::Int64 => "int64".to_string(),
+        DataType::UInt8 => "uint8".to_string(),
+        DataType::UInt16 => "uint16".to_string(),
+        DataType::UInt32 => "uint32".to_string(),
+        DataType::UInt64 => "uint64".to_string(),
+        DataType::Float16 | DataType::Float32 => "float".to_string(),
+        DataType::Float64 => "double".to_string(),
+        DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View => "string".to_string(),
+        DataType::Date32 | DataType::Date64 => "date".to_string(),
+        DataType::Timestamp(_, _) => "timestamp".to_string(),
+        DataType::Time32(_) | DataType::Time64(_) => "time".to_string(),
+        DataType::Decimal32(_, _)
+        | DataType::Decimal64(_, _)
+        | DataType::Decimal128(_, _)
+        | DataType::Decimal256(_, _) => "decimal".to_string(),
+        DataType::List(item) | DataType::LargeList(item) | DataType::FixedSizeList(item, _) => {
+            format!("list<{}>", data_type_name(item.data_type()))
+        }
+        _ => "binary".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use datafusion::arrow::datatypes::Field;
+    use std::sync::Arc;
+
+    fn column(name: &str, data_type: &str, nullable: bool) -> Property {
+        Property {
+            name: name.to_string(),
+            data_type: data_type.to_string(),
+            iri: None,
+            term_type: None,
+            datatype: None,
+            nullable,
+            role: None,
+        }
+    }
+
+    fn manifest() -> Manifest {
+        Manifest {
+            format: Format,
+            vertex_tables: vec![VertexTable {
+                name: "Person".to_string(),
+                iri: Some("https://example.org/Person".to_string()),
+                path: vertex_path("Person"),
+                key: "dense_id".to_string(),
+                identity: "subject".to_string(),
+                record_count: 3,
+                derived_from: vec!["@lake/people.csv".to_string()],
+                properties: vec![
+                    Property {
+                        role: Some(ColumnRole::Address),
+                        ..column("dense_id", "uint32", false)
+                    },
+                    {
+                        let mut name = column("name", "string", true);
+                        name.iri = Some("https://example.org/name".to_string());
+                        name
+                    },
+                ],
+            }],
+            edge_tables: vec![EdgeTable {
+                name: edge_table_name("Person", "knows", "Person"),
+                label: "knows".to_string(),
+                iri: None,
+                path: edge_path("Person_knows_Person"),
+                source: Endpoint {
+                    key: "src".to_string(),
+                    references: "Person".to_string(),
+                },
+                destination: Endpoint {
+                    key: "dst".to_string(),
+                    references: "Person".to_string(),
+                },
+                record_count: 2,
+                derived_from: vec!["@lake/people.csv".to_string()],
+                properties: vec![
+                    column("src", "uint32", false),
+                    column("dst", "uint32", false),
+                ],
+            }],
+            property_tables: vec![PropertyTable {
+                name: property_table_name("Person", "nickname"),
+                path: property_path("Person_nickname"),
+                source: Endpoint {
+                    key: "src".to_string(),
+                    references: "Person".to_string(),
+                },
+                record_count: 4,
+                derived_from: vec!["@lake/people.csv".to_string()],
+                properties: vec![
+                    column("src", "uint32", false),
+                    column("nickname", "string", false),
+                ],
+            }],
+        }
+    }
+
+    #[test]
+    fn the_document_is_the_contract_shape() {
+        let text = manifest().to_json().unwrap();
+        assert!(text.contains("\"format\": \"fossil/1\""), "{text}");
+        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let person = &json["vertex_tables"][0];
+        assert_eq!(person["path"], "vertex/Person.parquet");
+        assert_eq!(person["key"], "dense_id");
+        assert_eq!(person["identity"], "subject");
+        assert!(
+            person.get("position").is_none(),
+            "the corpus carries no picture"
+        );
+        assert_eq!(person["properties"][0]["type"], "uint32");
+        assert!(
+            person["properties"][0].get("nullable").is_none(),
+            "a column that cannot be null omits the field"
+        );
+        assert_eq!(person["properties"][1]["nullable"], true);
+        assert_eq!(person["properties"][0]["role"], "address");
+        assert!(
+            person["properties"][1].get("role").is_none(),
+            "a program column carries no role"
+        );
+        let knows = &json["edge_tables"][0];
+        assert_eq!(knows["name"], "Person_knows_Person");
+        assert_eq!(knows["path"], "edge/Person_knows_Person.parquet");
+        assert_eq!(knows["source"]["key"], "src");
+        assert_eq!(knows["destination"]["references"], "Person");
+        assert!(knows.get("iri").is_none(), "an absent IRI is absent");
+        let nickname = &json["property_tables"][0];
+        assert_eq!(nickname["name"], "Person_nickname");
+        assert_eq!(nickname["path"], "property/Person_nickname.parquet");
+        assert_eq!(nickname["source"]["references"], "Person");
+        for table in [person, knows, nickname] {
+            assert_eq!(
+                table["derived_from"],
+                serde_json::json!(["@lake/people.csv"]),
+                "a source is the key the program wrote"
+            );
+        }
+    }
+
+    /// `fossil/1` grows by optional fields only, so a corpus with no
+    /// multi-valued property writes the document it wrote before there were any.
+    #[test]
+    fn no_property_table_is_no_field() {
+        let mut m = manifest();
+        m.property_tables.clear();
+        let json = serde_json::to_value(&m).unwrap();
+        assert!(json.get("property_tables").is_none());
+        assert_eq!(serde_json::from_value::<Manifest>(json).unwrap(), m);
+    }
+
+    #[test]
+    fn the_document_round_trips() {
+        let m = manifest();
+        let back: Manifest = serde_json::from_str(&m.to_json().unwrap()).unwrap();
+        assert_eq!(back, m);
+    }
+
+    #[test]
+    fn a_reader_ignores_fields_it_does_not_know() {
+        let mut json = serde_json::to_value(manifest()).unwrap();
+        json["extent"] = serde_json::json!([0, 0, 1, 1]);
+        json["vertex_tables"][0]["extent"] = serde_json::json!([0, 0, 1, 1]);
+        let back: Manifest = serde_json::from_value(json).unwrap();
+        assert_eq!(back, manifest());
+    }
+
+    #[test]
+    fn a_reader_refuses_a_format_it_does_not_know() {
+        let mut json = serde_json::to_value(manifest()).unwrap();
+        json["format"] = serde_json::json!("fossil/2");
+        assert!(serde_json::from_value::<Manifest>(json).is_err());
+    }
+
+    #[test]
+    fn spellings_are_exact_widths_and_corpus_bnf_floats() {
+        assert_eq!(data_type_name(&DataType::Int16), "int16");
+        assert_eq!(data_type_name(&DataType::UInt32), "uint32");
+        assert_eq!(data_type_name(&DataType::Float32), "float");
+        assert_eq!(data_type_name(&DataType::Float64), "double");
+        let list = DataType::List(Arc::new(Field::new("item", DataType::Utf8, true)));
+        assert_eq!(data_type_name(&list), "list<string>");
+    }
+
+    /// The role on the wire is `corpus.bnf`'s word for it, so a reader in another
+    /// language matches the file it can read rather than a Rust variant name.
+    #[test]
+    fn a_role_is_spelled_as_corpus_bnf_writes_it() {
+        for column in crate::corpus::generated::PAYLOAD_COLUMNS
+            .iter()
+            .chain(crate::corpus::generated::EDGE_COLUMNS)
+            .chain(crate::corpus::generated::PROPERTY_COLUMNS)
+        {
+            let wire = serde_json::to_value(column.role).unwrap();
+            assert_eq!(
+                wire,
+                serde_json::Value::String(format!("{:?}", column.role).to_lowercase()),
+                "`{}`",
+                column.name
+            );
+        }
+    }
+
+    #[test]
+    fn every_generated_column_type_is_a_spelling_this_module_writes() {
+        let spelled: Vec<String> = [DataType::UInt32, DataType::Utf8, DataType::Float32]
+            .iter()
+            .map(data_type_name)
+            .collect();
+        for column in crate::corpus::generated::PAYLOAD_COLUMNS
+            .iter()
+            .chain(crate::corpus::generated::EDGE_COLUMNS)
+            .chain(crate::corpus::generated::PROPERTY_COLUMNS)
+        {
+            assert!(
+                spelled.iter().any(|s| s == column.data_type),
+                "`{}` is declared `{}`, which data_type_name never writes",
+                column.name,
+                column.data_type
+            );
+        }
+    }
+}

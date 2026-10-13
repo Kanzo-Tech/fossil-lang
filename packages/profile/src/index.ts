@@ -6,8 +6,8 @@
  * the credential the host vends for that connection (`@fossil-lang/storage`), and runs
  * `fossil-profile`'s plan on the host's engine (`runProfiler`, `@fossil-lang/wasm`): the columns and
  * their types, and — unless the host asks for types alone — the counts, candidate keys, inclusions
- * between sources and a sample. The plan is the one the language server runs natively, so the two
- * hosts share the code and only the engine differs. The engine is the host's, which is why
+ * between sources and a sample. The plan is Rust, the same one `fossil-df`'s tests run on native
+ * DuckDB, so only the engine differs. The engine is the host's, which is why
  * DuckDB-WASM is not a peer.
  */
 

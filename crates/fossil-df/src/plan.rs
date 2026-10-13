@@ -20,10 +20,9 @@ use datafusion::common::TableReference;
 use datafusion::error::DataFusionError;
 use datafusion::logical_expr::{Expr as DfExpr, JoinType, LogicalPlanBuilder};
 use datafusion::prelude::{DataFrame, SessionContext};
+use fossil_base::location::SourceAnchor;
 use fossil_hir::BinOp;
 use fossil_mir::{AggFn, Expr, JoinKind, JoinSide, Op};
-
-use fossil_location::SourceAnchor;
 
 use crate::{read_source, render};
 

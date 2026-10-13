@@ -1,7 +1,6 @@
 //! `Profiler` — [`fossil_profile::Profiler`] for a JS host: the plan in wasm,
 //! each query run on the page's DuckDB-WASM by the host, and the answers fed
-//! back. `@fossil-lang/profile` is the loop around it; the language server runs
-//! the same plan on native `DuckDB` (`crates/fossil-lsp/src/profile.rs`). And `mappingGrammar`:
+//! back. `@fossil-lang/profile` is the loop around it. And `mappingGrammar`:
 //! what a model may write once the sources are profiled — `fossil_ide::constrain`.
 
 use fossil_graph_schema::js::invalid_argument;

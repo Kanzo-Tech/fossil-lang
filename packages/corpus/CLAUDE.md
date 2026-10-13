@@ -16,9 +16,9 @@ view per table, two relations of the manifest — `fossil_tables`, `fossil_colum
 as RDF, `triples`, and answers the attachment that detaches them. **Every read after that is the host's SQL** (Mosaic's, in keasy).
 Do not put a query API back here — `scan` and its `Filter` were a second, poorer copy of SQL, and the
 one consumer translated Mosaic's predicates into it — and do not export the manifest's types: a
-caller reads the manifest as the two relations. The writer's `fossil_sinks::manifest` types are the
+caller reads the manifest as the two relations. The writer's `fossil_df::corpus::manifest` types are the
 one definition; `tests/manifest.test.ts` validates every fixture against the schema generated from
-them (`crates/fossil-sinks/fossil.schema.json`).
+them (`crates/fossil-df/src/corpus/fossil.schema.json`).
 
 `guards/guards.mjs` is imported by `docs/components/guard-index.tsx` at build time, so renaming or
 moving it breaks the documentation build — the intended coupling: a page cannot drift from a table

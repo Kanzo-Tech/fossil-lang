@@ -7,8 +7,8 @@
 //!
 //! It needs a HOST that has done its two jobs — installed a decoder row that
 //! claims `.shex`, and REGISTERED the document as a Salsa input before the query
-//! asks for it — which is what `HostDb::new` + [`file`] do here and what
-//! `fossil-lsp` and `fossil-wasm` do in production. `fossil_base::test_support::NativeSystem`
+//! asks for it — which is what `FossilDb::new` + [`file`] do here and what
+//! `fossil-wasm` does in production. `fossil_base::test_support::NativeSystem`
 //! is not enough: its provider table reads no types, so every program resolves
 //! no shape and every assertion below would fail for the wrong reason.
 
@@ -16,52 +16,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{Catalogue, Files, SourceFile, System};
+use fossil_base::{FossilDb, SourceFile};
 use fossil_ide::{NavigationTarget, goto_definition};
 
-#[salsa::db]
-#[derive(Clone)]
-struct HostDb {
-    storage: salsa::Storage<Self>,
-    system: Arc<dyn System>,
-    files: Files,
-    catalogue: Catalogue,
-}
-
-impl std::fmt::Debug for HostDb {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HostDb").finish_non_exhaustive()
-    }
-}
-
-#[salsa::db]
-impl salsa::Database for HostDb {}
-
-#[salsa::db]
-impl fossil_base::Db for HostDb {
-    fn system(&self) -> &dyn System {
-        &*self.system
-    }
-    fn files(&self) -> &Files {
-        &self.files
-    }
-
-    fn catalogue(&self) -> &Catalogue {
-        &self.catalogue
-    }
-}
-
-impl HostDb {
-    fn new() -> Self {
-        Self {
-            storage: salsa::Storage::default(),
-            system: Arc::new(NativeSystem::with_providers(
-                fossil_descriptors_output::PROVIDERS,
-            )),
-            files: Files::default(),
-            catalogue: Catalogue::default(),
-        }
-    }
+fn host_db() -> FossilDb {
+    FossilDb::new(Arc::new(NativeSystem::with_providers(
+        fossil_hir::providers::PROVIDERS,
+    )))
 }
 
 fn fixture_dir() -> PathBuf {
@@ -85,8 +46,8 @@ Users : Person from User
 ";
 
 /// Intern the program AND register the documents it names — the host's half,
-/// spelled with the same function `fossil-lsp` calls.
-fn program(db: &mut HostDb, src: &str) -> SourceFile {
+/// spelled with the same function `fossil-wasm` calls.
+fn program(db: &mut FossilDb, src: &str) -> SourceFile {
     let path = fixture_dir().join("goto.fossil");
     let f = SourceFile::new(db, src.to_string(), path.to_string_lossy().into_owned());
     fossil_hir::documents::register_missing_documents(db, f, &|_, location| {
@@ -96,7 +57,7 @@ fn program(db: &mut HostDb, src: &str) -> SourceFile {
 }
 
 /// The text of the file a target points into, and the slice the range covers.
-fn hit<'a>(db: &'a HostDb, target: &NavigationTarget) -> (&'a str, String) {
+fn hit<'a>(db: &'a FossilDb, target: &NavigationTarget) -> (&'a str, String) {
     let text = target.file.text(db);
     let slice = text
         .get(target.range.start as usize..target.range.end as usize)
@@ -111,7 +72,7 @@ fn hit<'a>(db: &'a HostDb, target: &NavigationTarget) -> (&'a str, String) {
 /// 8, so column 9 is unambiguously inside it.
 #[test]
 fn a_shape_name_resolves_into_the_document() {
-    let mut db = HostDb::new();
+    let mut db = host_db();
     let f = program(&mut db, SRC);
 
     let hits = goto_definition(&db, &[f], f, 4, 9);
@@ -146,7 +107,7 @@ Orders : Order from Purchase
     @subject = \"https://shop.example/order/{Purchase.id}\"
     total = Purchase.amount
 ";
-    let mut db = HostDb::new();
+    let mut db = host_db();
     let f = program(&mut db, TWO);
 
     // Line 4 is `Orders : Order from Purchase`; `Order` starts at column 9.
@@ -160,7 +121,7 @@ Orders : Order from Purchase
 /// `name = User.name` is line 7. The key is at column 4.
 #[test]
 fn a_property_key_resolves_to_its_predicate_in_the_document() {
-    let mut db = HostDb::new();
+    let mut db = host_db();
     let f = program(&mut db, SRC);
 
     let hits = goto_definition(&db, &[f], f, 7, 5);
@@ -182,7 +143,7 @@ fn a_property_key_resolves_to_its_predicate_in_the_document() {
 /// positional `ExprId` would have produced.
 #[test]
 fn each_property_key_resolves_to_its_own_predicate() {
-    let mut db = HostDb::new();
+    let mut db = host_db();
     let f = program(&mut db, SRC);
 
     // Line 6 is `    email = User.email`.
@@ -196,7 +157,7 @@ fn each_property_key_resolves_to_its_own_predicate() {
 /// the first predicate happens to be.
 #[test]
 fn the_identity_line_resolves_to_nothing() {
-    let mut db = HostDb::new();
+    let mut db = host_db();
     let f = program(&mut db, SRC);
     // Line 5 is `    @subject = "…"`; column 5 is inside `@subject`.
     assert!(goto_definition(&db, &[f], f, 5, 5).is_empty());
@@ -206,7 +167,7 @@ fn the_identity_line_resolves_to_nothing() {
 ///    index — the one position that never left the language.
 #[test]
 fn a_mapping_name_resolves_in_the_program() {
-    let mut db = HostDb::new();
+    let mut db = host_db();
     let f = program(&mut db, SRC);
 
     // Line 4, column 1 is inside `Users`.
@@ -228,7 +189,7 @@ fn a_mapping_name_resolves_in_the_program() {
 /// cannot be opened.
 #[test]
 fn an_unregistered_document_falls_back_to_the_type_binding() {
-    let db = HostDb::new();
+    let db = host_db();
     // Interned WITHOUT `register_missing_documents`: nothing is at the key.
     let f = SourceFile::new(&db, SRC.to_string(), "unregistered.fossil".to_string());
 
@@ -260,7 +221,7 @@ Users : Persn from User
     @subject = \"https://shop.example/user/{User.email}\"
     name = User.name
 ";
-    let mut db = HostDb::new();
+    let mut db = host_db();
     let f = program(&mut db, UNBOUND);
     assert!(
         goto_definition(&db, &[f], f, 4, 9).is_empty(),
@@ -271,7 +232,7 @@ Users : Persn from User
 /// goto-def on whitespace returns no targets and never panics.
 #[test]
 fn goto_def_on_whitespace_is_empty() {
-    let mut db = HostDb::new();
+    let mut db = host_db();
     let f = program(&mut db, SRC);
     // Line 4, column 5 is the space between `Users` and `:`.
     let hits = goto_definition(&db, &[f], f, 4, 5);
@@ -299,7 +260,7 @@ Adults := User.where(User.age)
 Users : Person from Adults
     email = User.email
 ";
-    let mut db = HostDb::new();
+    let mut db = host_db();
     let f = program(&mut db, WITH_DERIVED);
 
     // Line 2 col 1 — the read binding's own name.

@@ -1,6 +1,6 @@
 // #region bindings
-type { Persona } := io.shex("es.shex")
-type { Human }   := io.shex("en.shex")
+type { Persona }         := io.shex("es.shex")
+type { Person as Human } := io.shex("en.shex")
 // #endregion bindings
 
 Padron := io.csv("data/padron.csv")

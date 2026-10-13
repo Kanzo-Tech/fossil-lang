@@ -17,18 +17,23 @@ workspace = true
 # fossil-hir collapses what was three crates (fossil-types + fossil-resolve +
 # fossil-typeck) into one: they shared every type and could not be built apart.
 fossil-base = { path = "../fossil-base" }
-# The `@conn`/relative-path rule, which used to be a module of `fossil-base`.
-# It depends on nothing, so this edge costs a `std::path` join and no build time.
-fossil-location = { path = "../fossil-location" }
 fossil-syntax = { path = "../fossil-syntax" }
-# The checker consumes the input descriptor via this path dep.
-fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 # The primitive lattice `TyKind::Primitive` carries, AND the format-neutral
 # shape vocabulary (`OutputShapes` / `Shape` / `PropertyConstraint` / `Occurs` /
 # `Rejection`) the checker reads instead of a schema language. This crate names
 # no schema language at all: a host installs a decoder
 # (`fossil_base::ShapeDecoder`) and the compiler is handed a decoded value.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
+# The shape-document decoders (`shex`, `shacl`, `providers`): a document
+# becomes a type, and the types are here. AST-only — byte-stream input, never
+# `Schema::from_iri`, which would pull `reqwest`/`tokio` into the wasm closure.
+shex_ast = { workspace = true }
+rudof_iri = { workspace = true }
+prefixmap = { workspace = true }
+# SHACL is a shapes graph, walked with the Turtle reader `io.rdf` already uses
+# (`/docs/design/incremental` says why not rudof's SHACL crates).
+oxttl = { workspace = true }
+oxrdf = { workspace = true }
 salsa = { workspace = true }
 indexmap = { workspace = true }
 rowan = { workspace = true }
@@ -36,7 +41,8 @@ smol_str = { workspace = true }
 thiserror = { workspace = true }
 # Edit distance behind the did-you-mean diagnostics (`src/didyoumean.rs`).
 strsim = { workspace = true }
-# `MissingDocument` crosses to JS as it is: the wire type is this struct.
+# `MissingDocument` and `lineage`'s `Input` / `Format` cross to JS as they are:
+# the wire type is the struct.
 serde = { workspace = true }
 schemars = { workspace = true }
 

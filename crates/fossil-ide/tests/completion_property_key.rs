@@ -4,15 +4,13 @@
 //! contract, and it had two independent defects; the stdlib source had a third
 //! in the same position. All three are measured here against
 //! `tests/fixtures/shop.shex` — `shop:Person` declaring `shop:email` and
-//! `shop:name` — with the same host `fossil-lsp` installs.
+//! `shop:name` — with the same host `fossil-wasm` installs.
 //!
 //! **The label.** It offered `constraint.predicate`, the raw predicate IRI. A
 //! property key is never the IRI: it is
-//! [`fossil_graph_schema::short_name`] of it — the `@rename` the program
-//! addressed to that predicate, else the last segment. Accepting
+//! [`fossil_graph_schema::local_name`] of it, the last segment. Accepting
 //! `https://shop.example/voc#email` writes a line the parser refuses
-//! (`PropertyLhs := IDENT`), and accepting `name` where the program wrote
-//! `@rename(Person, "…#name" as full_name)` writes one the checker refuses.
+//! (`PropertyLhs := IDENT`).
 //!
 //! **The position.** It fired wherever the cursor was inside a mapping whose
 //! shape resolved — the header, the right-hand side of `=`, and after a member
@@ -64,54 +62,18 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{Catalogue, Files, SourceFile, System};
+use fossil_base::{FossilDb, SourceFile};
 use lsp_types::CompletionItemKind;
 
-#[salsa::db]
-#[derive(Clone)]
-struct HostDb {
-    storage: salsa::Storage<Self>,
-    system: Arc<dyn System>,
-    files: Files,
-    catalogue: Catalogue,
-}
-
-impl std::fmt::Debug for HostDb {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HostDb").finish_non_exhaustive()
-    }
-}
-
-#[salsa::db]
-impl salsa::Database for HostDb {}
-
-#[salsa::db]
-impl fossil_base::Db for HostDb {
-    fn system(&self) -> &dyn System {
-        &*self.system
-    }
-    fn files(&self) -> &Files {
-        &self.files
-    }
-    fn catalogue(&self) -> &Catalogue {
-        &self.catalogue
-    }
-}
-
-fn host() -> HostDb {
-    HostDb {
-        storage: salsa::Storage::default(),
-        system: Arc::new(NativeSystem::with_providers(
-            fossil_descriptors_output::PROVIDERS,
-        )),
-        files: Files::default(),
-        catalogue: Catalogue::default(),
-    }
+fn host() -> FossilDb {
+    FossilDb::new(Arc::new(NativeSystem::with_providers(
+        fossil_hir::providers::PROVIDERS,
+    )))
 }
 
 /// Intern `src` under a path NEXT TO the fixture document, so `io.shex("shop.shex")`
 /// resolves the way it does for a program on disk, and register what it names.
-fn program(db: &mut HostDb, src: &str) -> SourceFile {
+fn program(db: &mut FossilDb, src: &str) -> SourceFile {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join("property-key.fossil");
@@ -131,7 +93,7 @@ fn labels(items: &[lsp_types::CompletionItem], kind: CompletionItemKind) -> Vec<
         .collect()
 }
 
-fn fields(db: &HostDb, f: SourceFile, line: u32, character: u32) -> Vec<String> {
+fn fields(db: &FossilDb, f: SourceFile, line: u32, character: u32) -> Vec<String> {
     fossil_ide::completions(db, &[f], f, line, character)
         .iter()
         .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
@@ -144,16 +106,6 @@ fn fields(db: &HostDb, f: SourceFile, line: u32, character: u32) -> Vec<String> 
 /// cursor at after the last keystroke of the name; `=` is at 10; `User` is
 /// 12–15 and its `.` is at 16.
 const SHOP: &str = "\
-type { Person, Order } := io.shex(\"shop.shex\")
-User := io.csv(\"users.csv\")
-Users : Person from User
-    email = User.email
-";
-
-/// The same program with the repair the compiler recommends for a colliding
-/// predicate, addressed to `shop:name`.
-const RENAMED: &str = "\
-@rename(Person, \"https://shop.example/voc#name\" as full_name)
 type { Person, Order } := io.shex(\"shop.shex\")
 User := io.csv(\"users.csv\")
 Users : Person from User
@@ -219,21 +171,6 @@ fn the_key_position_offers_the_name_a_program_writes() {
     assert_eq!(fields(&db, f, 3, 6), vec!["email", "name"]);
 }
 
-/// **The label, and the half that is silent.** `local_name` and `short_name`
-/// agree on every predicate no `@rename` names, so a fixture without one cannot
-/// tell them apart. This is the one that can: the program renames
-/// `shop:name`, and `name` is a key the checker refuses.
-#[test]
-fn a_renamed_predicate_is_offered_under_its_rename() {
-    let mut db = host();
-    let f = program(&mut db, RENAMED);
-    assert_eq!(
-        fields(&db, f, 4, 9),
-        vec!["email", "full_name"],
-        "`@rename` is what makes the key writable, so it is what the key is",
-    );
-}
-
 /// **The position.** After a member access the receiver's members are the
 /// answer, and a property key is not one of them.
 ///
@@ -253,7 +190,7 @@ fn a_member_access_offers_no_property_key() {
             CompletionItemKind::FUNCTION
         )
         .len(),
-        12,
+        6,
         "the relation verbs are untouched by this",
     );
 }

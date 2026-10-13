@@ -15,25 +15,6 @@ use super::{Arity, LoweringKind, ParamSpec, PlanOp, RegistryEntry, ScalarTy, Sig
 pub(super) fn rows() -> Vec<RegistryEntry> {
     vec![
         RegistryEntry::new(
-            "core.lang",
-            vec![
-                ParamSpec {
-                    name: SmolStr::new("value"),
-                    ty: SigTy::Scalar(ScalarTy::String),
-                    arity: Arity::One,
-                    named: false,
-                },
-                ParamSpec {
-                    name: SmolStr::new("tag"),
-                    ty: SigTy::Scalar(ScalarTy::String),
-                    arity: Arity::One,
-                    named: false,
-                },
-            ],
-            SigTy::Scalar(ScalarTy::String),
-            LoweringKind::Expr(SmolStr::new("%0")),
-        ),
-        RegistryEntry::new(
             "seq.where",
             vec![
                 ParamSpec {
@@ -53,74 +34,6 @@ pub(super) fn rows() -> Vec<RegistryEntry> {
             LoweringKind::Op(PlanOp::Where),
         ),
         RegistryEntry::new(
-            "seq.map",
-            vec![ParamSpec {
-                name: SmolStr::new("rows"),
-                ty: SigTy::Rows,
-                arity: Arity::One,
-                named: false,
-            }],
-            SigTy::Rows,
-            LoweringKind::Op(PlanOp::Map),
-        ),
-        RegistryEntry::new(
-            "seq.flatten",
-            vec![
-                ParamSpec {
-                    name: SmolStr::new("rows"),
-                    ty: SigTy::Rows,
-                    arity: Arity::One,
-                    named: false,
-                },
-                ParamSpec {
-                    name: SmolStr::new("of"),
-                    ty: SigTy::Column,
-                    arity: Arity::One,
-                    named: false,
-                },
-            ],
-            SigTy::Rows,
-            LoweringKind::Op(PlanOp::Flatten),
-        ),
-        RegistryEntry::new(
-            "seq.take",
-            vec![
-                ParamSpec {
-                    name: SmolStr::new("rows"),
-                    ty: SigTy::Rows,
-                    arity: Arity::One,
-                    named: false,
-                },
-                ParamSpec {
-                    name: SmolStr::new("n"),
-                    ty: SigTy::Scalar(ScalarTy::Integer),
-                    arity: Arity::One,
-                    named: false,
-                },
-            ],
-            SigTy::Rows,
-            LoweringKind::Op(PlanOp::Take),
-        ),
-        RegistryEntry::new(
-            "seq.drop",
-            vec![
-                ParamSpec {
-                    name: SmolStr::new("rows"),
-                    ty: SigTy::Rows,
-                    arity: Arity::One,
-                    named: false,
-                },
-                ParamSpec {
-                    name: SmolStr::new("n"),
-                    ty: SigTy::Scalar(ScalarTy::Integer),
-                    arity: Arity::One,
-                    named: false,
-                },
-            ],
-            SigTy::Rows,
-            LoweringKind::Op(PlanOp::Drop),
-        ),
-        RegistryEntry::new(
             "seq.distinct",
             vec![ParamSpec {
                 name: SmolStr::new("rows"),
@@ -130,25 +43,6 @@ pub(super) fn rows() -> Vec<RegistryEntry> {
             }],
             SigTy::Rows,
             LoweringKind::Op(PlanOp::Distinct),
-        ),
-        RegistryEntry::new(
-            "seq.sort",
-            vec![
-                ParamSpec {
-                    name: SmolStr::new("rows"),
-                    ty: SigTy::Rows,
-                    arity: Arity::One,
-                    named: false,
-                },
-                ParamSpec {
-                    name: SmolStr::new("by"),
-                    ty: SigTy::Column,
-                    arity: Arity::OneOrMore,
-                    named: false,
-                },
-            ],
-            SigTy::Rows,
-            LoweringKind::Op(PlanOp::Sort),
         ),
         RegistryEntry::new(
             "seq.select",
@@ -237,17 +131,6 @@ pub(super) fn rows() -> Vec<RegistryEntry> {
             ],
             SigTy::Rows,
             LoweringKind::Op(PlanOp::GroupBy),
-        ),
-        RegistryEntry::new(
-            "seq.count",
-            vec![ParamSpec {
-                name: SmolStr::new("rows"),
-                ty: SigTy::Rows,
-                arity: Arity::One,
-                named: false,
-            }],
-            SigTy::Scalar(ScalarTy::Integer),
-            LoweringKind::Op(PlanOp::Count),
         ),
         RegistryEntry::new(
             "str.length",
@@ -381,25 +264,6 @@ pub(super) fn rows() -> Vec<RegistryEntry> {
             LoweringKind::Expr(SmolStr::new("string_split(%0, %1)")),
         ),
         RegistryEntry::new(
-            "str.concat",
-            vec![
-                ParamSpec {
-                    name: SmolStr::new("text"),
-                    ty: SigTy::Scalar(ScalarTy::String),
-                    arity: Arity::One,
-                    named: false,
-                },
-                ParamSpec {
-                    name: SmolStr::new("other"),
-                    ty: SigTy::Scalar(ScalarTy::String),
-                    arity: Arity::One,
-                    named: false,
-                },
-            ],
-            SigTy::Scalar(ScalarTy::String),
-            LoweringKind::Expr(SmolStr::new("concat(%0, %1)")),
-        ),
-        RegistryEntry::new(
             "str.trim",
             vec![ParamSpec {
                 name: SmolStr::new("text"),
@@ -479,17 +343,6 @@ pub(super) fn rows() -> Vec<RegistryEntry> {
             }],
             SigTy::Scalar(ScalarTy::Float),
             LoweringKind::Expr(SmolStr::new("CAST(%0 AS DOUBLE)")),
-        ),
-        RegistryEntry::new(
-            "parse.decimal",
-            vec![ParamSpec {
-                name: SmolStr::new("text"),
-                ty: SigTy::Scalar(ScalarTy::String),
-                arity: Arity::One,
-                named: false,
-            }],
-            SigTy::Scalar(ScalarTy::Float),
-            LoweringKind::Expr(SmolStr::new("CAST(CAST(%0 AS DECIMAL(38,18)) AS DOUBLE)")),
         ),
         RegistryEntry::new(
             "parse.date",

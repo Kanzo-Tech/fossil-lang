@@ -11,8 +11,8 @@ puts it in the host's DuckDB as a scoped secret (`@fossil-lang/storage`), runs `
 plan on that engine (`runProfiler` from `@fossil-lang/wasm`), and gives the credential back.
 
 The plan — which queries describe a source, which pairs of columns to test, what each answer means —
-is Rust, compiled into the wasm module, and it is the plan the language server runs on native DuckDB.
-The two hosts share the code; only the engine differs.
+is Rust, compiled into the wasm module, and it is the plan fossil's own tests run on native DuckDB.
+Only the engine differs.
 
 ```ts
 import { profile } from "@fossil-lang/profile";

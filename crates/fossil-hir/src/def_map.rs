@@ -1,8 +1,9 @@
 //! [`DefMap`] — per-file name resolution table.
 //!
-//! Holds the source bindings (`User := io.csv("...")`), the TYPE bindings
-//! (`type { Person } := io.shex("...")`), and the mapping list (one entry per
-//! `Name : Shape from source` block). Populated by the [`def_map`] Salsa query,
+//! Holds the source bindings (`User := io.csv("...")`), the TYPES — imported
+//! (`type { Person } := io.shex("...")`) and declared (`@iri("…") type Person`)
+//! in one table — and the mapping list (one entry per `Name : Shape from
+//! source` block). Populated by the [`def_map`] Salsa query,
 //! which consumes the CST from [`fossil_syntax::parse`].
 //!
 //! # There was a prefix table here, and its absence is the point
@@ -94,19 +95,58 @@ pub enum ShapeBindError {
     /// registered at the path, the provider refused it, or its decoder rejected
     /// it. The problem is `crate::shapes::decoded_document`'s, kept typed.
     Document(fossil_graph_schema::Problem),
-    /// The binding names more shapes than the document declares. Binding is
-    /// POSITIONAL, so this is the check that model gives
-    /// away free: the Nth name wants an Nth shape and there is none.
-    ///
-    /// `position` is that N, and it belongs to the surplus NAME rather than to
-    /// the binding — so this is one error value per member, not one shared by
-    /// all of them. `named` did both jobs, and every surplus name of a binding
-    /// was told the LAST one's number.
-    Arity {
-        declared: usize,
-        named: usize,
-        position: usize,
+    /// The member names a local name no shape of the document has. `declared`
+    /// is the local names it does have, in declaration order — the list the
+    /// author picks from.
+    NotInDocument {
+        shape: SmolStr,
+        declared: Vec<SmolStr>,
     },
+    /// Two shapes of the document share the member's local name. Both IRIs,
+    /// because the repair — declaring the type — has to quote one exactly.
+    Ambiguous {
+        shape: SmolStr,
+        first: SmolStr,
+        second: SmolStr,
+    },
+    /// A declared type with no `@iri`. The parser has said so at the
+    /// declaration; this is what a use of the name is told.
+    NoIri,
+}
+
+impl ShapeBindError {
+    /// The problem a use of `name` reports — `document` is the one the binding
+    /// names, when it names one. The one mapping from cause to code, shared by
+    /// the type side ([`crate::lower`]) and the source side ([`crate::infer`]).
+    #[must_use]
+    pub fn problem(&self, name: &str, document: Option<&str>) -> fossil_graph_schema::Problem {
+        use fossil_graph_schema::Problem;
+        let document = document.unwrap_or_default().to_string();
+        match self {
+            Self::NoSchema => Problem::NoDocument {
+                binding: Some(name.to_string()),
+            },
+            Self::Document(problem) => problem.clone(),
+            Self::NotInDocument { shape, declared } => Problem::NotInDocument {
+                name: shape.to_string(),
+                document,
+                declared: declared.iter().map(ToString::to_string).collect(),
+            },
+            Self::Ambiguous {
+                shape,
+                first,
+                second,
+            } => Problem::AmbiguousImport {
+                name: shape.to_string(),
+                document,
+                first: first.to_string(),
+                second: second.to_string(),
+            },
+            Self::NoIri => Problem::MissingIri {
+                name: name.to_string(),
+            },
+        }
+    }
 }
 
 /// What a source binding's right-hand side says: which constructor, over which
@@ -213,56 +253,45 @@ pub struct SourceEntry<'db> {
     pub call_span: Span,
 }
 
-/// One name bound by a type binding (`type { Person, City } := io.shex("s.shex")`).
+/// One type name the program has — imported (`type { Place as City } :=
+/// io.shex("s.shex")`) or declared (`@iri("…") type City`).
 ///
 /// The value side of the language binds sources; this binds TYPES. One
 /// catalogue (`io.*`) and ONE binder: `:=` binds a NAME, and the left-hand side
 /// says what kind of name it is (grammar.bnf, DEFINE). Types had their own `=`
 /// for a while and lost it: `=` assigns a value, and a type binding assigns
 /// nothing.
+///
+/// A declared type is a row of the same table, so a mapping header, an edge and
+/// a field's `Ref<…>` resolve both kinds by one lookup and never learn which
+/// they got (`/docs/design/declared`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct TypeEntry {
-    /// The local label. Free — it does not have to name anything in the
-    /// document, because binding is by position — the Nth name takes the Nth
-    /// declared shape, whatever it is called. This is what lets two documents
-    /// that both declare `Person` coexist.
+    /// The name the program uses: the declared name, or an import's — the
+    /// shape's local name, or the one after `as`.
     pub name: SmolStr,
-    /// The shape IRI this name binds: the Nth declared shape for the Nth name.
+    /// The shape IRI this name binds: the declaration's `@iri`, or the one shape
+    /// of the document whose local name the import wrote.
     pub shape_iri: Option<SmolStr>,
     /// Why it bound nothing, when it bound nothing. Never a bare `None`.
     pub shape_error: Option<ShapeBindError>,
-    /// The document the constructor names — `io.shex("personas.shex")`. This is
-    /// the datum that gives a CSV-sourced program somewhere to declare its
-    /// output shape: a program whose source is not RDF names a shape document
-    /// nowhere else, and without one it has no output contract at all.
+    /// `true` for a type the program declares; its shape is
+    /// [`crate::lower::HirFile::declared`]'s, and it names no document.
+    pub declared: bool,
+    /// The document the constructor names — `io.shex("personas.shex")`. `None`
+    /// for a declared type, which is its own document.
     pub document: Option<SmolStr>,
     /// The constructor — `io.shex`, `io.shacl`. It is the NAME that selects the
     /// registry row; dispatching on the document's extension instead would make
     /// `io.shex("x.ttl")` and `io.shacl("x.ttl")` the same program.
     pub constructor: Option<SmolStr>,
-    /// `@rename(Person, "http://xmlns.com/foaf/0.1/name" as foaf_name)` — the
-    /// renames written above this binding and addressed to THIS name, as
-    /// `(predicate IRI, the name to write instead)` in source order.
-    ///
-    /// Empty for every binding that carries none, which is almost all of them:
-    /// a rename is the repair for two predicates whose last IRI segments
-    /// coincide, and the repair is the exception. Property keys are bare names
-    /// on the bet that such a collision is rare; a vocabulary where it is the
-    /// norm is what would reverse that and bring qualification back.
-    ///
-    /// Addressed to a NAME and not to the file: one `type { … }` line binds
-    /// several names, `@rename`'s first argument says which, and two shapes in
-    /// one document can each have a colliding `name` needing different repairs.
-    /// [`crate::shapes::ResolvedShape::short_names`] applies them.
-    pub renames: Vec<(SmolStr, SmolStr)>,
-    /// The whole `type { Person } := io.shex("shape.shex")` item, file-absolute
-    /// and trivia-trimmed — [`SourceEntry::span`]'s twin, and the same
-    /// [`item_span`].
+    /// The whole `type { Person } := io.shex("shape.shex")` item, or the whole
+    /// declaration, file-absolute and trivia-trimmed — [`SourceEntry::span`]'s
+    /// twin, and the same [`item_span`].
     ///
     /// A diagnostic about the SHAPE rather than about one property belongs
     /// here: two predicates that collide make the shape unwritable, and the
-    /// binding is where the reader chose it and where the `@rename` repair
-    /// goes.
+    /// binding is where the reader chose it.
     pub span: Span,
 }
 
@@ -307,8 +336,7 @@ impl<'db> DefMap<'db> {
     /// The `(provider, document)` pair a source's `schema =` argument names —
     /// `schema = io.shex("x.shex")`.
     ///
-    /// The pair, for the reason [`Self::output_shape_binding`] is a pair: the
-    /// provider is what selects the row that reads the document, and handing
+    /// A pair, because the provider is what selects the row that reads the document, and handing
     /// them out separately is how a caller comes to read one and forget the
     /// other. That is not hypothetical here — `crate::infer` did exactly that
     /// and passed `None` for the provider, which turned every destructuring RDF
@@ -383,62 +411,13 @@ impl<'db> DefMap<'db> {
             })
     }
 
-    /// The shape IRI a `type { … } := io.shex(…)` name binds.
+    /// The shape IRI a type name binds, declared or imported.
     #[must_use]
     pub fn lookup_type(self, db: &'db dyn fossil_base::Db, name: &str) -> Option<SmolStr> {
         self.types(db)
             .iter()
             .find(|e| e.name.as_str() == name)
             .and_then(|e| e.shape_iri.clone())
-    }
-
-    /// The `@rename`s addressed to the binding that introduced `shape_iri`, as
-    /// `(predicate IRI, the name to write instead)`.
-    ///
-    /// Keyed by the SHAPE and not by the local name, because that is what the
-    /// caller has: a mapping header names a type, `lower_to_hir` resolves it to
-    /// a shape IRI, and by the time [`crate::check`] has a `ResolvedShape` the
-    /// local name is behind it. Empty when the file has no rename for that
-    /// shape, which is the ordinary case.
-    #[must_use]
-    pub fn renames_for_shape(
-        self,
-        db: &'db dyn fossil_base::Db,
-        shape_iri: &str,
-    ) -> Vec<(SmolStr, SmolStr)> {
-        self.types(db)
-            .iter()
-            .find(|e| e.shape_iri.as_deref() == Some(shape_iri))
-            .map_or_else(Vec::new, |e| e.renames.clone())
-    }
-
-    /// Every `@rename` the file wrote, addressed by shape — what the WRITER
-    /// needs, where [`Self::renames_for_shape`] is what the checker needs.
-    ///
-    /// The two halves used to be one: the checker read the table and
-    /// `OutputShapes::to_graph_schema` did not, so a repaired collision
-    /// type-checked under its new name and shipped under the old one. This is
-    /// the whole table because a document declares several shapes and the run
-    /// lowers all of them at once.
-    #[must_use]
-    pub fn renames(self, db: &'db dyn fossil_base::Db) -> fossil_graph_schema::Renames {
-        fossil_graph_schema::Renames::new(
-            self.types(db)
-                .iter()
-                .filter(|e| !e.renames.is_empty())
-                .filter_map(|e| {
-                    e.shape_iri.as_ref().map(|iri| {
-                        (
-                            iri.to_string(),
-                            e.renames
-                                .iter()
-                                .map(|(p, n)| (p.to_string(), n.to_string()))
-                                .collect(),
-                        )
-                    })
-                })
-                .collect(),
-        )
     }
 
     /// Why a type name bound nothing. `None` when it bound a shape.
@@ -454,58 +433,26 @@ impl<'db> DefMap<'db> {
             .and_then(|e| e.shape_error.clone())
     }
 
-    /// The `(constructor, document)` pair of the file's first `type` binding: the
-    /// constructor selects the registry row and the document is what it is asked
-    /// to read. They come back together so no caller can read one and forget the
-    /// other.
+    /// The entry that introduced `shape_iri` — what a mapping targeting that
+    /// shape is checked against: the declaration, or the document of the import.
     ///
-    /// **This is the PROGRAM's output descriptor, not a mapping's contract.**
-    /// The run writes one corpus and classifies its edges against one schema
-    /// (`fossil_df::output_descriptor`, v1). A mapping's contract is
-    /// resolved by TYPE — [`Self::shape_binding_for`] — because a program may
-    /// bring in two documents and a mapping is checked against the one that
-    /// declared ITS type.
-    #[must_use]
-    pub fn output_shape_binding(
-        self,
-        db: &'db dyn fossil_base::Db,
-    ) -> Option<(Option<SmolStr>, SmolStr)> {
-        self.types(db)
-            .iter()
-            .find_map(|e| e.document.clone().map(|d| (e.constructor.clone(), d)))
-    }
-
-    /// The `(constructor, document)` of the binding that introduced
-    /// `shape_iri` — the document a mapping targeting that shape is checked
-    /// against.
-    ///
-    /// **By TYPE, not by file, and that was a bug with a fixture waiting for
-    /// it.** This used to be [`Self::output_shape_binding`]: a `find_map` over
-    /// the type bindings returning the FIRST document any of them named. With
-    /// one document per program the two answers coincide; with two they do not,
-    /// and `docs/programs/multi-document` — `Persona` from `es.shex`,
-    /// `Human` from `en.shex`, disjoint — resolved its second mapping against
-    /// the first document and reported *«`es.shex` declares no shape
+    /// **By TYPE, not by file.** This was a `find_map` over the type bindings
+    /// returning the FIRST document any of them named. With one document per
+    /// program the two answers coincide; with two they do not, and
+    /// `docs/programs/multi-document` — `Persona` from `es.shex`, `Human` from
+    /// `en.shex`, disjoint — resolved its second mapping against the first
+    /// document and reported *«`es.shex` declares no shape
     /// `https://council.example/voc#Person`»*, which is true and is not the
-    /// mistake. The document that declares a shape is the one that bound it, and
-    /// `TypeEntry` has known which since it started carrying `document`.
-    ///
-    /// A shape NO binding introduced falls back to the first document, and that
-    /// is deliberate: it is the misspelt-shape case, where every document is
-    /// equally wrong. What the author needs is the list of names the program
-    /// bound, and `crate::lower::unbound_shape_problem` is what carries it, with
-    /// a did-you-mean over them.
+    /// mistake.
     #[must_use]
-    pub fn shape_binding_for(
+    pub fn type_of_shape(
         self,
         db: &'db dyn fossil_base::Db,
         shape_iri: &str,
-    ) -> Option<(Option<SmolStr>, SmolStr)> {
+    ) -> Option<&'db TypeEntry> {
         self.types(db)
             .iter()
             .find(|e| e.shape_iri.as_deref() == Some(shape_iri))
-            .and_then(|e| e.document.clone().map(|d| (e.constructor.clone(), d)))
-            .or_else(|| self.output_shape_binding(db))
     }
 }
 
@@ -549,12 +496,12 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                 }
             }
             SyntaxKind::TYPE_DEF => {
-                // `type { Person, City } := io.shex("personas.shex")`. Binds
+                // `type { Place as City } := io.shex("places.shex")`. Binds
                 // TYPES, not sources, so it produces no `SourceEntry` and takes
                 // no slot in `source_idx` — nothing downstream may read a type
                 // name as a source. The document is the constructor's first
                 // positional string, exactly as a source's URI is.
-                let members = parse_brace_member_names(&item);
+                let members = parse_brace_members(&item);
                 let (ctor, document) = parse_source_call(&item);
                 let bound = resolve_member_shape_iris(
                     db,
@@ -563,32 +510,42 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                     document.as_deref(),
                     &members,
                 );
-                // The `@rename` attributes above this binding, sorted by the
-                // name each addresses. A rename addressed to a name the binding
-                // does not introduce belongs to nobody and is dropped HERE —
-                // `crate::lower` reports it, over the same nodes, with a real
-                // span. This query stays diagnostic-free (it is signatures-only
-                // and runs outside a frame where `fossil_base::report` is valid).
-                let renames = parse_renames(&item);
-                for (name, (shape_iri, shape_error)) in members.into_iter().zip(bound) {
-                    let mine = renames
-                        .iter()
-                        .filter(|r| r.type_name == name)
-                        .map(|r| (r.predicate.clone(), r.rename_to.clone()))
-                        .collect();
+                for ((_, name), (shape_iri, shape_error)) in members.into_iter().zip(bound) {
                     types.push(TypeEntry {
                         name,
                         shape_iri,
                         shape_error,
+                        declared: false,
                         document: document.clone(),
                         constructor: ctor.clone(),
-                        renames: mine,
                         // Every name a `type { A, B }` line binds shares the
                         // line's span, because they share the binding — the
                         // same answer the destructuring source gives.
                         span: item_span(&item),
                     });
                 }
+            }
+            SyntaxKind::TYPE_DECL => {
+                // `@iri("https://schema.org/City") type City`. The IRI is the
+                // one written, and the fields are `crate::declared`'s: this
+                // table holds what a NAME resolves to, which is all a header,
+                // an edge or a `Ref<…>` asks of it.
+                let Some(decl) = fossil_syntax::ast::TypeDecl::cast(item.clone()) else {
+                    continue;
+                };
+                let Some(name) = decl.name() else {
+                    continue;
+                };
+                let shape_iri = decl.iri_attr().and_then(|a| a.iri());
+                types.push(TypeEntry {
+                    name,
+                    shape_error: shape_iri.is_none().then_some(ShapeBindError::NoIri),
+                    shape_iri,
+                    declared: true,
+                    document: None,
+                    constructor: None,
+                    span: item_span(&item),
+                });
             }
             SyntaxKind::MULTI_SOURCE_DEF => {
                 // `{ A, B, ... } := io.rdf(uri, schema = io.shex("x.shex"))`. Each member
@@ -597,7 +554,7 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                 // shape IRI in the schema (COMPILE TIME). Each member then lowers
                 // to its own `Op::Source` and `from <member>` resolves uniformly
                 // via the existing per-source lookups.
-                let members = parse_brace_member_names(&item);
+                let members = parse_brace_members(&item);
                 let schema = parse_schema_arg(&item);
                 let schema_arg = schema.as_ref().and_then(|s| s.document.clone());
                 let schema_provider = schema.as_ref().and_then(|s| s.provider.clone());
@@ -615,7 +572,7 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                     schema_arg.as_deref(),
                     &members,
                 );
-                for (member, (shape_iri, shape_error)) in members.into_iter().zip(shape_iris) {
+                for ((_, member), (shape_iri, shape_error)) in members.into_iter().zip(shape_iris) {
                     sources.push(SourceEntry {
                         name: member,
                         loc: SourceLoc::new(db, file, source_idx),
@@ -984,128 +941,32 @@ pub(crate) fn named_arg_names(node: &SyntaxNode) -> Vec<(SmolStr, Span)> {
     })
 }
 
-/// One `"…" as name` read off a `RENAME_ATTR`, with the name it is addressed
-/// to.
-///
-/// Public to the crate because [`crate::lower`] validates the same three fields
-/// against the binding and the shape document, with the CST node in hand so the
-/// diagnostic has a real span. Two readers, one shape, and the reading is here
-/// because this is where the CST is already being walked.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct RenameAttr {
-    /// The `IDENT` after `@rename(` — one of the names the binding introduces.
-    pub type_name: SmolStr,
-    /// The predicate IRI, unquoted. A full IRI and never a short name: the two
-    /// predicates being told apart differ only BEFORE their last segment, so
-    /// the last segment cannot identify either.
-    pub predicate: SmolStr,
-    /// The `IDENT` after `as` — what to write in a property key instead.
-    pub rename_to: SmolStr,
-}
-
-/// Every `RENAME_ATTR` above one `TYPE_DEF`, flattened to one entry per
-/// `RENAME`.
-///
-/// `RenameAttr*` is part of the `TypeDef` production (grammar.bnf, `TypeDef`), so
-/// these are CHILDREN of the node and not siblings of it — which is what makes a
-/// rename belong to one binding rather than to the file.
-///
-/// **That distinction is load-bearing and it is not decoration.**
-/// [`DefMap::output_shape_binding`] returns the document of the FIRST `type`
-/// binding in the file, a `find_map` over all of them; if a `@rename` were
-/// file-scoped it would inherit that flattening and a two-binding program would
-/// silently apply one binding's repair to the other's shape. Scoped to the node,
-/// it cannot.
-pub(crate) fn parse_renames(type_def: &fossil_syntax::SyntaxNode) -> Vec<RenameAttr> {
-    use fossil_syntax::SyntaxKind;
-    let mut out = Vec::new();
-    for attr in type_def
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::RENAME_ATTR)
-    {
-        // The attribute's own IDENT is the one that is NOT inside a `RENAME`:
-        // `@rename(Person, "…" as foaf_name)` has `Person` as a direct token
-        // child and `foaf_name` nested one level down.
-        let Some(type_name) = attr
-            .children_with_tokens()
-            .filter_map(fossil_syntax::SyntaxElement::into_token)
-            .find(|t| t.kind() == SyntaxKind::IDENT)
-            .map(|t| SmolStr::from(t.text()))
-        else {
-            continue;
-        };
-        for rename in attr.children().filter(|c| c.kind() == SyntaxKind::RENAME) {
-            let toks: Vec<_> = rename
-                .children_with_tokens()
-                .filter_map(fossil_syntax::SyntaxElement::into_token)
-                .filter(|t| {
-                    !matches!(
-                        t.kind(),
-                        SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT
-                    )
-                })
-                .collect();
-            let predicate = toks.iter().find(|t| t.kind() == SyntaxKind::STRING);
-            // The LAST `IDENT` is the new name; the first is the contextual
-            // `as`, which is an ordinary identifier and lexes as one.
-            let rename_to = toks.iter().rev().find(|t| t.kind() == SyntaxKind::IDENT);
-            if let (Some(predicate), Some(rename_to)) = (predicate, rename_to)
-                && rename_to.text() != "as"
-            {
-                out.push(RenameAttr {
-                    type_name: type_name.clone(),
-                    predicate: SmolStr::from(
-                        predicate
-                            .text()
-                            .trim_start_matches('"')
-                            .trim_end_matches('"'),
-                    ),
-                    rename_to: SmolStr::from(rename_to.text()),
-                });
-            }
-        }
-    }
-    out
-}
-
-/// The brace-list names of a destructuring binding — the IDENTs strictly
-/// between `{` and `}`.
+/// The members a destructuring binding lists, one per `IMPORT_MEMBER`: the
+/// shape's local name in the document, and the name the program uses — the one
+/// after `as` when there is one, else the same.
 ///
 /// Serves `MULTI_SOURCE_DEF` (`{ A, B } := …`) and `TYPE_DEF`
-/// (`type { A, B } := …`) alike. Scoping to the braces rather than to "before
-/// the binder" is what makes one function cover both: a `TYPE_DEF` carries the
-/// contextual `type` IDENT before its `{`, and taking everything before the
-/// binder would bind a phantom member called `type`.
-fn parse_brace_member_names(node: &fossil_syntax::SyntaxNode) -> Vec<SmolStr> {
-    use fossil_syntax::SyntaxKind;
-    let toks: Vec<_> = node
-        .descendants_with_tokens()
-        .filter_map(fossil_syntax::SyntaxElement::into_token)
-        .filter(|t| {
-            !matches!(
-                t.kind(),
-                SyntaxKind::WHITESPACE | SyntaxKind::NEWLINE | SyntaxKind::COMMENT
-            )
-        })
-        .collect();
-    let Some(open) = toks.iter().position(|t| t.kind() == SyntaxKind::LBRACE) else {
-        return Vec::new();
-    };
-    let close = toks
-        .iter()
-        .position(|t| t.kind() == SyntaxKind::RBRACE)
-        .unwrap_or(toks.len());
-    toks[open + 1..close.max(open + 1)]
-        .iter()
-        .filter(|t| t.kind() == SyntaxKind::IDENT)
-        .map(|t| SmolStr::from(t.text()))
+/// (`type { Place as City } := …`) alike, because both hold the same member
+/// list (grammar.bnf, `ImportMember`). A member whose name did not parse
+/// introduces nothing.
+fn parse_brace_members(node: &fossil_syntax::SyntaxNode) -> Vec<(SmolStr, SmolStr)> {
+    node.children()
+        .filter_map(fossil_syntax::ast::ImportMember::cast)
+        .filter_map(|m| Some((m.shape_name()?, m.name()?)))
         .collect()
 }
 
 /// Resolve each destructuring member to its shape IRI in the document, at
-/// COMPILE TIME. A member that binds nothing carries WHY (the caller —
-/// type-check — emits the diagnostic; this signatures-only query stays
-/// diagnostic-free).
+/// COMPILE TIME, by the shape's LOCAL NAME — the last segment of its IRI, the
+/// rule a property's name follows ([`fossil_graph_schema::local_name`]). A
+/// member that binds nothing carries WHY (the caller — lowering or inference —
+/// emits the diagnostic; this signatures-only query stays diagnostic-free).
+///
+/// It bound by POSITION, the Nth name to the Nth declared shape, and
+/// reordering a document rebound every program that read it
+/// (`/docs/design/declared`). Two shapes whose local names coincide are an
+/// error when one of them is imported and nothing otherwise: a document may
+/// hold shapes a program never names.
 ///
 /// `constructor` is the provider the binding names (`io.shex`, `io.shacl`), or
 /// `None` only when the program wrote a bare path, which is an error rather
@@ -1115,7 +976,7 @@ fn resolve_member_shape_iris(
     file: fossil_base::SourceFile,
     constructor: Option<&str>,
     schema_arg: Option<&str>,
-    members: &[SmolStr],
+    members: &[(SmolStr, SmolStr)],
 ) -> Vec<(Option<SmolStr>, Option<ShapeBindError>)> {
     let all = |e: &ShapeBindError| {
         members
@@ -1131,45 +992,46 @@ fn resolve_member_shape_iris(
         Err(problem) => return all(&ShapeBindError::Document(problem)),
     };
 
-    // POSITIONAL: the Nth name binds the Nth shape the document declares. The
-    // name is a free local label and is NOT looked up — which is why there is
-    // no "matches no shape" case left, and why two documents can no longer
-    // collide: two documents that both declare `Person` are told apart by the
-    // local labels the program chose, not by the shape names.
-    //
-    // This is only sound because `OutputShapes::shapes()` yields declaration
-    // order, which its own doc promises: a `HashMap` lived there until
-    // `crates/fossil-shex/examples/declaration_order.rs` measured six parses
-    // handing back six orders. Do not reintroduce a map here.
-    let declared: Vec<SmolStr> = document
-        .shapes()
-        .map(|s| SmolStr::from(s.iri.as_str()))
-        .collect();
-    (0..members.len())
-        .map(|i| {
-            declared.get(i).map_or_else(
-                || {
+    members
+        .iter()
+        .map(|(shape, _)| {
+            let mut named = document
+                .shapes()
+                .filter(|s| fossil_graph_schema::local_name(&s.iri) == shape.as_str());
+            match (named.next(), named.next()) {
+                (Some(only), None) => (Some(SmolStr::from(only.iri.as_str())), None),
+                (Some(first), Some(second)) => (
+                    None,
+                    Some(ShapeBindError::Ambiguous {
+                        shape: shape.clone(),
+                        first: SmolStr::from(first.iri.as_str()),
+                        second: SmolStr::from(second.iri.as_str()),
+                    }),
+                ),
+                (None, _) => {
+                    let mut declared: Vec<SmolStr> = Vec::new();
+                    for s in document.shapes() {
+                        let local = SmolStr::from(fossil_graph_schema::local_name(&s.iri));
+                        if !declared.contains(&local) {
+                            declared.push(local);
+                        }
+                    }
                     (
                         None,
-                        Some(ShapeBindError::Arity {
-                            declared: declared.len(),
-                            named: members.len(),
-                            position: i + 1,
+                        Some(ShapeBindError::NotInDocument {
+                            shape: shape.clone(),
+                            declared,
                         }),
                     )
-                },
-                |iri| (Some(iri.clone()), None),
-            )
+                }
+            }
         })
         .collect()
 }
 
-// Members bind POSITIONALLY, never by local name: two shapes from different
-// vocabularies can share one, and matching on it collapsed them into a single
-// key with no diagnostic. Path resolution is `crate::documents::registry_key`,
-// beside the loop the HOSTS call to register the same documents — the key and
-// the lookup are one function, which is the only arrangement in which they
-// cannot disagree.
+// Path resolution is `crate::documents::registry_key`, beside the loop the
+// HOSTS call to register the same documents — the key and the lookup are one
+// function, which is the only arrangement in which they cannot disagree.
 
 #[cfg(test)]
 mod tests {
@@ -1177,9 +1039,8 @@ mod tests {
 
     use fossil_base::test_support::{db_with_document, new_db};
 
-    /// Two shapes, in this order, with nothing else in them. Positional binding
-    /// is what these tests are about, so the names are deliberately words no
-    /// binding below uses.
+    /// Two shapes, in this order, with nothing else in them — alphabetical order
+    /// reversed, so a list that came back sorted would show.
     const TWO_SHAPES: &str = "\
 shape https://example.org/Zeta
 shape https://example.org/Alpha
@@ -1266,10 +1127,7 @@ Users : Person from User
         // the thing a shape name resolves against.
         assert_eq!(dm.types(&db).len(), 1);
         assert_eq!(dm.types(&db)[0].name, "Person");
-        assert_eq!(
-            dm.output_shape_binding(&db).map(|(_, d)| d).as_deref(),
-            Some("personas.shex")
-        );
+        assert_eq!(dm.types(&db)[0].document.as_deref(), Some("personas.shex"));
         assert_eq!(dm.sources(&db).len(), 1);
         assert!(dm.lookup_source(&db, "User").is_some());
         assert_eq!(dm.mappings(&db).len(), 1);
@@ -1392,7 +1250,7 @@ b := io.parquet(\"b.parquet\")
     /// the source's own positional URI is still the source's, not the argument's.
     #[test]
     fn the_schema_argument_carries_its_provider() {
-        let src = "{ a } := io.rdf(\"g.ttl\", schema = io.shex(\"two_shapes.shex\"))\n";
+        let src = "{ Zeta } := io.rdf(\"g.ttl\", schema = io.shex(\"two_shapes.shex\"))\n";
         let (db, file) = db_with_document(src, "two_shapes.shex", TWO_SHAPES);
         let dm = def_map(&db, file);
         let entry = &dm.sources(&db)[0];
@@ -1400,7 +1258,7 @@ b := io.parquet(\"b.parquet\")
         assert_eq!(entry.uri.as_deref(), Some("g.ttl"));
         assert_eq!(entry.schema_provider.as_deref(), Some("io.shex"));
         assert_eq!(entry.schema_arg.as_deref(), Some("two_shapes.shex"));
-        assert!(dm.lookup_source_shape_iri(&db, "a").is_some());
+        assert!(dm.lookup_source_shape_iri(&db, "Zeta").is_some());
     }
 
     /// A bare path still PARSES — the parser recovers it rather than dropping
@@ -1441,50 +1299,76 @@ b := io.parquet(\"b.parquet\")
         );
     }
 
-    /// The document declares `Zeta` then `Alpha`. The binding names them
-    /// `primero` and `segundo` — words that appear nowhere in it. Under the old
-    /// by-name rule both would resolve to `None`; under positional binding the
-    /// first name takes the first DECLARED shape, so the names being free is
-    /// exactly what this asserts.
+    /// The document declares `Zeta` then `Alpha`, and the binding names them
+    /// the other way round. Under positional binding `Alpha` took `Zeta`'s IRI;
+    /// by name each member takes the shape it names, and `as` renames it in the
+    /// program without changing which shape it is.
     #[test]
-    fn a_destructuring_member_binds_by_position_and_its_name_is_free() {
-        let src =
-            "{ primero, segundo } := io.rdf(\"g.ttl\", schema = io.shex(\"two_shapes.shex\"))\n";
+    fn a_destructuring_member_binds_by_local_name_and_as_renames_it() {
+        let src = "{ Alpha as primero, Zeta } := io.rdf(\"g.ttl\", schema = \
+                   io.shex(\"two_shapes.shex\"))\n";
         let (db, file) = db_with_document(src, "two_shapes.shex", TWO_SHAPES);
         let dm = def_map(&db, file);
 
         assert_eq!(
             dm.lookup_source_shape_iri(&db, "primero").as_deref(),
-            Some("https://example.org/Zeta"),
-            "the first name takes the first declared shape, whatever it is called"
+            Some("https://example.org/Alpha"),
+            "the name before `as` selects the shape; the one after names it"
         );
         assert_eq!(
-            dm.lookup_source_shape_iri(&db, "segundo").as_deref(),
-            Some("https://example.org/Alpha")
+            dm.lookup_source_shape_iri(&db, "Zeta").as_deref(),
+            Some("https://example.org/Zeta")
+        );
+        assert!(
+            dm.lookup_source(&db, "Alpha").is_none(),
+            "`as` renames: the shape's own name is not bound as well"
         );
         assert_eq!(dm.lookup_source_shape_error(&db, "primero"), None);
     }
 
-    /// Naming more shapes than the document declares is the check the positional
-    /// model gives away free, and it reports the two counts rather than blaming
-    /// the last name for being misspelt.
+    /// A member naming no shape the document declares carries the ones it
+    /// does, in the document's order.
     #[test]
-    fn naming_more_shapes_than_the_document_declares_is_an_arity_error() {
-        let src = "{ a, b, c } := io.rdf(\"g.ttl\", schema = io.shex(\"two_shapes.shex\"))\n";
+    fn a_member_the_document_does_not_declare_carries_the_ones_it_does() {
+        let src = "{ Omega } := io.rdf(\"g.ttl\", schema = io.shex(\"two_shapes.shex\"))\n";
         let (db, file) = db_with_document(src, "two_shapes.shex", TWO_SHAPES);
         let dm = def_map(&db, file);
 
-        assert!(
-            dm.lookup_source_shape_iri(&db, "b").is_some(),
-            "b is second"
+        assert_eq!(
+            dm.lookup_source_shape_error(&db, "Omega"),
+            Some(ShapeBindError::NotInDocument {
+                shape: "Omega".into(),
+                declared: vec!["Zeta".into(), "Alpha".into()],
+            })
+        );
+    }
+
+    /// Two shapes whose local names coincide are an error for the member that
+    /// names them, with both IRIs — and nothing for a binding that names
+    /// neither.
+    #[test]
+    fn two_shapes_sharing_a_local_name_refuse_the_import_that_names_it() {
+        const TWO_PLACES: &str = "\
+shape https://a.example/Place
+shape https://b.example/Place
+shape https://a.example/Tag
+";
+        let src = "type { Place, Tag } := io.shex(\"places.shex\")\n";
+        let (db, file) = db_with_document(src, "places.shex", TWO_PLACES);
+        let dm = def_map(&db, file);
+
+        assert_eq!(
+            dm.lookup_type_error(&db, "Place"),
+            Some(ShapeBindError::Ambiguous {
+                shape: "Place".into(),
+                first: "https://a.example/Place".into(),
+                second: "https://b.example/Place".into(),
+            })
         );
         assert_eq!(
-            dm.lookup_source_shape_error(&db, "c"),
-            Some(ShapeBindError::Arity {
-                declared: 2,
-                named: 3,
-                position: 3
-            })
+            dm.lookup_type(&db, "Tag").as_deref(),
+            Some("https://a.example/Tag"),
+            "a member that names an unambiguous shape binds it"
         );
     }
 
@@ -1542,27 +1426,53 @@ b := io.parquet(\"b.parquet\")
         );
     }
 
-    /// `type { … } := io.shex(…)` reaches the `DefMap`, binds positionally like
+    /// `type { … } := io.shex(…)` reaches the `DefMap`, binds by name like
     /// its value-side twin, and carries the document. The document is the datum
-    /// that matters: it is where a CSV-sourced program declares its output
-    /// shape.
+    /// that matters: it is where a CSV-sourced program finds its output shape.
     #[test]
-    fn a_type_binding_reaches_the_def_map_and_binds_positionally() {
-        let src = "type { uno, dos } := io.shex(\"two_shapes.shex\")\n";
+    fn a_type_binding_reaches_the_def_map_and_binds_by_name() {
+        let src = "type { Alpha as uno, Zeta } := io.shex(\"two_shapes.shex\")\n";
         let (db, file) = db_with_document(src, "two_shapes.shex", TWO_SHAPES);
         let dm = def_map(&db, file);
 
         assert_eq!(
             dm.lookup_type(&db, "uno").as_deref(),
-            Some("https://example.org/Zeta")
-        );
-        assert_eq!(
-            dm.lookup_type(&db, "dos").as_deref(),
             Some("https://example.org/Alpha")
         );
         assert_eq!(
-            dm.output_shape_binding(&db).map(|(_, d)| d).as_deref(),
+            dm.lookup_type(&db, "Zeta").as_deref(),
+            Some("https://example.org/Zeta")
+        );
+        assert_eq!(
+            dm.types(&db)[0].document.as_deref(),
             Some("two_shapes.shex")
+        );
+        assert!(!dm.types(&db)[0].declared);
+    }
+
+    /// A declared type is a row of the same table: its name resolves to the IRI
+    /// it writes, it names no document, and an import beside it is unaffected.
+    #[test]
+    fn a_declared_type_is_a_row_of_the_type_table() {
+        let src = "@iri(\"https://example.org/City\")\n\
+                   type City\n    \
+                   @iri(\"https://example.org/name\") name: String\n\
+                   type { Zeta } := io.shex(\"two_shapes.shex\")\n";
+        let (db, file) = db_with_document(src, "two_shapes.shex", TWO_SHAPES);
+        let dm = def_map(&db, file);
+
+        assert_eq!(
+            dm.lookup_type(&db, "City").as_deref(),
+            Some("https://example.org/City")
+        );
+        let city = dm
+            .type_of_shape(&db, "https://example.org/City")
+            .expect("City is a type");
+        assert!(city.declared);
+        assert_eq!(city.document, None);
+        assert_eq!(
+            dm.lookup_type(&db, "Zeta").as_deref(),
+            Some("https://example.org/Zeta")
         );
     }
 
@@ -1585,23 +1495,19 @@ b := io.parquet(\"b.parquet\")
         );
     }
 
-    /// The arity check applies on the type side too, and `type` remains usable
-    /// as an ordinary binding name in the same file.
+    /// The by-name check applies on the type side too, and `type` remains
+    /// usable as an ordinary binding name in the same file.
     #[test]
-    fn a_type_binding_reports_arity_and_type_is_still_a_usable_name() {
-        let src = "type { a, b, c } := io.shex(\"two_shapes.shex\")\n\
+    fn a_type_binding_refuses_an_undeclared_name_and_type_is_still_a_usable_name() {
+        let src = "type { Zeta, Omega } := io.shex(\"two_shapes.shex\")\n\
                    type := io.csv(\"type.csv\")\n";
         let (db, file) = db_with_document(src, "two_shapes.shex", TWO_SHAPES);
         let dm = def_map(&db, file);
 
-        assert_eq!(
-            dm.lookup_type_error(&db, "c"),
-            Some(ShapeBindError::Arity {
-                declared: 2,
-                named: 3,
-                position: 3
-            })
-        );
+        assert!(matches!(
+            dm.lookup_type_error(&db, "Omega"),
+            Some(ShapeBindError::NotInDocument { .. })
+        ));
         assert_eq!(
             dm.lookup_source_call(&db, "type"),
             Some(SourceCall {
@@ -1610,69 +1516,6 @@ b := io.parquet(\"b.parquet\")
                 delimiter: None,
             }),
             "`type` is contextual, so it is still a binding name"
-        );
-    }
-
-    /// `@rename` reaches the `DefMap`, and it reaches it ADDRESSED: one `type`
-    /// line binds several names, and each rename goes to the one it names.
-    ///
-    /// Sorting by name and not by file is the point. `output_shape_binding` is
-    /// a `find_map` over the file's bindings — it answers with the FIRST — so a
-    /// file-scoped rename table would inherit that flattening and apply one
-    /// binding's repair to another binding's shape without a word.
-    #[test]
-    fn a_rename_is_addressed_to_one_bound_name() {
-        let src = "@rename(uno, \"https://example.org/Zeta#name\" as zeta_name)\n\
-                   @rename(dos, \"https://example.org/Alpha#name\" as alpha_name)\n\
-                   type { uno, dos } := io.shex(\"two_shapes.shex\")\n";
-        let (db, file) = db_with_document(src, "two_shapes.shex", TWO_SHAPES);
-        let dm = def_map(&db, file);
-
-        let by_name = |n: &str| {
-            dm.types(&db)
-                .iter()
-                .find(|t| t.name == n)
-                .expect("bound")
-                .renames
-                .clone()
-        };
-        assert_eq!(
-            by_name("uno"),
-            vec![(
-                SmolStr::from("https://example.org/Zeta#name"),
-                SmolStr::from("zeta_name")
-            )],
-            "`uno`'s rename, and only `uno`'s"
-        );
-        assert_eq!(
-            by_name("dos"),
-            vec![(
-                SmolStr::from("https://example.org/Alpha#name"),
-                SmolStr::from("alpha_name")
-            )]
-        );
-        // And the shape-keyed accessor the checker uses reaches the same table:
-        // by the time a `ResolvedShape` exists the local name is behind it.
-        assert_eq!(
-            dm.renames_for_shape(&db, "https://example.org/Zeta"),
-            by_name("uno")
-        );
-    }
-
-    /// A rename addressed to a name the binding does not introduce belongs to
-    /// nobody, and is dropped HERE — `crate::lower::check_renames` reports it
-    /// over the same nodes, with a real span. This test pins the drop so the
-    /// report stays the only thing standing between it and silence.
-    #[test]
-    fn a_rename_addressed_to_an_unbound_name_binds_to_nothing() {
-        let src = "@rename(Persn, \"https://example.org/Zeta#name\" as z)\n\
-                   type { Person } := io.shex(\"two_shapes.shex\")\n";
-        let (db, file) = db_with_document(src, "two_shapes.shex", TWO_SHAPES);
-        let dm = def_map(&db, file);
-        assert!(
-            dm.types(&db)[0].renames.is_empty(),
-            "`Persn` is not `Person`, and a rename is not applied to a name it \
-             did not address"
         );
     }
 

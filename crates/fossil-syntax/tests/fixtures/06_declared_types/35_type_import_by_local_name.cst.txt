@@ -1,0 +1,23 @@
+PROGRAM
+  TYPE_DEF
+    IDENT "type"
+    LBRACE "{"
+    IMPORT_MEMBER
+      IDENT "Place"
+      IDENT "as"
+      IDENT "City"
+    RBRACE "}"
+    DEFINE ":="
+    EXPR
+      POSTFIX_EXPR
+        POSTFIX_EXPR
+          LITERAL_EXPR
+            IDENT "io"
+          DOT "."
+          IDENT "shex"
+        LPAREN "("
+        ARG_LIST
+          ARG
+            LITERAL_EXPR
+              STRING "\"places.shex\""
+        RPAREN ")"

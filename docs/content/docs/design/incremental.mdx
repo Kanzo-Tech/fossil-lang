@@ -1,0 +1,143 @@
+---
+title: One database, end to end
+description: "Everything that changes a compile's answer is a Salsa input the host writes, everything else is a query, and the editor and the run read one database through them — the shape ty, rust-analyzer and Cairo share."
+direction:
+  summary: "Every fact that changes a compile's answer is a Salsa input a host writes, every derived fact is a query, and the editor and the run answer from one database."
+---
+
+fossil has an incremental core so that [editing one mapping re-runs work for that mapping and not
+for its neighbours](/docs/design/tooling-for-humans). That promise only holds if Salsa sees
+everything a check reads. A fact read beside it — from a table the host fills, a map passed as an
+argument, a second copy of a decode — is memoised with the answer and never invalidated, and the
+editor shows a result for an input that is gone.
+
+The rule is the one [ty](https://github.com/astral-sh/ruff/tree/main/crates/ruff_db),
+[rust-analyzer](https://github.com/rust-lang/rust-analyzer/tree/master/crates/base-db) and
+[Cairo](https://github.com/starkware-libs/cairo/tree/main/crates/cairo-lang-filesystem) follow: **the
+host writes inputs, and everything else is a query.**
+
+## What a host writes
+
+Three things change a compile's answer, and each is a Salsa input.
+
+- **The text of a file** — the program, and every shape document it names
+  (`crates/fossil-base/src/files.rs, SourceFile`).
+- **Which files exist** — the registry a path resolves through, so that a document registered after
+  a check that missed it re-runs that check (`crates/fossil-base/src/files.rs, FileRegistry`).
+- **What each source is** — the columns a host's profile found for it, or the problem that stopped
+  the host from finding any (`crates/fossil-base/src/sources.rs, Described`).
+
+The third was not an input. The descriptors lived in a `Mutex<HashMap>` on the host's `System`, read
+from inside the checker with no dependency, so a source described *after* the first check left that
+check memoised against no columns: the squiggles of an open row, for a file whose columns the host had
+since read. The sources whose description failed lived in a second map on the wasm workspace, read
+beside the queries. Both are one input now, keyed by the source's location as the program writes it.
+
+Its granularity is the whole map, for the reason the file registry's is: a check that asked for a
+source nobody had described yet must re-run when one is, and a per-key input cannot express a miss.
+A host describes sources after a profile, not per keystroke, so invalidating every reader of the map
+costs a re-check of a program whose sources just changed.
+
+**What would reverse it:** a host that describes sources as often as it edits text. Then one input per
+source, with the registry holding only which keys exist.
+
+## The run reads what the check read
+
+The executor decoded a program's output document with a copy of the checker's decode: the same
+provider lookup, the same extension check, the same registry key, read off a static provider table
+rather than the installed one, and run again on every execute. Two copies of a decode are two places
+a run and a check can disagree about the document. It calls the checker's now
+(`crates/fossil-hir/src/shapes.rs, decoded_document`), whose read of the document's text is tracked.
+
+It reads the third input too: a run is given the profile the editor was given, so it checks a
+program against the columns the editor checked it against — [the last section](#one-database-and-the-run-checks-what-the-editor-checked)
+says how.
+
+## Diagnostics are returned by value
+
+A query that can find a mistake returns what it found in its output, as ty and rust-analyzer do.
+Diagnostics were a Salsa accumulator, and an accumulator can only be pushed from inside a query —
+which is why the tests carried tracked wrapper functions whose only job was to be a query, and why a
+helper that found a mistake needed a database to report it to.
+
+- **A query that can find a mistake carries its diagnostics in its output** — the parse, the
+  lowering, a mapping's body, the check of one mapping, the identity check, the lowering to MIR. A
+  check that refuses still returns an output, with the refusal among its diagnostics and the poison
+  beside it (`crates/fossil-hir/src/check.rs, TypeckOutput`).
+- **A helper reports into a sink it is handed**, not into the database, and the sink is what mints the
+  `ErrorGuaranteed` a poisoned result carries (`crates/fossil-base/src/error.rs, Diagnostics`). The
+  rule that a refusal cannot be silent stays a type: the only way to get the token is to push a
+  diagnostic.
+- **The program's diagnostics are the union of those outputs**, collected by one function every host
+  calls (`crates/fossil-mir/src/diagnostics.rs, program_diagnostics`).
+- **A test builds a database with what it needs** — files, documents, described sources — and calls
+  the real query, or hands a helper a sink of its own. No tracked function exists to be a test's
+  frame.
+
+**What would reverse it:** a diagnostic whose producer is not the query whose output carries it —
+reported from deep inside a query on behalf of another. An accumulator is the tool for that, and
+fossil has no such case: every diagnostic belongs to the query that found it.
+
+## One database, and the run checks what the editor checked
+
+The editor's workspace and the executor build the same database type, `FossilDb`, and write the same
+inputs into it. Nothing else is shared state:
+
+- **The connections are an input**, beside the files and the sources
+  (`crates/fossil-base/src/connections.rs, Connections`). A location expands through them, so a
+  document the program names, the list of what it reads and the run's routing read the connections
+  from the database rather than from a map handed beside it — and changing a connection re-runs the
+  queries that read them.
+- **The run is given the profile the editor was given.** `run` takes the same answer of the host's
+  profile that `registerProfile` takes, and writes it into the run's database before the check. A
+  run then refuses exactly what the editor refused, against the same columns.
+- **The executor stays its own wasm module**, so the editor does not load DataFusion. It compiles the
+  same queries over the same database type, so the two cannot answer differently about one program
+  and one set of inputs.
+
+**What would reverse it:** a host that needs a run and an edit to disagree on purpose — a run against
+inputs the editor must not see. None does: the run's inputs are the program, its documents, its
+connections and its sources, which are the editor's.
+
+## The crates, as the references cut them
+
+ty, rust-analyzer and Cairo put the Salsa substrate in one small crate at the bottom — the database,
+its inputs, the file abstraction — the parser in a crate of its own, the semantic analysis in one or
+a few, the editor functions in one with no protocol in it, and each transport in a thin crate over
+those. fossil's crates are cut that way, and a crate that is none of those folds into the one whose
+subject it is. Six are modules of that crate now:
+
+| module | because |
+| --- | --- |
+| `fossil_base::location` | where a written reference points is the file abstraction, which ty keeps in `ruff_db` beside the inputs |
+| `fossil_base::sources` | the columns a host found for a source are the value of an input, so the type is the input's; the trait beside it, its schema and its stub had no caller |
+| `fossil_hir::lineage` | what a program reads is a question about its def map, asked by every host |
+| `fossil_hir::shex`, `fossil_hir::shacl` | a shape document becomes a type, and the types are here — the decoders and the `providers` rows that install them; what the executor was handed beside them, an enum whose one live method returned a `GraphSchema`, is a `GraphSchema` |
+| `fossil_df::corpus` | the corpus format is the writer's: nothing else builds a manifest |
+
+One is still a crate of its own:
+
+| crate | folds into | because |
+| --- | --- | --- |
+| `fossil-graph-schema` | `fossil-base`, `fossil-hir` | the errors are the substrate's and a primitive is the type system's |
+
+The ShEx decode still resolves references and labels by hand; reading `shex_ast`'s compiled schema,
+`SchemaIR`, through a `TryFrom` is [the declared types' direction](/docs/design/declared).
+
+**SHACL stays fossil's own walk.** rudof's SHACL crates (`shacl_ast`, `shacl_ir`, `shacl_rdf`,
+measured at 0.2.9 on 2026-10-13) are on the 0.2 line while `shex_ast` is on 0.3, so their IRIs are
+another crate's type; and `shacl_ast` takes `iri_s` with its default features, which pull `reqwest`
+and with it `tokio` into the wasm closure — what the hard rule on `tokio` forbids. The walk over
+`oxrdf` is a few hundred lines that compile to wasm32 today. **What would reverse it:** a rudof
+SHACL release on the line `shex_ast` is on whose IRI crate builds for wasm32 without a network
+client.
+
+**What would reverse it:** a module whose consumers are not the crate it sits in — a second reader
+of the corpus format in Rust, say, which would want `fossil_df::corpus` without DataFusion.
+
+## Held by
+
+`crates/fossil-wasm/tests/register_inferred_descriptor.rs` describes a source after a check and asserts
+the check re-runs against the new columns; `crates/fossil-df/tests/documents.rs` runs a program whose
+output document the checker decoded; `crates/fossil-base/src/connections.rs` sets the connections
+after a query read them and asserts it re-runs, and that setting the same map again does not.

@@ -23,11 +23,17 @@ pub struct MirGraph<'db> {
     /// `examples/users.csv`. It also must not panic: `lower_to_mir_pg` runs on
     /// every keystroke from the LSP, over half-written programs. So it taints
     /// instead, following rustc's `ErrorGuaranteed` discipline — the marker's
-    /// presence implies ≥1 accumulated `Diagnostic`, so
-    /// the editor shows the error while consumers refuse the graph.
+    /// presence implies ≥1 `Diagnostic` reported by this lowering or by a query
+    /// it read, so the editor shows the error while consumers refuse the graph.
     ///
     /// Consumers MUST check this before executing; `fossil_df::execute_graph` is
     /// the enforcement point.
     #[returns(copy)]
     pub error: Option<fossil_base::ErrorGuaranteed>,
+
+    /// What the lowering itself found: a source it cannot resolve, a mapping
+    /// with no identity, and fossil's own faults. What the queries it read
+    /// found is in their outputs.
+    #[returns(ref)]
+    pub diagnostics: Vec<fossil_base::Diagnostic>,
 }

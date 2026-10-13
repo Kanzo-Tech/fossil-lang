@@ -3,26 +3,25 @@
 //!
 //! The text comes out of the document registry and never off a disk or an
 //! argument: a host registers what `fossil_hir::documents::missing_documents`
-//! reports, and the run decodes the same bytes, with the same registry row, as
-//! the check. The deleted native CLI read the file again through its anchor
-//! and `fossil-df-wasm` took a second copy as a `shex` string and sniffed its
-//! language; either could decode a document other than the one that compiled.
+//! reports, and the run decodes it with the checker's own decode — one
+//! function, so a run and a check cannot read two documents
+//! (`/docs/design/incremental`).
 
-use fossil_base::providers::{Capability, provider};
-use fossil_base::{Db, SourceFile, file_at};
-use fossil_descriptors_output::OutputDescriptorKind;
-use fossil_graph_schema::{Failure, Foreign, Problem};
+use fossil_base::providers::provider;
+use fossil_base::{Db, SourceFile};
+use fossil_graph_schema::{Failure, GraphSchema, Problem};
 use fossil_hir::def_map::def_map;
-use fossil_hir::documents::registry_key;
 
 /// Resolve the output descriptor `file` names.
 ///
 /// Two places name one, in this order:
 ///
-/// 1. **`type { … } := io.shex("shop.shex")`** — what the CHECKER resolves the
-///    mappings against, so it wins: the document the run classifies edges with
-///    has to be the document the program compiled against, or a CSV program
-///    gets `ACCEPT_ALL_DEFAULT` and emits zero edges.
+/// 1. **The program's types** — declared (`@iri("…") type Person`) or imported
+///    (`type { … } := io.shex("shop.shex")`), as
+///    [`fossil_hir::shapes::program_shapes`] gathers them. It is what the
+///    CHECKER resolves the mappings against, so it wins: the types the run
+///    classifies edges with have to be the ones the program compiled against,
+///    or a CSV program gets the empty schema and emits zero edges.
 /// 2. `io.rdf(schema = io.shex(…))` — an RDF input whose shape doubles as the
 ///    output contract, for a program that reads a graph and writes one back.
 ///
@@ -32,18 +31,19 @@ use fossil_hir::documents::registry_key;
 /// # Errors
 /// The document is unregistered, named by no provider or by one that reads no
 /// types, has an extension the row declines, or fails to decode.
-pub fn output_descriptor(db: &dyn Db, file: SourceFile) -> Result<OutputDescriptorKind, Failure> {
-    let def_map = def_map(db, file);
-    if let Some((constructor, document)) = def_map.output_shape_binding(db) {
-        return decode(db, file, constructor.as_deref(), &document);
+pub fn output_descriptor(db: &dyn Db, file: SourceFile) -> Result<GraphSchema, Failure> {
+    if let Some(shapes) = fossil_hir::shapes::program_shapes(db, file)? {
+        return Ok(shapes.to_graph_schema());
     }
+
+    let def_map = def_map(db, file);
 
     let mut schema: Option<(Option<&str>, &str)> = None;
     for s in def_map.sources(db) {
         let reads_a_graph = s
             .constructor
             .as_deref()
-            .and_then(|c| provider(fossil_descriptors_output::PROVIDERS, c))
+            .and_then(|c| provider(fossil_base::providers::installed(db), c))
             .is_some_and(|p| p.reads_rows == Some(fossil_base::RowReader::Materialised));
         let Some(arg) = s.schema_arg.as_ref().filter(|_| reads_a_graph) else {
             continue;
@@ -62,69 +62,19 @@ pub fn output_descriptor(db: &dyn Db, file: SourceFile) -> Result<OutputDescript
 
     match schema {
         Some((provider, document)) => decode(db, file, provider, document),
-        None => Ok(OutputDescriptorKind::ACCEPT_ALL_DEFAULT),
+        None => Ok(GraphSchema::default()),
     }
 }
 
-/// Decode one registered document through the row the program named. The row
-/// is selected by the constructor the program wrote and its `reads_types` is
-/// the function the checker calls.
+/// Decode one registered document through the checker's own decode,
+/// [`fossil_hir::shapes::decoded_document`]: the same row, the same registry
+/// key and the same tracked read of the text the program compiled against.
 fn decode(
     db: &dyn Db,
     file: SourceFile,
     constructor: Option<&str>,
     document: &str,
-) -> Result<OutputDescriptorKind, Failure> {
-    let table = fossil_descriptors_output::PROVIDERS;
-    let ctor = constructor.ok_or_else(|| {
-        Failure::new(Problem::BareDocumentPath {
-            document: document.to_string(),
-        })
-        .with_help("write `io.shex(\"…\")` or `io.shacl(\"…\")`")
-    })?;
-    let row = provider(table, ctor).ok_or_else(|| {
-        Failure::new(Problem::UnknownProvider {
-            constructor: ctor.to_string(),
-        })
-        .with_help(fossil_hir::refusals::unknown_constructor(table))
-    })?;
-    if !row.provides(Capability::ReadTypes) {
-        return Err(Failure::new(Problem::WrongCapability {
-            constructor: row.constructor(),
-            capability: "read types".to_string(),
-        })
-        .with_help(fossil_hir::refusals::decline_capability(
-            row,
-            Capability::ReadTypes,
-            table,
-        )));
-    }
-    if !row.accepts(document) {
-        return Err(Failure::new(Problem::WrongExtension {
-            constructor: row.constructor(),
-            document: document.to_string(),
-        })
-        .with_help(fossil_hir::refusals::decline_extension(row, document)));
-    }
-    let read = row.reads_types.ok_or_else(|| Problem::Bug {
-        what: format!(
-            "`{}` declares it reads types and has no decoder",
-            row.constructor()
-        ),
-    })?;
-
-    let key = registry_key(db, file, document);
-    let registered = file_at(db, &key).ok_or_else(|| Problem::NotRegistered {
-        document: document.to_string(),
-    })?;
-    let shapes = read(&key, registered.text(db)).map_err(|e| {
-        Failure::new(Problem::Unparseable {
-            document: document.to_string(),
-            reason: None,
-        })
-        .caused_by(Foreign::named("Rejection", format!("{e:?}")))
-    })?;
-    Ok(OutputDescriptorKind::Lowered(
-        shapes.to_graph_schema(&def_map(db, file).renames(db)),
-    ))
+) -> Result<GraphSchema, Failure> {
+    let shapes = fossil_hir::shapes::decoded_document(db, file, constructor, document)?;
+    Ok(shapes.to_graph_schema())
 }

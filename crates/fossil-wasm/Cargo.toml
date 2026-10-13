@@ -27,32 +27,16 @@ workspace = true
 [dependencies]
 # Compiler-core crates wired into FossilWorkspace::compile
 # The wasm dep tree is the compiler front-end crates plus WASM glue. NO
-# fossil-lsp (a binary), NO
-# fossil-sinks (the corpus format — the editor writes no corpus; that is
-# fossil-df-wasm's job).
+# fossil-df (the corpus format and its writer — the editor writes no corpus;
+# that is fossil-df-wasm's job).
 fossil-base    = { path = "../fossil-base" }
 fossil-syntax  = { path = "../fossil-syntax" }
 fossil-hir     = { path = "../fossil-hir" }
 fossil-mir     = { path = "../fossil-mir" }
-# WasmSystem stores InferredDescriptors registered
-# by the browser host BEFORE invoking compile() — the
-# Rust forward-propagation path reads them through the System trait accessor,
-# because the browser has no filesystem to introspect a CSV from.
-fossil-descriptors-input = { path = "../fossil-descriptors-input" }
-# The `SHEX` decoder row this host installs on its `System`. A table of `fn`
-# so the dependency buys one const and no vtable — and the
-# host never names a ShEx type: it hands the row over and the compiler
-# calls it.
-fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 smol_str = { workspace = true }
 # `Failure` is what every call here refuses with, and `js` the one function
 # that throws it as a `FossilError` — shared by the three wasm crates.
 fossil-graph-schema = { path = "../fossil-graph-schema", features = ["js"] }
-# `fossil_lineage::inputs` is what the test-reachable `inputs_native` core
-# calls to report what a program reads. WASM-clean: its own deps are
-# fossil-hir + salsa + smol_str, all already inside the WASM gate, and it pulls
-# no native UDF crate.
-fossil-lineage = { path = "../fossil-lineage" }
 # The `diagnostics()` method converts byte-offset spans to UTF-16 LSP ranges via
 # `fossil_ide::LineIndex` (the rust-analyzer model). fossil-ide is inside the
 # WASM gate — wasm32-clean by construction. Wiring this dep lets `check()`
@@ -61,8 +45,7 @@ fossil-ide = { path = "../fossil-ide" }
 # The profiler the browser runs on its own DuckDB-WASM: sans-IO, so it is wasm32
 # like the rest of this tree, and the gate watches it (`/docs/design/profile`).
 fossil-profile = { path = "../fossil-profile" }
-# `WasmDb` is a fresh `#[salsa::db]` struct (mirrors `LspDb` — production hosts
-# own their own db). Needs the
+# `WasmDb` is a fresh `#[salsa::db]` struct (production hosts own their own db). Needs the
 # `salsa::Storage<Self>` field + the `Database` derive macro at the
 # trait-object level.
 salsa = { workspace = true }

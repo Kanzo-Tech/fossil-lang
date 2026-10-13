@@ -13,7 +13,7 @@ export type Code =
   | 'syntax/expected-token'
   | 'syntax/unexpected-token'
   | 'syntax/unknown-character'
-  | 'syntax/malformed-rename'
+  | 'syntax/missing-iri'
   | 'syntax/misplaced-attribute'
   | 'syntax/invalid-mapping-header'
   | 'syntax/invalid-property-name'
@@ -31,6 +31,9 @@ export type Code =
   | 'name/unknown-function'
   | 'name/unknown-parameter'
   | 'name/unknown-source'
+  | 'name/unknown-type'
+  | 'name/duplicate-field'
+  | 'name/duplicate-type'
   | 'argument/arity'
   | 'argument/duplicate'
   | 'argument/skipped-parameter'
@@ -44,15 +47,15 @@ export type Code =
   | 'type/expected-number'
   | 'type/incomparable'
   | 'type/branch-mismatch'
+  | 'type/invalid-field-type'
   | 'shape/no-document'
   | 'shape/name-collision'
   | 'shape/missing-required-property'
   | 'shape/unsupported-disjunction'
   | 'shape/cyclic-reference'
   | 'shape/unresolved-reference'
-  | 'shape/binding-arity'
-  | 'shape/rename-unknown-type'
-  | 'shape/rename-unknown-predicate'
+  | 'shape/not-in-document'
+  | 'shape/ambiguous-import'
   | 'shape/more-than-one-output'
   | 'document/not-registered'
   | 'document/unparseable'
@@ -70,7 +73,6 @@ export type Code =
   | 'identity/edge-without-template'
   | 'identity/edge-arity'
   | 'pipeline/unknown-verb'
-  | 'pipeline/unimplemented-verb'
   | 'pipeline/stage-arity'
   | 'pipeline/invalid-stage-argument'
   | 'pipeline/not-an-aggregate'
@@ -116,7 +118,7 @@ export const CODES: readonly Code[] = [
   'syntax/expected-token',
   'syntax/unexpected-token',
   'syntax/unknown-character',
-  'syntax/malformed-rename',
+  'syntax/missing-iri',
   'syntax/misplaced-attribute',
   'syntax/invalid-mapping-header',
   'syntax/invalid-property-name',
@@ -134,6 +136,9 @@ export const CODES: readonly Code[] = [
   'name/unknown-function',
   'name/unknown-parameter',
   'name/unknown-source',
+  'name/unknown-type',
+  'name/duplicate-field',
+  'name/duplicate-type',
   'argument/arity',
   'argument/duplicate',
   'argument/skipped-parameter',
@@ -147,15 +152,15 @@ export const CODES: readonly Code[] = [
   'type/expected-number',
   'type/incomparable',
   'type/branch-mismatch',
+  'type/invalid-field-type',
   'shape/no-document',
   'shape/name-collision',
   'shape/missing-required-property',
   'shape/unsupported-disjunction',
   'shape/cyclic-reference',
   'shape/unresolved-reference',
-  'shape/binding-arity',
-  'shape/rename-unknown-type',
-  'shape/rename-unknown-predicate',
+  'shape/not-in-document',
+  'shape/ambiguous-import',
   'shape/more-than-one-output',
   'document/not-registered',
   'document/unparseable',
@@ -173,7 +178,6 @@ export const CODES: readonly Code[] = [
   'identity/edge-without-template',
   'identity/edge-arity',
   'pipeline/unknown-verb',
-  'pipeline/unimplemented-verb',
   'pipeline/stage-arity',
   'pipeline/invalid-stage-argument',
   'pipeline/not-an-aggregate',
@@ -235,10 +239,11 @@ export interface ProblemData {
     character: string;
   };
   /**
-   * A `@rename` written incompletely; `missing` is the part it lacks.
+   * A declared type, or a field of one, written without its `@iri`; `name` is the type's or the
+   * field's.
    */
-  'syntax/malformed-rename': {
-    missing: string;
+  'syntax/missing-iri': {
+    name: string;
   };
   /**
    * An attribute written where it does not belong.
@@ -298,8 +303,8 @@ export interface ProblemData {
     callee: string;
   };
   /**
-   * A shape name no `type { … } := …` binding introduces. `declared` is the names the program
-   * does bind.
+   * A type name nothing in the program introduces — in a mapping header, an edge or a field's
+   * `Ref<…>`. `declared` is the names the program does have, declared or imported.
    */
   'name/unknown-shape': {
     declared: string[];
@@ -361,6 +366,28 @@ export interface ProblemData {
   'name/unknown-source': {
     binding: string;
     bound_to?: string | null;
+  };
+  /**
+   * A field's type that names no type a field can have. `types` is the names a field's type is
+   * written in.
+   */
+  'name/unknown-type': {
+    name: string;
+    types: string[];
+  };
+  /**
+   * A field written twice in one declared type.
+   */
+  'name/duplicate-field': {
+    field: string;
+    type_name: string;
+  };
+  /**
+   * A type name the program introduces twice — declared twice, imported twice, or declared and
+   * imported.
+   */
+  'name/duplicate-type': {
+    name: string;
   };
   /**
    * A call given fewer arguments than it requires or more than it takes.
@@ -461,6 +488,14 @@ export interface ProblemData {
     then: string;
   };
   /**
+   * A field's type the shape vocabulary cannot carry — `Option<Seq<T>>`, `Ref<String>`, `Option`
+   * alone. `reason` says which rule it breaks.
+   */
+  'type/invalid-field-type': {
+    reason: string;
+    written: string;
+  };
+  /**
    * No shape document where one is needed. `binding` is the binding that names none; absent when
    * the program names none at all.
    */
@@ -506,29 +541,23 @@ export interface ProblemData {
     shape: string;
   };
   /**
-   * A binding that names more shapes than its document declares; names bind by position, and
-   * `position` is the surplus name's.
+   * An import that names a shape its document does not declare. The name is a shape's local name;
+   * `declared` is the ones the document has.
    */
-  'shape/binding-arity': {
-    declared: number;
-    name: string;
-    named: number;
-    position: number;
-  };
-  /**
-   * A `@rename` naming a type its binding does not introduce.
-   */
-  'shape/rename-unknown-type': {
-    introduced: string[];
-    shape: string;
-  };
-  /**
-   * A `@rename` naming a predicate its shape does not declare.
-   */
-  'shape/rename-unknown-predicate': {
+  'shape/not-in-document': {
     declared: string[];
-    predicate: string;
-    shape: string;
+    document: string;
+    name: string;
+  };
+  /**
+   * An import of a local name two shapes of its document share. `first` and `second` are their
+   * IRIs.
+   */
+  'shape/ambiguous-import': {
+    document: string;
+    first: string;
+    name: string;
+    second: string;
   };
   /**
    * A program whose sources declare two different output shapes; one program writes one.
@@ -649,14 +678,6 @@ export interface ProblemData {
   'pipeline/unknown-verb': {
     verb: string;
     verbs: string[];
-  };
-  /**
-   * A verb the catalogue declares and the lowering does not implement yet.
-   */
-  'pipeline/unimplemented-verb': {
-    implemented: string[];
-    pipeline: string;
-    verb: string;
   };
   /**
    * A stage missing a position it needs (`missing`), or given more than it takes (`missing`
@@ -934,7 +955,7 @@ export const TITLES: { readonly [C in Code]: string } = {
   'syntax/expected-token': 'Expected another token',
   'syntax/unexpected-token': 'Unexpected token',
   'syntax/unknown-character': 'No token starts with this character',
-  'syntax/malformed-rename': 'A malformed rename',
+  'syntax/missing-iri': 'A declaration without its IRI',
   'syntax/misplaced-attribute': 'An attribute in the wrong place',
   'syntax/invalid-mapping-header': 'Not a mapping header',
   'syntax/invalid-property-name': 'Not a property name',
@@ -952,6 +973,9 @@ export const TITLES: { readonly [C in Code]: string } = {
   'name/unknown-function': 'Not a function fossil knows',
   'name/unknown-parameter': 'Not a parameter of this function',
   'name/unknown-source': 'Not a source binding',
+  'name/unknown-type': 'Not a type a field can have',
+  'name/duplicate-field': 'A field written twice',
+  'name/duplicate-type': 'A type introduced twice',
   'argument/arity': 'The wrong number of arguments',
   'argument/duplicate': 'An argument given twice',
   'argument/skipped-parameter': 'A parameter skipped',
@@ -965,15 +989,15 @@ export const TITLES: { readonly [C in Code]: string } = {
   'type/expected-number': 'Not a number',
   'type/incomparable': 'Values that cannot be compared',
   'type/branch-mismatch': 'Branches of different types',
+  'type/invalid-field-type': 'Not a field type',
   'shape/no-document': 'No shape document',
   'shape/name-collision': 'Two predicates share a name',
   'shape/missing-required-property': 'A required property is never written',
   'shape/unsupported-disjunction': 'A value disjunction',
   'shape/cyclic-reference': 'A cyclic shape reference',
   'shape/unresolved-reference': 'An unresolved shape reference',
-  'shape/binding-arity': 'More names than shapes',
-  'shape/rename-unknown-type': 'A rename of a type the binding does not introduce',
-  'shape/rename-unknown-predicate': 'A rename of a predicate the shape does not declare',
+  'shape/not-in-document': 'Not a shape the document declares',
+  'shape/ambiguous-import': 'Two shapes share the imported name',
   'shape/more-than-one-output': 'More than one output shape',
   'document/not-registered': 'A document is not registered',
   'document/unparseable': 'A document does not parse',
@@ -991,7 +1015,6 @@ export const TITLES: { readonly [C in Code]: string } = {
   'identity/edge-without-template': 'An edge to a type nothing writes',
   'identity/edge-arity': 'An edge given the wrong number of values',
   'pipeline/unknown-verb': 'Not a relation verb',
-  'pipeline/unimplemented-verb': 'A verb with no lowering yet',
   'pipeline/stage-arity': 'A stage given the wrong arguments',
   'pipeline/invalid-stage-argument': 'A stage argument of the wrong kind',
   'pipeline/not-an-aggregate': 'Not an aggregation',
@@ -1038,7 +1061,7 @@ export type DetailedCode =
   | 'syntax/expected-token'
   | 'syntax/unexpected-token'
   | 'syntax/unknown-character'
-  | 'syntax/malformed-rename'
+  | 'syntax/missing-iri'
   | 'syntax/misplaced-attribute'
   | 'syntax/invalid-mapping-header'
   | 'syntax/number-out-of-range'
@@ -1050,6 +1073,8 @@ export type DetailedCode =
   | 'name/unknown-shape'
   | 'name/unknown-field'
   | 'name/dotted-column'
+  | 'name/duplicate-field'
+  | 'name/duplicate-type'
   | 'argument/skipped-parameter'
   | 'argument/positional-after-named'
   | 'argument/named-on-edge'
@@ -1060,14 +1085,13 @@ export type DetailedCode =
   | 'type/expected-number'
   | 'type/incomparable'
   | 'type/branch-mismatch'
+  | 'type/invalid-field-type'
   | 'shape/name-collision'
   | 'shape/missing-required-property'
   | 'shape/unsupported-disjunction'
   | 'shape/cyclic-reference'
   | 'shape/unresolved-reference'
-  | 'shape/binding-arity'
-  | 'shape/rename-unknown-type'
-  | 'shape/rename-unknown-predicate'
+  | 'shape/ambiguous-import'
   | 'shape/more-than-one-output'
   | 'document/not-registered'
   | 'document/unread'
@@ -1122,7 +1146,7 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'syntax/expected-token': (d) => `expected ${d.expected}, found ${d.found}`,
   'syntax/unexpected-token': (_) => `unexpected token`,
   'syntax/unknown-character': (d) => `unexpected character \`${d.character}\` — no token starts with it`,
-  'syntax/malformed-rename': (d) => `this \`@rename\` has no ${d.missing}: a rename is \`@rename(Type, "<predicate IRI>" as <name>)\``,
+  'syntax/missing-iri': (d) => `\`${d.name}\` has no \`@iri\`: a declared type and each of its fields write their IRI`,
   'syntax/misplaced-attribute': (d) => `\`${d.attribute}\` does not belong ${d.place}`,
   'syntax/invalid-mapping-header': (d) => `this is not a mapping header — ${d.reason} — so nothing is produced from it. A mapping is \`Name : Shape from <source>\``,
   'syntax/number-out-of-range': (d) => `\`${d.literal}\` does not fit in ${d.kind}: ${d.reason}`,
@@ -1134,6 +1158,8 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'name/unknown-shape': (d) => `\`${d.shape}\` is not a shape this program declares`,
   'name/unknown-field': (d) => `\`${d.field}\` is not a field of \`${d.relation}\``,
   'name/dotted-column': (d) => `\`${d.reference}\` reads a member of a column, and a row's columns have none — a column whose name has a dot in it is written quoted: \`${d.quoted}\``,
+  'name/duplicate-field': (d) => `\`${d.type_name}\` has two fields called \`${d.field}\``,
+  'name/duplicate-type': (d) => `\`${d.name}\` is introduced twice, and a type name names one type`,
   'argument/skipped-parameter': (d) => `\`${d.function}\` is given nothing for \`${d.parameter}\`, and something after it; a parameter cannot be skipped`,
   'argument/positional-after-named': (d) => `\`${d.argument}\` is positional and follows \`${d.named} = …\`; once an argument is named, the ones after it are too`,
   'argument/named-on-edge': (d) => `\`${d.argument}\` names an argument of \`${d.target}\`, and an edge's arguments fill its identity template in the order they are written`,
@@ -1144,14 +1170,13 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'type/expected-number': (d) => `${d.operand} must be a number, and it is ${d.actual}`,
   'type/incomparable': (d) => `cannot compare ${d.left} with ${d.right} using \`${d.operator}\``,
   'type/branch-mismatch': (d) => `the branches of \`? :\` have different types: ${d.then} and ${d.otherwise}`,
+  'type/invalid-field-type': (d) => `\`${d.written}\` is not a field type: ${d.reason}`,
   'shape/name-collision': (d) => `two predicates of ${d.shape} are both called \`${d.name}\``,
   'shape/missing-required-property': (d) => `\`${d.mapping}\` never writes \`${d.property}\`, and ${d.shape} requires it`,
   'shape/unsupported-disjunction': (d) => `a value disjunction is not supported: shape \`${d.shape}\` has ${d.branches} branches`,
   'shape/cyclic-reference': (d) => `cyclic shape graph not supported: ${d.path.join(' -> ')}`,
   'shape/unresolved-reference': (d) => `unresolved shape reference \`${d.reference}\` in shape \`${d.shape}\``,
-  'shape/binding-arity': (d) => `the binding names ${d.named} shape(s) and the document declares ${d.declared}, so \`${d.name}\`, at position ${d.position}, binds nothing`,
-  'shape/rename-unknown-type': (d) => `\`@rename\` names \`${d.shape}\`, which this \`type\` binding does not introduce`,
-  'shape/rename-unknown-predicate': (d) => `\`${d.shape}\` declares no predicate \`${d.predicate}\`, so this rename never fires`,
+  'shape/ambiguous-import': (d) => `\`${d.name}\` names two shapes of \`${d.document}\`: \`${d.first}\` and \`${d.second}\``,
   'shape/more-than-one-output': (d) => `a program may declare only one output shape; found \`${d.first}\` and \`${d.second}\``,
   'document/not-registered': (d) => `the document \`${d.document}\` is not registered`,
   'document/unread': (d) => `${d.documents.length} document(s) could not be read: ${d.documents.join(', ')}`,

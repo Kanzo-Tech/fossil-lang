@@ -159,8 +159,8 @@ argument for this shape over a `code: &'static str` field beside a free `message
   something the data does not carry, and a consumer that wants the column name reads `data.column`.
 - **The JSON Schema is derived**, so the TypeScript union is generated rather than restated (below).
 
-**`Diagnostic` keeps its spans and swaps `message: String` for `problem: Problem`.** It stays the salsa
-accumulator, keeps `severity`, `span`, `frame`, `labels`, `help`, `suggestion_source` and `did_you_mean`
+**`Diagnostic` keeps its spans and swaps `message: String` for `problem: Problem`.** It keeps
+`severity`, `span`, `frame`, `labels`, `help`, `suggestion_source` and `did_you_mean`
 — everything positional, which a run failure has none of. `message` becomes `problem.to_string()`. That
 is the one-layer rule applied: there is one type that says *what went wrong* (`Problem`) and one that
 says *where in a program* (`Diagnostic`), and a compile diagnostic is the second holding the first. A
@@ -311,19 +311,19 @@ reachable from a fixture has a page*.
 Nothing below is invented: each code is one or more of the sites counted above, merged where they
 are the same mistake. The dead `ParseDiagnostic::InconsistentDedent` gets no code; its variant goes.
 
-**Compile — 71 codes** (plus `internal/bug`, below):
+**Compile — 72 codes** (plus `internal/bug`, below):
 
 | Area | Codes |
 | --- | --- |
-| `syntax` (13) | `expected-token`, `unexpected-token`, `unknown-character`, `malformed-rename`, `misplaced-attribute`, `invalid-mapping-header`, `invalid-property-name`, `number-out-of-range`, `incomplete-conditional`, `uncalled-function`, `invalid-callee`, `needless-quotes`, `hole-in-member-name` |
-| `name` (8) | `unknown-shape`, `unknown-property`, `unknown-field`, `row-not-in-scope`, `unknown-function`, `unknown-parameter`, `unknown-source`, `dotted-column` |
+| `syntax` (13) | `expected-token`, `unexpected-token`, `unknown-character`, `missing-iri`, `misplaced-attribute`, `invalid-mapping-header`, `invalid-property-name`, `number-out-of-range`, `incomplete-conditional`, `uncalled-function`, `invalid-callee`, `needless-quotes`, `hole-in-member-name` |
+| `name` (11) | `unknown-shape`, `unknown-property`, `unknown-field`, `row-not-in-scope`, `unknown-function`, `unknown-parameter`, `unknown-source`, `dotted-column`, `unknown-type`, `duplicate-field`, `duplicate-type` |
 | `argument` (6) | `arity`, `duplicate`, `skipped-parameter`, `positional-after-named`, `named-on-edge`, `alias-in-value-call` |
-| `type` (7) | `property-mismatch`, `argument-mismatch`, `relation-as-value`, `expected-bool`, `expected-number`, `incomparable`, `branch-mismatch` |
-| `shape` (9) | `no-document`, `name-collision`, `missing-required-property`, `unsupported-disjunction`, `cyclic-reference`, `unresolved-reference`, `binding-arity`, `rename-unknown-type`, `rename-unknown-predicate` |
+| `type` (8) | `property-mismatch`, `argument-mismatch`, `relation-as-value`, `expected-bool`, `expected-number`, `incomparable`, `branch-mismatch`, `invalid-field-type` |
+| `shape` (8) | `no-document`, `name-collision`, `missing-required-property`, `unsupported-disjunction`, `cyclic-reference`, `unresolved-reference`, `not-in-document`, `ambiguous-import` |
 | `document` (2) | `not-registered`, `unparseable` |
 | `provider` (6) | `unknown`, `wrong-capability`, `wrong-extension`, `invalid-reader-option`, `foreign-reader-option`, `bare-document-path` |
 | `identity` (6) | `missing-subject`, `duplicate-subject`, `subject-not-first`, `conflicting`, `edge-without-template`, `edge-arity` |
-| `pipeline` (12) | `unknown-verb`, `unimplemented-verb`, `stage-arity`, `invalid-stage-argument`, `not-an-aggregate`, `union-alias`, `cycle`, `unknown-columns`, `union-mismatch`, `join-not-equality`, `join-key-not-column`, `join-one-side` |
+| `pipeline` (11) | `unknown-verb`, `stage-arity`, `invalid-stage-argument`, `not-an-aggregate`, `union-alias`, `cycle`, `unknown-columns`, `union-mismatch`, `join-not-equality`, `join-key-not-column`, `join-one-side` |
 | `unsupported` (1) | `expression` — a gap in the compiler, not a mistake in the program |
 
 **Run, storage, corpus and the API — 28 codes.** The executor's descriptor errors reuse the compile

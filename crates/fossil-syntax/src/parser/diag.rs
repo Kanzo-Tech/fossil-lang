@@ -1,10 +1,8 @@
 //! Parser-internal diagnostic enum.
 //!
-//! The parser is a pure helper (NOT a Salsa-tracked
-//! function), so it cannot call `.accumulate(db)` directly. Instead the
-//! parser collects `ParseDiagnostic`s in a `Vec` and the wrapping
-//! `parse(db, file)` Salsa query iterates them after CST construction,
-//! accumulating each via `to_diagnostic().accumulate(db)`.
+//! The parser collects `ParseDiagnostic`s in a `Vec` and the wrapping
+//! `parse(db, file)` Salsa query translates them after CST construction,
+//! via `to_diagnostic()`, into the output's diagnostics.
 //!
 //! The variants split by what the parser can SAY: what it wanted, the byte the
 //! lexer has no rule for ([`ParseDiagnostic::UnlexableCharacter`]), and an
@@ -34,9 +32,9 @@ pub enum ParseDiagnostic {
     /// A form the grammar HAS, written incompletely, where naming the missing
     /// token would say less than naming the production.
     ///
-    /// `@subject` where `@rename` goes and a `Rename` with no `as` are both
-    /// this: the parser knows which production it is in and can quote it, while
-    /// `expected IDENT, found STRING` throws that away.
+    /// `@subject` where `@iri` goes and a field with no `@iri` are both this:
+    /// the parser knows which production it is in and can quote it, while
+    /// `expected AT_ATTR, found IDENT` throws that away.
     Malformed {
         problem: Problem,
         help: Option<String>,
@@ -46,7 +44,7 @@ pub enum ParseDiagnostic {
 
 impl ParseDiagnostic {
     /// Translate the parser-internal diagnostic into a public `Diagnostic`
-    /// suitable for `.accumulate(db)` inside the `parse` Salsa query.
+    /// for the `parse` Salsa query's output.
     #[must_use]
     pub fn to_diagnostic(self) -> Diagnostic {
         match self {

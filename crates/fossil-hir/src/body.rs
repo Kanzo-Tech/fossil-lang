@@ -141,6 +141,10 @@ pub struct HirBody<'db> {
     /// so the second caret is redundant rather than wrong.
     #[returns(ref)]
     pub ref_spans: Vec<Vec<RefSpan>>,
+    /// What lowering this body found: an expression it could not read, and the
+    /// identity's three obligations. Mapping-relative.
+    #[returns(ref)]
+    pub diagnostics: Vec<fossil_base::Diagnostic>,
 }
 
 /// One reference, and where its NAME is written.
@@ -251,6 +255,7 @@ pub fn body<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> HirB
     // not in the parser: each is a fact about a mapping
     // rather than about a token, and the message wants the mapping's name.
     let mut subjects: Vec<(usize, fossil_graph_schema::Span)> = Vec::new();
+    let mut sink = fossil_base::Diagnostics::new();
     if let Some(node) = mapping_cst.syntax() {
         let name = mapping_name(&node);
         if let Some(body_node) = node
@@ -261,7 +266,7 @@ pub fn body<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> HirB
                 .children()
                 .filter(|c| c.kind() == SyntaxKind::PROPERTY)
             {
-                if let Some(prop) = lower_property_public(db, &prop_node, &type_names) {
+                if let Some(prop) = lower_property_public(db, &mut sink, &prop_node, &type_names) {
                     if matches!(prop.key, crate::lower::PropertyKey::Subject) {
                         let r = prop_node.text_range();
                         subjects.push((
@@ -275,10 +280,17 @@ pub fn body<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> HirB
                     expr_count = expr_count.saturating_add(1);
                 }
             }
-            check_identity(db, &name, &subjects, &body_node);
+            check_identity(&mut sink, &name, &subjects, &body_node);
         }
     }
-    HirBody::new(db, properties, expr_spans, expr_count, ref_spans)
+    HirBody::new(
+        db,
+        properties,
+        expr_spans,
+        expr_count,
+        ref_spans,
+        sink.into_vec(),
+    )
 }
 
 /// Every reference written inside one property's right-hand side, with the
@@ -396,17 +408,17 @@ fn mapping_name(mapping_node: &SyntaxNode) -> String {
 /// caught downstream in `fossil-mir` as an internal error — the compiler's
 /// spelling for something the author wrote and can fix.
 fn check_identity(
-    db: &dyn fossil_base::Db,
+    sink: &mut fossil_base::Diagnostics,
     name: &str,
     subjects: &[(usize, fossil_graph_schema::Span)],
     body_node: &SyntaxNode,
 ) {
     use fossil_graph_schema::Problem;
-    use salsa::Accumulator as _;
-    let emit = |span: fossil_graph_schema::Span, problem: Problem, help: &str| {
-        fossil_base::Diagnostic::new(fossil_graph_schema::Severity::Error, problem, span)
-            .with_help(help)
-            .accumulate(db);
+    let mut emit = |span: fossil_graph_schema::Span, problem: Problem, help: &str| {
+        sink.push(
+            fossil_base::Diagnostic::new(fossil_graph_schema::Severity::Error, problem, span)
+                .with_help(help),
+        );
     };
     let mapping = || name.to_string();
     let Some(&(index, first_span)) = subjects.first() else {

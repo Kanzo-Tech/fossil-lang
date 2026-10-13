@@ -30,10 +30,8 @@ fossil-hir = { path = "../fossil-hir" }
 # `tests/wire.rs` derives the schemas and the TypeScript of the types that cross
 # to a reader or to JS, from the crates that declare them.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
-fossil-sinks = { path = "../fossil-sinks" }
 fossil-wasm = { path = "../fossil-wasm" }
-fossil-lineage = { path = "../fossil-lineage" }
-fossil-descriptors-input = { path = "../fossil-descriptors-input" }
+fossil-base = { path = "../fossil-base" }
 fossil-profile = { path = "../fossil-profile" }
 fossil-ide = { path = "../fossil-ide" }
 fossil-storage = { path = "../fossil-storage" }
@@ -42,9 +40,8 @@ schemars = { workspace = true }
 expect-test = { workspace = true }
 # `tests/engine_reach.rs` reads `deny.toml` — the file that IS the engine-ring
 # policy — rather than a second copy of its list, so it needs a TOML parser.
-# Declared here and not in `[workspace.dependencies]` for the reason
-# `fossil-lsp` declares `criterion` the same way: one crate's test needs it, and
-# a workspace row is for a version several crates must agree on. It adds nothing
+# Declared here and not in `[workspace.dependencies]` because one crate's test
+# needs it, and a workspace row is for a version several crates must agree on. It adds nothing
 # to the graph — `toml 0.9.12` was already resolved in `Cargo.lock` before this
 # line existed, and no shipped artefact links it, since `xtask` is nobody's
 # dependency and this is a dev-dependency of it.

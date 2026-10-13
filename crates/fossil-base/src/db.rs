@@ -1,25 +1,32 @@
 //! Salsa `Db` trait + `FossilDb` implementation.
 //!
-//! The trait is intentionally **thin**: `system()`, `files()` and
-//! `catalogue()`. Descriptors and host capabilities flow through `&dyn System`
-//! rather than as separate composing traits. This is the verified pattern from
-//! `ruff_db` (and `ty_wasm` composes `Workspace { db, system }` over it).
+//! The trait is intentionally **thin**: `system()`, and one handle per input a
+//! host writes — `files()`, `sources()`, `connections()`, `catalogue()`. This is the pattern
+//! from `ruff_db` (and `ty_wasm` composes `Workspace { db, system }` over it):
+//! what changes a compile's answer is an input, never ambient host state.
 //!
 //! The registry does NOT flow through `System`, and used to. `System::providers`
 //! returned `&'static [&'static Provider]`, which is a table nothing can
 //! invalidate and no file can produce; it is a Salsa input now, reached the same
 //! way [`Files`] is.
 
-use std::sync::Arc;
+use std::collections::BTreeMap;
+use std::sync::{Arc, OnceLock};
 
+use crate::connections::Connections;
 use crate::files::Files;
 use crate::providers::Catalogue;
+use crate::sources::Sources;
 use crate::system::System;
 
 #[salsa::db]
 pub trait Db: salsa::Database {
     fn system(&self) -> &dyn System;
     fn files(&self) -> &Files;
+    /// What each source a program reads is — see [`crate::sources::described`].
+    fn sources(&self) -> &Sources;
+    /// The host's connections — see [`crate::connections::connections`].
+    fn connections(&self) -> Connections;
     /// The provider rows installed in this database — see
     /// [`crate::providers::installed`], which is how a query reads them.
     fn catalogue(&self) -> &Catalogue;
@@ -31,6 +38,8 @@ pub struct FossilDb {
     storage: salsa::Storage<Self>,
     system: Arc<dyn System>,
     files: Files,
+    sources: Sources,
+    connections: OnceLock<Connections>,
     catalogue: Catalogue,
 }
 
@@ -67,11 +76,11 @@ impl FossilDb {
         Self::with_storage(salsa::Storage::new(Some(callback)), system)
     }
 
-    /// The one constructor. It exists because the file registry
-    /// ([`crate::files::FileRegistry`]) and the provider catalogue
-    /// ([`crate::providers::Registry`]) are Salsa inputs, and a Salsa input can
-    /// only be created with a database in hand — so the database is built first
-    /// and both forced immediately after, **outside any query**. Salsa does not
+    /// The one constructor. It exists because every handle on [`Db`] is a Salsa
+    /// input — the file registry ([`crate::files::FileRegistry`]), the sources,
+    /// the connections and the provider catalogue ([`crate::providers::Registry`])
+    /// — and a Salsa input can only be created with a database in hand — so the
+    /// database is built first and each forced immediately after, **outside any query**. Salsa does not
     /// stop a query body from creating an input, but an input a query creates is
     /// not in that query's dependency list; allocating here means no query ever
     /// has to.
@@ -80,9 +89,13 @@ impl FossilDb {
             storage,
             system,
             files: Files::default(),
+            sources: Sources::default(),
+            connections: OnceLock::new(),
             catalogue: Catalogue::default(),
         };
         let _ = db.files.registry(&db);
+        let _ = db.sources.registry(&db);
+        let _ = db.connections();
         let _ = db.catalogue.registry(&db);
         db
     }
@@ -99,6 +112,16 @@ impl Db for FossilDb {
 
     fn files(&self) -> &Files {
         &self.files
+    }
+
+    fn sources(&self) -> &Sources {
+        &self.sources
+    }
+
+    fn connections(&self) -> Connections {
+        *self
+            .connections
+            .get_or_init(|| Connections::new(self, BTreeMap::new()))
     }
 
     fn catalogue(&self) -> &Catalogue {

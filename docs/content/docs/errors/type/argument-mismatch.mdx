@@ -8,8 +8,8 @@ parameter declares. Every function is a row in the catalogue with a typed signat
 argument is checked against its parameter:
 
 ```fossil
-    label = str.concat(User.name, User.age)
-    // argument 2 of `str.concat` expects String, and this is Integer
+    label = str.replace(User.name, User.age, "")
+    // argument 2 of `str.replace` expects String, and this is Integer
 ```
 
 When the value is the receiver of a member call — the thing to the left of the dot — there is no
@@ -39,7 +39,7 @@ reported: fossil does not claim a mistake it cannot see.
 
 - **The wrong column was passed.** Pass the one of the type the function takes.
 - **The value is right but held in another type.** Convert it first: `parse.integer`,
-  `parse.float`, `parse.decimal`, `parse.date` and `parse.datetime` turn a string into a typed
+  `parse.float`, `parse.date` and `parse.datetime` turn a string into a typed
   value. See [the standard library](/docs/book/stdlib) for what each function takes.
 - **The wrong function was called.** A member of `str` takes a string; a member of `math` takes a
   number. Pick the one whose signature matches what you have.

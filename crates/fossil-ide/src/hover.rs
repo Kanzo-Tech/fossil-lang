@@ -50,7 +50,7 @@ pub struct HoverInfo {
     /// fence + the rendered type kind + an italic provenance line.
     pub markdown: String,
     /// Byte-offset range the hover applies to. Translated to
-    /// `lsp_types::Range` by the LSP handler in `fossil-lsp/src/lib.rs`.
+    /// `lsp_types::Range` by the host.
     pub range: Range<u32>,
 }
 
@@ -197,7 +197,7 @@ fn resolve_hover_target<'db>(
             PropertyKey::Subject => None,
         });
     let predicate_iri = short_name.and_then(|name| {
-        let output = typecheck_mapping(db, mapping).ok()?;
+        let output = typecheck_mapping(db, mapping).checked(db).ok()?;
         output
             .predicates(db)
             .iter()

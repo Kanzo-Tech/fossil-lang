@@ -27,7 +27,7 @@ value and one on the line of the shape that declares the property.
 - **The wrong column was named.** When the row has a field of the expected type, the `help` names it (two at most, and a count for the rest):
   here `Purchase.amount` is a `Float`, and `total = Purchase.amount` is probably what was meant.
 - **The right column holds the value as text.** Convert it explicitly — `parse.float`,
-  `parse.integer`, `parse.decimal`, `parse.date` and `parse.datetime` turn a string into the declared
+  `parse.integer`, `parse.date` and `parse.datetime` turn a string into the declared
   type. The `help` names the one that fits, found by searching the standard library for a function
   from the actual type to the expected one.
 - **The shape is wrong.** If the property really is text, change the shape's datatype instead; the

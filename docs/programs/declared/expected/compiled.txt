@@ -1,0 +1,31 @@
+── type bindings ──
+City ← declared.shex = https://geo.example/Place
+Person ← declared = https://schema.org/Person
+
+── source bindings ──
+CityRow := io.csv(data/city.csv)
+PersonRow := io.csv(data/person.csv)
+KnowsRow := io.csv(data/knows.csv)
+Friends from PersonRow.join(KnowsRow, on = PersonRow.id == KnowsRow.person)
+
+── mappings ──
+Cities: 2 written, 2 lowered
+    @subject
+    name
+People: 4 written, 4 lowered
+    @subject
+    name
+    handle
+    livesIn
+Friends: 5 written, 5 lowered
+    @subject
+    name
+    handle
+    livesIn
+    knows
+
+── run ──
+vertex Place (https://geo.example/Place) × 2 — dense_id, subject, name
+vertex Person (https://schema.org/Person) × 3 — dense_id, subject, name, handle
+edge Person_livesIn_Place × 3
+edge Person_knows_Person × 3

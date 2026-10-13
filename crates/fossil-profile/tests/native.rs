@@ -8,7 +8,7 @@ use std::fmt::Write as _;
 use fossil_graph_schema::Primitive;
 use fossil_profile::{ColumnRef, Inclusion, Options, Profile, Rows, Source};
 
-/// The language server's half: a query on a `duckdb::Connection`, its rows as text.
+/// The host's half: a query on a `duckdb::Connection`, its rows as text.
 fn rows(conn: &duckdb::Connection, sql: &str) -> duckdb::Result<Rows> {
     let mut stmt = conn.prepare(sql)?;
     let mut rows = stmt.query([])?;

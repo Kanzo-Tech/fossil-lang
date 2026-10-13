@@ -36,11 +36,8 @@
 //!
 //! ## Architecture
 //!
-//! `fossil-wasm` is the language service IN THE BROWSER — NOT a recompiled
-//! `fossil-lsp` (which has a `compile_error!` cfg-tripwire because
-//! `lsp-server` uses crossbeam + stdio). Both `fossil-lsp` (native, JSON-RPC
-//! over stdio) and `fossil-wasm` (WASM, plain method calls) are thin transport
-//! adapters over the same `fossil-ide` free functions — "one crate, two hosts".
+//! `fossil-wasm` is the language service in the browser: a thin transport
+//! adapter, plain method calls, over the `fossil-ide` free functions.
 //!
 //! ## Why the Workspace lifecycle is fan-out-safe
 //!
@@ -52,8 +49,7 @@
 //! `fossil-hir`'s `invalidation_regression` test is what proves.
 //!
 //! WASM-first is load-bearing, not a port: everything above `fossil-ide` had to
-//! build for `wasm32` before this shim could exist at all, which is why the
-//! `compile_error!` tripwires live on the native-only crates rather than here.
+//! build for `wasm32` before this shim could exist at all.
 
 // `result_large_err`: the pure-Rust half refuses with
 // `fossil_graph_schema::Failure` (144 bytes, over clippy's 128) on the path that
@@ -71,10 +67,10 @@ pub use crate::ide::{CompletionItem, CompletionKind, Hover, Location, SemanticTo
 pub use crate::tokenize::{Token, tokenize_native};
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use fossil_base::{Catalogue, Files, SourceFile, System};
+use fossil_base::{FossilDb, SourceFile, System};
 use fossil_graph_schema::js::{bug, invalid_argument};
 use fossil_graph_schema::{Failure, Problem};
 use fossil_hir::documents::MissingDocument;
@@ -86,60 +82,9 @@ use crate::wasm_system::WasmSystem;
 pub use crate::workspace::FileHandle;
 use crate::workspace::OpenFiles;
 
-/// The Salsa database the WASM host owns.
-///
-/// Mirrors `fossil-lsp::LspDb`: the Salsa runtime + the host
-/// [`System`] (here [`WasmSystem`]) + the file registry. The target-side `ShEx`
-/// type/properties `fossil-ide` surfaces are reachable because the PROGRAM
-/// names its output document and the host REGISTERS it (see
-/// [`FossilWorkspace::register_document_native`]) — the host supplies
-/// documents, not a contract.
-#[salsa::db]
-#[derive(Clone)]
-struct WasmDb {
-    storage: salsa::Storage<Self>,
-    system: Arc<dyn System>,
-    files: Files,
-    catalogue: Catalogue,
-}
-
-impl std::fmt::Debug for WasmDb {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WasmDb").finish_non_exhaustive()
-    }
-}
-
-#[salsa::db]
-impl salsa::Database for WasmDb {}
-
-#[salsa::db]
-impl fossil_base::Db for WasmDb {
-    fn system(&self) -> &dyn System {
-        &*self.system
-    }
-    fn files(&self) -> &Files {
-        &self.files
-    }
-
-    fn catalogue(&self) -> &Catalogue {
-        &self.catalogue
-    }
-}
-
-impl WasmDb {
-    fn new(system: Arc<dyn System>) -> Self {
-        Self {
-            storage: salsa::Storage::default(),
-            system,
-            files: Files::default(),
-            catalogue: Catalogue::default(),
-        }
-    }
-}
-
 /// JS-facing handle for the Fossil compiler running inside a WASM module.
 ///
-/// One instance owns one [`WasmDb`] (Salsa store + injected [`WasmSystem`]).
+/// One instance owns one [`FossilDb`] (Salsa store + injected [`WasmSystem`]).
 /// Hosts construct a single workspace per browser tab / Node process and
 /// reuse it across all method calls to amortise the Salsa interning +
 /// memoisation overhead.
@@ -149,19 +94,7 @@ impl WasmDb {
 /// exports it under the name `FossilWorkspace`. That indirection is the fix
 /// for a real defect — the type-level note on [`WasmWorkspace`] says which.
 pub struct FossilWorkspace {
-    db: WasmDb,
-    /// The system handle is owned by `db` via `Arc<dyn System>`; we retain a
-    /// typed `Arc<WasmSystem>` here so descriptor registration reaches its
-    /// cache without round-tripping through the trait object.
-    system: Arc<WasmSystem>,
-    /// Connection name → base, as `@name/…` expands against it. Outside Salsa:
-    /// it reaches locations only, never a registry key, so setting it
-    /// invalidates nothing.
-    connections: HashMap<String, String>,
-    /// Source key → why the host could not describe it. Outside Salsa, like
-    /// the descriptor table beside it, and read by `diagnostics` only: a row per key
-    /// at the binding that reads it — see [`FossilWorkspace::undescribed_diagnostics`].
-    undescribed: HashMap<String, Undescribed>,
+    db: FossilDb,
     /// The open-file lifecycle map (handle → `SourceFile` + URI index).
     /// Mutated by `open_file` / `update_file` / `close_file`; iterated by
     /// `diagnostics` / `diagnostics_for`.
@@ -185,13 +118,9 @@ impl FossilWorkspace {
     #[must_use]
     pub fn new() -> Self {
         console_error_panic_hook::set_once();
-        let system = Arc::new(WasmSystem::default());
-        let db = WasmDb::new(system.clone() as Arc<dyn System>);
+        let db = FossilDb::new(Arc::new(WasmSystem) as Arc<dyn System>);
         Self {
             db,
-            system,
-            connections: HashMap::new(),
-            undescribed: HashMap::new(),
             files: OpenFiles::default(),
         }
     }
@@ -402,8 +331,9 @@ impl WasmWorkspace {
 
     // ----- Documents and sources: fossil resolves, the host reads -----
 
-    /// Replace the connection map `@name/…` expands against, as
-    /// `Host.connections()` answers it.
+    /// Replace the connections `@name/…` expands against, as
+    /// `Host.connections()` answers them — an input, so what expanded one
+    /// re-runs ([`fossil_base::set_connections`]).
     ///
     /// # Errors
     ///
@@ -414,7 +344,7 @@ impl WasmWorkspace {
         &self,
         #[wasm_bindgen(unchecked_param_type = "Record<string, string>")] connections: JsValue,
     ) -> Result<(), JsValue> {
-        let connections: HashMap<String, String> = serde_wasm_bindgen::from_value(connections)
+        let connections: BTreeMap<String, String> = serde_wasm_bindgen::from_value(connections)
             .map_err(|e| {
                 invalid_argument(
                     "connections",
@@ -430,7 +360,7 @@ impl WasmWorkspace {
     }
 
     /// The documents the file at `handle` names that nothing has registered:
-    /// `{ key, location }` rows, the location expanded through the connection map.
+    /// `{ key, location }` rows, the location expanded through the connections.
     ///
     /// # Errors
     ///
@@ -463,7 +393,7 @@ impl WasmWorkspace {
         Ok(())
     }
 
-    /// What the file at `handle` reads — see [`fossil_lineage::inputs`].
+    /// What the file at `handle` reads — see [`fossil_hir::lineage::inputs`].
     ///
     /// # Errors
     ///
@@ -584,7 +514,7 @@ impl WasmWorkspace {
 
     // ----- Register a host-introspected descriptor -----
 
-    /// Register an [`fossil_descriptors_input::InferredDescriptor`] for a
+    /// Register an [`fossil_base::sources::InferredDescriptor`] for a
     /// source binding name BEFORE invoking `diagnostics`. The Rust compiler reads
     /// from this registration during forward type propagation — the browser has
     /// no filesystem to introspect a CSV from, so the column types must arrive
@@ -668,54 +598,8 @@ impl FossilWorkspace {
     /// host could not describe.
     fn file_diagnostics(&self, file: SourceFile) -> Vec<fossil_base::Diagnostic> {
         let mut all = fossil_ide::diagnostics(&self.db, file);
-        all.extend(self.undescribed_diagnostics(file));
+        all.extend(fossil_hir::infer::refused_sources(&self.db, file));
         all
-    }
-
-    /// One warning per source key `file` reads that the host registered as
-    /// undescribed, at the call of the first binding that reads it — the
-    /// `io.csv("users.csv")` right of `:=` — under the problem's own code.
-    ///
-    /// A warning and not an error: what is lost is the source's columns, so
-    /// field completion and forward typing, and the program still compiles
-    /// against an open row. Whether the source is readable at all is the run's
-    /// to say, under the same code. `/docs/design/tooling-for-humans` has the
-    /// argument and what would reverse it.
-    ///
-    /// Outside Salsa and recomputed per call: it is a table lookup per source
-    /// binding over the memoised def map, and a registration then needs no
-    /// revision bump to be seen.
-    fn undescribed_diagnostics(&self, file: SourceFile) -> Vec<fossil_base::Diagnostic> {
-        if self.undescribed.is_empty()
-            || fossil_base::claimed(fossil_base::installed(&self.db), file.path(&self.db))
-        {
-            return Vec::new();
-        }
-        let mut seen: Vec<&str> = Vec::new();
-        let mut out = Vec::new();
-        for entry in fossil_hir::def_map::def_map(&self.db, file).sources(&self.db) {
-            let Some(key) = entry.uri.as_deref() else {
-                continue;
-            };
-            let Some(why) = self.undescribed.get(key) else {
-                continue;
-            };
-            if seen.contains(&key) {
-                continue;
-            }
-            seen.push(key);
-            let mut d = fossil_base::Diagnostic::new(
-                fossil_graph_schema::Severity::Warning,
-                why.problem.clone(),
-                entry.call_span,
-            )
-            .file_absolute();
-            if let Some(help) = &why.help {
-                d = d.with_help(help.clone());
-            }
-            out.push(d);
-        }
-        out
     }
 
     /// Native-reachable per-file diagnostic drain. Returns `None` when
@@ -782,8 +666,8 @@ impl FossilWorkspace {
     }
 
     /// Pure-Rust mirror of [`WasmWorkspace::set_connections`].
-    pub fn set_connections_native(&mut self, connections: HashMap<String, String>) {
-        self.connections = connections;
+    pub fn set_connections_native(&mut self, connections: BTreeMap<String, String>) {
+        fossil_base::set_connections(&mut self.db, connections);
     }
 
     /// Pure-Rust mirror of [`WasmWorkspace::missing_documents`]; `None` for an
@@ -791,11 +675,7 @@ impl FossilWorkspace {
     #[must_use]
     pub fn missing_documents_native(&self, handle: FileHandle) -> Option<Vec<MissingDocument>> {
         let file = self.files.get(handle)?;
-        Some(fossil_hir::documents::missing_documents(
-            &self.db,
-            file,
-            &self.connections,
-        ))
+        Some(fossil_hir::documents::missing_documents(&self.db, file))
     }
 
     /// Pure-Rust mirror of [`WasmWorkspace::register_document`].
@@ -806,9 +686,9 @@ impl FossilWorkspace {
     /// Pure-Rust mirror of [`WasmWorkspace::inputs`]; `None` for an unknown
     /// handle.
     #[must_use]
-    pub fn inputs_native(&self, handle: FileHandle) -> Option<Vec<fossil_lineage::Input>> {
+    pub fn inputs_native(&self, handle: FileHandle) -> Option<Vec<fossil_hir::lineage::Input>> {
         let file = self.files.get(handle)?;
-        Some(fossil_lineage::inputs(&self.db, file, &self.connections))
+        Some(fossil_hir::lineage::inputs(&self.db, file))
     }
 
     // ----- Accessors for the editor surface in [`ide`] (pub(crate)) -----
@@ -846,28 +726,18 @@ impl FossilWorkspace {
     /// `tests/workspace.rs`.
     ///
     /// `descriptor_json` is the JSON serialisation of
-    /// [`fossil_descriptors_input::InferredDescriptor`].
+    /// [`fossil_base::sources::InferredDescriptor`].
     ///
     /// # Errors
     ///
-    /// Returns `api/invalid-argument`, the `serde_json` error as its cause, if
-    /// the JSON fails to deserialise. The descriptor table is not modified on error.
+    /// What [`fossil_base::columns_from_json`] refuses. Nothing is recorded on
+    /// error.
     pub fn register_inferred_descriptor_native(
         &mut self,
         descriptor_json: &str,
     ) -> Result<(), Failure> {
-        let descriptor: fossil_descriptors_input::InferredDescriptor =
-            serde_json::from_str(descriptor_json).map_err(|e| {
-                Failure::new(Problem::InvalidArgument {
-                    argument: "descriptorJson".to_string(),
-                    expected: "an InferredDescriptor as JSON".to_string(),
-                })
-                .caused_by(e)
-            })?;
-        self.undescribed.remove(descriptor.key.as_str());
-        if let Some(cache) = self.system.descriptors() {
-            cache.insert(descriptor);
-        }
+        let descriptor = fossil_base::columns_from_json(descriptor_json)?;
+        fossil_base::describe_columns(&mut self.db, descriptor);
         Ok(())
     }
 
@@ -875,35 +745,27 @@ impl FossilWorkspace {
     ///
     /// # Errors
     ///
-    /// Returns `api/invalid-argument`, the `serde_json` error as its cause, if
-    /// `problem_json` is not a `Problem` this build of fossil knows. Nothing is
-    /// recorded on error.
+    /// What [`fossil_base::refusal_from_json`] refuses. Nothing is recorded on
+    /// error.
     pub fn register_undescribed_native(
         &mut self,
         key: &str,
         problem_json: &str,
     ) -> Result<(), Failure> {
-        let Undescribed { problem, help } = serde_json::from_str(problem_json).map_err(|e| {
-            Failure::new(Problem::InvalidArgument {
-                argument: "problemJson".to_string(),
-                expected: "a Problem as JSON".to_string(),
-            })
-            .caused_by(e)
-        })?;
-        self.undescribed
-            .insert(key.to_string(), Undescribed { problem, help });
+        let refused = fossil_base::refusal_from_json(problem_json)?;
+        fossil_base::describe(&mut self.db, key, refused);
         Ok(())
     }
 
-    /// Native-reachable lookup into the descriptor cache, by source URI.
+    /// The columns registered for a source, by the location the program writes.
     /// Lets cargo-tests verify the registration round-trips without going
     /// through the wasm-bindgen wrapper.
     #[must_use]
     pub fn inferred_descriptor_native(
         &self,
         uri: &str,
-    ) -> Option<fossil_descriptors_input::InferredDescriptor> {
-        self.system.descriptors()?.get(uri)
+    ) -> Option<fossil_base::sources::InferredDescriptor> {
+        fossil_base::columns(&self.db, uri)
     }
 }
 
@@ -924,20 +786,8 @@ impl Default for FossilWorkspace {
 pub fn formats() -> Result<JsValue, JsValue> {
     to_value(
         "the formats",
-        &fossil_lineage::formats(fossil_descriptors_output::PROVIDERS),
+        &fossil_hir::lineage::formats(fossil_hir::providers::PROVIDERS),
     )
-}
-
-/// Why a source could not be described: the problem a host's introspection
-/// answered, as `@fossil-lang/types`' `Problem` carries it. `title`, `detail`
-/// and `cause` are not read — the first two are rendered again from the code
-/// and its data, and a diagnostic has no place for the third.
-#[derive(Debug, Clone, serde::Deserialize)]
-struct Undescribed {
-    #[serde(flatten)]
-    problem: Problem,
-    #[serde(default)]
-    help: Option<String>,
 }
 
 /// One diagnostic row in the [`WasmWorkspace::diagnostics`] return array: the
@@ -998,7 +848,7 @@ pub struct DiagnosticRelatedInformation {
 /// an editor shows.
 /// Only the two keys are this array's own; [`Diagnostic::related`] says why.
 fn to_diagnostic(
-    db: &WasmDb,
+    db: &FossilDb,
     file: SourceFile,
     uri: &str,
     index: &LineIndex,

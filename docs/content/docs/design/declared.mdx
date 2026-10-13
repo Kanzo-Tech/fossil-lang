@@ -1,0 +1,182 @@
+---
+title: Types declared in the program
+description: "An output type is written in the program — a name, its fields, their types and every IRI — or imported from a shape document by name. One rule for names, no @rename, no positional binding, and the catalogue's names that run nothing go."
+direction:
+  summary: "Where Fossil meets RDF — a primitive and its datatype, a reference and its IRI, a shape document and the types it declares — the conversion is a From onto rudof's types, ShEx's over shex_ast's SchemaIR, and the page listing what Fossil supports of RDF is generated from those conversions."
+---
+
+A program's output type was always read out of a shape document: a `.shex` or a SHACL file beside the
+program, bound by position, with `@rename` to repair two predicates whose names collide. That is the
+right contract when the vocabulary is somebody else's, and a detour when it is yours. A program that
+maps three CSV files into a graph of its own had to ship a second file in a second language, upload it
+somewhere its host could read, and keep the two in step by hand. The assistant that proposes a graph
+from a profile ([Profile](/docs/design/profile)) had nowhere to put the types it proposes except that
+second file.
+
+So a type can be declared in the program, and an imported one is named by its name. The grammar is
+[`grammar.bnf`](/docs/book/grammar), `TypeDecl`; this page is why it is shaped as it is. All of it is
+built except the last section's conversions, which is what the `direction` above declares.
+
+```
+@iri("https://schema.org/Person")
+type Person
+    @iri("https://schema.org/name")          name: String
+    @iri("https://shop.example/vocab/name")  handle: String
+    @iri("https://schema.org/birthDate")     born: Option<Date>
+    @iri("https://schema.org/homeLocation")  livesIn: Ref<City>
+```
+
+## Below the parser, nothing changes
+
+A declaration lowers to the same neutral shape vocabulary a ShEx or SHACL decoder produces
+(`crates/fossil-graph-schema/src/shapes.rs, OutputShapes`), in
+`crates/fossil-hir/src/declared.rs, lower_declarations`. The checker, the MIR and the corpus writer
+read that vocabulary and never learn whether it came from a declaration or a document — the cut
+[Inference from shapes](/docs/design/shapes) already made between ShEx and SHACL, made once more.
+A declaration is a third decoder whose input is the program. A declared type is a row of the same
+table an import's name is (`crates/fossil-hir/src/def_map.rs, TypeEntry`), so a mapping header, an
+edge and a `Ref<…>` resolve both by one lookup, and the run classifies edges with every type the
+program has, declared and imported (`crates/fossil-hir/src/shapes.rs, program_shapes`).
+
+The vocabulary grew by one field for it, and it is the field the next section is about: a property
+carries its `name` (`crates/fossil-graph-schema/src/shapes.rs, PropertyConstraint`). A decoder writes
+the predicate's last segment, which is all a document says; a declaration writes the field's own.
+Without it the field's name would have had to be derived from its IRI after all, and two fields whose
+IRIs end alike would have collided in the vocabulary that was meant to keep them apart.
+
+**What would reverse it:** a property of a declared type the vocabulary cannot carry — then the
+vocabulary grows, as it did for `name`, and the declaration does not get a path of its own around
+it.
+
+## Indented, as the rest of Fossil
+
+A type is a header and a body with one field per line, indented as a mapping's body is. There is no
+`=` and no braces: `=` assigns a value, and a declaration assigns nothing — the rule the grammar
+already states for `:=`. From F#, which this language takes its type providers and its naming rule
+from, come the type names and the attribute on the field's own line (`[<Attr>] Name: string`), not
+the record's punctuation.
+
+**What would reverse it:** a declaration that needs to nest — a field whose type is written inline —
+which indentation alone would make ambiguous.
+
+## The types are the ones the checker already has
+
+A field's type is a primitive of the lattice (`crates/fossil-graph-schema/src/lib.rs, Primitive`) or
+one of three constructors, written as the checker already prints them: `Option<T>` zero or one,
+`Seq<T>` zero or more, `Ref<T>` a reference to a node of the declared or imported type `T`, which is
+an edge. A bare `T` is exactly one. Cardinality is the type, not a marker beside it: ShEx's `?`, `*`
+and `+` do not appear.
+
+`Option` and `Seq` hold a primitive or a `Ref<T>`, and the count is said once, outermost: the
+vocabulary carries one `(min, max)` per property, so `Option<Seq<T>>` would be a second spelling of
+`Seq<T>`, `Seq<Option<T>>` a list with holes no corpus can write, and `Option<Option<T>>` nothing. Each
+is refused as [`type/invalid-field-type`](/docs/errors/type/invalid-field-type), as are `Ref<String>`
+(a reference is to a node) and a type of the program written bare (`livesIn: City` is
+`Ref<City>`). A name that is neither a primitive nor a constructor is
+[`name/unknown-type`](/docs/errors/name/unknown-type), and a `Ref<T>` whose `T` the program does not
+have is [`name/unknown-shape`](/docs/errors/name/unknown-shape), the code a mapping header naming
+one gets.
+
+ShEx's `+`, one or more, has no type of its own. **What would reverse it:** a program that needs the
+checker to refuse an empty list — then `NonEmpty<T>`, as a fourth constructor.
+
+There is no `&` or other sugar for `Ref<T>`. `&` was a token once, the intersection of two shapes, and
+went; a second spelling of a reference would be the second way to say one thing that this page
+removes elsewhere. **What would reverse it:** nothing short of a measurement that `Ref<…>` is the bulk
+of a real program's text.
+
+## Every IRI is written
+
+The type's IRI goes above it, each field's on the field's line, whole and in a string. A missing one
+is an error. There is no base the compiler falls back to and no prefix it expands through — the
+grammar has no `PrefixDecl` — so a name nobody wrote never becomes an IRI. A host that proposes types,
+as keasy's assistant does, computes the IRIs from what it knows (the workspace, the type's name) and
+writes them; the model never chooses one.
+
+**What would reverse it:** programs where the `@iri` lines are most of the text. Then an explicit
+`@base` on the type, never an implicit one from the host.
+
+## One rule for names: by name
+
+A field's name is what the program writes, and the IRI is beside it, so two predicates whose last
+segments coincide — `schema:name`, `shop:name` — are two fields with two names and collide nowhere.
+That is what `@rename` existed to repair, and it goes: a vocabulary with collisions is used by
+declaring the type with the IRIs it needs.
+
+The import binds by name too. In `type { Place as City } := io.shex("places.shex")`, `Place` is the
+local name of a shape the document declares — the last segment of its IRI, the rule a property's name
+already follows — and `as` names it in the program. It was positional: the Nth name took the Nth
+shape, and reordering a document rebound every program that read it (the cost
+[Inference from shapes](/docs/design/shapes) recorded). A name the document does not declare is an
+error listing the ones it does ([`shape/not-in-document`](/docs/errors/shape/not-in-document)); two
+shapes whose local names coincide are an error naming both IRIs when one of them is imported, and
+nothing when neither is ([`shape/ambiguous-import`](/docs/errors/shape/ambiguous-import)). A name
+introduced twice — declared twice, imported twice, or one of each — is
+[`name/duplicate-type`](/docs/errors/name/duplicate-type), and a field written twice in one type
+[`name/duplicate-field`](/docs/errors/name/duplicate-field). The destructuring source,
+`{ A, B } := io.rdf(…, schema = …)`, binds its members by the same rule, because it is the same member
+list.
+
+What the corpus calls a type is still its IRI's last segment, as it always was: `type { Place as City }`
+writes a `Place` table, because the vertex table is named for the node's `rdf:type` and not for a word
+of the program.
+
+**What would reverse it:** a document that must be imported as it is and whose shapes' local names
+collide, often enough that declaring the type each time is the larger cost.
+
+## RDF is rudof's, through `From` and `Into`
+
+This is the part not built, and it is what the page's `direction` declares. The language does not
+change for it; the implementation does. Where Fossil meets RDF — a primitive and its XSD datatype, a
+reference and its IRI, a declared type and its shape — the conversion is to be a Rust `From`/`Into`
+onto the types of [rudof](https://rudof-project.github.io/), which is already where `shex_ast` comes
+from, instead of tables and `match`es of our own (`crates/fossil-graph-schema/src/lib.rs, Primitive`
+holds them: the XSD table both ways, and the names a declared field's type is read in). A ShEx
+document then becomes declared types by a `TryFrom` over `shex_ast`'s compiled schema, `SchemaIR`
+([One database, end to end](/docs/design/incremental) says where it lives), where
+`fossil_hir::shex` resolves references and labels by hand today. What Fossil supports of RDF is then the
+set of those conversions, and the page that lists it is generated from what has a `From`.
+
+**What would reverse it:** an RDF concept Fossil needs that rudof does not model, or a rudof release
+whose types move under us faster than our own table would.
+
+## The catalogue keeps only what runs
+
+The same review removes names that exist and run nothing, or say what another name already says.
+[What Fossil supports of RDF](/docs/book/rdf) is the page that says, for the rest, how far Fossil lines
+up with RDF today.
+
+| Name | Why it goes | What brings it back |
+| --- | --- | --- |
+| `seq.map`, `seq.flatten`, `seq.take`, `seq.drop`, `seq.sort`, `seq.count` | No operator in `crates/fossil-mir/src/op.rs, Op` and no engine that runs them; six catalogue rows against six verbs that execute | An operator and a test that executes it, verb by verb |
+| `str.concat` | String interpolation says the same and lowers to the same `Concat` | A concatenation interpolation cannot write |
+| `parse.decimal` | Returns `Float`, as `parse.float` does | A `Decimal` type that keeps precision, as `xsd:decimal` |
+| `core.lang` | Lowers to its first argument: the tag type-checks and is dropped, because a corpus has no place for a language tag ([What Fossil supports of RDF](/docs/book/rdf)) | A corpus column for a literal's language, and a writer that fills it |
+
+## Held by
+
+A conformance program, `declared`, uses all of it at once — a declared type with an `Option`, a `Seq`
+and a `Ref`, two fields whose IRIs end alike, an import by local name with `as` from a document that
+declares another shape first — and is run by the conformance harness, which keeps what it compiled
+and the tables the run wrote as artefacts beside it (`docs/programs/declared/expected/compiled.txt`).
+The book shows it as it is on disk:
+
+<Program src="declared/declared.fossil" region="declaration" title="declared.fossil" />
+
+Each claim the checker owes is a titled test in `crates/fossil-hir/tests/declared_types.rs`. That a
+declaration lowers to the vocabulary, field names and all, is
+`crates/fossil-hir/tests/declared_types.rs, a_declared_type_lowers_to_the_shape_vocabulary`; that a
+mapping targeting one is checked as against an imported shape, clean and not, is
+`crates/fossil-hir/tests/declared_types.rs, a_mapping_targeting_a_declared_type_is_checked_like_an_imported_one`
+and `crates/fossil-hir/tests/declared_types.rs, a_declared_type_refuses_what_an_imported_shape_refuses`.
+One per refusal:
+
+- a missing `@iri`: `crates/fossil-hir/tests/declared_types.rs, a_declaration_without_its_iri_is_refused`
+- an unknown field type: `crates/fossil-hir/tests/declared_types.rs, an_unknown_field_type_is_refused_listing_the_ones_there_are`
+- a field type the vocabulary cannot carry: `crates/fossil-hir/tests/declared_types.rs, a_field_type_the_vocabulary_cannot_carry_is_refused`
+- a field written twice: `crates/fossil-hir/tests/declared_types.rs, a_field_written_twice_is_refused`
+- a type declared twice: `crates/fossil-hir/tests/declared_types.rs, a_type_declared_twice_is_refused`
+- a type declared and imported under one name: `crates/fossil-hir/tests/declared_types.rs, a_type_declared_and_imported_under_one_name_is_refused`
+- a `Ref<T>` whose `T` the program does not have: `crates/fossil-hir/tests/declared_types.rs, a_ref_to_a_type_the_program_does_not_have_is_refused`
+- an import the document does not declare: `crates/fossil-hir/tests/declared_types.rs, an_import_the_document_does_not_declare_is_refused_listing_the_ones_it_does`
+- two shapes sharing an imported local name: `crates/fossil-hir/tests/declared_types.rs, two_shapes_sharing_an_imported_local_name_are_refused_naming_both`

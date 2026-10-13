@@ -4,7 +4,7 @@
 #![allow(clippy::redundant_pub_crate)]
 
 //! The host half these integration tests owe the checker: a filesystem, every
-//! provider row `fossil-descriptors-output` publishes, and the shape documents a
+//! provider row `fossil_hir::providers` publishes, and the shape documents a
 //! program names, put into the database before any query goes looking for them.
 
 // The module is shared by eight test binaries and no binary uses all of it.
@@ -33,7 +33,7 @@ pub(crate) fn db_with_shapes(
     documents: &[(&str, &str)],
 ) -> (FossilDb, SourceFile) {
     let system: Arc<dyn System> = Arc::new(NativeSystem::with_providers(
-        fossil_descriptors_output::PROVIDERS,
+        fossil_hir::providers::PROVIDERS,
     ));
     let mut db = FossilDb::new(system);
     let file = SourceFile::new(&db, program.to_string(), program_path.to_string());
@@ -44,23 +44,16 @@ pub(crate) fn db_with_shapes(
     (db, file)
 }
 
-/// Every diagnostic the file's mappings accumulate, in mapping order.
+/// Every diagnostic the file produces, as every host reads them.
 ///
 /// A mapping that does not compile makes `execute_*` return
 /// `Plan("the mapping did not compile; see the reported diagnostics")` — a
 /// message that names no diagnostic. This is how a test says which.
 pub(crate) fn diagnostics(db: &FossilDb, file: SourceFile) -> Vec<String> {
-    let def_map = fossil_hir::def_map::def_map(db, file);
-    let mut out = Vec::new();
-    for mapping in def_map.mappings(db) {
-        let _ = fossil_mir::lower_to_mir_pg(db, *mapping);
-        out.extend(
-            fossil_mir::lower_to_mir_pg::accumulated::<fossil_base::Diagnostic>(db, *mapping)
-                .into_iter()
-                .map(fossil_base::Diagnostic::message),
-        );
-    }
-    out
+    fossil_mir::program_diagnostics(db, file)
+        .iter()
+        .map(fossil_base::Diagnostic::message)
+        .collect()
 }
 
 /// A [`fossil_storage::Host`] that vends nothing: every store a test needs is
@@ -140,10 +133,9 @@ pub(crate) fn register_provider_sources(
     ctx: &datafusion::prelude::SessionContext,
     db: &FossilDb,
     file: SourceFile,
-    descriptor: &fossil_df::OutputDescriptorKind,
+    descriptor: &fossil_graph_schema::GraphSchema,
 ) {
-    let none = std::collections::HashMap::new();
-    for binding in fossil_df::provider_bindings(db, file, descriptor, &none) {
+    for binding in fossil_df::provider_bindings(db, file, descriptor) {
         let turtle = std::fs::read_to_string(&binding.uri)
             .unwrap_or_else(|e| panic!("read RDF source `{}`: {e}", binding.uri));
         fossil_df::register_rdf(ctx, &binding, &turtle).expect("register the RDF source");

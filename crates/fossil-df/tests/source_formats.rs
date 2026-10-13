@@ -57,8 +57,7 @@ async fn three_users_from(program: &str, name: &str) -> Vec<String> {
         &ctx,
         &db,
         mapping,
-        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-        &std::collections::HashMap::new(),
+        &fossil_graph_schema::GraphSchema::default(),
     )
     .await
     .unwrap_or_else(|e| panic!("{name}: {e}; {:#?}", support::diagnostics(&db, file)));
@@ -100,8 +99,7 @@ async fn reads_an_ndjson_source() {
         &ctx,
         &db,
         mapping,
-        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-        &std::collections::HashMap::new(),
+        &fossil_graph_schema::GraphSchema::default(),
     )
     .await
     .unwrap_or_else(|e| {
@@ -166,8 +164,7 @@ async fn reads_a_pipe_delimited_csv_source() {
         &ctx,
         &db,
         mapping,
-        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-        &std::collections::HashMap::new(),
+        &fossil_graph_schema::GraphSchema::default(),
     )
     .await
     .unwrap_or_else(|e| {

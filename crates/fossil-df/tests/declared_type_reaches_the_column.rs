@@ -7,7 +7,7 @@
 //! (`tests/aggregate_result_types.rs` is that table); and the executor
 //! introspects nothing, so an untyped column was declared `string` over a
 //! `BIGINT`. `properties` describes the file a reader opens, so the writer
-//! spells the written column's Arrow type (`fossil_sinks::manifest::data_type_name`)
+//! spells the written column's Arrow type (`fossil_df::corpus::manifest::data_type_name`)
 //! and both disagreements stop reaching the artefact.
 //!
 //! The checker's disagreement with the engine is still real, and still in

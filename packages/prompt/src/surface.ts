@@ -19,7 +19,7 @@
  */
 
 /** SHA-256 of the `grammar.bnf` {@link SURFACE} and {@link FORBIDDEN} were last reviewed against. */
-export const GRAMMAR_DIGEST = '15bbab2c305d2efc147d2ee27a22e5c391fa0fc9f1e5e90fae7a7e61804f8138';
+export const GRAMMAR_DIGEST = '52c93563f4326f9e359b767c8b69bbf660b9c54f677b5a81a06a87b1bba678e9';
 
 /** A complete program: `docs/programs/shop/shop.fossil`, region markers removed. */
 export const EXAMPLE = `type { Person, Order } := io.shex("shop.shex")
@@ -75,7 +75,8 @@ export const FORBIDDEN: readonly ForbiddenForm[] = [
   },
   {
     form: '`#[rdf(…)]` attributes and `type T(…) do … end`',
-    instead: 'shapes are declared in the ShEx or SHACL document, never in the program',
+    instead:
+      'a type is imported from a ShEx or SHACL document with `type { … } := io.shex("…")`, or declared as `@iri("…")` above `type Name` with one `@iri("…") field: Type` line per field',
     refused: '#[rdf(type = "http://example.org/Person")]\ntype Person(name) do end\n',
   },
   {

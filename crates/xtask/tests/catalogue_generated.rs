@@ -74,7 +74,7 @@ fn every_row_lands_in_exactly_one_generated_file() {
         assert_eq!(
             in_descriptors,
             row.decodes.is_some(),
-            "row `{}`: a row that decodes belongs in fossil-descriptors-output, \
+            "row `{}`: a row that decodes belongs in fossil_hir::providers, \
              and only such a row does",
             row.name
         );

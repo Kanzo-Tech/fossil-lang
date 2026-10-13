@@ -81,14 +81,14 @@ failure.
 
 ```
                      ┌─▶ crates/fossil-base/src/providers/generated.rs
-                     ├─▶ crates/fossil-descriptors-output/src/generated.rs
+                     ├─▶ crates/fossil-hir/src/providers/generated.rs
                      ├─▶ crates/fossil-profile/src/generated.rs
 catalogue.bnf ──cargo├─▶ crates/fossil-hir/src/stdlib/generated.rs
               xtask  ├─▶ packages/profile/src/catalogue.generated.ts
             catalogue├─▶ docs/content/generated/stdlib.mdx
                      └─▶ packages/prompt/src/catalogue.generated.ts
 
-corpus.bnf ─────cargo──▶ crates/fossil-sinks/src/generated.rs
+corpus.bnf ─────cargo──▶ crates/fossil-df/src/corpus/generated.rs
               xtask
               corpus
 ```
@@ -102,7 +102,7 @@ not user data* against *what this struct already surfaces as a named member*. A
 file's header carries the literal count that made the case.
 
 Each is a PROJECTION of the same rows, not a copy of the file: `fossil-base` gets
-the rows whose behaviour the compiler can link, `descriptors-output` the ones
+the rows whose behaviour the compiler can link, `fossil_hir::providers` the ones
 needing a shape-language parser, `fossil-hir` the stdlib table the checker
 resolves every call against, `profile` the ones with a table function to
 `DESCRIBE` through (`io.rdf` has none), `executor` every row that reads data

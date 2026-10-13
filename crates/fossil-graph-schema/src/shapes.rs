@@ -7,7 +7,7 @@
 //! is what a materializer consumes. But the checker needs something else — the
 //! per-shape constraint table it asks "given target shape `ex:Person`, what is
 //! the expected type and cardinality of predicate `p`?" — and until now the only
-//! spelling of that table was `fossil_shex::ShapeBinding`, whose fields are
+//! spelling of that table was `fossil_hir::shex::ShapeBinding`, whose fields are
 //! `rudof_iri::IriS` and `shex_ast::ShapeExpr`. Reading it meant linking `ShEx`.
 //!
 //! This module is the same table with no type from any schema language in it. A
@@ -49,94 +49,18 @@ use crate::{Cardinality, EdgeType, GraphSchema, NodeType, Primitive, Property, S
 /// position — and there is no plural/singular heuristic: a scheme that lets a
 /// small change in the document rename a member is how a minor version bump
 /// breaks a program. A collision is an error naming both IRIs, never a numeric
-/// suffix, and the repair is written in the program, not in the document.
+/// suffix, and the repair is to declare the type in the program, with the IRIs
+/// it needs, rather than to edit the document.
 ///
 /// It lives here because this crate is the one both sides of that rule share:
 /// the decoder that produces the IRIs and the schema that carries the names.
 /// There were three independent copies of this three-line function in the tree
 /// — in the MIR lowering, in the `ShEx` descriptor, and in the SHACL decoder
-/// (`fossil-descriptors-output/src/shacl.rs`); this is the one they collapse
+/// (`fossil-hir/src/shacl.rs`); this is the one they collapse
 /// onto.
 #[must_use]
 pub fn local_name(iri: &str) -> &str {
     iri.rsplit(['#', '/']).next().unwrap_or(iri)
-}
-
-/// **The name a predicate is written and emitted under**: the `@rename` a
-/// program addressed to it, or [`local_name`] when it wrote none.
-///
-/// [`local_name`] is the default and this is the rule on the OUTPUT side —
-/// every side that turns a predicate IRI into the name a program WRITES or the
-/// writer EMITS owes the rename the same look-up, because the rename is what
-/// makes a colliding predicate writable at all. Four sides did not: the
-/// checker's required-property pass reported a renamed predicate the body HAD
-/// written as missing, and [`OutputShapes::to_graph_schema`] then emitted its
-/// column under the un-renamed name — so the one program the repair exists for
-/// could neither compile nor round-trip.
-///
-/// **It is not every call site of [`local_name`], and the claim used to read as
-/// if it were.** `@rename` is addressed to a `type` binding, so it governs the
-/// target shape's names and nothing else. Three sides call the bare function on
-/// a predicate IRI and are right to:
-///
-/// - `fossil_hir::infer`'s source-row builder names INPUT row fields, which no
-///   `@rename` is addressed to;
-/// - `fossil_hir::shapes::suggested_alias` proposes what to rename a colliding
-///   predicate TO, and it needs the un-renamed segment to build the suggestion.
-///
-/// Everything else the tree calls [`local_name`] on is a SHAPE IRI, not a
-/// predicate one, and this function has no opinion about those.
-///
-/// Generic over the string type so the checker's `SmolStr` pairs and the
-/// program's owned `String` pairs reach the same function.
-#[must_use]
-pub fn short_name<'a, S: AsRef<str>>(predicate_iri: &'a str, renames: &'a [(S, S)]) -> &'a str {
-    renames
-        .iter()
-        .find(|(iri, _)| iri.as_ref() == predicate_iri)
-        .map_or_else(|| local_name(predicate_iri), |(_, name)| name.as_ref())
-}
-
-/// The `@rename`s a program wrote, addressed by the shape they were written
-/// above: shape IRI → `(predicate IRI, the name to write instead)`.
-///
-/// Addressed to a SHAPE and not to the document, because that is how the
-/// program writes them — `@rename(Person, "…" as foaf_name)` names the binding —
-/// and because two shapes in one document can each declare a colliding
-/// predicate needing a different repair.
-///
-/// [`Renames::default`] is «this program renamed nothing», which is almost
-/// every program and is the only answer a host with no program in hand can
-/// give. It is a parameter and not a default because a caller that silently
-/// dropped the table is exactly the defect this type exists to close.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Renames {
-    by_shape: Vec<(String, Vec<(String, String)>)>,
-}
-
-impl Renames {
-    /// Build from `(shape IRI, renames)` pairs, in the order the program wrote
-    /// them.
-    #[must_use]
-    pub const fn new(by_shape: Vec<(String, Vec<(String, String)>)>) -> Self {
-        Self { by_shape }
-    }
-
-    /// `true` when the program renamed nothing.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.by_shape.iter().all(|(_, r)| r.is_empty())
-    }
-
-    /// The renames addressed to `shape_iri` — empty when the program wrote none
-    /// for it, which is the ordinary case.
-    #[must_use]
-    pub fn for_shape(&self, shape_iri: &str) -> &[(String, String)] {
-        self.by_shape
-            .iter()
-            .find(|(iri, _)| iri == shape_iri)
-            .map_or(&[], |(_, renames)| renames.as_slice())
-    }
 }
 
 /// What a shape document says — format-neutral. `ShEx` and SHACL both lower into
@@ -165,6 +89,15 @@ struct OutputShapesRepr {
     rejections: Vec<Rejection>,
 }
 
+/// By what it says — the shapes and the rejections. The index is derived from
+/// the shapes, so two values equal by [`PartialEq`] hash alike.
+impl std::hash::Hash for OutputShapes {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.shapes.hash(state);
+        self.rejections.hash(state);
+    }
+}
+
 impl From<OutputShapesRepr> for OutputShapes {
     fn from(repr: OutputShapesRepr) -> Self {
         Self::new(repr.shapes, repr.rejections)
@@ -185,7 +118,7 @@ impl From<OutputShapes> for OutputShapesRepr {
 pub const SUBJECT_COLUMN: &str = "subject";
 
 /// One shape: a set of predicates a subject of this type may carry.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Shape {
     /// The shape's IRI, fully resolved — the key the output model is addressed
     /// by (`NodeType::iri`).
@@ -202,7 +135,7 @@ pub struct Shape {
 // said «the checker reads it to decide whether an unlisted predicate is an
 // error». The checker never saw it: `ResolvedShape::from_shape` reads `iri` and
 // `properties` and drops the rest, so the only reader in the workspace was one
-// test in `fossil-shex`.
+// test of the `ShEx` decoder.
 //
 // It is deleted rather than wired, and the reason is that wiring it would
 // change nothing. A property key is a BARE NAME resolved against this table
@@ -214,10 +147,19 @@ pub struct Shape {
 
 /// One predicate of a [`Shape`] — the format-neutral collapse of a `ShEx`
 /// `TripleConstraint` / a SHACL property shape.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PropertyConstraint {
-    /// The full predicate IRI, fully resolved. [`local_name`] derives from it
-    /// the bare name the program writes.
+    /// The bare name a program writes for this predicate — a body's property
+    /// key, and the column the corpus names.
+    ///
+    /// A decoder writes [`local_name`] of [`Self::predicate`]: a document says
+    /// nothing else a name could come from. A declared type writes the field's
+    /// own name, which is the whole point of declaring one — two predicates
+    /// whose last segments coincide are two fields with two names
+    /// (`/docs/design/declared`). It is carried rather than derived because
+    /// only the second source knows it.
+    pub name: String,
+    /// The full predicate IRI, fully resolved.
     pub predicate: String,
     /// The RDF term the document declares for the value, verbatim, or `None`
     /// when it declares none. A decoder writes [`Term::Iri`] for an IRI-valued
@@ -250,7 +192,7 @@ pub struct PropertyConstraint {
     /// a SHACL one (a separate decoder over Turtle, with no lookup of its own
     /// yet), and a compact document where the lookup did not find the
     /// predicate. A consumer drops one label; nothing else changes. See
-    /// `fossil_shex::spans`, which is a lookup over text and explains at length
+    /// `fossil_hir::shex::spans`, which is a lookup over text and explains at length
     /// why that is not a second parser.
     pub span: Option<Span>,
 }
@@ -299,7 +241,7 @@ impl PropertyConstraint {
 /// replaces had both `Exact(n)` and `Range { min: n, max: Some(n) }` for the
 /// same cardinality, and its `is_single_valued` answered `true` for the first
 /// and `false` for the second. A pair cannot hold two spellings of one fact.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Occurs {
     /// Minimum number of values. `0` = optional.
     pub min: u32,
@@ -353,7 +295,7 @@ impl Occurs {
 /// carries the predicate IRIs of each branch instead: enough to *name* the split
 /// in a diagnostic, not enough to re-emit the document's own syntax. Re-emitting
 /// syntax is the decoder's job, and it is the decoder that knows the syntax.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Rejection {
     /// A disjunction the compiler does not support. `disjuncts` carries the
     /// predicate IRIs of each branch, in order — `disjuncts.len()` is the number
@@ -378,9 +320,8 @@ impl OutputShapes {
     /// **A repeated IRI keeps its FIRST declaration and its first slot.** The
     /// alternative — last one wins — is what a `HashMap::insert` does for free,
     /// and either rule is arbitrary, but only one of them leaves the order
-    /// alone: a later duplicate that overwrites an earlier slot moves the shape
-    /// that positional binding is counting on. So the duplicate is dropped
-    /// entirely, not merged and not appended.
+    /// alone, and the order is what a diagnostic lists the shapes in. So the
+    /// duplicate is dropped entirely, not merged and not appended.
     #[must_use]
     pub fn new(shapes: Vec<Shape>, rejections: Vec<Rejection>) -> Self {
         let mut kept: Vec<Shape> = Vec::with_capacity(shapes.len());
@@ -406,15 +347,14 @@ impl OutputShapes {
         Self::new(Vec::new(), vec![rejection])
     }
 
-    /// Every shape, **in declaration order**. Callers may rely on that:
-    /// `type { A, B } := io.shex(…)` binds **by position**, the Nth name to the
-    /// Nth declared shape, so `A` is the first shape the document declares and
-    /// `B` the second — the local name selects nothing and is free to be
-    /// anything. A `HashMap` lived where this `Vec` is until
-    /// `crates/fossil-shex/examples/declaration_order.rs` measured what it cost
-    /// — six parses of one document handed back six different orders, because
-    /// Rust seeds its hasher per process. The order is the document's; it is not
-    /// ours to choose.
+    /// Every shape, **in declaration order**. An import binds by local name and
+    /// not by position, but the order still reaches a person: an import naming
+    /// no shape lists the ones the document declares, and two shapes sharing a
+    /// local name are named first-then-second. A `HashMap` lived where this
+    /// `Vec` is until `crates/fossil-hir/examples/shex_declaration_order.rs`
+    /// measured what it cost — six parses of one document handed back six
+    /// different orders, because Rust seeds its hasher per process. The order
+    /// is the document's; it is not ours to choose.
     pub fn shapes(&self) -> impl Iterator<Item = &Shape> {
         self.shapes.iter()
     }
@@ -445,25 +385,19 @@ impl OutputShapes {
     /// document checks [`Self::rejections`] first. That was already true of the
     /// `ShEx` original, which lowered the non-rejected parts of every shape.
     ///
-    /// `renames` is the program's — [`Renames`], addressed by shape — and it
-    /// governs the property/edge LABEL through [`short_name`], which is the same
-    /// function the checker resolves a bare property key with. It used to be
-    /// [`local_name`] here and rename-aware there, so a program that repaired a
-    /// collision type-checked and then wrote the column under the name it had
-    /// just renamed away from. A host with no program in hand passes
-    /// [`Renames::default`], and the node LABEL is never renamed: `@rename`
-    /// addresses a predicate, and the type's own name is the binding the program
-    /// wrote.
+    /// A node's label is [`local_name`] of its IRI; a property's or an edge's is
+    /// [`PropertyConstraint::name`], the key a program writes, and two that
+    /// coincide are a collision the checker refuses rather than a name this
+    /// function chooses.
     #[must_use]
-    pub fn to_graph_schema(&self, renames: &Renames) -> GraphSchema {
+    pub fn to_graph_schema(&self) -> GraphSchema {
         let mut nodes = Vec::new();
         let mut edges = Vec::new();
         for shape in self.shapes() {
             let label = local_name(&shape.iri).to_string();
-            let shape_renames = renames.for_shape(&shape.iri);
             let mut properties = Vec::new();
             for c in &shape.properties {
-                let name = short_name(&c.predicate, shape_renames).to_string();
+                let name = c.name.clone();
                 let cardinality = c.occurs.collapse();
                 if c.targets.is_empty() {
                     properties.push(Property {
@@ -505,6 +439,7 @@ mod tests {
 
     fn prop(predicate: &str, datatype: Option<Primitive>, occurs: Occurs) -> PropertyConstraint {
         PropertyConstraint {
+            name: local_name(predicate).into(),
             predicate: predicate.into(),
             term: datatype.map(|p| Term::Literal(Some(p.to_xsd_iri().into()))),
             targets: Vec::new(),
@@ -515,6 +450,7 @@ mod tests {
 
     fn edge(predicate: &str, targets: &[&str], occurs: Occurs) -> PropertyConstraint {
         PropertyConstraint {
+            name: local_name(predicate).into(),
             predicate: predicate.into(),
             term: None,
             targets: targets.iter().map(|t| (*t).to_string()).collect(),
@@ -534,8 +470,7 @@ mod tests {
     // -- declaration order + first declaration wins ------------------------
 
     /// The order is the document's. Nothing sorts, nothing hashes on the way
-    /// out — the destructuring binds by position, the Nth name to the Nth
-    /// declared shape.
+    /// out.
     #[test]
     fn shapes_iterate_in_declaration_order() {
         let doc = OutputShapes::new(
@@ -816,7 +751,7 @@ mod tests {
             vec![],
         );
 
-        let g = doc.to_graph_schema(&Renames::default());
+        let g = doc.to_graph_schema();
 
         assert_eq!(
             g.nodes.len(),
@@ -896,7 +831,7 @@ mod tests {
             )],
             vec![],
         );
-        let g = doc.to_graph_schema(&Renames::default());
+        let g = doc.to_graph_schema();
         assert!(g.edges.is_empty());
         assert_eq!(g.nodes[0].properties[0].datatype, Primitive::AnyUri);
     }

@@ -1,8 +1,9 @@
 //! Typed AST views over the lossless CST.
 //!
 //! Only the wrappers a downstream consumer needs to walk the program:
-//! `SourceDef`, `Mapping`, `MappingHeader`, `MappingBody`, `Property` for
-//! `fossil-hir`. Each is a thin newtype around `SyntaxNode` with `cast`
+//! `SourceDef`, `Mapping`, `MappingHeader`, `MappingBody`, `Property`,
+//! `ImportMember` for `fossil-hir`, and the declaration's `TypeDecl`, `Field`,
+//! `IriAttr`, `TypeExpr`. Each is a thin newtype around `SyntaxNode` with `cast`
 //! (kind-checking constructor) + `syntax` (back-edge accessor) and a few
 //! convenience accessors for child tokens. A view is added when a consumer needs it, never ahead of one.
 //!
@@ -11,7 +12,7 @@
 //! offsets, trivia and error recovery are only visible there.
 
 pub mod items;
-pub use items::ShapeExpr;
+pub use items::{Field, ImportMember, IriAttr, ShapeExpr, TypeDecl, TypeExpr};
 
 use crate::kind::{SyntaxKind, SyntaxNode};
 

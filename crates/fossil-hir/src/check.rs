@@ -32,13 +32,12 @@
 //!
 //! # No silent coercion
 //!
-//! Every type mismatch emits a [`Diagnostic`] via [`fossil_base::raise`] AND
-//! produces an [`ErrorGuaranteed`]. `typecheck_mapping` returns `Err` when the
-//! body has even one type error.
+//! Every type mismatch emits a [`Diagnostic`] via [`Diagnostics::raise`] AND
+//! produces an [`ErrorGuaranteed`]. `typecheck_mapping`'s output is poisoned
+//! when the body has even one type error.
 
-use fossil_base::{Diagnostic, ErrorGuaranteed, SourceFile, SpanFrame};
-use fossil_graph_schema::{Problem, Severity, Span};
-use salsa::Accumulator;
+use fossil_base::{Diagnostic, Diagnostics, ErrorGuaranteed, SourceFile, SpanFrame};
+use fossil_graph_schema::{Problem, Severity, Span, local_name};
 use smol_str::SmolStr;
 
 use crate::body::{ExprId, body};
@@ -78,27 +77,60 @@ pub struct TypeckOutput<'db> {
     /// copies it into `fossil.json`.
     #[returns(ref)]
     pub predicates: Vec<Predicate>,
+    /// What the check found, the refusals among them.
+    #[returns(ref)]
+    pub diagnostics: Vec<Diagnostic>,
+    /// The taint of the first refusal in [`Self::diagnostics`], if the check
+    /// refused. The fields above are then incomplete, and [`Self::checked`] is
+    /// how a reader declines them.
+    #[returns(copy)]
+    pub poisoned: Option<ErrorGuaranteed>,
+}
+
+impl<'db> TypeckOutput<'db> {
+    /// This output when the check passed, or the taint when it refused.
+    ///
+    /// # Errors
+    ///
+    /// The [`ErrorGuaranteed`] of the first refusal; its diagnostic is already
+    /// in [`Self::diagnostics`], so a caller propagates it and reports nothing.
+    pub fn checked(self, db: &'db dyn fossil_base::Db) -> Result<Self, ErrorGuaranteed> {
+        self.poisoned(db).map_or(Ok(self), Err)
+    }
 }
 
 /// The ONE Salsa-tracked checker entry per mapping.
 ///
 /// Reads `body` + `spans` + the source row + the target shape,
-/// runs the plain-Rust bidirectional checker, and returns a [`TypeckOutput`].
-/// Returns `Err(ErrorGuaranteed)` if the body has any type error (every error
-/// also pushes ≥1 [`Diagnostic`] to the accumulator).
-#[salsa::tracked(returns(clone))]
+/// runs the plain-Rust bidirectional checker, and returns a [`TypeckOutput`]
+/// carrying what it found. A body with any type error still returns one, with
+/// [`TypeckOutput::poisoned`] set.
+#[salsa::tracked(returns(copy))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn typecheck_mapping<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
-) -> Result<TypeckOutput<'db>, ErrorGuaranteed> {
+) -> TypeckOutput<'db> {
     let hir_body = body(db, mapping);
     let spans_table = spans(db, mapping);
     // A source pipeline whose row algebra does not add up taints the mapping and
     // stops here. Checking the body against a row that could not be
     // built would report a second, invented error for every property that reads a
     // column the join was supposed to bring.
-    let source_scope = resolve_source_scope(db, mapping)?;
+    let mut sink = Diagnostics::new();
+    let source_scope = match resolve_source_scope(db, &mut sink, mapping) {
+        Ok(scope) => scope,
+        Err(eg) => {
+            return TypeckOutput::new(
+                db,
+                ExprTypes::new(db, Vec::new()),
+                None,
+                Vec::new(),
+                sink.into_vec(),
+                Some(eg),
+            );
+        }
+    };
     let source_row = source_scope.as_ref().and_then(|s| s.flat(db));
     // This used to pass `ACCEPT_ALL_DEFAULT` — one literal that turned backward
     // checking off for every program compiled through the checker, because the
@@ -116,17 +148,9 @@ pub fn typecheck_mapping<'db>(
     // The short-name table, and the collisions that make some names unwritable.
     // Built once per mapping: the body resolves every key against it, and a
     // collision is reported here rather than once per property that trips on it.
-    //
-    // The rename table comes off the `type` binding that introduced this
-    // mapping's shape, keyed by the shape IRI because that is what survives the
-    // header's resolution. It is read through `def_map`, which is file-keyed and
-    // structurally stable across body edits, so it adds no per-mapping fan-out.
-    let renames = shape_iri_of(db, mapping)
-        .map(|iri| crate::def_map::def_map(db, mapping.file(db)).renames_for_shape(db, &iri))
-        .unwrap_or_default();
     let (predicates, collisions) = resolved_shape
         .as_ref()
-        .map_or_else(|| (Vec::new(), Vec::new()), |s| s.short_names(&renames));
+        .map_or_else(|| (Vec::new(), Vec::new()), ResolvedShape::short_names);
     let mut cx = Checker {
         expr: Expr {
             db,
@@ -140,13 +164,13 @@ pub fn typecheck_mapping<'db>(
             relation: source_binding_name(db, mapping),
             spans: SpanSource::Table(spans_table),
             entries: Vec::new(),
+            sink,
             first_error: None,
             expected_ref: None,
         },
         mapping,
         resolved_shape,
         predicates: predicates.clone(),
-        renames,
     };
 
     // Surface what the decoder rejected before checking the body — they are
@@ -162,11 +186,14 @@ pub fn typecheck_mapping<'db>(
     }
     cx.check_required_properties(properties);
 
-    let first_error = cx.expr.first_error;
     let expr_types = ExprTypes::new(db, cx.expr.entries);
-    first_error.map_or_else(
-        || Ok(TypeckOutput::new(db, expr_types, source_row, predicates)),
-        Err,
+    TypeckOutput::new(
+        db,
+        expr_types,
+        source_row,
+        predicates,
+        cx.expr.sink.into_vec(),
+        cx.expr.first_error,
     )
 }
 
@@ -186,11 +213,11 @@ pub fn typecheck_mapping<'db>(
 /// bound shape NAME, the `from` binding and the `@subject` are all read off the
 /// consuming mapping's CST, and a decoder has never seen the program — it has
 /// seen `ShEx`. Only the branch predicates come from the document, and those
-/// cross as plain strings in [`Rejection::Disjunction`], which is why
-/// `fossil-hir` needs no dependency on `fossil-shex` at all.
+/// cross as plain strings in [`Rejection::Disjunction`], which is why the
+/// checker reads no type of [`crate::shex`] at all.
 ///
 /// That was worth writing down because the opposite reasoning had been, and it
-/// produced a second renderer in `fossil-shex` that outlived its own argument:
+/// produced a second renderer in the `ShEx` decoder that outlived its own argument:
 /// «re-emitting syntax stays with the decoder, because it is the decoder that
 /// knows the syntax». It knew the `ShEx` syntax. It did not know Fossil's, and
 /// it emitted a CURIE header, `iri =`, a backtick template and a leading `.` —
@@ -227,7 +254,6 @@ pub fn render_split_suggestion(
     base_from_clause: &str,
     base_iri_template: &str,
     disjuncts: &[Vec<String>],
-    renames: &[(SmolStr, SmolStr)],
 ) -> String {
     use std::fmt::Write as _;
 
@@ -246,12 +272,8 @@ pub fn render_split_suggestion(
             out.push_str("    // TODO: this branch names no predicate — split it by hand\n");
         }
         for predicate in branch {
-            // The name a body may actually write — [`fossil_graph_schema::short_name`],
-            // the rename included. It was `local_name`, so a split suggested
-            // for a shape whose colliding predicate the program had already
-            // repaired emitted the name the repair renamed AWAY from: the
-            // compiler's two generated repairs disagreeing with each other.
-            let short = fossil_graph_schema::short_name(predicate, renames);
+            // The name a body writes: the predicate's last segment.
+            let short = local_name(predicate);
             // `{base_from_clause}.{short}`, and the qualifier is the whole
             // repair. It was `.{short}` — the retired `FieldRef`, a leading dot
             // naming a column of an anonymous current row. The parser refuses
@@ -283,13 +305,6 @@ pub struct Checker<'db> {
     /// The target shape's predicates by short name — what a bare property key
     /// resolves against.
     pub(crate) predicates: Vec<Predicate>,
-    /// The `@rename`s written above the binding that introduced this mapping's
-    /// shape, as `(predicate IRI, the name to write instead)`. `predicates`
-    /// above is this already applied; the table itself is kept because
-    /// [`Checker::check_required_properties`] walks the shape's constraints and
-    /// not that table, and walking them with [`fossil_graph_schema::local_name`]
-    /// is how a renamed predicate the body HAD written was reported missing.
-    pub(crate) renames: Vec<(SmolStr, SmolStr)>,
 }
 
 impl Checker<'_> {
@@ -344,8 +359,8 @@ impl Checker<'_> {
                     // in the corpus.
                     // The blamed name is the one the BODY wrote, not the
                     // predicate IRI `resolve_predicate` returned: the message
-                    // reads back the line the author is looking at, and a
-                    // rename means those two are different words.
+                    // reads back the line the author is looking at, and the key
+                    // is not the IRI.
                     Some((
                         constraint.value_ty,
                         name.clone(),
@@ -409,7 +424,6 @@ impl Checker<'_> {
         if let Some(Predicate { iri, .. }) = self.predicates.iter().find(|p| p.name == *name) {
             return Some(iri.clone());
         }
-        let db = self.expr.db;
         let candidates: Vec<&str> = self.predicates.iter().map(|p| p.name.as_str()).collect();
         let suggestion = did_you_mean(name.as_str(), candidates.iter().copied());
         let mut d = Diagnostic::new(
@@ -423,7 +437,7 @@ impl Checker<'_> {
         if let Some(s) = suggestion {
             d = d.with_help(format!("did you mean `{s}`?"));
         }
-        let eg = fossil_base::raise(db, d);
+        let eg = self.expr.sink.raise(d);
         self.expr.record_error(eg);
         None
     }
@@ -434,26 +448,14 @@ impl Checker<'_> {
     fn surface_name_collisions(&mut self, collisions: &[NameCollision]) {
         let db = self.expr.db;
         let header_span = self.header_span();
-        // **The recommendation is code, and both placeholders had to go.**
-        //
-        // This line said `@rename(<Type>, "…" as <another_name>)` and neither
-        // half was writable: `<Type>` and `<another_name>` are not identifiers,
-        // and `@rename` had no production at all — `AT_ATTR` at top level fell
-        // through to `bump_as_error`. So the one repair the compiler names for
-        // the one error it refuses to fix itself could not be pasted, in three
-        // independent ways.
-        //
-        // Now the type is the bound name this mapping targets, the alias comes
-        // from the vocabulary that brought the predicate in (see
-        // `shapes::suggested_alias` for why a SUGGESTION is not the banned
-        // derivation), and the production exists.
-        // `the_recommended_rename_parses_and_repairs_the_collision` feeds this
-        // exact text back through the compiler and checks that the collision
-        // goes away and the renamed key resolves.
+        // The repair is to DECLARE the type, where each field writes its own
+        // name beside its IRI. The alias is a suggestion from the vocabulary
+        // that brought the predicate in (`shapes::suggested_alias` says why a
+        // SUGGESTION is not the banned derivation).
         let type_name = self.target_type_name();
         // The BINDING, not the mapping header: the collision is a fact about
-        // the shape this program brought in, the reader chose it on that line,
-        // and the `@rename` the help proposes goes above it. The header span is
+        // the shape this program brought in, and the reader chose it on that
+        // line. The header span is
         // the fallback for a mapping whose type name bound nothing, which has
         // already been told so.
         let bound_at = def_map(db, self.expr.file).lookup_type_span(db, type_name.as_str());
@@ -504,10 +506,10 @@ impl Checker<'_> {
             }
             d = d.with_help(format!(
                 "a short name is the last segment of the predicate IRI, and fossil never picks \
-                 between two. Give one of them another name above the binding: \
-                 @rename({type_name}, \"{second}\" as {alias})"
+                 between two. Declare `{type_name}` in the program instead, where each field \
+                 writes its own name beside its IRI: `{alias}`, say, for `{second}`"
             ));
-            let eg = fossil_base::raise(db, d);
+            let eg = self.expr.sink.raise(d);
             self.expr.record_error(eg);
         }
     }
@@ -521,16 +523,9 @@ impl Checker<'_> {
     /// corpus makes to its readers, and a mapping that does not keep it writes
     /// a node that does not conform to the shape it declares.
     ///
-    /// **The name compared is [`fossil_graph_schema::short_name`], not
-    /// [`local_name`].** This walked the constraints with `local_name` and so
-    /// did not know about `@rename`: a required predicate the program had
-    /// renamed and then WRITTEN under its new name was reported missing, and
-    /// the only repair the compiler offers for a name collision made the
-    /// program it repaired fail to compile.
     fn check_required_properties(&mut self, properties: &[HirProperty]) {
         use std::fmt::Write as _;
 
-        let db = self.expr.db;
         let header_span = self.header_span();
         let Some(shape) = self.resolved_shape.as_ref() else {
             return;
@@ -539,15 +534,7 @@ impl Checker<'_> {
             .constraints
             .iter()
             .filter(|c| c.occurs.demands_one_or_more())
-            .map(|c| {
-                (
-                    SmolStr::from(fossil_graph_schema::short_name(
-                        c.predicate.as_str(),
-                        &self.renames,
-                    )),
-                    c.predicate.clone(),
-                )
-            })
+            .map(|c| (c.name.clone(), c.predicate.clone()))
             .filter(|(short, _)| {
                 !properties
                     .iter()
@@ -562,12 +549,7 @@ impl Checker<'_> {
             .constraints
             .iter()
             .filter(|c| !c.occurs.demands_one_or_more())
-            .map(|c| {
-                SmolStr::from(fossil_graph_schema::short_name(
-                    c.predicate.as_str(),
-                    &self.renames,
-                ))
-            })
+            .map(|c| c.name.clone())
             .collect();
         let declared_at: Vec<(SmolStr, Option<(Span, SmolStr)>)> = missing
             .iter()
@@ -617,7 +599,7 @@ impl Checker<'_> {
                 );
                 let _ = write!(help, " {list} {verb} optional and may stay out.");
             }
-            let eg = fossil_base::raise(db, d.with_help(help));
+            let eg = self.expr.sink.raise(d.with_help(help));
             self.expr.record_error(eg);
         }
     }
@@ -626,13 +608,11 @@ impl Checker<'_> {
         let Some(shape) = self.resolved_shape.as_ref() else {
             return;
         };
-        let db = self.expr.db;
         let header_span = self.header_span();
         // Clone the data we need so we don't hold a borrow of `self` across the
         // mutable `record_error` calls.
         let rejections = shape.rejections.clone();
         let document = shape.document.to_string();
-        let renames = self.renames.clone();
         let base_name = self.mapping_name();
         let source_name = source_binding_name(self.expr.db, self.mapping);
         // The header names a bound shape NAME, not an IRI. This argument was
@@ -670,26 +650,24 @@ impl Checker<'_> {
                         source_name.as_str(),
                         subject.as_str(),
                         disjuncts,
-                        &renames,
                     );
                     let n = disjuncts.len();
                     // Structured suggestion carrier — NOT a Markdown
-                    // delimiter. Accumulate directly (informational; no
-                    // ErrorGuaranteed).
-                    Diagnostic::new(
-                        Severity::Error,
-                        Problem::UnsupportedDisjunction {
-                            shape: shape_iri.to_string(),
-                            branches: n as u64,
-                        },
-                        header_span,
-                    )
-                    .with_suggestion_source(suggestion)
-                    .accumulate(db);
+                    // delimiter. Pushed without a taint: informational.
+                    self.expr.sink.push(
+                        Diagnostic::new(
+                            Severity::Error,
+                            Problem::UnsupportedDisjunction {
+                                shape: shape_iri.to_string(),
+                                branches: n as u64,
+                            },
+                            header_span,
+                        )
+                        .with_suggestion_source(suggestion),
+                    );
                 }
                 Rejection::CyclicRef { path } => {
-                    let eg = fossil_base::report(
-                        db,
+                    let eg = self.expr.sink.report(
                         header_span,
                         Problem::CyclicReference {
                             path: path.iter().map(ToString::to_string).collect(),
@@ -698,8 +676,7 @@ impl Checker<'_> {
                     self.expr.record_error(eg);
                 }
                 Rejection::UnresolvedRef { label, in_shape } => {
-                    let eg = fossil_base::report(
-                        db,
+                    let eg = self.expr.sink.report(
                         header_span,
                         Problem::UnresolvedReference {
                             reference: label.to_string(),
@@ -709,8 +686,7 @@ impl Checker<'_> {
                     self.expr.record_error(eg);
                 }
                 Rejection::Malformed(m) => {
-                    let eg = fossil_base::report(
-                        db,
+                    let eg = self.expr.sink.report(
                         header_span,
                         Problem::Unparseable {
                             document: document.clone(),
@@ -778,8 +754,7 @@ impl Checker<'_> {
     /// The LOCAL name of the type this mapping targets — `Person`, the word a
     /// `type { Person } := …` binding introduced and the header repeats.
     ///
-    /// Not the shape IRI: it is what a `@rename`'s first argument has to be, and
-    /// a suggestion that quoted the IRI there would not compile.
+    /// Not the shape IRI: a message names the type as the program does.
     fn target_type_name(&self) -> SmolStr {
         let db = self.expr.db;
         let file = self.mapping.file(db);
@@ -807,9 +782,6 @@ pub(crate) fn source_binding_name<'db>(
 /// The fully-resolved shape IRI a mapping targets, or `None` when its header
 /// did not lower.
 ///
-/// A free function rather than a `Checker` method because `typecheck_mapping`
-/// needs it BEFORE the `Checker` exists — the rename table is an input to the
-/// short-name table, which is an input to the `Checker`.
 fn shape_iri_of<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> Option<SmolStr> {
     let file = mapping.file(db);
     lower_to_hir(db, file)
@@ -833,9 +805,8 @@ mod tests;
 /// nothing must not reject a `String`. See
 /// [`crate::shapes::ShapeConstraint::value_ty`].
 ///
-/// Plain-Rust (NOT `#[salsa::tracked]`). Called from within the tracked
-/// [`typecheck_mapping`] frame (and from tests' tracked shims) so its
-/// diagnostic emissions are valid.
+/// Plain-Rust (NOT `#[salsa::tracked]`). It reports into the checker's sink,
+/// which [`typecheck_mapping`] returns in its output.
 ///
 /// `property` is the name the BODY wrote for the slot that refused the value,
 /// and `source_value` the lowered right-hand side — the message names the slot,
@@ -956,7 +927,7 @@ pub fn compatible<'db>(
 /// hash seed. An unsorted `first` would put a different function in the message
 /// on different runs of the same compiler — and this text is committed as a
 /// conformance artefact, so it would be a golden that fails at random.
-/// `crates/fossil-shex/examples/declaration_order.rs` measured this exact class
+/// `crates/fossil-hir/examples/shex_declaration_order.rs` measured this exact class
 /// of bug once already: six parses, six orders.
 fn repair_for<'db>(
     cx: &Expr<'db>,
@@ -1017,13 +988,10 @@ fn repair_for<'db>(
                 && matches!(e.sig.params.as_slice(), [only] if is_ty(only.ty.scalar(), actual))
         })
         .collect();
-    // **The one NAMED after the type wins**, then alphabetical. `parse.decimal`
-    // and `parse.float` both answer String → Float — the catalogue has no
-    // Decimal type in the MVP lattice, so `decimal` returns a Float by
-    // compromise and says so in its own row — and sorting on the name alone
-    // put `decimal` in front of an author who asked for a Float. The tiebreak
-    // is what a reader would reach for; the alphabetical order under it is what
-    // keeps the answer the same on every run.
+    // **The one NAMED after the type wins**, then alphabetical: two rows may
+    // answer the same conversion, and the tiebreak is what a reader would reach
+    // for; the alphabetical order under it keeps the answer the same on every
+    // run.
     let wanted = expected_display.to_ascii_lowercase();
     conversions.sort_by(|a, b| (a.member != wanted, &a.name).cmp(&(b.member != wanted, &b.name)));
     if let Some(convert) = conversions.first() {
@@ -1183,6 +1151,9 @@ pub struct Expr<'db> {
     pub(crate) relation: SmolStr,
     pub(crate) spans: SpanSource<'db>,
     pub(crate) entries: Vec<ExprTypeEntry<'db>>,
+    /// What this checker found. Its owner moves it into the output of the
+    /// query it runs inside.
+    pub(crate) sink: Diagnostics,
     /// First type error encountered (if any). Every error also pushes a
     /// diagnostic, so any `Some(eg)` here implies >= 1 emitted `Diagnostic`.
     pub(crate) first_error: Option<ErrorGuaranteed>,
@@ -1216,6 +1187,7 @@ impl<'db> Expr<'db> {
             relation,
             spans: SpanSource::At(at),
             entries: Vec::new(),
+            sink: Diagnostics::new(),
             first_error: None,
             expected_ref: None,
         }
@@ -1248,7 +1220,7 @@ impl<'db> Expr<'db> {
     /// Raise a built [`Diagnostic`], in the frame this checker's spans are in.
     ///
     /// THE emission point, and it is one so that the frame is decided once.
-    /// `fossil_base::report` at each call site defaults to
+    /// `Diagnostics::report` at each call site defaults to
     /// `SpanFrame::MappingRelative` — correct for a body and silently wrong for
     /// a pipeline, whose span is already file-absolute.
     ///
@@ -1262,7 +1234,7 @@ impl<'db> Expr<'db> {
         } else {
             d
         };
-        let eg = fossil_base::raise(self.db, d);
+        let eg = self.sink.raise(d);
         self.record_error(eg);
         eg
     }
@@ -1709,8 +1681,8 @@ impl<'db> Expr<'db> {
                 self.span_of(expr_id),
             )
             .with_help(
-                "so there is no identity to build. A `type { … } := io.shex(…)` binding \
-                 introduces the name, and the Nth name takes the Nth shape the document declares",
+                "so there is no identity to build. A type is declared in the program, or \
+                 imported by its local name with `type { … } := io.shex(…)`",
             );
             self.raise(d);
             return unresolved();
@@ -2050,9 +2022,9 @@ impl<'db> Expr<'db> {
                 TyKind::Primitive(Primitive::Integer) => {}
                 // The mistake this arm exists to catch, and `+` is where it is
                 // made: `User.first + " " + User.last` is what someone writes on
-                // the first day. It is not string concatenation — `str.concat`
+                // the first day. It is not string concatenation — interpolation
                 // is, and one idea does not get two spellings — so the message
-                // names the row rather than only refusing.
+                // says how rather than only refusing.
                 kind => {
                     let mut d = Diagnostic::new(
                         Severity::Error,
@@ -2065,7 +2037,9 @@ impl<'db> Expr<'db> {
                     if matches!(kind, TyKind::Primitive(Primitive::String))
                         && matches!(op, BinOp::Add)
                     {
-                        d = d.with_help("two strings are joined with `str.concat`, not `+`");
+                        d = d.with_help(
+                            "strings are joined by interpolation, `\"{a} {b}\"`, not `+`",
+                        );
                     }
                     let eg = self.raise(d);
                     poisoned = Some(eg);

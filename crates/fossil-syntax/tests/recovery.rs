@@ -41,13 +41,13 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{Diagnostic, FossilDb, SourceFile, System};
+use fossil_base::{FossilDb, SourceFile, System};
 use fossil_graph_schema::Problem;
 use fossil_syntax::parse;
 
 /// Parse `input` on a worker thread; panic with "parser hung — regression"
 /// if it doesn't finish within `timeout`. On success returns the wall-clock
-/// duration + the accumulated diagnostics' problems.
+/// duration + the parse diagnostics' problems.
 ///
 /// We cannot return the `Cst<'db>` itself, nor the `&Diagnostic`s, because the
 /// db lives on the worker thread and drops when it exits — so the problems are
@@ -60,9 +60,12 @@ fn parse_with_timeout(input: &'static str, timeout: Duration) -> (Duration, Vec<
         let system: Arc<dyn System> = Arc::new(NativeSystem::default());
         let db = FossilDb::new(system);
         let file = SourceFile::new(&db, input_owned, "regression.fossil".to_string());
-        let _cst = parse(&db, file);
-        let diags: Vec<&Diagnostic> = parse::accumulated::<Diagnostic>(&db, file);
-        let problems: Vec<Problem> = diags.iter().map(|d| d.problem.clone()).collect();
+        let cst = parse(&db, file);
+        let problems: Vec<Problem> = cst
+            .diagnostics(&db)
+            .iter()
+            .map(|d| d.problem.clone())
+            .collect();
         let elapsed = start.elapsed();
         let _ = tx.send((elapsed, problems));
     });

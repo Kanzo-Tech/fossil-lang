@@ -44,7 +44,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use duckdb::Connection;
 use fossil_df::Executor;
-use fossil_sinks::manifest::{Manifest, ROW_GROUP_ROWS};
+use fossil_df::corpus::manifest::{Manifest, ROW_GROUP_ROWS};
 use fossil_storage::{Access, Host, Scope, Storage, StorageCredential};
 use futures::TryStreamExt;
 use futures::future::BoxFuture;

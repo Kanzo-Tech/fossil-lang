@@ -7,13 +7,17 @@
 //!
 //! ```text
 //! Program       := TopLevel*
-//! TopLevel      := SourceDef | MultiSourceDef | TypeDef | Mapping
+//! TopLevel      := SourceDef | MultiSourceDef | TypeDef | TypeDecl | Mapping
 //! SourceDef     := IDENT DEFINE Expression
-//! MultiSourceDef:= LBRACE IDENT (COMMA IDENT)* RBRACE DEFINE Expression
-//! TypeDef       := RenameAttr* 'type'
-//!                  LBRACE IDENT (COMMA IDENT)* RBRACE DEFINE Expression
-//! RenameAttr    := AT_ATTR LPAREN IDENT (COMMA Rename)+ RPAREN
-//! Rename        := STRING 'as' IDENT
+//! MultiSourceDef:= LBRACE ImportMember (COMMA ImportMember)* RBRACE
+//!                  DEFINE Expression
+//! TypeDef       := 'type' LBRACE ImportMember (COMMA ImportMember)* RBRACE
+//!                  DEFINE Expression
+//! ImportMember  := IDENT ('as' IDENT)?
+//! TypeDecl      := IriAttr 'type' IDENT NEWLINE INDENT Field+ DEDENT
+//! Field         := IriAttr IDENT SHAPE_SEP TypeExpr NEWLINE
+//! IriAttr       := AT_ATTR LPAREN STRING RPAREN
+//! TypeExpr      := IDENT (LT TypeExpr GT)?
 //! Mapping       := MappingHeader INDENT MappingBody DEDENT
 //! MappingHeader := IDENT SHAPE_SEP ShapeExpr KW_FROM Expression
 //! ShapeExpr     := IDENT
@@ -50,7 +54,6 @@ pub(crate) mod items;
 pub(crate) mod recover;
 
 use diag::ParseDiagnostic;
-use salsa::Accumulator;
 
 /// Salsa-storable handle to a parsed CST.
 ///
@@ -91,34 +94,32 @@ impl CstRoot {
 pub struct Cst<'db> {
     #[returns(ref)]
     pub root: CstRoot,
+    /// What the parser could not make sense of, file-absolute.
+    #[returns(ref)]
+    pub diagnostics: Vec<fossil_base::Diagnostic>,
 }
 
 /// Parse `file` into a lossless CST. Salsa-tracked: re-parsing the same file
 /// is a memo hit; mutating `file.text(db)` invalidates and re-parses.
 ///
-/// This signature is locked. New diagnostics flow via the
-/// [`fossil_base::Diagnostic`] accumulator, never by widening the return type.
+/// This signature is locked. New diagnostics go into [`Cst::diagnostics`],
+/// never into a wider return type.
 #[salsa::tracked(returns(copy))]
 pub fn parse(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> Cst<'_> {
     let text = file.text(db);
     let tokens = lex_with_indents(text);
     let mut parser = Parser::new(tokens);
     parser.parse_program();
-    // The parser is pure (not Salsa-tracked), so it cannot
-    // call `.accumulate(db)` itself. Drain its internal `Vec<ParseDiagnostic>`
-    // here, inside the wrapping Salsa query, so each parse error reaches
-    // the host (LSP / WASM / executor) via the `Diagnostic` accumulator.
     // `.file_absolute()` and not the default frame: `parse` is FILE-keyed, so a
     // parse error's span is a file offset by construction. Left in the default
-    // `MappingRelative`, a per-mapping drain rebases it by
-    // the mapping's own start — which moves the copy, so the dedup keyed on
-    // (severity, message, span) stops collapsing the two and the reader gets the
-    // same error twice, the second one pointing past the end of the file.
-    for d in std::mem::take(&mut parser.diagnostics) {
-        d.to_diagnostic().file_absolute().accumulate(db);
-    }
+    // `MappingRelative`, a host rebases it by some mapping's own start and the
+    // caret points somewhere else in the file, or past its end.
+    let diagnostics = std::mem::take(&mut parser.diagnostics)
+        .into_iter()
+        .map(|d| d.to_diagnostic().file_absolute())
+        .collect();
     let green = parser.builder.finish();
-    Cst::new(db, CstRoot::new(green))
+    Cst::new(db, CstRoot::new(green), diagnostics)
 }
 
 // =====================================================================
@@ -130,8 +131,7 @@ pub(crate) struct Parser {
     pos: usize,
     pub(crate) builder: GreenNodeBuilder<'static>,
     /// Parser-internal diagnostic queue. Drained by the wrapping `parse()`
-    /// Salsa query into the public `Diagnostic`
-    /// accumulator after CST construction. Public to `super::recover` and
+    /// Salsa query into [`Cst::diagnostics`] after CST construction. Public to `super::recover` and
     /// `super::items` so the recovery helpers can push diagnostics without
     /// going through a `impl Parser { … }` shim per call site.
     pub(crate) diagnostics: Vec<ParseDiagnostic>,
@@ -221,8 +221,8 @@ impl Parser {
     /// reason: a contextual keyword is told from an identifier by its spelling
     /// and nothing else. `current_text` covers `type` at the start of an item;
     /// this one covers `as`, which is contextual in the MIDDLE of a form —
-    /// `"…" as name` and `Node as Other` — so the decision needs a token the
-    /// parser has not reached yet.
+    /// `Node as Other` — and a declaration's name, which follows the `type`
+    /// the parser has not consumed yet.
     pub(crate) fn peek_text(&self, offset: usize) -> Option<&str> {
         self.peek(offset).map(|t| t.text.as_str())
     }
@@ -270,8 +270,8 @@ impl Parser {
 
     /// Eat the current token if it matches `kind`; otherwise emit it under an
     /// `ERROR` node AND push an [`diag::ParseDiagnostic::ExpectedToken`] into
-    /// the parser's queue. The diagnostic is drained into the public
-    /// `Diagnostic` accumulator by the wrapping [`parse`] Salsa query.
+    /// the parser's queue. The diagnostic is drained into
+    /// [`Cst::diagnostics`] by the wrapping [`parse`] Salsa query.
     ///
     /// Prefer [`recover::expect_or_recover`] with an explicit anchor set: the
     /// recovery cascade is local to the caller, while this `expect` consumes
@@ -361,8 +361,8 @@ impl Parser {
     }
 
     /// Append a `ParseDiagnostic` to the parser's internal queue. Drained
-    /// by the wrapping Salsa `parse()` query (see `parse` above) into the
-    /// public `Diagnostic` accumulator after CST construction.
+    /// by the wrapping Salsa `parse()` query (see `parse` above) into
+    /// [`Cst::diagnostics`] after CST construction.
     pub(crate) fn push_diagnostic(&mut self, d: ParseDiagnostic) {
         self.diagnostics.push(d);
     }

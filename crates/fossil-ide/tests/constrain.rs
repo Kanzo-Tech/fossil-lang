@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{Diagnostic, FossilDb, SourceFile, System};
+use fossil_base::{FossilDb, SourceFile, System};
 use fossil_ide::constrain::{
     Document, SourceVocabulary, TypeVocabulary, Vocabulary, mapping_grammar, prelude,
 };
@@ -89,8 +89,8 @@ fn syntax_errors(program: &str) -> Vec<String> {
     let system: Arc<dyn System> = Arc::new(NativeSystem::default());
     let db = FossilDb::new(system);
     let file = SourceFile::new(&db, program.to_string(), "sampled.fossil".to_string());
-    parse(&db, file);
-    parse::accumulated::<Diagnostic>(&db, file)
+    parse(&db, file)
+        .diagnostics(&db)
         .iter()
         .map(|d| format!("{d:?}"))
         .collect()

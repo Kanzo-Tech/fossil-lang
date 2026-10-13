@@ -48,7 +48,7 @@ pub struct SourceFile {
 /// `PartialEq` on every write to decide whether anything actually changed, and
 /// it is small. Ordering it also means a future consumer that iterates gets the
 /// file order rather than the process's hash seed — the failure
-/// `crates/fossil-shex/examples/declaration_order.rs` already measured once.
+/// `crates/fossil-hir/examples/shex_declaration_order.rs` already measured once.
 #[salsa::input(debug)]
 pub struct FileRegistry {
     #[returns(ref)]

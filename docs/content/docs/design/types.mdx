@@ -28,7 +28,7 @@ graph LR
 fields are the columns of the file, with the types the file has, and every expression in the body is
 synthesised from it. That row type comes from the file itself: one
 `DESCRIBE SELECT * FROM read_csv_auto(…)` per source, run by the host over the sources the def map
-bound and before the check (`crates/fossil-lsp/src/profile.rs, profile_and_register`, over `fossil-profile`'s plan) and cached per source. The programs are small and
+bound and before the check (`fossil-profile`'s plan, [Profile](/docs/design/profile)) and cached per source. The programs are small and
 the sources are large, so it is the only step of a compile that costs real time.
 
 **Backward, from the shape.** `Users : Person from Adults` names the type the body must produce.
@@ -124,7 +124,7 @@ covariance of `Optional` and of `Seq`, and `Integer <: Float`, all in
   [the row algebra](/docs/design/algebra), above any shape and reachable by a program that names no
   shape at all. Typing the whole predicate as `Bool` is the general form, and is [not what to build
   first](/docs/design/discarded).
-- **Which `etag` the descriptor cache uses.** mtime and size from one `stat` today; a host
+- **Which `etag` a host compares before profiling again.** mtime and size from one `stat` today; a host
   with a strong `ETag` writes that instead, and one that cannot cheaply tell writes `""`, which
   reads as *never fresh*. A content hash is ruled out either way: it reads the whole source to
   decide whether to read the source.

@@ -86,22 +86,22 @@
       "x-detail": "\"unexpected character `{character}` — no token starts with it\""
     },
     {
-      "description": "A `@rename` written incompletely; `missing` is the part it lacks.",
+      "description": "A declared type, or a field of one, written without its `@iri`; `name` is the type's or the field's.",
       "properties": {
         "code": {
           "enum": [
-            "syntax/malformed-rename"
+            "syntax/missing-iri"
           ],
           "type": "string"
         },
         "data": {
           "properties": {
-            "missing": {
+            "name": {
               "type": "string"
             }
           },
           "required": [
-            "missing"
+            "name"
           ],
           "type": "object"
         }
@@ -110,9 +110,9 @@
         "code",
         "data"
       ],
-      "title": "A malformed rename",
+      "title": "A declaration without its IRI",
       "type": "object",
-      "x-detail": "\"this `@rename` has no {missing}: a rename is \\\n         `@rename(Type, \\\"<predicate IRI>\\\" as <name>)`\""
+      "x-detail": "\"`{name}` has no `@iri`: a declared type and each of its fields write their IRI\""
     },
     {
       "description": "An attribute written where it does not belong.",
@@ -380,7 +380,7 @@
       "x-detail": "\"`{callee}` calls something that is not a function name; only a catalogued name may be called\""
     },
     {
-      "description": "A shape name no `type { … } := …` binding introduces. `declared` is the names the program does bind.",
+      "description": "A type name nothing in the program introduces — in a mapping header, an edge or a field's `Ref<…>`. `declared` is the names the program does have, declared or imported.",
       "properties": {
         "code": {
           "enum": [
@@ -677,6 +677,104 @@
       "title": "Not a source binding",
       "type": "object",
       "x-detail": "\"{}\", unknown_source(.binding, .bound_to.as_deref())"
+    },
+    {
+      "description": "A field's type that names no type a field can have. `types` is the names a field's type is written in.",
+      "properties": {
+        "code": {
+          "enum": [
+            "name/unknown-type"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "types": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "name",
+            "types"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "Not a type a field can have",
+      "type": "object",
+      "x-detail": "\"`{name}` is not a type a field can have — it is one of {}\",\ncode_list(.types)"
+    },
+    {
+      "description": "A field written twice in one declared type.",
+      "properties": {
+        "code": {
+          "enum": [
+            "name/duplicate-field"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "type_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "type_name"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "A field written twice",
+      "type": "object",
+      "x-detail": "\"`{type_name}` has two fields called `{field}`\""
+    },
+    {
+      "description": "A type name the program introduces twice — declared twice, imported twice, or declared and imported.",
+      "properties": {
+        "code": {
+          "enum": [
+            "name/duplicate-type"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "A type introduced twice",
+      "type": "object",
+      "x-detail": "\"`{name}` is introduced twice, and a type name names one type\""
     },
     {
       "description": "A call given fewer arguments than it requires or more than it takes.",
@@ -1142,6 +1240,39 @@
       "x-detail": "\"the branches of `? :` have different types: {then} and {otherwise}\""
     },
     {
+      "description": "A field's type the shape vocabulary cannot carry — `Option<Seq<T>>`, `Ref<String>`, `Option` alone. `reason` says which rule it breaks.",
+      "properties": {
+        "code": {
+          "enum": [
+            "type/invalid-field-type"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "written": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "written"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "Not a field type",
+      "type": "object",
+      "x-detail": "\"`{written}` is not a field type: {reason}\""
+    },
+    {
       "description": "No shape document where one is needed. `binding` is the binding that names none; absent when the program names none at all.",
       "properties": {
         "code": {
@@ -1349,40 +1480,74 @@
       "x-detail": "\"unresolved shape reference `{reference}` in shape `{shape}`\""
     },
     {
-      "description": "A binding that names more shapes than its document declares; names bind by position, and `position` is the surplus name's.",
+      "description": "An import that names a shape its document does not declare. The name is a shape's local name; `declared` is the ones the document has.",
       "properties": {
         "code": {
           "enum": [
-            "shape/binding-arity"
+            "shape/not-in-document"
           ],
           "type": "string"
         },
         "data": {
           "properties": {
             "declared": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "document": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "declared",
+            "document",
+            "name"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "Not a shape the document declares",
+      "type": "object",
+      "x-detail": "\"`{name}` is not a shape `{document}` declares — it declares {}\",\ncode_list(.declared)"
+    },
+    {
+      "description": "An import of a local name two shapes of its document share. `first` and `second` are their IRIs.",
+      "properties": {
+        "code": {
+          "enum": [
+            "shape/ambiguous-import"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "document": {
+              "type": "string"
+            },
+            "first": {
+              "type": "string"
             },
             "name": {
               "type": "string"
             },
-            "named": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "position": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
+            "second": {
+              "type": "string"
             }
           },
           "required": [
-            "declared",
+            "document",
+            "first",
             "name",
-            "named",
-            "position"
+            "second"
           ],
           "type": "object"
         }
@@ -1391,85 +1556,9 @@
         "code",
         "data"
       ],
-      "title": "More names than shapes",
+      "title": "Two shapes share the imported name",
       "type": "object",
-      "x-detail": "\"the binding names {named} shape(s) and the document declares {declared}, so `{name}`, \\\n         at position {position}, binds nothing\""
-    },
-    {
-      "description": "A `@rename` naming a type its binding does not introduce.",
-      "properties": {
-        "code": {
-          "enum": [
-            "shape/rename-unknown-type"
-          ],
-          "type": "string"
-        },
-        "data": {
-          "properties": {
-            "introduced": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "shape": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "introduced",
-            "shape"
-          ],
-          "type": "object"
-        }
-      },
-      "required": [
-        "code",
-        "data"
-      ],
-      "title": "A rename of a type the binding does not introduce",
-      "type": "object",
-      "x-detail": "\"`@rename` names `{shape}`, which this `type` binding does not introduce\""
-    },
-    {
-      "description": "A `@rename` naming a predicate its shape does not declare.",
-      "properties": {
-        "code": {
-          "enum": [
-            "shape/rename-unknown-predicate"
-          ],
-          "type": "string"
-        },
-        "data": {
-          "properties": {
-            "declared": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "predicate": {
-              "type": "string"
-            },
-            "shape": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "declared",
-            "predicate",
-            "shape"
-          ],
-          "type": "object"
-        }
-      },
-      "required": [
-        "code",
-        "data"
-      ],
-      "title": "A rename of a predicate the shape does not declare",
-      "type": "object",
-      "x-detail": "\"`{shape}` declares no predicate `{predicate}`, so this rename never fires\""
+      "x-detail": "\"`{name}` names two shapes of `{document}`: `{first}` and `{second}`\""
     },
     {
       "description": "A program whose sources declare two different output shapes; one program writes one.",
@@ -2039,46 +2128,6 @@
       "title": "Not a relation verb",
       "type": "object",
       "x-detail": "\"`{verb}` is not a relation verb; the catalogue has {}\", code_list(.verbs)"
-    },
-    {
-      "description": "A verb the catalogue declares and the lowering does not implement yet.",
-      "properties": {
-        "code": {
-          "enum": [
-            "pipeline/unimplemented-verb"
-          ],
-          "type": "string"
-        },
-        "data": {
-          "properties": {
-            "implemented": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "pipeline": {
-              "type": "string"
-            },
-            "verb": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "implemented",
-            "pipeline",
-            "verb"
-          ],
-          "type": "object"
-        }
-      },
-      "required": [
-        "code",
-        "data"
-      ],
-      "title": "A verb with no lowering yet",
-      "type": "object",
-      "x-detail": "\"`{verb}` is a relation verb the lowering does not implement yet, so `{pipeline}` \\\n         cannot compile; implemented today: {}\",\ncode_list(.implemented)"
     },
     {
       "description": "A stage missing a position it needs (`missing`), or given more than it takes (`missing` absent).",

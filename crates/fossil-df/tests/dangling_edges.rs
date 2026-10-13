@@ -79,12 +79,9 @@ async fn run(program: &str) -> fossil_df::Graph {
         &ctx,
         &db,
         file,
-        &fossil_df::OutputDescriptorKind::Lowered(
-            fossil_shex::ShExDescriptor::from_shex_source(GRAPH_SHEX)
-                .expect("parse graph.shex")
-                .to_graph_schema(&fossil_graph_schema::Renames::default()),
-        ),
-        &std::collections::HashMap::new(),
+        &fossil_hir::shex::ShExDescriptor::from_shex_source(GRAPH_SHEX)
+            .expect("parse graph.shex")
+            .to_graph_schema(),
     )
     .await
     .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)))

@@ -1,0 +1,45 @@
+PROGRAM
+  TYPE_DECL
+    IRI_ATTR
+      AT_ATTR "@iri"
+      LPAREN "("
+      STRING "\"https://example.org/Doc\""
+      RPAREN ")"
+    IDENT "type"
+    IDENT "Doc"
+    FIELD
+      IRI_ATTR
+        AT_ATTR "@iri"
+        LPAREN "("
+        STRING "\"https://example.org/tags\""
+        RPAREN ")"
+      IDENT "tags"
+      SHAPE_SEP ":"
+      TYPE_EXPR
+        IDENT "Option"
+        LT "<"
+        TYPE_EXPR
+          IDENT "Seq"
+          LT "<"
+          TYPE_EXPR
+            IDENT "String"
+          GT ">"
+        GT ">"
+    FIELD
+      IRI_ATTR
+        AT_ATTR "@iri"
+        LPAREN "("
+        STRING "\"https://example.org/related\""
+        RPAREN ")"
+      IDENT "related"
+      SHAPE_SEP ":"
+      TYPE_EXPR
+        IDENT "Seq"
+        LT "<"
+        TYPE_EXPR
+          IDENT "Ref"
+          LT "<"
+          TYPE_EXPR
+            IDENT "Doc"
+          GT ">"
+        GT ">"

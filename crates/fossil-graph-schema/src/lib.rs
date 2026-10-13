@@ -57,14 +57,16 @@ pub mod span;
 
 pub use problem::{CODES, Failure, Foreign, Problem, Related, Severity, TEMPLATES};
 pub use shapes::{
-    Occurs, OutputShapes, PropertyConstraint, Rejection, Renames, SUBJECT_COLUMN, Shape,
-    local_name, short_name,
+    Occurs, OutputShapes, PropertyConstraint, Rejection, SUBJECT_COLUMN, Shape, local_name,
 };
 pub use span::Span;
 
 /// A whole graph's schema: its node types and edge types. The single contract
 /// shared by the producer, every materializer, and the consumer.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// The empty schema types nothing, so every predicate stays a vertex property:
+/// what a program that names no output shape is run against.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GraphSchema {
     pub nodes: Vec<NodeType>,
     pub edges: Vec<EdgeType>,
@@ -199,6 +201,28 @@ impl std::fmt::Display for Primitive {
 }
 
 impl Primitive {
+    /// The lattice, in declaration order — what a declared field's type is
+    /// read against ([`Self::from_name`]).
+    pub const ALL: [Self; 9] = [
+        Self::String,
+        Self::Integer,
+        Self::Float,
+        Self::Bool,
+        Self::Date,
+        Self::DateTime,
+        Self::Time,
+        Self::GYear,
+        Self::AnyUri,
+    ];
+
+    /// The primitive a program writes as `name` — `String`, `GYear`, `AnyUri`:
+    /// the name [`Display`](std::fmt::Display) prints, so a type is read in the
+    /// words the checker prints it in.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|p| p.to_string() == name)
+    }
+
     /// Parse an XSD datatype IRI into the lattice. Accepts all three spellings
     /// the tree carries: the full `http://www.w3.org/2001/XMLSchema#<name>` IRI,
     /// the `xsd:<name>` prefixed form, and the bare local name.
@@ -465,21 +489,25 @@ mod tests {
     /// directions are inverses, not two tables that happen to agree today.
     #[test]
     fn to_xsd_iri_round_trips_every_variant() {
-        let all = [
-            Primitive::String,
-            Primitive::Integer,
-            Primitive::Float,
-            Primitive::Bool,
-            Primitive::Date,
-            Primitive::DateTime,
-            Primitive::Time,
-            Primitive::GYear,
-            Primitive::AnyUri,
-        ];
-        assert_eq!(all.len(), 9, "the lattice is nine wide");
-        for p in all {
+        for p in Primitive::ALL {
             assert_eq!(Primitive::from_xsd_iri(p.to_xsd_iri()), Some(p), "{p:?}");
         }
+    }
+
+    /// A program names a primitive as the checker prints it, and every variant
+    /// reads back from that name — `ALL` is the whole lattice, not a list that
+    /// happens to agree with the enum today.
+    #[test]
+    fn from_name_reads_back_every_printed_name() {
+        for p in Primitive::ALL {
+            assert_eq!(Primitive::from_name(&p.to_string()), Some(p), "{p:?}");
+        }
+        assert_eq!(
+            Primitive::from_name("string"),
+            None,
+            "the name is case-sensitive"
+        );
+        assert_eq!(Primitive::from_name("Option"), None);
     }
 
     #[test]

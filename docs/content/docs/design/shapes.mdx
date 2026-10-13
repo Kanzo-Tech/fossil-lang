@@ -3,8 +3,10 @@ title: Inference from shapes
 description: A shape document is a constraint table, a constraint table is a target type, and so a mapping is checked against the shape before the graph exists rather than validated after it does.
 ---
 
-The type of a fossil program's *output* is not written in the program. It is read out of an RDF shape
-document — ShEx or SHACL — that describes the graph you intend to produce.
+The type of a fossil program's *output* is read out of an RDF shape document — ShEx or SHACL — that
+describes the graph you intend to produce, or [declared in the program](/docs/design/declared) when
+the vocabulary is the program's own. This page is about the first; the second lowers to the same
+table, and the checker never learns which it got.
 
 <Program src="shop/shop.shex" region="person" title="shop.shex" />
 
@@ -14,7 +16,7 @@ the target type of every mapping that claims to produce that class.
 
 <Program src="shop/shop.fossil" region="shapes" title="shop.fossil" />
 
-The binding pulls shapes out of the document and gives them local names. From that line on, `Person`
+The binding pulls shapes out of the document by their local names. From that line on, `Person`
 is a type the checker knows as thoroughly as the type a [provider](/docs/design/type-providers)
 generated for a CSV — same status, opposite end of the program.
 
@@ -86,12 +88,14 @@ Universidad de Oviedo — a dependency on a specification's authors, not on a co
 a shape *means* has a normative answer, and re-deriving it from the specification text is how
 implementations drift from each other.
 
-## The cost of binding by position
+## Binding by name
 
-Shapes bind to local names in the order the document declares them, not by matching names, which is
-what lets one program read two documents with unrelated vocabularies. It also means reordering the
-shapes inside a document rebinds the program — acceptable because shape documents are files you
-version and review, but a real edge, and the sort discovered on the day somebody tidies one up.
+An import names each shape by its local name, the last segment of its IRI — the rule a property's
+name already follows — and `as` renames it in the program, which is what lets one program read two
+documents whose vocabularies share a word. It bound by position once, the Nth name to the Nth shape,
+and reordering the shapes inside a document rebound the program; that cost, and why it went, are
+[Types declared in the program](/docs/design/declared)'s.
 
-Naming a document is also what gives a program its property names, so the output type is not optional
-the way an annotation is: a program with no document has no way to spell a property at all.
+A type is also what gives a program its property names, so the output type is not optional the way
+an annotation is: a program with no type, imported or declared, has no way to spell a property at
+all.

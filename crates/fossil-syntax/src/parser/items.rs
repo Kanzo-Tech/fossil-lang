@@ -15,12 +15,18 @@
 //! ```text
 //! Program             := TopLevel* EOF                     — as specified
 //! TopLevel            := SourceDef | MultiSourceDef
-//!                      | TypeDef | Mapping                 — as specified
-//! TypeDef             := RenameAttr* 'type' LBRACE IDENT (COMMA IDENT)* RBRACE
+//!                      | TypeDef | TypeDecl | Mapping      — as specified
+//! MultiSourceDef      := LBRACE ImportMember (COMMA ImportMember)* RBRACE
 //!                        DEFINE Expression                 — as specified
-//! RenameAttr          := AT_ATTR LPAREN IDENT (COMMA Rename)+ RPAREN
+//! TypeDef             := 'type' LBRACE ImportMember (COMMA ImportMember)* RBRACE
+//!                        DEFINE Expression                 — as specified
+//! ImportMember        := IDENT ('as' IDENT)?               — as specified
+//! TypeDecl            := IriAttr 'type' IDENT NEWLINE INDENT Field+ DEDENT
 //!                                                          — as specified
-//! Rename              := STRING 'as' IDENT                 — as specified
+//! Field               := IriAttr IDENT SHAPE_SEP TypeExpr NEWLINE
+//!                                                          — as specified
+//! IriAttr             := AT_ATTR LPAREN STRING RPAREN      — as specified
+//! TypeExpr            := IDENT (LT TypeExpr GT)?           — as specified
 //! Mapping             := MappingHeader NEWLINE INDENT MappingBody DEDENT
 //! MappingHeader       := IDENT SHAPE_SEP ShapeExpr 'from' Expression
 //! ShapeExpr           := IDENT                             — as specified
@@ -77,19 +83,23 @@
 //!    existed only to keep `a : b` out of a ternary.
 //! (Rule 4 was `<<` vs `<`, and it is gone with the triple term. With `ABS_IRI`
 //! gone, `<` no longer even opens.)
-//! 5. `type` at top level: `type {` is a `TypeDef`, `type :=` a `SourceDef`
-//!    binding the name `type`, `type :` a mapping called `type`. One token of
-//!    lookahead, in [`parse_program`], and the word stays a column name.
-//! 6. `@rename` vs `@subject`: both lex as `AT_ATTR` and POSITION decides.
-//!    [`parse_rename_attr`] takes the top-level position — reached because
-//!    `TypeDef := RenameAttr* 'type' …` puts `AT_ATTR` in that production's
-//!    FIRST set — and [`parse_subject_assign`] takes the body position, which
-//!    is reachable only through an `INDENT`. Each checks the NAME and refuses
-//!    the other's, so neither is valid in the other's position and no third
-//!    name is valid anywhere.
-//! 7. `as`, contextual in `STRING as IDENT` (inside `@rename`, [`parse_rename`])
-//!    and `IDENT as IDENT` (the self-join alias,
-//!    `super::expr::parse_arg`). One token of lookahead settles both: an
+//! 5. `type` at top level: `type {` is a `TypeDef`, `type IDENT` a
+//!    `TypeDecl`, `type :=` a `SourceDef` binding the name `type`, `type :` a
+//!    mapping called `type`. One token of lookahead, in [`parse_program`], and
+//!    the word stays a column name.
+//! 6. `@iri` vs `@subject`: both lex as `AT_ATTR` and POSITION decides.
+//!    [`parse_iri_attr`] takes the top-level position — `TypeDecl` starts with
+//!    `AT_ATTR`, and it is that token's only derivation at top level — and the
+//!    start of a line in a declaration's body; [`parse_subject_assign`] takes
+//!    the first line of a mapping body. Both bodies are reachable only through
+//!    an `INDENT`, and the item above each says which one it is. Any other
+//!    name at top level is refused by [`parse_program`] and in a declaration
+//!    by [`parse_iri_attr`]; `fossil_hir` refuses one in a mapping body. So
+//!    neither is valid in the other's position and no third name is valid
+//!    anywhere.
+//! 7. `as`, contextual in `IDENT as IDENT` twice: an import member
+//!    ([`parse_import_member`]) and the self-join alias
+//!    (`super::expr::parse_arg`). One token of lookahead settles both: an
 //!    operand followed by a bare `IDENT`, which no expression can continue
 //!    because the language has no juxtaposition. Everywhere else `as` is an
 //!    ordinary identifier and lexes as one.
@@ -118,23 +128,36 @@ pub(crate) fn parse_program(p: &mut Parser) {
         }
         match p.current() {
             None => break,
-            // `@rename(Person, "…" as foaf_name)` above a `type` binding.
-            //
-            // `TypeDef := RenameAttr* 'type' …` (grammar.bnf, TypeDef), so this
-            // is not a `TopLevel` alternative of its own: `TopLevel := … |
-            // TypeDef | …` already derives it, and what a `RenameAttr*` prefix
-            // changed is the FIRST set — `TypeDef` now starts with `AT_ATTR` as
-            // well as with the contextual `type`. Hence two entries into one
-            // function rather than a fifth item.
-            //
-            // LL(1) survives it because `AT_ATTR` has exactly ONE derivation
-            // here: `SubjectAssign` lives inside a mapping body, which is
-            // reached only through `INDENT`. That is disambiguation rule 6
-            // (grammar.bnf, § DISAMBIGUATION RULES) — both names lex as
-            // `AT_ATTR` and POSITION decides — and `parse_rename_attr` is where
-            // the position is
-            // enforced, by name, in both directions.
-            Some(SyntaxKind::AT_ATTR) => parse_type_def(p),
+            // `@iri("…")` above a `type` declaration. LL(1) survives it because
+            // `AT_ATTR` has exactly ONE derivation here: `SubjectAssign` and a
+            // field's `IriAttr` live inside a body, which is reached only
+            // through `INDENT` (disambiguation rule 6). Any other name, and an
+            // `@iri` above an import, is consumed whole and refused, so the
+            // item under it still parses as what it is.
+            Some(SyntaxKind::AT_ATTR) if p.current_text() != Some(crate::attr::IRI) => {
+                let found = p.current_text().unwrap_or("@").to_string();
+                parse_misplaced_attr(
+                    p,
+                    found,
+                    "at the top level",
+                    "the attribute at the top level is `@iri(\"…\")`, above a `type` \
+                     declaration. `@subject = <expr>` is the first line of a MAPPING BODY — it \
+                     assigns the identity of the rows a mapping writes, and outside one there are \
+                     no rows.",
+                );
+            }
+            Some(SyntaxKind::AT_ATTR)
+                if p.peek_text(4) == Some("type") && p.peek_kind(5) == Some(SyntaxKind::LBRACE) =>
+            {
+                parse_misplaced_attr(
+                    p,
+                    crate::attr::IRI.to_string(),
+                    "above a `type` import",
+                    "an imported type takes its IRI from the document that declares it. `@iri` \
+                     names the IRI of a type DECLARED under it, `type <Name>` and its fields.",
+                );
+            }
+            Some(SyntaxKind::AT_ATTR) => parse_type_decl(p),
             // `{ A, B, ... } := io.rdf(...)` — a destructuring source def. A
             // top-level `{` is the only `{` there is now: the selective-import
             // brace went with `use`, and the record and annotation braces went
@@ -153,6 +176,13 @@ pub(crate) fn parse_program(p: &mut Parser) {
                 // `rdf:type` is the commonest predicate there is.
                 Some(SyntaxKind::LBRACE) if p.current_text() == Some("type") => {
                     parse_type_def(p);
+                }
+                // `type Person` → a declaration whose `@iri` is missing. No
+                // other item puts two `IDENT`s side by side, so it is parsed as
+                // one and refused for the line it lacks, rather than recovered
+                // past as `unexpected token`.
+                Some(SyntaxKind::IDENT) if p.current_text() == Some("type") => {
+                    parse_type_decl(p);
                 }
                 // Always make progress on a token we don't know what to do
                 // with at the program level — `bump_as_error` emits a single
@@ -193,38 +223,16 @@ fn parse_source_def(p: &mut Parser) {
 
 // ───────────────────────────────────────────────────────────────────────
 // MultiSourceDef (destructuring source): `{ A, B, ... } := io.rdf(...)`
-//   MultiSourceDef := LBRACE IDENT (COMMA IDENT)* RBRACE DEFINE Expression
+//   MultiSourceDef := LBRACE ImportMember (COMMA ImportMember)* RBRACE
+//                     DEFINE Expression
 //
-// Each IDENT in the brace list names a member bound to the single source on
-// the right of `:=` (the local-name of a shape declared in the source's
-// schema). The brace/comma loop is shared with `parse_type_def`; the `:= expr`
-// tail mirrors `parse_source_def`.
+// Each member names a shape declared in the source's schema, bound to the
+// single source on the right of `:=`. The member list is `TypeDef`'s, by the
+// grammar's own word: the two must not drift apart.
 // ───────────────────────────────────────────────────────────────────────
 fn parse_multi_source_def(p: &mut Parser) {
     p.start(SyntaxKind::MULTI_SOURCE_DEF);
-    p.bump(); // LBRACE
-    recover::expect_or_recover(
-        p,
-        SyntaxKind::IDENT,
-        &[SyntaxKind::COMMA, SyntaxKind::RBRACE],
-    );
-    loop {
-        p.skip_trivia();
-        if p.current() != Some(SyntaxKind::COMMA) {
-            break;
-        }
-        p.bump(); // COMMA
-        p.skip_trivia();
-        if p.current() == Some(SyntaxKind::RBRACE) {
-            break; // trailing comma allowed
-        }
-        recover::expect_or_recover(
-            p,
-            SyntaxKind::IDENT,
-            &[SyntaxKind::COMMA, SyntaxKind::RBRACE],
-        );
-    }
-    recover::expect_or_recover(p, SyntaxKind::RBRACE, TOP_LEVEL_ANCHORS);
+    parse_import_members(p);
     p.skip_trivia();
     recover::expect_or_recover(p, SyntaxKind::DEFINE, TOP_LEVEL_ANCHORS);
     p.parse_expr();
@@ -232,68 +240,30 @@ fn parse_multi_source_def(p: &mut Parser) {
 }
 
 // ───────────────────────────────────────────────────────────────────────
-// TypeDef (type binding): `type { Person, City } := io.shex("s.shex")`
-//   TypeDef := RenameAttr* 'type' LBRACE IDENT (COMMA IDENT)* RBRACE
+// TypeDef (type import): `type { Place as City } := io.shex("places.shex")`
+//   TypeDef := 'type' LBRACE ImportMember (COMMA ImportMember)* RBRACE
 //              DEFINE Expression
-//
-// The same destructuring as `MultiSourceDef`, in type position — one catalogue
-// (`io.*`) and ONE binder. The brace list is byte-for-byte the loop above; the
-// differences are the leading contextual `type` and the `RenameAttr*` prefix.
 //
 // `:=` and not `=` (grammar.bnf, DEFINE): `:=` BINDS A NAME and `=` ASSIGNS A
 // VALUE, and what is being bound is read off the left-hand side, not off the
 // glyph. Every `=` in the grammar is an assignment — a body property,
 // `@subject`, a named argument.
-//
-// TWO ENTRY POINTS, ONE FUNCTION. `parse_program` reaches this on `AT_ATTR` and
-// on the contextual `type` alike, and neither is allowed to assume the other's
-// lookahead — so the `type` and the `{` are CHECKED here rather than bumped on
-// the caller's word.
 // ───────────────────────────────────────────────────────────────────────
 fn parse_type_def(p: &mut Parser) {
     p.start(SyntaxKind::TYPE_DEF);
-    // `RenameAttr*` — zero or more, each on its own line above the binding.
-    // The grammar's `*` is the permissive reading, and it is the DECIDED one:
-    // open question 1 was settled on 2026-08-12 (grammar.bnf, § OPEN) in favour
-    // of `RenameAttr*` with `(COMMA Rename)+`, on the argument that the
-    // alternative is a LIMIT and a limit needs a reason. Refusing a second one
-    // would be a ruling made by a parser, which is the inversion
-    // `grammar.bnf`'s own header forbids.
-    loop {
-        p.skip_trivia();
-        if p.current() != Some(SyntaxKind::AT_ATTR) {
-            break;
-        }
-        parse_rename_attr(p);
-    }
+    p.bump(); // the contextual `type`, checked by `parse_program`'s lookahead
+    parse_import_members(p);
     p.skip_trivia();
-    // The contextual `type`. Checked by TEXT, because it is an ordinary
-    // identifier — that is the whole of disambiguation rule 5, and it is what
-    // keeps `type` usable as a column name in a language whose commonest
-    // predicate is `rdf:type`.
-    if p.current() == Some(SyntaxKind::IDENT) && p.current_text() == Some("type") {
-        p.bump();
-    } else {
-        malformed(
-            p,
-            Problem::MisplacedAttribute {
-                attribute: crate::attr::RENAME.to_string(),
-                place: "anywhere but above a `type` binding".to_string(),
-            },
-            "`@rename` renames a predicate of ONE type binding, so a `type { … } := …` has to \
-             follow it. It goes in the program and not in the `.shex` because the vocabulary may \
-             not be yours.",
-        );
-        p.finish();
-        return;
-    }
-    p.skip_trivia();
+    recover::expect_or_recover(p, SyntaxKind::DEFINE, TOP_LEVEL_ANCHORS);
+    p.parse_expr();
+    p.finish();
+}
+
+/// `LBRACE ImportMember (COMMA ImportMember)* RBRACE` — the member list both
+/// destructurings share. A trailing comma is allowed.
+fn parse_import_members(p: &mut Parser) {
     recover::expect_or_recover(p, SyntaxKind::LBRACE, TOP_LEVEL_ANCHORS);
-    recover::expect_or_recover(
-        p,
-        SyntaxKind::IDENT,
-        &[SyntaxKind::COMMA, SyntaxKind::RBRACE],
-    );
+    parse_import_member(p);
     loop {
         p.skip_trivia();
         if p.current() != Some(SyntaxKind::COMMA) {
@@ -302,19 +272,260 @@ fn parse_type_def(p: &mut Parser) {
         p.bump(); // COMMA
         p.skip_trivia();
         if p.current() == Some(SyntaxKind::RBRACE) {
-            break; // trailing comma allowed
+            break;
         }
-        recover::expect_or_recover(
-            p,
-            SyntaxKind::IDENT,
-            &[SyntaxKind::COMMA, SyntaxKind::RBRACE],
-        );
+        parse_import_member(p);
     }
     recover::expect_or_recover(p, SyntaxKind::RBRACE, TOP_LEVEL_ANCHORS);
+}
+
+/// Anchors inside a member list: the separator and the closer. Wider sets would
+/// let a recovery run out of the braces and eat the `:=` after them.
+const MEMBER_ANCHORS: &[SyntaxKind] = &[SyntaxKind::COMMA, SyntaxKind::RBRACE];
+
+// ───────────────────────────────────────────────────────────────────────
+// ImportMember := IDENT ('as' IDENT)?
+//
+// The first IDENT is the LOCAL NAME of a shape the document declares, and the
+// one after `as` is what the program calls it. `as` is checked by TEXT, as the
+// contextual `type` is (disambiguation rule 7): inside a member list nothing
+// else follows a name but `,` or `}`, so an IDENT there can only be `as`.
+// ───────────────────────────────────────────────────────────────────────
+fn parse_import_member(p: &mut Parser) {
     p.skip_trivia();
-    recover::expect_or_recover(p, SyntaxKind::DEFINE, TOP_LEVEL_ANCHORS);
-    p.parse_expr();
+    p.start(SyntaxKind::IMPORT_MEMBER);
+    recover::expect_or_recover(p, SyntaxKind::IDENT, MEMBER_ANCHORS);
+    p.skip_trivia();
+    if p.current() == Some(SyntaxKind::IDENT) && p.current_text() == Some("as") {
+        p.bump();
+        recover::expect_or_recover(p, SyntaxKind::IDENT, MEMBER_ANCHORS);
+    }
     p.finish();
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// TypeDecl := IriAttr 'type' IDENT NEWLINE INDENT Field+ DEDENT
+//
+//   @iri("https://schema.org/Person")
+//   type Person
+//       @iri("https://schema.org/name")  name: String
+//
+// An output type written in the program. The body is indented as a mapping's
+// is, and there is no `=`: a declaration assigns nothing.
+//
+// Reached on `AT_ATTR` and on `type IDENT` alike. The second is a declaration
+// that forgot its IRI, and is parsed whole so the refusal names it.
+// ───────────────────────────────────────────────────────────────────────
+fn parse_type_decl(p: &mut Parser) {
+    p.start(SyntaxKind::TYPE_DECL);
+    if p.current() == Some(SyntaxKind::AT_ATTR) {
+        parse_iri_attr(p);
+    } else {
+        let name = p.peek_text(1).unwrap_or("type").to_string();
+        missing_iri(p, name);
+    }
+    p.skip_trivia();
+    // The contextual `type`, checked by TEXT: it is an ordinary identifier, and
+    // that is what keeps it usable as a column name.
+    if p.current() == Some(SyntaxKind::IDENT) && p.current_text() == Some("type") {
+        p.bump();
+    } else {
+        malformed(
+            p,
+            Problem::MisplacedAttribute {
+                attribute: crate::attr::IRI.to_string(),
+                place: "anywhere but above a `type` declaration".to_string(),
+            },
+            "`@iri` names the IRI of the type declared under it, so `type <Name>` and its \
+             fields have to follow. An imported type takes its IRI from the document.",
+        );
+        p.finish();
+        return;
+    }
+    recover::expect_or_recover(
+        p,
+        SyntaxKind::IDENT,
+        &[SyntaxKind::INDENT, SyntaxKind::IDENT],
+    );
+    p.skip_trivia();
+    if p.current() == Some(SyntaxKind::INDENT) {
+        p.bump();
+        parse_fields(p);
+        p.skip_trivia();
+        if p.current() == Some(SyntaxKind::DEDENT) {
+            p.bump();
+        } else {
+            recover::recover_to(p, TOP_LEVEL_ANCHORS);
+        }
+    } else {
+        // `Field+`: a declaration with no body declares a type with nothing
+        // in it, which no mapping could write.
+        recover::expect_or_recover(p, SyntaxKind::INDENT, TOP_LEVEL_ANCHORS);
+    }
+    p.finish();
+}
+
+/// Anchors inside a declaration's body: the start of the next field — its
+/// `@iri`, or the name of one that forgot it — and the body's end.
+const FIELD_ANCHORS: &[SyntaxKind] = &[SyntaxKind::DEDENT, SyntaxKind::AT_ATTR, SyntaxKind::IDENT];
+
+fn parse_fields(p: &mut Parser) {
+    loop {
+        p.skip_trivia();
+        match p.current() {
+            None | Some(SyntaxKind::DEDENT) => break,
+            Some(SyntaxKind::AT_ATTR | SyntaxKind::IDENT) => parse_field(p),
+            _ => {
+                // The no-progress guard `parse_mapping_body` carries, for the
+                // same reason: an anchor that starts no field must still move.
+                recover::recover_to(p, FIELD_ANCHORS);
+                if !matches!(
+                    p.current(),
+                    None | Some(SyntaxKind::DEDENT | SyntaxKind::AT_ATTR | SyntaxKind::IDENT)
+                ) {
+                    p.bump_as_error();
+                }
+            }
+        }
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// Field := IriAttr IDENT SHAPE_SEP TypeExpr NEWLINE
+//
+// A field with no `@iri` is still parsed whole, so the refusal names it and the
+// next field is not lost to recovery.
+// ───────────────────────────────────────────────────────────────────────
+fn parse_field(p: &mut Parser) {
+    p.start(SyntaxKind::FIELD);
+    if p.current() == Some(SyntaxKind::AT_ATTR) {
+        parse_iri_attr(p);
+    } else {
+        let name = p.current_text().unwrap_or_default().to_string();
+        missing_iri(p, name);
+    }
+    recover::expect_or_recover(p, SyntaxKind::IDENT, FIELD_ANCHORS);
+    recover::expect_or_recover(p, SyntaxKind::SHAPE_SEP, FIELD_ANCHORS);
+    p.skip_trivia();
+    parse_type_expr(p);
+    p.finish();
+}
+
+/// Anchors inside a `TypeExpr`: its closer, and the next field or the body's
+/// end. Not `IDENT`, which is what a type is made of.
+const TYPE_EXPR_ANCHORS: &[SyntaxKind] = &[SyntaxKind::GT, SyntaxKind::DEDENT, SyntaxKind::AT_ATTR];
+
+// ───────────────────────────────────────────────────────────────────────
+// TypeExpr := IDENT (LT TypeExpr GT)?
+//
+// `<` and `>` are LT and GT, and in type position nothing else can follow an
+// IDENT, so they open and close and never compare. Which names take an
+// argument, and which are types at all, is the checker's: `Ref<String>` parses.
+// ───────────────────────────────────────────────────────────────────────
+fn parse_type_expr(p: &mut Parser) {
+    p.start(SyntaxKind::TYPE_EXPR);
+    recover::expect_or_recover(p, SyntaxKind::IDENT, TYPE_EXPR_ANCHORS);
+    // `peek_kind` and not `skip_trivia`: the line break after a field's type
+    // belongs to the body, not to this node.
+    if p.peek_kind(0) == Some(SyntaxKind::LT) {
+        p.skip_trivia();
+        p.bump(); // LT
+        p.skip_trivia();
+        parse_type_expr(p);
+        recover::expect_or_recover(p, SyntaxKind::GT, TYPE_EXPR_ANCHORS);
+    }
+    p.finish();
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// IriAttr := AT_ATTR LPAREN STRING RPAREN
+//
+// The IRI is whole, in a STRING, and constant: there is no base it is resolved
+// against and no prefix it expands through. A string with a hole is not a
+// `STRING` token, so it is refused here as the token it is.
+// ───────────────────────────────────────────────────────────────────────
+fn parse_iri_attr(p: &mut Parser) {
+    p.start(SyntaxKind::IRI_ATTR);
+    // The token is an `AT_ATTR`; the NAME decides which attribute this is
+    // (disambiguation rule 6). `@subject` here is not an unknown name, it is a
+    // known one in the wrong place, and only the parser knows which place. At
+    // top level `parse_program` has already refused every other name, so the
+    // place is a field's.
+    if p.current_text() != Some(crate::attr::IRI) {
+        let found = p.current_text().unwrap_or("@").to_string();
+        malformed(
+            p,
+            Problem::MisplacedAttribute {
+                attribute: found,
+                place: "before a field of a `type` declaration".to_string(),
+            },
+            "the only attribute in this position is `@iri(\"…\")`. `@subject` is the first line \
+             of a MAPPING BODY — it assigns the identity of the rows a mapping writes, and a \
+             declaration writes no rows.",
+        );
+    }
+    p.bump(); // AT_ATTR
+    recover::expect_or_recover(p, SyntaxKind::LPAREN, IRI_ANCHORS);
+    recover::expect_or_recover(p, SyntaxKind::STRING, IRI_ANCHORS);
+    recover::expect_or_recover(p, SyntaxKind::RPAREN, IRI_ANCHORS);
+    p.finish();
+}
+
+/// An attribute in a position that takes none of its kind, refused by name and
+/// consumed whole under an `ERROR` — its `( … )` or its `= <expr>` — so that
+/// recovery does not report the rest of the line a second time.
+fn parse_misplaced_attr(p: &mut Parser, attribute: String, place: &str, help: &str) {
+    p.start(SyntaxKind::ERROR);
+    malformed(
+        p,
+        Problem::MisplacedAttribute {
+            attribute,
+            place: place.to_string(),
+        },
+        help,
+    );
+    p.bump(); // AT_ATTR
+    p.skip_trivia();
+    match p.current() {
+        Some(SyntaxKind::ASSIGN) => {
+            p.bump();
+            p.parse_expr();
+        }
+        Some(SyntaxKind::LPAREN) => loop {
+            match p.current() {
+                None | Some(SyntaxKind::NEWLINE) => break,
+                Some(SyntaxKind::RPAREN) => {
+                    p.bump();
+                    break;
+                }
+                _ => p.bump(),
+            }
+        },
+        _ => {}
+    }
+    p.finish();
+}
+
+/// Anchors inside an `IriAttr`: its closer, and what follows one — the `type`
+/// or the field's name — or the body's edges. Wider sets would let a recovery
+/// run past the line.
+const IRI_ANCHORS: &[SyntaxKind] = &[
+    SyntaxKind::RPAREN,
+    SyntaxKind::IDENT,
+    SyntaxKind::INDENT,
+    SyntaxKind::DEDENT,
+];
+
+/// Report a declaration or a field with no `@iri`, at the token where it should
+/// have begun. Nothing is consumed: the declaration goes on being parsed.
+fn missing_iri(p: &mut Parser, name: String) {
+    malformed(
+        p,
+        Problem::MissingIri { name },
+        "write it above a type and before each field, whole and in a string: \
+         `@iri(\"https://schema.org/name\")`. There is no base it could fall back to and no \
+         prefix it could expand through, so a name nobody wrote never becomes an IRI.",
+    );
 }
 
 /// Push a [`ParseDiagnostic::Malformed`] carrying `problem`, with `help`, at
@@ -331,129 +542,6 @@ fn malformed(p: &mut Parser, problem: Problem, help: &str) {
         help: Some(help.to_string()),
         span: fossil_graph_schema::Span::new(at, at),
     });
-}
-
-// ───────────────────────────────────────────────────────────────────────
-// RenameAttr := AT_ATTR LPAREN IDENT (COMMA Rename)+ RPAREN
-//                                                     (grammar.bnf, RenameAttr)
-//
-//   @rename(Person, "http://xmlns.com/foaf/0.1/name" as foaf_name)
-//   type { Person } := io.shex("mixed.shex")
-//
-// The repair for two predicates whose last IRI segments coincide, in the shape
-// of Prisma's `@map`: all constants, above the declaration, in the PROGRAM
-// rather than in the `.shex` because the vocabulary may not be yours.
-//
-// Two predicates that collide make BOTH unwritable, and fossil never picks
-// between them — the evidence is FSharp.Data's own (PLDI 2016 §6.5): its
-// numeric-suffix collision scheme and its singulariser renamed members across a
-// minor version and broke a program in production. So the repair is the
-// author's, and it is what `check.rs`'s collision diagnostic has been telling
-// people to write since before it parsed.
-//
-// The `IDENT` is one of the names the binding BELOW introduces; that it is one
-// of them is not checked here, because the parser cannot see whether a name is
-// bound. `fossil_hir::lower` checks it, against the same node, with a real span.
-// ───────────────────────────────────────────────────────────────────────
-fn parse_rename_attr(p: &mut Parser) {
-    p.start(SyntaxKind::RENAME_ATTR);
-    // The token is an `AT_ATTR`; the NAME is what decides which of the two
-    // attributes this is (disambiguation rule 6). Checking it here rather than
-    // in the HIR is deliberate: `@subject` in this position is not an unknown
-    // name, it is a known one in the wrong place, and only the parser knows
-    // which place this is.
-    if p.current_text() != Some(crate::attr::RENAME) {
-        let found = p.current_text().unwrap_or("@").to_string();
-        malformed(
-            p,
-            Problem::MisplacedAttribute {
-                attribute: found,
-                place: "above a `type` binding".to_string(),
-            },
-            "the only attribute in this position is `@rename`. `@subject` is the first line of \
-             a MAPPING BODY — it assigns the identity of the rows a mapping writes, and above a \
-             type binding there are no rows yet.",
-        );
-    }
-    p.bump(); // AT_ATTR
-    recover::expect_or_recover(p, SyntaxKind::LPAREN, RENAME_ANCHORS);
-    recover::expect_or_recover(p, SyntaxKind::IDENT, RENAME_ANCHORS);
-    // `(COMMA Rename)+` — at least one. A `@rename(Person)` renames nothing,
-    // and the `+` in the grammar says so; an empty attribute would be a line
-    // that looks like a repair and is not one.
-    let mut renames = 0usize;
-    loop {
-        p.skip_trivia();
-        if p.current() != Some(SyntaxKind::COMMA) {
-            break;
-        }
-        p.bump(); // COMMA
-        p.skip_trivia();
-        if p.current() == Some(SyntaxKind::RPAREN) {
-            break; // trailing comma
-        }
-        parse_rename(p);
-        renames += 1;
-    }
-    if renames == 0 {
-        malformed(
-            p,
-            Problem::MalformedRename {
-                missing: "`\"<predicate IRI>\" as <name>`".to_string(),
-            },
-            "`@rename` needs at least one: it names the type whose predicate is being renamed, \
-             and then what to call it.",
-        );
-    }
-    recover::expect_or_recover(p, SyntaxKind::RPAREN, TOP_LEVEL_ANCHORS);
-    p.finish();
-}
-
-/// Anchors inside a `RenameAttr` — the two tokens that mean «the next part of
-/// this attribute» and the one that closes it. `TOP_LEVEL_ANCHORS` would let a
-/// recovery run out of the parentheses and eat the `type` line below.
-const RENAME_ANCHORS: &[SyntaxKind] = &[
-    SyntaxKind::COMMA,
-    SyntaxKind::STRING,
-    SyntaxKind::RPAREN,
-    SyntaxKind::IDENT,
-];
-
-// ───────────────────────────────────────────────────────────────────────
-// Rename := STRING 'as' IDENT                            (grammar.bnf, Rename)
-//
-// The first of the two places `as` survives, and one of the two that keep it
-// CONTEXTUAL rather than reserved — disambiguation rule 7
-// (grammar.bnf, § DISAMBIGUATION RULES). One token of
-// lookahead settles it: after a STRING operand comes a bare IDENT, and no
-// expression can continue that way — there is no juxtaposition in this
-// language, so `"…" as x` has exactly one reading and `as` stays an ordinary
-// identifier everywhere else.
-//
-// The predicate is a full IRI in a STRING and never a bare name: the whole
-// point of the attribute is that the two colliding predicates differ only
-// BEFORE their last segment, so the last segment cannot identify either.
-// ───────────────────────────────────────────────────────────────────────
-fn parse_rename(p: &mut Parser) {
-    p.start(SyntaxKind::RENAME);
-    recover::expect_or_recover(p, SyntaxKind::STRING, RENAME_ANCHORS);
-    p.skip_trivia();
-    // `as` — an IDENT whose text is `as`, checked exactly as the contextual
-    // `type` is. It is NOT a keyword: the lexer hands it back as an ordinary
-    // identifier and a column called `as` still parses everywhere else.
-    if p.current() == Some(SyntaxKind::IDENT) && p.current_text() == Some("as") {
-        p.bump();
-    } else {
-        malformed(
-            p,
-            Problem::MalformedRename {
-                missing: "`as`".to_string(),
-            },
-            "the `as` is what separates the predicate from the name you want to write instead.",
-        );
-    }
-    recover::expect_or_recover(p, SyntaxKind::IDENT, RENAME_ANCHORS);
-    p.finish();
 }
 
 // ───────────────────────────────────────────────────────────────────────
@@ -661,6 +749,7 @@ fn parse_property_lhs(p: &mut Parser) {
 #[cfg(test)]
 mod disambiguation {
     use crate::SyntaxKind;
+    use crate::ast::{Field, ImportMember, TypeDecl, TypeExpr};
     use crate::indent::lex_with_indents;
     use crate::kind::SyntaxNode;
     use fossil_graph_schema::Problem;
@@ -865,82 +954,182 @@ mod disambiguation {
         );
     }
 
-    // ── RULE 6 — `@rename` vs `@subject`, by POSITION ─────────────────
+    // ── RULE 6 — `@iri` vs `@subject`, by POSITION ────────────────────
 
-    /// The `@rename` repair for two colliding predicates, spelled out. It is
-    /// the one thing the collision
-    /// diagnostic in `fossil_hir::check` has been telling authors to write, and
-    /// until this production existed that recommendation did not parse.
+    /// The declaration `/docs/design/declared` opens with: two fields whose
+    /// IRIs end alike, an `Option`, a `Ref`, and a `Seq` — each field one
+    /// `FIELD` with its own `IRI_ATTR`, and the type's `IRI_ATTR` a child of
+    /// the declaration rather than a sibling of it.
     #[test]
-    fn rule6_rename_above_a_type_binding_parses() {
-        let src = "@rename(Person, \"http://xmlns.com/foaf/0.1/name\" as foaf_name)\n\
-                   type { Person } := io.shex(\"mixed.shex\")\n";
-        let root = parse_str(src);
-        let type_def = find_first_kind(&root, SyntaxKind::TYPE_DEF).expect("a TYPE_DEF");
-        assert!(
-            descendant_kind_exists(&type_def, SyntaxKind::RENAME_ATTR),
-            "`RenameAttr*` is part of `TypeDef`, so the attribute is a CHILD of \
-             the binding and not a sibling — that is what scopes a rename to one \
-             binding rather than to the file",
-        );
-        assert!(
-            descendant_kind_exists(&type_def, SyntaxKind::RENAME),
-            "and each `\"…\" as name` is its own node",
-        );
+    fn rule6_iri_above_a_type_and_before_each_field_parses() {
+        let src = "@iri(\"https://schema.org/Person\")\n\
+                   type Person\n    \
+                   @iri(\"https://schema.org/name\")          name: String\n    \
+                   @iri(\"https://shop.example/vocab/name\")  handle: String\n    \
+                   @iri(\"https://schema.org/birthDate\")     born: Option<Date>\n    \
+                   @iri(\"https://schema.org/homeLocation\")  livesIn: Ref<City>\n    \
+                   @iri(\"https://schema.org/knowsAbout\")    topics: Seq<String>\n";
         assert!(messages(src).is_empty(), "got {:?}", messages(src));
+        let root = parse_str(src);
+        let decl = find_first_kind(&root, SyntaxKind::TYPE_DECL)
+            .and_then(TypeDecl::cast)
+            .expect("a TYPE_DECL");
+        assert_eq!(decl.name().as_deref(), Some("Person"));
+        assert_eq!(
+            decl.iri_attr().and_then(|a| a.iri()).as_deref(),
+            Some("https://schema.org/Person"),
+            "the type's `@iri` belongs to the declaration it names",
+        );
+        let fields: Vec<(String, String)> = decl
+            .fields()
+            .map(|f| {
+                (
+                    f.name().unwrap_or_default().to_string(),
+                    f.iri_attr()
+                        .and_then(|a| a.iri())
+                        .unwrap_or_default()
+                        .to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            fields,
+            [
+                ("name", "https://schema.org/name"),
+                ("handle", "https://shop.example/vocab/name"),
+                ("born", "https://schema.org/birthDate"),
+                ("livesIn", "https://schema.org/homeLocation"),
+                ("topics", "https://schema.org/knowsAbout"),
+            ]
+            .map(|(n, i)| (n.to_string(), i.to_string())),
+            "every field carries its own `@iri`, and two that end alike are two fields",
+        );
     }
 
-    /// `RenameAttr*` — more than one, which is how open question 1 was decided
-    /// on 2026-08-12 (grammar.bnf, § OPEN) and is what the `*` says.
+    /// `Option<Seq<String>>`: the argument of a `TYPE_EXPR` is a `TYPE_EXPR`,
+    /// and `>>` closes two because it is two `GT` tokens — there is no `>>`.
     #[test]
-    fn rule6_two_renames_and_two_attributes_both_parse() {
-        let src = "@rename(Person, \"http://a/name\" as a_name, \"http://b/name\" as b_name)\n\
-                   @rename(City, \"http://a/label\" as a_label)\n\
-                   type { Person, City } := io.shex(\"m.shex\")\n";
-        let root = parse_str(src);
-        let type_def = find_first_kind(&root, SyntaxKind::TYPE_DEF).expect("a TYPE_DEF");
-        let attrs = type_def
-            .children()
-            .filter(|c| c.kind() == SyntaxKind::RENAME_ATTR)
-            .count();
-        let renames = type_def
-            .children()
-            .filter(|c| c.kind() == SyntaxKind::RENAME_ATTR)
-            .flat_map(|a| a.children())
-            .filter(|c| c.kind() == SyntaxKind::RENAME)
-            .count();
-        assert_eq!((attrs, renames), (2, 3));
+    fn a_type_expression_nests() {
+        let src = "@iri(\"https://e.org/T\")\n\
+                   type T\n    \
+                   @iri(\"https://e.org/tags\") tags: Option<Seq<String>>\n";
         assert!(messages(src).is_empty(), "got {:?}", messages(src));
+        let root = parse_str(src);
+        let field = find_first_kind(&root, SyntaxKind::FIELD)
+            .and_then(Field::cast)
+            .expect("a FIELD");
+        let names: Vec<String> = std::iter::successors(field.type_expr(), TypeExpr::argument)
+            .filter_map(|t| t.name())
+            .map(|n| n.to_string())
+            .collect();
+        assert_eq!(names, ["Option", "Seq", "String"]);
+    }
+
+    /// A field with no `@iri` is refused by name — `IriAttr` is mandatory in
+    /// the production — and the fields after it still parse.
+    #[test]
+    fn a_field_without_its_iri_is_refused_and_the_next_one_parses() {
+        let src = "@iri(\"https://e.org/T\")\n\
+                   type T\n    \
+                   name: String\n    \
+                   @iri(\"https://e.org/born\") born: Date\n";
+        assert_eq!(
+            messages(src),
+            [Problem::MissingIri {
+                name: "name".to_string()
+            }],
+        );
+        let root = parse_str(src);
+        let decl = find_first_kind(&root, SyntaxKind::TYPE_DECL).expect("a TYPE_DECL");
+        assert_eq!(
+            decl.children()
+                .filter(|c| c.kind() == SyntaxKind::FIELD)
+                .count(),
+            2,
+        );
+    }
+
+    /// And a type with no `@iri` is the same refusal, naming the type.
+    #[test]
+    fn a_type_without_its_iri_is_refused() {
+        let src = "type T\n    @iri(\"https://e.org/born\") born: Date\n";
+        assert_eq!(
+            messages(src),
+            [Problem::MissingIri {
+                name: "T".to_string()
+            }],
+        );
+        assert!(descendant_kind_exists(
+            &parse_str(src),
+            SyntaxKind::TYPE_DECL
+        ));
     }
 
     /// `@subject` at top level is a KNOWN name in the WRONG place, and the
     /// message says which place it belongs in. That is the whole of rule 6:
     /// one token, two names, position decides.
+    ///
+    /// It is consumed whole, so the import under it still parses and the line
+    /// is reported once.
     #[test]
     fn rule6_subject_at_top_level_names_the_position_it_belongs_in() {
         let src = "@subject = \"x\"\ntype { Person } := io.shex(\"m.shex\")\n";
-        let msgs = messages(src);
-        assert!(
-            msgs.contains(&Problem::MisplacedAttribute {
+        assert_eq!(
+            messages(src),
+            [Problem::MisplacedAttribute {
                 attribute: "@subject".to_string(),
-                place: "above a `type` binding".to_string(),
-            }),
-            "expected `@subject` refused above a `type` binding, got {msgs:?}",
+                place: "at the top level".to_string(),
+            }],
+        );
+        assert!(descendant_kind_exists(
+            &parse_str(src),
+            SyntaxKind::TYPE_DEF
+        ));
+    }
+
+    /// An import takes its IRIs from the document, so an `@iri` above one is
+    /// refused, and the import parses.
+    #[test]
+    fn rule6_an_iri_above_an_import_is_refused() {
+        let src = "@iri(\"https://e.org/T\")\ntype { Person } := io.shex(\"m.shex\")\n";
+        assert_eq!(
+            messages(src),
+            [Problem::MisplacedAttribute {
+                attribute: "@iri".to_string(),
+                place: "above a `type` import".to_string(),
+            }],
+        );
+        assert!(descendant_kind_exists(
+            &parse_str(src),
+            SyntaxKind::TYPE_DEF
+        ));
+    }
+
+    /// The same in a declaration's body: a field's attribute is `@iri`.
+    #[test]
+    fn rule6_subject_before_a_field_is_refused() {
+        let src = "@iri(\"https://e.org/T\")\ntype T\n    @subject(\"x\") a: String\n";
+        assert_eq!(
+            messages(src),
+            [Problem::MisplacedAttribute {
+                attribute: "@subject".to_string(),
+                place: "before a field of a `type` declaration".to_string(),
+            }],
         );
     }
 
-    /// And a `@rename` with no binding under it is refused rather than
-    /// swallowed — a rename renames a predicate OF something.
+    /// And an `@iri` with no declaration under it is refused rather than
+    /// swallowed: an imported type takes its IRI from the document.
     #[test]
-    fn rule6_a_rename_with_no_type_binding_under_it_is_refused() {
-        let src = "@rename(Person, \"http://a/name\" as a_name)\nUser := io.csv(\"u.csv\")\n";
+    fn rule6_an_iri_with_no_declaration_under_it_is_refused() {
+        let src = "@iri(\"https://e.org/T\")\nUser := io.csv(\"u.csv\")\n";
         let msgs = messages(src);
         assert!(
             msgs.contains(&Problem::MisplacedAttribute {
-                attribute: "@rename".to_string(),
-                place: "anywhere but above a `type` binding".to_string(),
+                attribute: "@iri".to_string(),
+                place: "anywhere but above a `type` declaration".to_string(),
             }),
-            "expected the missing-binding refusal, got {msgs:?}",
+            "expected the missing-declaration refusal, got {msgs:?}",
         );
     }
 
@@ -964,6 +1153,44 @@ mod disambiguation {
             .collect();
         assert_eq!(idents, vec!["Node", "as", "Other"]);
         assert!(messages(src).is_empty(), "got {:?}", messages(src));
+    }
+
+    /// The import, by local name: `Place` is the shape's name in the document
+    /// and `City` the program's. One `IMPORT_MEMBER` per member, with or
+    /// without its `as`.
+    #[test]
+    fn rule7_an_import_member_names_its_shape_with_as() {
+        let src = "type { Place as City, Person } := io.shex(\"places.shex\")\n";
+        assert!(messages(src).is_empty(), "got {:?}", messages(src));
+        let root = parse_str(src);
+        let type_def = find_first_kind(&root, SyntaxKind::TYPE_DEF).expect("a TYPE_DEF");
+        let members: Vec<(String, String)> = type_def
+            .children()
+            .filter_map(ImportMember::cast)
+            .map(|m| {
+                (
+                    m.shape_name().unwrap_or_default().to_string(),
+                    m.name().unwrap_or_default().to_string(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            members,
+            [("Place", "City"), ("Person", "Person")].map(|(s, n)| (s.to_string(), n.to_string())),
+        );
+    }
+
+    /// An `as` with nothing after it names nothing.
+    #[test]
+    fn rule7_an_as_with_no_name_after_it_is_refused() {
+        let src = "type { Place as } := io.shex(\"places.shex\")\n";
+        assert_eq!(
+            messages(src),
+            [Problem::ExpectedToken {
+                expected: "IDENT".to_string(),
+                found: "RBRACE".to_string(),
+            }],
+        );
     }
 
     /// The half that makes it CONTEXTUAL rather than reserved: `as` is an

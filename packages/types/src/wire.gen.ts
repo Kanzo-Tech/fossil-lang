@@ -252,15 +252,15 @@ export interface InferredDescriptor {
   columns: InferredColumn[];
   /**
    * An entity tag in RFC 9110's sense (§8.8.3): an opaque validator of the state of the source
-   * this was read from, which may be weak. The cache compares it; nothing interprets it. The
-   * language server writes `mtime` + size, a host that has a strong `ETag` or a content digest
-   * writes that instead, and a host that cannot cheaply tell writes `""` — which
-   * `crate::DescriptorCache::is_fresh` reads as "never fresh", so that source is re-introspected
-   * every time. It is NOT a hash of the bytes, and deliberately: hashing means reading the whole
-   * source to decide whether the source needs reading, which makes the cache cost more than the
-   * `DESCRIBE` it saves. `mtime` + size is two fields of one `stat`. Its one dangerous failure —
-   * saying "unchanged" when it changed — needs a file restored with the same `mtime` AND the same
-   * size, which is what pairing the two narrows.
+   * this was read from, which may be weak. A host compares it to decide whether to profile the
+   * source again; nothing interprets it. A host that can stat a file writes `mtime` + size, a host
+   * that has a strong `ETag` or a content digest writes that instead, and a host that cannot
+   * cheaply tell writes `""`, which is never fresh, so that source is profiled every time. It is
+   * NOT a hash of the bytes, and deliberately: hashing means reading the whole source to decide
+   * whether the source needs reading, which makes the cache cost more than the `DESCRIBE` it saves.
+   * `mtime` + size is two fields of one `stat`. Its one dangerous failure — saying "unchanged"
+   * when it changed — needs a file restored with the same `mtime` AND the same size, which is
+   * what pairing the two narrows.
    */
   etag: string;
   /**
@@ -285,8 +285,8 @@ export interface Input {
    */
   binding?: string;
   /**
-   * The connection the location lies under, when it was written `@name/…` and the connection map
-   * has that name.
+   * The connection the location lies under, when it was written `@name/…` and the connections
+   * have that name.
    */
   connection?: string;
   /**
@@ -299,7 +299,7 @@ export interface Input {
    */
   key: string;
   /**
-   * `key` through `fossil_location::SourceAnchor`: what a host signs and reads.
+   * `key` through `fossil_base::location::SourceAnchor`: what a host signs and reads.
    */
   location: string;
   /**
@@ -371,12 +371,12 @@ export interface MissingDocument {
    */
   connection?: string;
   /**
-   * What it is registered under: `registry_key`, anchored with no connection map, so repointing a
-   * connection never invalidates a query.
+   * What it is registered under: `registry_key`, anchored with no connections, so repointing a
+   * connection never moves a registered document.
    */
   key: string;
   /**
-   * Where it is fetched from: the same reference through the connection map.
+   * Where it is fetched from: the same reference through the connections.
    */
   location: string;
 }

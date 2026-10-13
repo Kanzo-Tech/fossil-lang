@@ -47,12 +47,10 @@ Order : Order from orders
 
 const GRAPH_SHEX: &str = include_str!("fixtures/graph.shex");
 
-fn descriptor() -> fossil_df::OutputDescriptorKind {
-    fossil_df::OutputDescriptorKind::Lowered(
-        fossil_shex::ShExDescriptor::from_shex_source(GRAPH_SHEX)
-            .expect("parse graph.shex")
-            .to_graph_schema(&fossil_graph_schema::Renames::default()),
-    )
+fn descriptor() -> fossil_graph_schema::GraphSchema {
+    fossil_hir::shex::ShExDescriptor::from_shex_source(GRAPH_SHEX)
+        .expect("parse graph.shex")
+        .to_graph_schema()
 }
 
 #[tokio::test]
@@ -61,15 +59,9 @@ async fn execute_graph_resolves_edges_to_dense_ids() {
         support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
 
     let ctx = SessionContext::new();
-    let graph = fossil_df::execute_graph(
-        &ctx,
-        &db,
-        file,
-        &descriptor(),
-        &std::collections::HashMap::new(),
-    )
-    .await
-    .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
+    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor())
+        .await
+        .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
     // Two vertex types (source order: Person, Order); one edge (placedBy).
     let vtypes: Vec<&str> = graph.vertices.iter().map(|v| v.label.as_str()).collect();
@@ -113,15 +105,9 @@ async fn the_write_emits_one_manifest_over_one_table_per_type_and_relation() {
         support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
 
     let ctx = SessionContext::new();
-    let graph = fossil_df::execute_graph(
-        &ctx,
-        &db,
-        file,
-        &descriptor(),
-        &std::collections::HashMap::new(),
-    )
-    .await
-    .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
+    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor())
+        .await
+        .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
     let (written, files) = support::write_in_memory(&graph).await;
     assert_eq!(
@@ -135,7 +121,7 @@ async fn the_write_emits_one_manifest_over_one_table_per_type_and_relation() {
     );
 
     // The document on disk IS the value the write answered.
-    let on_disk: fossil_sinks::manifest::Manifest =
+    let on_disk: fossil_df::corpus::manifest::Manifest =
         serde_json::from_slice(&files["fossil.json"]).expect("fossil.json parses");
     assert_eq!(on_disk, written.manifest);
     let text = String::from_utf8(files["fossil.json"].clone()).expect("UTF-8");

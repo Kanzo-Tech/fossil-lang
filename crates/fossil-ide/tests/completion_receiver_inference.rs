@@ -14,57 +14,21 @@
 use std::sync::Arc;
 
 use fossil_base::test_support::{NativeSystem, register_inferred};
-use fossil_base::{Catalogue, Files, SourceFile, System};
+use fossil_base::{FossilDb, SourceFile};
 use fossil_graph_schema::Primitive;
 use lsp_types::CompletionItemKind;
 
-#[salsa::db]
-#[derive(Clone)]
-struct HostDb {
-    storage: salsa::Storage<Self>,
-    system: Arc<dyn System>,
-    files: Files,
-    catalogue: Catalogue,
-}
-
-impl std::fmt::Debug for HostDb {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("HostDb").finish_non_exhaustive()
-    }
-}
-
-#[salsa::db]
-impl salsa::Database for HostDb {}
-
-#[salsa::db]
-impl fossil_base::Db for HostDb {
-    fn system(&self) -> &dyn System {
-        &*self.system
-    }
-    fn files(&self) -> &Files {
-        &self.files
-    }
-    fn catalogue(&self) -> &Catalogue {
-        &self.catalogue
-    }
-}
-
-/// A host that keeps a descriptor table AND decodes shape documents — the two
-/// jobs `fossil-lsp`'s `LspSystem` does. `NativeSystem` alone keeps the table
+/// A host that describes its sources AND decodes shape documents — the two
+/// jobs the browser host's `System` does. `NativeSystem` alone keeps the table
 /// but not the decoder; the bare `System` trait default keeps neither.
-fn host() -> HostDb {
-    HostDb {
-        storage: salsa::Storage::default(),
-        system: Arc::new(NativeSystem::decoding()),
-        files: Files::default(),
-        catalogue: Catalogue::default(),
-    }
+fn host() -> FossilDb {
+    FossilDb::new(Arc::new(NativeSystem::decoding()))
 }
 
 /// Intern `src` and register `users.csv` as a two-column row — `name` a String,
 /// `age` an Integer. Two columns of DIFFERENT types, because the whole question
 /// below is which type the member list comes from.
-fn program(db: &mut HostDb, src: &str) -> SourceFile {
+fn program(db: &mut FossilDb, src: &str) -> SourceFile {
     register_inferred(
         db,
         "users.csv",
@@ -117,7 +81,6 @@ User : Person from users
     assert_eq!(
         labels(&items, CompletionItemKind::FUNCTION),
         vec![
-            "concat",
             "contains",
             "ends_with",
             "length",
@@ -247,7 +210,7 @@ User : Person from users
     );
     assert_eq!(
         labels(&items, CompletionItemKind::FUNCTION).len(),
-        12,
+        6,
         "the relation verbs are still offered here — see this test's docs",
     );
 }
@@ -370,9 +333,9 @@ knows := io.csv(\"knows.csv\")
 User : Person from knows
     name = knows.
 ";
-    let db = host();
+    let mut db = host();
     register_inferred(
-        &db,
+        &mut db,
         "knows.csv",
         &[
             ("Person.id", Primitive::String),
@@ -406,8 +369,8 @@ knows := io.csv(\"knows.csv\")
 User : Person from knows
     name = knows.\"first name\".
 ";
-    let db = host();
-    register_inferred(&db, "knows.csv", &[("first name", Primitive::String)]);
+    let mut db = host();
+    register_inferred(&mut db, "knows.csv", &[("first name", Primitive::String)]);
     let f = SourceFile::new(&db, SRC.to_string(), "receiver.fossil".to_string());
     let items = fossil_ide::completions(&db, &[f], f, 2, after_trailing_dot(SRC, 2));
     let functions = labels(&items, CompletionItemKind::FUNCTION);

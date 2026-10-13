@@ -216,7 +216,7 @@ async fn each_aggregate_disagrees_in_its_own_way() {
 
     // A decimal widens its PRECISION and stays a decimal, so neither candidate
     // fix reaches it by declaring a scalar: `Primitive` has no decimal, and
-    // `fossil_sinks::manifest::data_type_name` has no `Decimal128` arm either
+    // `fossil_df::corpus::manifest::data_type_name` has no `Decimal128` arm either
     // (it would fall to `binary`).
     assert_eq!(
         at("math.sum", &DataType::Decimal128(10, 2)),

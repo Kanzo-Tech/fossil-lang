@@ -2,15 +2,15 @@
 //! source **URI**, never the binding name.
 //!
 //! What only this crate can test is the indirection: the checker holds a
-//! binding name, the cache holds URIs, and the `DefMap` is what joins them. The
-//! table's own behaviour — insertion, replacement, freshness — belongs to
-//! `fossil-descriptors-input::cache`, and the `System` accessor to
-//! `fossil-base`; neither is re-asserted here.
+//! binding name, the source registry holds locations, and the `DefMap` is what
+//! joins them — and that the registry is an input, so describing a source
+//! re-runs a check that already ran (`/docs/design/incremental`).
 
+use fossil_base::sources::{InferredColumn, InferredDescriptor};
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{Db, FossilDb, SourceFile, System};
-use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
+use fossil_base::{FossilDb, SourceFile, System, describe_columns};
 use fossil_graph_schema::Primitive;
+use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::def_map;
 use fossil_hir::infer::source_row_inferred;
 use fossil_hir::ty::TyKind;
@@ -36,14 +36,10 @@ fn descriptor(uri: &str, columns: &[(&str, Primitive)]) -> InferredDescriptor {
 
 /// A db over a `NativeSystem` holding `descriptors`, plus the program file.
 fn db_with(descriptors: Vec<InferredDescriptor>) -> (FossilDb, SourceFile) {
-    let system = NativeSystem::default();
-    let cache = system
-        .descriptors()
-        .expect("the native host keeps a descriptor table");
+    let mut db = FossilDb::new(Arc::new(NativeSystem::default()) as Arc<dyn System>);
     for d in descriptors {
-        cache.insert(d);
+        describe_columns(&mut db, d);
     }
-    let db = FossilDb::new(Arc::new(system) as Arc<dyn System>);
     let file = SourceFile::new(&db, PROGRAM.to_string(), "/w/mapping.fossil".to_string());
     (db, file)
 }
@@ -91,20 +87,54 @@ fn an_unregistered_uri_propagates_nothing() {
     assert!(field_names(&db, file).is_empty());
 }
 
-/// Re-introspection is visible to the checker: the cache replaces the entry for
+/// Re-describing is visible to the checker: the registry replaces the entry for
 /// a URI, and the next type-check reads the new columns. This is the
 /// consumer-side half of the engine's re-introspection test.
 #[test]
 fn re_registering_a_uri_changes_what_the_checker_sees() {
-    let (db, file) = db_with(vec![descriptor(
+    let (mut db, file) = db_with(vec![descriptor(
         "data/users.csv",
         &[("id", Primitive::Integer)],
     )]);
     assert_eq!(field_names(&db, file), ["id"]);
 
-    db.system().descriptors().expect("table").insert(descriptor(
-        "data/users.csv",
-        &[("id", Primitive::Integer), ("email", Primitive::String)],
-    ));
+    describe_columns(
+        &mut db,
+        descriptor(
+            "data/users.csv",
+            &[("id", Primitive::Integer), ("email", Primitive::String)],
+        ),
+    );
     assert_eq!(field_names(&db, file), ["id", "email"]);
+}
+
+/// The bug the registry being an input fixes: a check that already ran against
+/// a source's old columns re-runs when the source is described again. Read
+/// beside Salsa, the memoised check kept refusing a column the source now has.
+#[test]
+fn describing_a_source_after_a_check_re_runs_the_check() {
+    let (mut db, file) = db_with(vec![descriptor(
+        "data/users.csv",
+        &[("id", Primitive::Integer)],
+    )]);
+    let unknown_name = |db: &FossilDb| {
+        let mapping = *def_map(db, file).mappings(db).first().expect("one mapping");
+        typecheck_mapping(db, mapping)
+            .diagnostics(db)
+            .iter()
+            .any(|d| d.problem.code() == "name/unknown-field")
+    };
+    assert!(unknown_name(&db), "`users.name` is not a column yet");
+
+    describe_columns(
+        &mut db,
+        descriptor(
+            "data/users.csv",
+            &[("id", Primitive::Integer), ("name", Primitive::String)],
+        ),
+    );
+    assert!(
+        !unknown_name(&db),
+        "the check re-ran against the new columns"
+    );
 }

@@ -50,8 +50,7 @@ async fn a_call_produces_its_column() {
         &ctx,
         &db,
         mapping,
-        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-        &std::collections::HashMap::new(),
+        &fossil_graph_schema::GraphSchema::default(),
     )
     .await
     .unwrap_or_else(|e| {
@@ -113,8 +112,7 @@ User : Person from users
         &ctx,
         &db,
         mapping,
-        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-        &std::collections::HashMap::new(),
+        &fossil_graph_schema::GraphSchema::default(),
     )
     .await
     .unwrap_or_else(|e| {
@@ -168,8 +166,7 @@ User : Person from users
         &ctx,
         &db,
         mapping,
-        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-        &std::collections::HashMap::new(),
+        &fossil_graph_schema::GraphSchema::default(),
     )
     .await
     .unwrap_or_else(|e| {
@@ -223,8 +220,7 @@ User : Person from users
         &ctx,
         &db,
         mapping,
-        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-        &std::collections::HashMap::new(),
+        &fossil_graph_schema::GraphSchema::default(),
     )
     .await
     .unwrap_or_else(|e| {
@@ -281,8 +277,7 @@ User : Person from users
         &ctx,
         &db,
         mapping,
-        &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-        &std::collections::HashMap::new(),
+        &fossil_graph_schema::GraphSchema::default(),
     )
     .await
     .unwrap_or_else(|e| {

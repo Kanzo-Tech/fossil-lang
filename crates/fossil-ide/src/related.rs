@@ -7,23 +7,12 @@
 //! exactly — `DiagnosticRelatedInformation { location: { uri, range }, message }`
 //! — and it takes a URI per entry, which a label does not carry.
 //!
-//! # The hosts had NO labels at all, not just no document ones
-//!
-//! `fossil-lsp`'s `to_lsp_diagnostic` converted the span, the severity and the
-//! message and dropped `labels` on the floor; `fossil-wasm`'s `to_diagnostic`
-//! did the same. So a report whose whole content is a RELATION between two
-//! places — «`Users` and `Imported` mint two identities for Person», which
-//! names both mappings and underlines both `@subject` lines — reached an editor
-//! as one squiggle with no second half, and had since the day labels existed.
-//! `fossil check` rendered it in full the whole time, which is why nothing
-//! caught it.
-//!
-//! # One answer, two renderings
+//! # One answer, rendered by the host
 //!
 //! This resolves the QUESTION — which file and which range each label is in —
-//! and stops there. `fossil-lsp` turns the answer into
-//! `DiagnosticRelatedInformation`, `fossil-wasm` into its JS-facing row shape,
-//! and neither re-derives a URI. That is the split this workspace keeps
+//! and stops there. `fossil-wasm` turns the answer into its JS-facing row shape
+//! and does not re-derive a URI. A label is often the whole report: «`Users` and
+//! `Imported` mint two identities for Person» names both mappings. That is the split this workspace keeps
 //! arriving at: `documents_named` and `registry_key` are one function each for
 //! the same reason, after the editor's hand-rolled copy of the second silently
 //! disagreed with the checker's on a `://` scheme.

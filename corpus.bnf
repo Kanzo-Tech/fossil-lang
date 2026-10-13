@@ -35,7 +35,7 @@
 
    # The `type` is the spelling the MANIFEST writes
 
-   Not Arrow's and not Rust's. `crates/fossil-sinks/src/manifest.rs, data_type_name`
+   Not Arrow's and not Rust's. `crates/fossil-df/src/corpus/manifest.rs, data_type_name`
    is the mapping from an Arrow type to it, and a `properties:` entry carries
    whatever that returns — so a column declared here with a different spelling
    for the same type would put two names for one thing in one document, which is
@@ -59,7 +59,7 @@
    **File names** (`fossil.json`, `vertex/<Type>.parquet`,
    `edge/<Src>_<label>_<Dst>.parquet`, `property/<Type>_<name>.parquet`).
    They are the manifest's `path`, and the manifest is
-   `crates/fossil-sinks/src/manifest.rs` — its structs are the format, and
+   `crates/fossil-df/src/corpus/manifest.rs` — its structs are the format, and
    `fossil.schema.json` beside them is what a reader in another language checks
    against. A second declaration of them here would be a second source for a
    fact that already has one. Columns are different: they are named
@@ -67,7 +67,7 @@
 
    # Status
 
-   `cargo xtask corpus` generates `crates/fossil-sinks/src/generated.rs` from
+   `cargo xtask corpus` generates `crates/fossil-df/src/corpus/generated.rs` from
    this file, and `cargo xtask corpus --check` fails when it is stale. There is
    no TypeScript projection: `fossil.json` lists every column of every table in
    its `properties`, and each column the writer emits there carries its `role`

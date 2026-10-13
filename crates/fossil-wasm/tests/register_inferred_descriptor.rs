@@ -94,3 +94,34 @@ fn distinct_uris_register_independently() {
     assert_eq!(products.key.as_str(), "products.csv");
     assert_eq!(products.columns[0].name.as_str(), "sku");
 }
+
+/// The stale check the descriptor table caused: a check that ran before the
+/// host described a source kept refusing its columns afterwards, because the
+/// table was read beside Salsa. It is an input now (`/docs/design/incremental`).
+#[test]
+fn describing_a_source_after_a_check_re_runs_the_check() {
+    const PROGRAM: &str = "\
+users := io.csv(\"users.csv\")
+User : Person from users
+    name = users.email
+";
+    let mut ws = FossilWorkspace::new();
+    let _ = ws.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
+    ws.register_inferred_descriptor_native(&sample_descriptor_json("users.csv"))
+        .expect("ok");
+    let unknown_email = |ws: &FossilWorkspace| {
+        ws.diagnostic_rows()
+            .iter()
+            .any(|r| r.code == "name/unknown-field")
+    };
+    assert!(unknown_email(&ws), "`email` is not a column yet");
+
+    ws.register_inferred_descriptor_native(
+        r#"{"key":"users.csv","columns":[{"name":"email","primitive":"string"}],"etag":""}"#,
+    )
+    .expect("ok");
+    assert!(
+        !unknown_email(&ws),
+        "the check re-ran against the new columns"
+    );
+}

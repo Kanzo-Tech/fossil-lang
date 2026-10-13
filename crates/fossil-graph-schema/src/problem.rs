@@ -302,13 +302,11 @@ catalogue! {
     #[error("unexpected character `{character}` — no token starts with it")]
     UnknownCharacter { character: String },
 
-    /// A `@rename` written incompletely; `missing` is the part it lacks.
-    "syntax/malformed-rename", "A malformed rename",
-    #[error(
-        "this `@rename` has no {missing}: a rename is \
-         `@rename(Type, \"<predicate IRI>\" as <name>)`"
-    )]
-    MalformedRename { missing: String },
+    /// A declared type, or a field of one, written without its `@iri`; `name`
+    /// is the type's or the field's.
+    "syntax/missing-iri", "A declaration without its IRI",
+    #[error("`{name}` has no `@iri`: a declared type and each of its fields write their IRI")]
+    MissingIri { name: String },
 
     /// An attribute written where it does not belong.
     "syntax/misplaced-attribute", "An attribute in the wrong place",
@@ -366,8 +364,9 @@ catalogue! {
 
     // ── name ────────────────────────────────────────────────────────────
 
-    /// A shape name no `type { … } := …` binding introduces. `declared` is
-    /// the names the program does bind.
+    /// A type name nothing in the program introduces — in a mapping header,
+    /// an edge or a field's `Ref<…>`. `declared` is the names the program does
+    /// have, declared or imported.
     "name/unknown-shape", "Not a shape this program declares",
     #[error("`{shape}` is not a shape this program declares")]
     UnknownShape { shape: String, declared: Vec<String> },
@@ -415,6 +414,23 @@ catalogue! {
     "name/unknown-source", "Not a source binding",
     #[error("{}", unknown_source(.binding, .bound_to.as_deref()))]
     UnknownSource { binding: String, bound_to: Option<String> },
+
+    /// A field's type that names no type a field can have. `types` is the
+    /// names a field's type is written in.
+    "name/unknown-type", "Not a type a field can have",
+    #[error("`{name}` is not a type a field can have — it is one of {}", code_list(.types))]
+    UnknownType { name: String, types: Vec<String> },
+
+    /// A field written twice in one declared type.
+    "name/duplicate-field", "A field written twice",
+    #[error("`{type_name}` has two fields called `{field}`")]
+    DuplicateField { type_name: String, field: String },
+
+    /// A type name the program introduces twice — declared twice, imported
+    /// twice, or declared and imported.
+    "name/duplicate-type", "A type introduced twice",
+    #[error("`{name}` is introduced twice, and a type name names one type")]
+    DuplicateType { name: String },
 
     // ── argument ────────────────────────────────────────────────────────
 
@@ -496,6 +512,12 @@ catalogue! {
     #[error("the branches of `? :` have different types: {then} and {otherwise}")]
     BranchMismatch { then: String, otherwise: String },
 
+    /// A field's type the shape vocabulary cannot carry — `Option<Seq<T>>`,
+    /// `Ref<String>`, `Option` alone. `reason` says which rule it breaks.
+    "type/invalid-field-type", "Not a field type",
+    #[error("`{written}` is not a field type: {reason}")]
+    InvalidFieldType { written: String, reason: String },
+
     // ── shape ───────────────────────────────────────────────────────────
 
     /// No shape document where one is needed. `binding` is the binding that
@@ -530,24 +552,17 @@ catalogue! {
     #[error("unresolved shape reference `{reference}` in shape `{shape}`")]
     UnresolvedReference { reference: String, shape: String },
 
-    /// A binding that names more shapes than its document declares; names
-    /// bind by position, and `position` is the surplus name's.
-    "shape/binding-arity", "More names than shapes",
-    #[error(
-        "the binding names {named} shape(s) and the document declares {declared}, so `{name}`, \
-         at position {position}, binds nothing"
-    )]
-    BindingArity { name: String, named: u64, declared: u64, position: u64 },
+    /// An import that names a shape its document does not declare. The name
+    /// is a shape's local name; `declared` is the ones the document has.
+    "shape/not-in-document", "Not a shape the document declares",
+    #[error("`{name}` is not a shape `{document}` declares — it declares {}", code_list(.declared))]
+    NotInDocument { name: String, document: String, declared: Vec<String> },
 
-    /// A `@rename` naming a type its binding does not introduce.
-    "shape/rename-unknown-type", "A rename of a type the binding does not introduce",
-    #[error("`@rename` names `{shape}`, which this `type` binding does not introduce")]
-    RenameUnknownType { shape: String, introduced: Vec<String> },
-
-    /// A `@rename` naming a predicate its shape does not declare.
-    "shape/rename-unknown-predicate", "A rename of a predicate the shape does not declare",
-    #[error("`{shape}` declares no predicate `{predicate}`, so this rename never fires")]
-    RenameUnknownPredicate { shape: String, predicate: String, declared: Vec<String> },
+    /// An import of a local name two shapes of its document share. `first`
+    /// and `second` are their IRIs.
+    "shape/ambiguous-import", "Two shapes share the imported name",
+    #[error("`{name}` names two shapes of `{document}`: `{first}` and `{second}`")]
+    AmbiguousImport { name: String, document: String, first: String, second: String },
 
     /// A program whose sources declare two different output shapes; one
     /// program writes one.
@@ -652,15 +667,6 @@ catalogue! {
     "pipeline/unknown-verb", "Not a relation verb",
     #[error("`{verb}` is not a relation verb; the catalogue has {}", code_list(.verbs))]
     UnknownVerb { verb: String, verbs: Vec<String> },
-
-    /// A verb the catalogue declares and the lowering does not implement yet.
-    "pipeline/unimplemented-verb", "A verb with no lowering yet",
-    #[error(
-        "`{verb}` is a relation verb the lowering does not implement yet, so `{pipeline}` \
-         cannot compile; implemented today: {}",
-        code_list(.implemented)
-    )]
-    UnimplementedVerb { verb: String, pipeline: String, implemented: Vec<String> },
 
     /// A stage missing a position it needs (`missing`), or given more than
     /// it takes (`missing` absent).
@@ -963,7 +969,7 @@ impl Problem {
 /// [`Problem::DoesNotCompile`] relates. The span is **file-absolute**.
 ///
 /// `fossil_base::Diagnostic` cannot be named here: that crate depends on this
-/// one and is the salsa accumulator. This is its positional part reduced to
+/// one. This is its positional part reduced to
 /// the span, and the same [`Problem`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Related {

@@ -30,7 +30,7 @@
 //! The decoded shape carries where the document declares it and each of its
 //! predicates — [`fossil_graph_schema::Shape::span`] and
 //! [`fossil_graph_schema::PropertyConstraint::span`], found by
-//! `fossil_shex::spans` with rudof's own prefix spellings. When there is no span
+//! `fossil_hir::shex::spans` with rudof's own prefix spellings. When there is no span
 //! (`ShExJ`, SHACL), the answer is still the right FILE with a `0..0` range —
 //! the top of the document. That is the honest degraded answer, and it is
 //! deliberately not a `None`: an editor that opens `shop.shex` at line 1 has
@@ -38,15 +38,15 @@
 //! answering nothing takes them nowhere.
 //!
 //! [`NavigationTarget`] carries no precision flag, because no consumer could
-//! act on one — `fossil-lsp` and `fossil-wasm` both translate `{file, range}`
-//! into an `lsp_types::Location` and nothing else. `0..0` IS the flag, and it
+//! act on one — the host translates `{file, range}` into an
+//! `lsp_types::Location` and nothing else. `0..0` IS the flag, and it
 //! is one every consumer already understands.
 //!
 //! # Domain boundary
 //!
 //! Returns Fossil-domain [`NavigationTarget`]s (`{ file, range: Range<u32> }`),
 //! NEVER `lsp_types::Location` — the byte→UTF-16 range translation happens in
-//! `fossil-lsp` via [`crate::position::position`], so this stays
+//! the host via [`crate::position::position`], so this stays
 //! transport-free and WASM-clean. No new Salsa query is added: the
 //! `WorkspaceIndex` is a plain struct built by a CST walk, and the two document
 //! paths read queries that the checker already runs for this file
@@ -77,7 +77,7 @@ use fossil_hir::documents::registry_key;
 
 /// A goto-def navigation target: the owning file + the byte range.
 ///
-/// `fossil-lsp` translates `range` to a UTF-16 `lsp_types::Range` and pairs it
+/// The host translates `range` to a UTF-16 `lsp_types::Range` and pairs it
 /// with the file URI to build a `lsp_types::Location`.
 ///
 /// **`range == 0..0` means "this file, position unknown"** — see the module
@@ -190,8 +190,8 @@ fn document_name_under_cursor(token: &SyntaxToken) -> Option<(SyntaxNode, Wanted
 /// The shape is the mapping's own target, [`resolve_target_shape`] — the
 /// document that declared it, not the first one the file names — and a
 /// property key resolves through the checker's `predicates` table, the same
-/// one hover and `fossil-mir` read, so a renamed predicate lands where the
-/// checker says it is.
+/// one hover and `fossil-mir` read, so a key lands where the checker says it
+/// is.
 fn document_targets(
     db: &dyn fossil_base::Db,
     file: SourceFile,
@@ -222,12 +222,16 @@ fn document_targets(
     let span = match wanted {
         Wanted::Shape(_) => shape.span,
         Wanted::Predicate(key) => {
-            let Some(iri) = typecheck_mapping(db, mapping).ok().and_then(|out| {
-                out.predicates(db)
-                    .iter()
-                    .find(|p| p.name.as_str() == key.as_str())
-                    .map(|p| p.iri.clone())
-            }) else {
+            let Some(iri) = typecheck_mapping(db, mapping)
+                .checked(db)
+                .ok()
+                .and_then(|out| {
+                    out.predicates(db)
+                        .iter()
+                        .find(|p| p.name.as_str() == key.as_str())
+                        .map(|p| p.iri.clone())
+                })
+            else {
                 return Vec::new();
             };
             shape.constraint_for(&iri).and_then(|c| c.span)
@@ -258,24 +262,13 @@ fn type_binding_range(
         })
 }
 
-/// The names between `{` and `}` of a `TYPE_DEF` — `Person`, `Order` in
-/// `type { Person, Order } := io.shex("shop.shex")`.
-///
-/// The IDENTs after the closing brace belong to the constructor (`io`, `shex`),
-/// so the scan stops there.
+/// The names a `TYPE_DEF` introduces — `Person`, `Order` in
+/// `type { Person, Order } := io.shex("shop.shex")`, `City` in
+/// `type { Place as City } := …`.
 fn brace_members(node: &SyntaxNode) -> Vec<String> {
-    let mut members = Vec::new();
-    let mut inside = false;
-    for token in node
-        .descendants_with_tokens()
-        .filter_map(fossil_syntax::SyntaxElement::into_token)
-    {
-        match token.kind() {
-            SyntaxKind::LBRACE => inside = true,
-            SyntaxKind::RBRACE => break,
-            SyntaxKind::IDENT if inside => members.push(token.text().to_string()),
-            _ => {}
-        }
-    }
-    members
+    node.children()
+        .filter_map(fossil_syntax::ast::ImportMember::cast)
+        .filter_map(|m| m.name())
+        .map(|n| n.to_string())
+        .collect()
 }

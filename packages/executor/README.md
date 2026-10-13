@@ -35,6 +35,10 @@ reads each source through `read` on its connection — by range requests, not wh
 is written at `<prefix><path>` through `write` on `{ job }`, in parts when a file is large. The host
 never signs a URL.
 
+Pass `profiled` — what `profile` in `@fossil-lang/profile` answered, the value the editor's
+`registerProfile` took — and the run checks the program against the same columns the editor did:
+`run(program, { host, job, profiled })`. Without it every source is an open row.
+
 `report` is `{ location, dropped }`: where the corpus went and, per edge table, how many input rows
 named a vertex that does not exist. What was written is `<location>fossil.json`.
 

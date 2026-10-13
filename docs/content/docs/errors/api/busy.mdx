@@ -15,7 +15,8 @@ A host sees `data: { call }`, the method that was refused, spelled as the bindin
 (`updateFile`, `setConnections`, `run`, …). From the workspace in `@fossil-lang/wasm` it carries the
 help *coalesce edits (an LSP client debounces `didChange` rather than sending one per keystroke) and
 retry — the workspace is still usable*. From the executor in `@fossil-lang/executor` it is raised by
-`setConnections` and `registerDocument` while a run holds the program.
+`setConnections`, `registerDocument`, `registerInferredDescriptor` and `registerUndescribed` while a
+run holds the program.
 
 ## Why fossil refuses it
 

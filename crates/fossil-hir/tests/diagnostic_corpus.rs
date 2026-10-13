@@ -21,11 +21,11 @@
 //! # Driving strategy — "Db-wired" vs "helper-proven"
 //!
 //! The production `typecheck_mapping` Salsa query resolves the target shape
-//! through the file registry and the source row through the descriptor table,
+//! through the file registry and the source row through the source registry,
 //! so forward propagation (SC#1) is exercised **end-to-end through the
 //! production query path**: `run_db_wired_fixture` writes a real `SourceFile`
-//! whose path lets the relative `io.shex("…")` argument resolve, then drains
-//! the diagnostics the query accumulated. These fixtures are labelled
+//! whose path lets the relative `io.shex("…")` argument resolve, then reads
+//! the diagnostics the query and what it read returned. These fixtures are labelled
 //! **Db-wired**.
 //!
 //! Backward checking (SC#2) and the value-disjunction rejection (SC#4) are NOT
@@ -201,6 +201,28 @@ fn render_diagnostic(out: &mut String, diag: &Diagnostic) {
 // Forward-propagation driver (Db-wired — production query path)
 // ---------------------------------------------------------------------------
 
+/// What the check of `mapping` says, and what every query it reads says: the
+/// mapping's body, the file's parse and its lowering — the whole of what a
+/// reader of this one mapping is told.
+fn read_by_check(db: &dyn Db, mapping: fossil_hir::def_map::MappingLoc<'_>) -> Vec<Diagnostic> {
+    let file = mapping.file(db);
+    let mut out = typecheck_mapping(db, mapping).diagnostics(db).clone();
+    out.extend(body(db, mapping).diagnostics(db).iter().cloned());
+    out.extend(
+        fossil_syntax::parse(db, file)
+            .diagnostics(db)
+            .iter()
+            .cloned(),
+    );
+    out.extend(
+        fossil_hir::lower::lower_to_hir(db, file)
+            .diagnostics(db)
+            .iter()
+            .cloned(),
+    );
+    out
+}
+
 /// Drive a fixture **end-to-end through the production `typecheck_mapping`
 /// query**. The `mapping.fossil`'s `io.shex("…")` path is resolved relative to
 /// the fixture directory, so the target shape is bound by the real
@@ -228,13 +250,17 @@ fn run_db_wired_fixture(bucket: &str, name: &str) -> String {
     // Introspection cannot run here — `fossil-hir` is WASM-clean and has no
     // `DuckDB`, and these directories have no CSV to introspect anyway. So the
     // host registers what an introspection WOULD have found, which is exactly
-    // what `fossil_lsp::profile::profile_and_register` and the browser's
-    // `registerInferredDescriptor` do before a compile.
-    for entry in def_map(&db, file).sources(&db).clone() {
-        if let Some(uri) = entry.uri.as_deref() {
+    // what the browser's `registerProfile` does before a compile.
+    let uris: Vec<String> = def_map(&db, file)
+        .sources(&db)
+        .iter()
+        .filter_map(|entry| entry.uri.as_deref().map(str::to_string))
+        .collect();
+    for uri in uris {
+        {
             fossil_base::test_support::register_inferred(
-                &db,
-                uri,
+                &mut db,
+                &uri,
                 &[
                     ("id", Primitive::Integer),
                     ("name", Primitive::String),
@@ -253,12 +279,7 @@ fn run_db_wired_fixture(bucket: &str, name: &str) -> String {
     let mappings = def_map(&db, file).mappings(&db).clone();
     let mut all_diags: Vec<Diagnostic> = Vec::new();
     for mloc in &mappings {
-        let _ = typecheck_mapping(&db, *mloc);
-        all_diags.extend(
-            typecheck_mapping::accumulated::<Diagnostic>(&db, *mloc)
-                .into_iter()
-                .cloned(),
-        );
+        all_diags.extend(read_by_check(&db, *mloc));
     }
 
     if all_diags.is_empty() {
@@ -286,6 +307,7 @@ fn run_db_wired_fixture(bucket: &str, name: &str) -> String {
 /// One predicate constrained to an XSD datatype, or to nothing.
 fn constraint(predicate: &str, datatype: Option<Primitive>, occurs: Occurs) -> PropertyConstraint {
     PropertyConstraint {
+        name: fossil_graph_schema::local_name(predicate).to_string(),
         predicate: predicate.to_string(),
         term: datatype.map(|p: Primitive| Term::Literal(Some(p.to_xsd_iri().into()))),
         targets: Vec::new(),
@@ -392,7 +414,6 @@ fn run_shape_fixture(bucket: &str, document: &Shape, rejections: &[Rejection]) -
             "users",
             "\"https://example.org/u/{users.id}\"",
             disjuncts,
-            &[],
         );
         let _ = writeln!(out, "  suggestion:");
         for line in suggestion.lines() {
@@ -501,8 +522,7 @@ fn disjunction_rejection_three_branches() {
 // source + typecheck_mapping. `HirExpr::Call` EXISTS now (`lower.rs`), so the
 // premise is stale and the conclusion is unverified — do not read the next
 // sentence as a measurement. The closure-synthesis algorithm and its rendering
-// are proven in-crate (crates/fossil-hir/src/check_tests.rs) and at the LSP
-// hover layer (crates/fossil-lsp/tests/lsp_hover_smoke.rs). These corpus
+// are proven in-crate (crates/fossil-hir/src/check_tests.rs). These corpus
 // fixtures lock the reachable
 // surface: did-you-mean firing on a body column reference that WILL live inside
 // a synthesised closure once the surface lambda form lands. (It said `FieldRef`
@@ -559,15 +579,13 @@ fn a_split_branch_with_no_predicate_still_parses() {
         "users",
         "\"https://example.org/u/{users.id}\"",
         &[vec!["http://example.org/email".to_string()], vec![]],
-        &[],
     );
     let full = format!(
         "type {{ Contact }} := io.shex(\"contact.shex\")\nusers := io.csv(\"users.csv\")\n{suggestion}"
     );
     let db = new_db();
     let file = SourceFile::new(&db, full.clone(), "split.fossil".to_string());
-    fossil_syntax::parse(&db, file);
-    let errors = fossil_syntax::parse::accumulated::<Diagnostic>(&db, file);
+    let errors = fossil_syntax::parse(&db, file).diagnostics(&db);
     assert!(
         errors.is_empty(),
         "the split did not parse: {errors:?}\n{full}"
@@ -593,7 +611,6 @@ fn the_generated_split_suggestion_compiles() {
             vec!["http://example.org/email".to_string()],
             vec!["http://example.org/phone".to_string()],
         ],
-        &[],
     );
 
     // 2. The generated split names a shape and reads a source. Prepend the
@@ -622,7 +639,7 @@ fn the_generated_split_suggestion_compiles() {
          prop http://example.org/phone string 0 1\n",
     );
     fossil_base::test_support::register_inferred(
-        &db,
+        &mut db,
         "users.csv",
         &[
             ("id", Primitive::Integer),
@@ -644,9 +661,9 @@ fn the_generated_split_suggestion_compiles() {
 
     for mloc in &mappings {
         let result = typecheck_mapping(&db, *mloc);
-        let diags = typecheck_mapping::accumulated::<Diagnostic>(&db, *mloc);
+        let diags = read_by_check(&db, *mloc);
         assert!(
-            result.is_ok(),
+            result.checked(&db).is_ok(),
             "split-suggestion mapping #{} failed to type-check: {:#?}",
             mloc.index(&db),
             diags
@@ -662,7 +679,11 @@ fn the_generated_split_suggestion_compiles() {
              line; got {props:#?}",
             mloc.index(&db),
         );
-        let body_diags = body::accumulated::<Diagnostic>(&db, *mloc);
+        let body_diags: Vec<&Diagnostic> = body(&db, *mloc)
+            .diagnostics(&db)
+            .iter()
+            .chain(fossil_syntax::parse(&db, file).diagnostics(&db))
+            .collect();
         assert!(
             body_diags.is_empty(),
             "the generated split must lower without complaint: {body_diags:#?}"
@@ -759,7 +780,7 @@ fn resolved_constraints_never_leak_unknown_or_inferenceid() {
     }
 }
 
-// ===== The collision repair is code, and the compiler has to accept it back ==
+// ===== A collision names the repair, and the repair is a declaration ======
 
 /// Two predicates whose last IRI segments coincide. Both become unwritable and
 /// the checker says so — a property key is the bare last segment of a predicate
@@ -773,8 +794,6 @@ prop http://example.org/name string 1 1
 prop http://xmlns.com/foaf/0.1/name string 0 1
 ";
 
-/// The program that trips it. `foaf_name` is what the repair will make writable;
-/// until then the shape declares two `name`s and neither can be written.
 const COLLIDING_PROGRAM: &str = "\
 type { Person } := io.shex(\"colliding.shex\")
 User := io.csv(\"u.csv\")
@@ -784,42 +803,11 @@ People : Person from User
     name = User.name
 ";
 
-/// The `@rename(…)` clause out of a diagnostic's `help:`, verbatim.
-///
-/// Extracted by scanning rather than by re-rendering, and that is the point of
-/// the test: what is fed back to the parser is the exact text a reader would
-/// copy off their terminal.
-///
-/// It read the MESSAGE until the collision report grew labels. The repair is
-/// prose about what to do, which is what `Diagnostic::help` is; the message is
-/// now the one sentence naming the shape and the colliding name, and the two
-/// IRIs it used to carry are under the lines of the document that declare them.
-fn rename_clause(helps: &[String]) -> String {
-    let m = helps
-        .iter()
-        .find(|m| m.contains("@rename("))
-        .unwrap_or_else(|| panic!("no `help:` recommended a `@rename`; got {helps:#?}"));
-    let start = m.find("@rename(").expect("just matched");
-    let end = start + m[start..].find(')').expect("the clause is parenthesised") + 1;
-    m[start..end].to_string()
-}
-
-/// **The recommendation has to be true.**
-///
-/// `Checker::surface_name_collisions` has told authors to write
-/// `@rename(<Type>, "<iri>" as <name>)` since before there was a production for
-/// it: `AT_ATTR` at top level fell through to `bump_as_error`, so the one repair
-/// the compiler names did not parse. Two things had to change for this test to
-/// be possible — the production (grammar.bnf, `TypeDef := RenameAttr* 'type' …`)
-/// and the message, which said `<Type>` where a real bound name has to go.
-///
-/// This is the same shape as `the_generated_split_suggestion_compiles`: a
-/// compiler that emits source is answerable for that source. It goes further,
-/// because parsing is not the claim — the claim is that the repair REPAIRS, so
-/// the assertion is that the collision is gone and the renamed key resolves.
+/// The collision is reported, and its help sends the author to the repair the
+/// language has: declaring the type, where a field's name sits beside its IRI.
+/// It names the bound type and the second IRI, and proposes a name for it.
 #[test]
-fn the_recommended_rename_parses_and_repairs_the_collision() {
-    // 1. The collision, reported.
+fn a_collision_names_the_declaration_that_repairs_it() {
     let mut db = new_db();
     let file = SourceFile::new(
         &db,
@@ -828,71 +816,16 @@ fn the_recommended_rename_parses_and_repairs_the_collision() {
     );
     register_document(&mut db, "colliding.shex", COLLIDING_DOCUMENT);
     let mapping = def_map(&db, file).mappings(&db)[0];
-    let before: Vec<String> = typecheck_mapping::accumulated::<Diagnostic>(&db, mapping)
-        .into_iter()
-        .map(Diagnostic::message)
-        .collect();
+    let diagnostics = read_by_check(&db, mapping);
+    let collision = diagnostics
+        .iter()
+        .find(|d| d.message().contains("both called `name`"))
+        .unwrap_or_else(|| panic!("the two predicates must collide; got {diagnostics:#?}"));
+    let help = collision.help.clone().expect("a collision says what to do");
     assert!(
-        before.iter().any(|m| m.contains("both called `name`")),
-        "the two predicates must collide to begin with; got {before:#?}"
-    );
-
-    // 2. The repair, taken from the `help:` and put where it says.
-    let helps: Vec<String> = typecheck_mapping::accumulated::<Diagnostic>(&db, mapping)
-        .into_iter()
-        .filter_map(|d| d.help.clone())
-        .collect();
-    let clause = rename_clause(&helps);
-    assert!(
-        clause.contains("Person"),
-        "the clause names the bound TYPE, not a `<Type>` placeholder: {clause}"
-    );
-    let repaired = format!("{clause}\n{COLLIDING_PROGRAM}");
-
-    // 3. The repaired program, checked through the production path.
-    let mut db2 = new_db();
-    let file2 = SourceFile::new(&db2, repaired.clone(), "colliding.fossil".to_string());
-    register_document(&mut db2, "colliding.shex", COLLIDING_DOCUMENT);
-    let mappings = def_map(&db2, file2).mappings(&db2).clone();
-    assert_eq!(
-        mappings.len(),
-        1,
-        "the repaired program must still parse into its one mapping:\n{repaired}"
-    );
-    let after: Vec<String> = typecheck_mapping::accumulated::<Diagnostic>(&db2, mappings[0])
-        .into_iter()
-        .map(Diagnostic::message)
-        .collect();
-    assert!(
-        !after.iter().any(|m| m.contains("both called `name`")),
-        "the repair must repair: the collision is still reported.\n\
-         program:\n{repaired}\ndiagnostics: {after:#?}"
-    );
-
-    // 4. And the renamed key is now writable — a repair that silences the
-    //    message without making the predicate reachable would pass step 3.
-    let alias = clause
-        .rsplit_once(" as ")
-        .and_then(|(_, tail)| tail.strip_suffix(')'))
-        .expect("the clause ends `as <name>)`")
-        .to_string();
-    let with_use = format!("{repaired}    {alias} = User.name\n");
-    let mut db3 = new_db();
-    let file3 = SourceFile::new(&db3, with_use.clone(), "colliding.fossil".to_string());
-    register_document(&mut db3, "colliding.shex", COLLIDING_DOCUMENT);
-    let m3 = def_map(&db3, file3).mappings(&db3)[0];
-    let diags: Vec<String> = typecheck_mapping::accumulated::<Diagnostic>(&db3, m3)
-        .into_iter()
-        .map(Diagnostic::message)
-        .collect();
-    assert!(
-        !diags.iter().any(|m| m.contains(&alias)),
-        "`{alias}` must resolve to the renamed predicate.\n\
-         program:\n{with_use}\ndiagnostics: {diags:#?}"
-    );
-    assert_eq!(
-        body(&db3, m3).properties(&db3).len(),
-        3,
-        "@subject, name and foaf_name all survive the lowering"
+        help.contains("Declare `Person` in the program")
+            && help.contains("`foaf_name`")
+            && help.contains("http://xmlns.com/foaf/0.1/name"),
+        "the help names the type to declare, a field name and its IRI: {help}"
     );
 }

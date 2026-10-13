@@ -15,11 +15,10 @@ workspace = true
 
 [dependencies]
 # `providers::DATA` — the `io.` rows, which choose the reader a source is read
-# with — and `NativeReader`, its table function and option keyword.
+# with — and `NativeReader`, its table function and option keyword; and
+# `sources::InferredDescriptor`, the columns a profile finds, which is the
+# value of the input a host writes them into.
 fossil-base = { path = "../fossil-base" }
-# `InferredDescriptor` / `InferredColumn` — what the compiler's cache holds, and
-# the first half of a profile.
-fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 # `Primitive`, the lattice a DuckDB column type maps onto.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 # A profile crosses to a host as JSON, and `@fossil-lang/types` declares its
@@ -29,7 +28,7 @@ serde = { workspace = true }
 smol_str = { workspace = true }
 
 [dev-dependencies]
-# The engine its tests run the plan on, as the language server does. A dev
+# The engine its tests run the plan on. A dev
 # edge: nothing that depends on this crate links a database through it.
 duckdb = { workspace = true }
 tempfile = { workspace = true }

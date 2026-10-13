@@ -1,0 +1,48 @@
+---
+title: Not a field type
+description: "`type/invalid-field-type` — a declared field's type is written in the right names and says something the shape vocabulary cannot carry."
+---
+
+Every name in the field's type is one fossil knows, and together they say something a field cannot
+be:
+
+```fossil
+@iri("https://schema.org/Person")
+type Person
+    @iri("https://schema.org/nickname")  nicknames: Option<Seq<String>>
+```
+
+```text
+`Option<Seq<String>>` is not a field type: a field says how many values it holds once, outermost — `Option<T>` or `Seq<T>` of a primitive or a `Ref<T>` — and the vocabulary has one count per property
+```
+
+The forms there are:
+
+| Written | Means |
+| --- | --- |
+| `T` | exactly one value of the primitive `T` |
+| `Option<T>` | zero or one |
+| `Seq<T>` | zero or more |
+| `Ref<C>` | a reference to a node of the type `C`, declared or imported — an edge |
+
+and `Option` and `Seq` hold a primitive or a `Ref<C>`. So the refusal names one of these rules:
+
+- **A count said twice.** `Option<Seq<T>>` would be a second spelling of `Seq<T>`; `Seq<Option<T>>`
+  a list with holes in it, which a corpus has no way to write; `Option<Option<T>>` nothing at all.
+- **A reference to a value.** `Ref<String>` — a reference is to a node, and a `String` is not one.
+- **A constructor with nothing in it.** `Option`, `Seq` or `Ref` alone.
+- **A primitive with an argument.** `String<Date>`.
+- **A type of the program written bare.** `livesIn: City` — a node is held by reference,
+  `Ref<City>`.
+
+## Why fossil refuses it
+
+A declaration lowers to the same vocabulary a ShEx or SHACL document does, and that vocabulary gives
+each property one `(min, max)` and one kind of value. A type that says more than that would have to be
+dropped quietly to be lowered, and the field would then be checked against something its author did
+not write. [Types declared in the program](/docs/design/declared) is where the forms are argued.
+
+## How to repair it
+
+- **Say the count once:** `nicknames: Seq<String>`.
+- **Write the reference to the type:** `livesIn: Ref<City>`.

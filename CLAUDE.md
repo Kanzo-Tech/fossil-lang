@@ -62,7 +62,6 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
   derives it from the cdylib dependency closure and prints it, precisely because the two
   hand-maintained `-p …` lists that preceded it had already drifted apart (9 crates vs 6).
 - **Forbidden crates** (banned in `deny.toml`): `serde_yml` (RUSTSEC-2025-0068; `serde_yaml_ng` if YAML ever returns),
-  `tower-lsp` (unmaintained ~3 years; use `lsp-server`, as all three reference implementations do),
   `wasm-pack` (archived; use `wasm-bindgen-cli` + Vite),
   `sqlx` (not WASM-compatible).
 - **`tokio` never reaches a wasm build from our own manifests.** A crate may hold it behind
@@ -95,14 +94,13 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
 | Component | Version | Notes |
 |-----------|---------|-------|
 | Rust toolchain | 1.90 | per `rust-toolchain.toml`; bumped from 1.85 to unblock wasm-bindgen-cli 0.2.120 install |
-| salsa | 0.28.5 + `accumulator` feature | incremental query framework; ≥0.28.5 for RUSTSEC-2026-0308. 0.28 returns by reference by default, so every tracked item that predates it names `returns(clone)` or `returns(copy)`, the 0.26 default |
+| salsa | 0.28.5, defaults minus `accumulator` | incremental query framework; diagnostics travel in query outputs (`/docs/design/incremental`); ≥0.28.5 for RUSTSEC-2026-0308. 0.28 returns by reference by default, so every tracked item that predates it names `returns(clone)` or `returns(copy)`, the 0.26 default |
 | rowan | 0.16 | lossless CST |
 | logos | 0.16 | lexer |
 | miette | 7.6 | diagnostics |
 | duckdb | 1.10502 (`features = ["bundled"]`) | native execution |
 | wasm-bindgen | =0.2.120 | exact pin; CLI must match |
 | wasm-opt (binaryen) | 116 via `cargo install wasm-opt@0.116.1` | NOT apt (ubuntu ships binaryen 108, whose wasm-opt corrupts wasm-bindgen's externref table → `Table.grow(): failed to grow table` instantiating a wasm-bindgen module on Node 20, binaryen #4711; 116 fixes it). `packages/executor/scripts/build-wasm.sh` passes the six wasm32 default features (bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint, reference-types, multivalue — Rust 1.87/LLVM 20). NOT `-all` → no gc/typed-funcref, which break instantiation |
-| lsp-server | 0.7 | NOT tower-lsp (unmaintained) |
 | arrow + parquet | 58 | the corpus writer, `fossil_df::write` (through `datafusion`'s re-export) |
 | shex_ast + rudof_iri | 0.3 | ShEx target shapes; explicit features only — `default-features` drags in what wasm32 cannot build |
 | datafusion | 54, `default-features = false` | pinned in `crates/fossil-df/Cargo.toml`, not the workspace table — see the `zstd`/`arrow-ipc` note there |
@@ -113,60 +111,51 @@ API changes.
 
 ## Project Layout
 
-`ls crates/` and `git ls-files packages` are the lists. This is what each one is for; a
-`[NATIVE-ONLY]` crate carries a `wasm32` `compile_error!` tripwire.
+`ls crates/` and `git ls-files packages` are the lists. This is what each one is for.
 
 ```
 crates/
-  fossil-base/             Salsa Db trait + System abstraction (thin Db, fat System)
-  fossil-location/         the ONE rule turning a written reference into something a reader can
-                           open — `@conn`, scheme, absolute, else the program's directory; never
-                           the cwd. It was a module of `fossil-base` and is not one now: a
-                           substrate «doesn't know about file paths». It depends on NOTHING and
-                           `fossil-base` does not depend on IT — each of its readers
-                           (`fossil-hir`, `-ide`, `-df`, `-lineage`) takes it direct
+  fossil-base/             the Salsa substrate: the `Db` trait and `FossilDb`, every input a
+                           host writes (files, sources, connections, the provider rows), the
+                           `Diagnostics` sink, and `location` — the ONE rule turning a written
+                           reference into something a reader can open: `@conn`, scheme,
+                           absolute, else the program's directory; never the cwd
   fossil-syntax/           lossless CST + parser
   fossil-hir/              types + name resolution + bidirectional checker + the stdlib
-                           catalog. `stdlib.rs` owns the TYPES a row is written in; the ROWS
+                           catalog, and `lineage`: what a program reads, through the
+                           connections. `stdlib.rs` owns the TYPES a row is written in; the ROWS
                            are `catalogue.bnf` and `stdlib/generated.rs` is what
                            `cargo xtask catalogue` makes of them. Adding a function is a
-                           line in the `.bnf` and touches no Rust
+                           line in the `.bnf` and touches no Rust. And the shape-document
+                           decoders: `shex` over `shex_ast`, `shacl` over `oxrdf`, and
+                           `providers::PROVIDERS`, the registry a compiling host installs
   fossil-mir/              typed operator algebra; `src/op.rs` is the operator enum
-  fossil-shex/             ShExDescriptor over `shex_ast` — backward target-shape checking
-  fossil-descriptors-{input,output}/   trait + impls (ShEx, inferred)
   fossil-storage/          a vended `StorageCredential` (Iceberg REST's) → a scoped DuckDB secret,
                            an Azure SAS lend, or (feature `object-store`) an `object_store` store
                            routed by longest prefix and renewed at expires−5min — the one IO path
                            of DataFusion and of every byte fossil reads or writes. `js`: a JS
                            `Host` as its `Host`. The one renderer of a `CREATE SECRET`
   fossil-storage-wasm/     that, exposed to JS for `@fossil-lang/storage`
-  fossil-lineage/          source lineage + provider introspection, projected onto the wire
-  fossil-sinks/            the `fossil/1` format: `fossil.json`'s structs (serde + schemars;
-                           `fossil.schema.json` beside them is what a reader in another
-                           language checks against), `FOSSIL_FORMAT`, and `generated.rs` —
-                           the writer's column table from `corpus.bnf`. It byte-writes
-                           nothing: `arrow-schema` for the types, `serde_json` to emit
   fossil-df/               DataFusion backend for the property-graph MIR, the one corpus
                            writer (`write`: a Parquet per table, `fossil.json`
                            last), and `Executor` — the whole run a host drives, under the
-                           2 GiB pool in `memory.rs` that refuses as `run/over-budget`
+                           2 GiB pool in `memory.rs` that refuses as `run/over-budget`.
+                           `corpus` is the `fossil/1` format: `fossil.json`'s structs, with
+                           `fossil.schema.json` beside them for a reader in another language,
+                           and `generated.rs`, the writer's column table from `corpus.bnf`
   fossil-profile/          what a source is — columns and types, counts, candidate keys, the
                            inclusions between sources, a sample — planned as queries and read
                            from their answers, running NOTHING (sans-IO, `run(sources, options,
-                           exec)`). Each host runs the plan on its own `DuckDB`; it links no
-                           engine, so it is in the wasm closure. `Options::TYPES` is one
+                           exec)`). The browser runs the plan on DuckDB-WASM and `fossil-df`'s
+                           tests on native `duckdb`; it links no engine, so it is in the wasm
+                           closure. There is no native language server: it was deleted on
+                           2026-10-12 (`/docs/design/discarded`). `Options::TYPES` is one
                            `DESCRIBE` a source, what the editor asks for. `generated.rs` is
                            `catalogue.bnf`'s reader and type table
   fossil-graph-schema/     the canonical graph-schema — the shared substrate contract — and the
                            error catalogue: `Problem`, `Failure`, and (feature `js`) the one
                            function every wasm crate throws a failure through
   fossil-ide/              hover, completion, goto-def + the symbol/prefix/workspace indexes
-  fossil-lsp/              LSP server via lsp-server  [NATIVE-ONLY]. `src/profile.rs` is the
-                           native host for `fossil-profile`: the columns of every source it can
-                           `stat`, on a `DuckDB` connection, before the compile. It links
-                           `DuckDB` on a normal edge — `cargo tree -e normal -i duckdb
-                           --workspace` is the list, and `crates/xtask/tests/engine_reach.rs`
-                           holds it against `deny.toml`
   fossil-wasm/             WASM host shim (the workspace under `openProgram` + the tokenizer)
   fossil-df-wasm/          `fossil_df::Executor` exposed to JS — the only host that writes a
                            corpus, in the browser and in Node. There is no native CLI: it
@@ -190,7 +179,7 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            and loads no WASM. Beside `src/` sits the contract it fulfils — `guards/`,
                            `conformance/` and `integration/` — outside `files`, so npm never
                            sees it. `tests/manifest.test.ts` holds `src/manifest.ts` against
-                           `fossil-sinks/fossil.schema.json`; `integration/round-trip.test.ts`
+                           `fossil-df/src/corpus/fossil.schema.json`; `integration/round-trip.test.ts`
                            runs a program through the executor and reads the corpus back over
                            HTTP. `test` stays `tests/` alone because the release gate runs it
                            without `duckdb`; the contract is `test:contract` (`corpus.yml`) and
@@ -228,8 +217,8 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            legend ships, and the guard is on the Rust side
   profile/                 what a program's sources are, on the host's DuckDB: each read under
                            its credential, then `fossil-profile`'s plan run on the engine
-                           (`runProfiler`, from `wasm/`). The plan is the language server's
-                           too, so the two hosts share the code and only the engine differs
+                           (`runProfiler`, from `wasm/`). The plan is Rust, the same one
+                           `fossil-df`'s tests run on native `duckdb`
 
 docs/                      Next.js + fumadocs, and ALL of the prose: the book, the corpus
                            format, and the design argument behind a maintainers' divider.
@@ -244,8 +233,8 @@ catalogue.bnf              which names exist — the `io.` rows, the stdlib rows
                            states a row twice
 corpus.bnf                 what a corpus is made of — the vertex and edge columns the writer
                            emits and the ROLE of each. The source of one generated file,
-                           `fossil-sinks/src/generated.rs`. File names are NOT here: they are
-                           `fossil.json`'s `path`, and `fossil-sinks::manifest` owns them
+                           `fossil-df/src/corpus/generated.rs`. File names are NOT here: they
+                           are `fossil.json`'s `path`, and `fossil_df::corpus::manifest` owns them
 tests/wasm_parity/         the manual DuckDB-WASM cross-engine parity harness
 ```
 
@@ -269,7 +258,7 @@ over somebody else's editor, and the somebody else is `@kanzo-tech/ui`.
   Run WASM gate to confirm no transitive WASM-incompat leak. If the dep is foundational, say why
   on the page whose claim depends on it.
 - **Add a new crate:** `members = ["crates/*"]` picks it up; copy the shape of an existing
-  peer (compiler-core, native-only with the `wasm32` cfg-tripwire, or wasm-shim). Do not
+  peer (compiler-core or wasm-shim). Do not
   record the new crate count anywhere — nothing should have one to update.
 - **Run the WASM smoke test:** build the nodejs bindgen target, then
   `node crates/fossil-wasm/test-wasm-workspace.js` — the build precondition is in that file's

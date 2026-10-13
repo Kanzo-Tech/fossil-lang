@@ -59,6 +59,8 @@ use fossil_hir::spans::spans;
 use fossil_hir::{HirExpr, HirMapping, MappingLoc, PropertyKey, Record, Ty, TyKind};
 use smol_str::SmolStr;
 
+use fossil_base::{Diagnostics, ErrorGuaranteed};
+
 use crate::graph::MirGraph;
 use crate::op::{Expr, Op, SinkRef, SourceFormat, VProp};
 
@@ -79,6 +81,23 @@ pub fn lower_to_mir_pg<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
 ) -> MirGraph<'db> {
+    let mut sink = Diagnostics::new();
+    // A refusal leaves no ops: a graph that lost one is not a smaller graph,
+    // it is a wrong one.
+    let (ops, error) = match lower_mapping(db, &mut sink, mapping) {
+        Ok(ops) => (ops, None),
+        Err(eg) => (Vec::new(), Some(eg)),
+    };
+    MirGraph::new(db, ops, error, sink.into_vec())
+}
+
+/// [`lower_to_mir_pg`]'s body: the ops, or the taint of the refusal it pushed
+/// into `sink`.
+fn lower_mapping<'db>(
+    db: &'db dyn fossil_base::Db,
+    sink: &mut Diagnostics,
+    mapping: MappingLoc<'db>,
+) -> Result<Vec<Op<'db>>, ErrorGuaranteed> {
     let file = mapping.file(db);
     let dm = def_map(db, file);
     let span = mapping_span(db, mapping);
@@ -88,10 +107,7 @@ pub fn lower_to_mir_pg<'db>(
     // mapping, for an answer the key already carried.
     let dense_idx = mapping.index(db);
     if dense_idx >= dm.mappings(db).len() {
-        return poisoned(
-            db,
-            fossil_base::bug(db, span, "mapping is absent from its own DefMap"),
-        );
+        return Err(sink.bug(span, "mapping is absent from its own DefMap"));
     }
     let hir = lower_to_hir(db, file);
     // **This ICE reached users, and it was never about the mapping it named.**
@@ -113,28 +129,13 @@ pub fn lower_to_mir_pg<'db>(
     // here that was ever a compiler bug.
     let m = match hir.mappings(db).get(dense_idx) {
         Some(Ok(m)) => m,
-        Some(Err(eg)) => {
-            // The body is still checked. `body` is keyed by the mapping and
-            // reads the CST directly, so it needs nothing the header failed to
-            // give; forcing it here puts its diagnostics in THIS query's
-            // dependency subtree, which is where `program_diagnostics` drains
-            // them from. Without this line a mapping whose header is one token
-            // wrong loses every report about the lines under it, which is the
-            // failure `lower_mapping_node` already refuses for a shape name it
-            // cannot resolve.
-            let _ = body(db, mapping);
-            return poisoned(db, *eg);
-        }
+        Some(Err(eg)) => return Err(*eg),
         None => {
-            return poisoned(
-                db,
-                fossil_base::bug(
-                    db,
-                    span,
-                    "the HIR has no slot at this mapping's DefMap index: `def_map` and \
-                     `lower_to_hir` disagree about how many MAPPING nodes the file has",
-                ),
-            );
+            return Err(sink.bug(
+                span,
+                "the HIR has no slot at this mapping's DefMap index: `def_map` and \
+                 `lower_to_hir` disagree about how many MAPPING nodes the file has",
+            ));
         }
     };
     let body = body(db, mapping);
@@ -150,13 +151,9 @@ pub fn lower_to_mir_pg<'db>(
     // The checker already resolves the shape, so the table arrives through a
     // seam this function already reads — as a pair of strings, with no shape
     // vocabulary and no descriptor, so nothing `0e6898d` cut comes back.
-    let (row_type, predicates) = match typecheck_mapping(db, mapping) {
-        Err(eg) => return poisoned(db, eg),
-        Ok(out) => (
-            out.source_row(db).unwrap_or_else(|| untyped_row(db)),
-            out.predicates(db).clone(),
-        ),
-    };
+    let checked = typecheck_mapping(db, mapping).checked(db)?;
+    let row_type = checked.source_row(db).unwrap_or_else(|| untyped_row(db));
+    let predicates = checked.predicates(db).clone();
     // v0.1: every prop is typed String. The descriptor-driven type refinement is
     // the next increment; the backend derives the manifest/xsd spelling from `Ty`.
     let string_ty = Ty::new(db, TyKind::Primitive(Primitive::String));
@@ -165,41 +162,35 @@ pub fn lower_to_mir_pg<'db>(
 
     // 0..k: the source relation. One `Op::Source` for a binding that reads a
     // file; `Source` plus one op per verb when the binding is a pipeline.
-    let source = match lower_source_chain(
+    let source = lower_source_chain(
         db,
+        sink,
         dm,
         file,
         &m.source_binding,
         span,
         &mut ops,
         &mut Vec::new(),
-    ) {
-        Ok(c) => c,
-        Err(eg) => return poisoned(db, eg),
-    };
+    )?;
     let source_idx = source.last;
 
     // `id` = the vertex IRI. No `iri` property (or one that does not lower) is
     // fatal: the old empty-string default produced vertices whose subject was
     // `""`, which dedups every row of the mapping into a single blank node.
     let iri_span_line = iri_property_line(db, mapping, body);
-    let Some(id) = lower_iri_property(m, body, db, iri_span_line) else {
-        return poisoned(
-            db,
-            fossil_base::report(
-                db,
-                span,
-                fossil_graph_schema::Problem::MissingSubject {
-                    mapping: m.name.to_string(),
-                },
-            ),
-        );
+    let Some(id) = lower_iri_property(m, body, db, sink, iri_span_line) else {
+        return Err(sink.report(
+            span,
+            fossil_graph_schema::Problem::MissingSubject {
+                mapping: m.name.to_string(),
+            },
+        ));
     };
 
     // Nothing here GUESSES an edge from template shapes: the lookup already
     // exists downstream, where `apply_output_shape` classifies a predicate as an
-    // edge when the SHAPE says its range is a shape. Naming a shape document is
-    // MANDATORY, so that path is always available.
+    // edge when the SHAPE says its range is a shape. A mapping targets a type,
+    // declared or imported, so that path is always available.
 
     // Classify each non-`iri` property: FieldRef/StringLit → vertex prop;
     // IRI-template that resolves to another subject → edge; dangling template /
@@ -257,7 +248,7 @@ pub fn lower_to_mir_pg<'db>(
             HirExpr::ColumnRef { column: field, .. } | HirExpr::FieldRef(field) => {
                 props.push(VProp {
                     name: pred_local,
-                    value: lower_property_value(db, &prop.value, &m.source_binding, None),
+                    value: lower_property_value(db, sink, &prop.value, &m.source_binding, None),
                     ty: field_ty(field.as_str()),
                     rdf_uri: iri.clone(),
                     term: term.clone(),
@@ -273,7 +264,7 @@ pub fn lower_to_mir_pg<'db>(
             HirExpr::StringLit(_) | HirExpr::Ternary { .. } | HirExpr::Interpolation(_) => props
                 .push(VProp {
                     name: pred_local,
-                    value: lower_property_value(db, &prop.value, &m.source_binding, None),
+                    value: lower_property_value(db, sink, &prop.value, &m.source_binding, None),
                     ty: string_ty,
                     rdf_uri: iri.clone(),
                     term: term.clone(),
@@ -285,7 +276,7 @@ pub fn lower_to_mir_pg<'db>(
             // that produces one.
             HirExpr::Call { func, .. } => props.push(VProp {
                 name: pred_local,
-                value: lower_property_value(db, &prop.value, &m.source_binding, None),
+                value: lower_property_value(db, sink, &prop.value, &m.source_binding, None),
                 ty: call_result_ty(db, func),
                 rdf_uri: iri.clone(),
                 term: term.clone(),
@@ -299,7 +290,7 @@ pub fn lower_to_mir_pg<'db>(
             // boolean, which is the silent half of a wrong answer.
             HirExpr::BinOp { .. } | HirExpr::UnaryOp { .. } => props.push(VProp {
                 name: pred_local,
-                value: lower_property_value(db, &prop.value, &m.source_binding, None),
+                value: lower_property_value(db, sink, &prop.value, &m.source_binding, None),
                 ty: operator_ty(db, &prop.value, &field_ty),
                 rdf_uri: iri.clone(),
                 term: term.clone(),
@@ -307,7 +298,7 @@ pub fn lower_to_mir_pg<'db>(
             }),
             HirExpr::IntLit(_) => props.push(VProp {
                 name: pred_local,
-                value: lower_property_value(db, &prop.value, &m.source_binding, None),
+                value: lower_property_value(db, sink, &prop.value, &m.source_binding, None),
                 ty: Ty::new(db, TyKind::Primitive(Primitive::Integer)),
                 rdf_uri: iri.clone(),
                 term: term.clone(),
@@ -315,7 +306,7 @@ pub fn lower_to_mir_pg<'db>(
             }),
             HirExpr::FloatLit(_) => props.push(VProp {
                 name: pred_local,
-                value: lower_property_value(db, &prop.value, &m.source_binding, None),
+                value: lower_property_value(db, sink, &prop.value, &m.source_binding, None),
                 ty: Ty::new(db, TyKind::Primitive(Primitive::Float)),
                 rdf_uri: iri.clone(),
                 term: term.clone(),
@@ -323,7 +314,7 @@ pub fn lower_to_mir_pg<'db>(
             }),
             HirExpr::BoolLit(_) => props.push(VProp {
                 name: pred_local,
-                value: lower_property_value(db, &prop.value, &m.source_binding, None),
+                value: lower_property_value(db, sink, &prop.value, &m.source_binding, None),
                 ty: Ty::new(db, TyKind::Primitive(Primitive::Bool)),
                 rdf_uri: iri.clone(),
                 term: term.clone(),
@@ -334,17 +325,13 @@ pub fn lower_to_mir_pg<'db>(
             // refuses — and a refused mapping never gets here, because its
             // `Err` poisons this graph at the top of the function.
             HirExpr::Edge { target, .. } => {
-                return poisoned(
-                    db,
-                    fossil_base::bug(
-                        db,
-                        span,
-                        format!(
-                            "an edge to `{target}` reached MIR unresolved: it has no identity \
-                             template and the checker did not refuse the mapping"
-                        ),
+                return Err(sink.bug(
+                    span,
+                    format!(
+                        "an edge to `{target}` reached MIR unresolved: it has no identity \
+                         template and the checker did not refuse the mapping"
                     ),
-                );
+                ));
             }
         }
     }
@@ -369,14 +356,7 @@ pub fn lower_to_mir_pg<'db>(
         sink: SinkRef::Corpus,
     });
 
-    MirGraph::new(db, ops, None)
-}
-
-/// A tainted, op-less graph. `eg` is the [`fossil_base::ErrorGuaranteed`] whose
-/// construction already accumulated the explaining `Diagnostic`, so
-/// the caller never has to remember to emit one.
-fn poisoned(db: &dyn fossil_base::Db, eg: fossil_base::ErrorGuaranteed) -> MirGraph<'_> {
-    MirGraph::new(db, Vec::new(), Some(eg))
+    Ok(ops)
 }
 
 /// The row type of a source that declares no schema: a record with no known
@@ -410,9 +390,8 @@ fn mapping_span<'db>(
 /// (it has no schema knowledge — `iri`-templates aside, an `hasProject = .x`
 /// `FieldRef` value looks like a column). The schema is what knows that
 /// `ex:hasProject` **references another node type** (→ a typed edge) and that its
-/// cardinality is **multi-valued**. This is the same edge-vs-property decision
-/// `fossil-sinks`'s `vertex_edge_decomp` makes for the SQL writer, taken against
-/// the one shared model.
+/// cardinality is **multi-valued**. The edge-vs-property decision is taken here,
+/// once, against the one shared model.
 ///
 /// Takes the **schema**, not the document that produced it: a caller holding a
 /// `ShEx` or SHACL descriptor calls `to_graph_schema()` itself. MIR is a property
@@ -562,6 +541,7 @@ impl Chain {
 /// the graph got past type-checking: a bug, and it says so.
 fn lower_source_chain<'db>(
     db: &'db dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     dm: DefMap<'db>,
     file: fossil_base::SourceFile,
     binding: &SmolStr,
@@ -579,7 +559,7 @@ fn lower_source_chain<'db>(
         .cloned();
 
     let Some(pipe) = pipe else {
-        let (uri, format) = resolve_source(dm, db, binding, span)?;
+        let (uri, format) = resolve_source(dm, db, sink, binding, span)?;
         // The row type of THIS binding, not of the mapping: a pipeline's mapping
         // sees the derived row, and the source underneath it still declares its
         // own. Any diagnostic this would raise was already raised by the
@@ -587,10 +567,11 @@ fn lower_source_chain<'db>(
         // `.ok().flatten()`: the taint was already raised by the type-check,
         // which poisons the graph before the lowering runs, so here a failed row
         // is the same as an absent one — an untyped source, as before.
-        let row_type = fossil_hir::infer::resolve_binding_row(db, file, binding.as_str(), &[])
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| untyped_row(db));
+        let row_type =
+            fossil_hir::infer::resolve_binding_row(db, sink, file, binding.as_str(), &[])
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| untyped_row(db));
         ops.push(Op::Source {
             uri,
             format,
@@ -604,8 +585,7 @@ fn lower_source_chain<'db>(
     };
 
     if path.contains(binding) {
-        return Err(fossil_base::bug(
-            db,
+        return Err(sink.bug(
             span,
             format!(
                 "the source pipeline `{binding}` reaches itself past the checker's cycle guard"
@@ -614,11 +594,11 @@ fn lower_source_chain<'db>(
     }
     path.push(binding.clone());
 
-    let mut chain = lower_source_chain(db, dm, file, &pipe.base, span, ops, path)?;
+    let mut chain = lower_source_chain(db, sink, dm, file, &pipe.base, span, ops, path)?;
     for op in &pipe.ops {
         match op {
             HirSourceOp::Where(pred) => {
-                let pred = lower_property_value(db, pred, &chain.primary(), None);
+                let pred = lower_property_value(db, sink, pred, &chain.primary(), None);
                 ops.push(Op::Filter {
                     input: chain.last,
                     pred,
@@ -638,7 +618,7 @@ fn lower_source_chain<'db>(
                     .collect(),
             }),
             HirSourceOp::Join { right, alias, on } => {
-                let right_chain = lower_source_chain(db, dm, file, right, span, ops, path)?;
+                let right_chain = lower_source_chain(db, sink, dm, file, right, span, ops, path)?;
                 // The condition is a PREDICATE the author writes, so there is
                 // no key to synthesise: it lowers like any other expression.
                 //
@@ -646,7 +626,7 @@ fn lower_source_chain<'db>(
                 // references are qualified (`Purchase.user_id`,
                 // `User.id`), so each one already carries the relation it
                 // belongs to and the scope only supplies the default.
-                let on = lower_property_value(db, on, &chain.primary(), None);
+                let on = lower_property_value(db, sink, on, &chain.primary(), None);
                 // `Node.join(Node as Other, …)` — the self-join alias is the
                 // second name for the same source, and it travels as an alias
                 // rather than as the right side's name because the backend has
@@ -726,7 +706,7 @@ fn lower_source_chain<'db>(
             // a row of the result came from one of them and nothing says which.
             // The pipeline's name is what both sides are re-qualified under.
             HirSourceOp::Union { right } => {
-                let right_chain = lower_source_chain(db, dm, file, right, span, ops, path)?;
+                let right_chain = lower_source_chain(db, sink, dm, file, right, span, ops, path)?;
                 ops.push(Op::Union {
                     left: chain.last,
                     right: right_chain.last,
@@ -784,6 +764,7 @@ fn lower_source_chain<'db>(
 fn resolve_source<'db>(
     dm: DefMap<'db>,
     db: &'db dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     binding: &SmolStr,
     span: fossil_graph_schema::Span,
 ) -> Result<(SmolStr, SourceFormat), fossil_base::ErrorGuaranteed> {
@@ -800,8 +781,7 @@ fn resolve_source<'db>(
         delimiter,
     } = call;
     let Some(uri) = uri else {
-        return Err(fossil_base::report(
-            db,
+        return Err(sink.report(
             span,
             fossil_graph_schema::Problem::UnknownSource {
                 binding: binding.to_string(),
@@ -827,8 +807,7 @@ fn resolve_source<'db>(
                     name: SmolStr::new(name),
                 },
                 None => {
-                    return Err(fossil_base::report(
-                        db,
+                    return Err(sink.report(
                         span,
                         fossil_graph_schema::Problem::UnknownProvider {
                             constructor: c.to_string(),
@@ -838,8 +817,7 @@ fn resolve_source<'db>(
             },
         },
         None => {
-            return Err(fossil_base::report(
-                db,
+            return Err(sink.report(
                 span,
                 fossil_graph_schema::Problem::BareDocumentPath {
                     document: uri.to_string(),
@@ -931,6 +909,7 @@ fn lower_iri_property<'db>(
     m: &HirMapping,
     body: HirBody<'db>,
     db: &'db dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     span_line: u32,
 ) -> Option<Expr<'db>> {
     let prop = body
@@ -939,6 +918,7 @@ fn lower_iri_property<'db>(
         .find(|p| matches!(p.key, PropertyKey::Subject))?;
     Some(lower_property_value(
         db,
+        sink,
         &prop.value,
         &m.source_binding,
         Some(span_line),
@@ -1172,6 +1152,7 @@ fn substitute_edges<'db>(
 /// and still emits an empty source, which the backend resolves unqualified.
 fn lower_property_value<'db>(
     db: &'db dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     value: &HirExpr,
     source_binding: &SmolStr,
     assert_line: Option<u32>,
@@ -1191,7 +1172,7 @@ fn lower_property_value<'db>(
         },
         HirExpr::StringLit(s) => Expr::LitString(s.clone()),
         HirExpr::Interpolation(parts) => {
-            lower_interpolation(db, parts, source_binding, assert_line)
+            lower_interpolation(db, sink, parts, source_binding, assert_line)
         }
         // The result type comes from the same catalog entry the checker typed
         // this call against — the backend derives the column's datatype from
@@ -1202,10 +1183,23 @@ fn lower_property_value<'db>(
             then,
             otherwise,
         } => Expr::Ternary {
-            cond: Box::new(lower_property_value(db, cond, source_binding, assert_line)),
-            then: Box::new(lower_property_value(db, then, source_binding, assert_line)),
+            cond: Box::new(lower_property_value(
+                db,
+                sink,
+                cond,
+                source_binding,
+                assert_line,
+            )),
+            then: Box::new(lower_property_value(
+                db,
+                sink,
+                then,
+                source_binding,
+                assert_line,
+            )),
             otherwise: Box::new(lower_property_value(
                 db,
+                sink,
                 otherwise,
                 source_binding,
                 assert_line,
@@ -1233,6 +1227,7 @@ fn lower_property_value<'db>(
             Expr::IsNull {
                 operand: Box::new(lower_property_value(
                     db,
+                    sink,
                     operand,
                     source_binding,
                     assert_line,
@@ -1242,8 +1237,20 @@ fn lower_property_value<'db>(
         }
         HirExpr::BinOp { op, lhs, rhs } => Expr::BinOp {
             op: *op,
-            lhs: Box::new(lower_property_value(db, lhs, source_binding, assert_line)),
-            rhs: Box::new(lower_property_value(db, rhs, source_binding, assert_line)),
+            lhs: Box::new(lower_property_value(
+                db,
+                sink,
+                lhs,
+                source_binding,
+                assert_line,
+            )),
+            rhs: Box::new(lower_property_value(
+                db,
+                sink,
+                rhs,
+                source_binding,
+                assert_line,
+            )),
             ty: Ty::new(db, TyKind::Primitive(Primitive::Bool)),
         },
         HirExpr::FloatLit(v) => Expr::LitFloat(*v),
@@ -1261,6 +1268,7 @@ fn lower_property_value<'db>(
             op: *op,
             operand: Box::new(lower_property_value(
                 db,
+                sink,
                 operand,
                 source_binding,
                 assert_line,
@@ -1277,7 +1285,7 @@ fn lower_property_value<'db>(
             func: func.clone(),
             args: args
                 .iter()
-                .map(|a| lower_property_value(db, a, source_binding, assert_line))
+                .map(|a| lower_property_value(db, sink, a, source_binding, assert_line))
                 .collect(),
             ty: call_result_ty(db, func),
         },
@@ -1293,8 +1301,7 @@ fn lower_property_value<'db>(
         // answer that reads as a green test is the one failure this file cannot
         // afford.
         HirExpr::Edge { target, .. } => {
-            let _eg = fossil_base::bug(
-                db,
+            let _eg = sink.bug(
                 fossil_graph_schema::Span::new(0, 0),
                 format!(
                     "an edge to `{target}` reached the value lowering unresolved — \
@@ -1337,6 +1344,7 @@ fn call_result_ty<'db>(db: &'db dyn fossil_base::Db, func: &SmolStr) -> Ty<'db> 
 /// `CASE WHEN <expr> IS NOT NULL THEN <expr> ELSE error(...) END`.
 fn lower_interpolation<'db>(
     db: &'db dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     parts: &[InterpolationPart],
     source_binding: &SmolStr,
     assert_line: Option<u32>,
@@ -1346,7 +1354,7 @@ fn lower_interpolation<'db>(
         .map(|part| match part {
             InterpolationPart::Text(t) => Expr::LitString(t.clone()),
             InterpolationPart::Hole(e) => {
-                let value = lower_property_value(db, e, source_binding, None);
+                let value = lower_property_value(db, sink, e, source_binding, None);
                 match (assert_line, is_per_row(e)) {
                     (Some(line), true) => Expr::Assert {
                         name: SmolStr::new_static("iri_template_unbound"),
@@ -1779,7 +1787,8 @@ People : Person from Rows
         ];
         let binding = SmolStr::new_static("users");
         // `assert_line = None` → object-position lowering (no Assert wrapper).
-        let lowered: Expr<'_> = lower_interpolation(&db, &parts, &binding, None);
+        let lowered: Expr<'_> =
+            lower_interpolation(&db, &mut Diagnostics::new(), &parts, &binding, None);
         match lowered {
             Expr::Concat(l, r) => {
                 assert!(matches!(l.as_ref(), Expr::ColRef { .. }));
@@ -1801,7 +1810,8 @@ People : Person from Rows
             InterpolationPart::Text("/profile".into()),
         ];
         let binding = SmolStr::new_static("users");
-        let lowered: Expr<'_> = lower_interpolation(&db, &parts, &binding, Some(3));
+        let lowered: Expr<'_> =
+            lower_interpolation(&db, &mut Diagnostics::new(), &parts, &binding, Some(3));
         match lowered {
             Expr::Concat(l, r) => {
                 match l.as_ref() {
@@ -1838,7 +1848,8 @@ People : Person from Rows
         let binding = SmolStr::new_static("users");
         // Subject position: the constant hole must NOT get an assertion, only
         // the per-row one would.
-        let lowered: Expr<'_> = lower_interpolation(&db, &parts, &binding, Some(3));
+        let lowered: Expr<'_> =
+            lower_interpolation(&db, &mut Diagnostics::new(), &parts, &binding, Some(3));
         match lowered {
             Expr::Concat(l, r) => {
                 assert!(

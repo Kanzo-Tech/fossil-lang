@@ -7,7 +7,7 @@
 //! `properties`, which lists every one of them with the `role` of each the
 //! writer emits — the writer reads it off this table, which derives `serde` on
 //! [`Role`]'s projection for the purpose — and its types from
-//! `crates/fossil-sinks/fossil.schema.json`; the TypeScript projection this
+//! `crates/fossil-df/src/corpus/fossil.schema.json`; the TypeScript projection this
 //! module also emitted went when the manifest started listing the columns.
 //!
 //! # Why a parser here and a lexer from next door
@@ -243,11 +243,11 @@ const RUST_HEADER: &str = "\
 //! \"the writer's columns\" and nothing said so — see `corpus.bnf`.
 ";
 
-/// The Rust table: `crates/fossil-sinks/src/generated.rs`.
+/// The Rust table: `crates/fossil-df/src/corpus/generated.rs`.
 ///
-/// It lands in `fossil-sinks` because that crate is the junta — the manifest
-/// model, in the closure of both the writer and the reader — so every Rust
-/// consumer already depends on it and none grows an edge to reach this.
+/// It lands beside the manifest model, in the writer, because the corpus format
+/// is the writer's: every Rust consumer of a column is `fossil-df` or depends on
+/// it, so none grows an edge to reach this.
 #[must_use]
 pub fn emit_rust(columns: &[Column]) -> String {
     let mut out = String::from(RUST_HEADER);
@@ -397,7 +397,7 @@ pub fn generated() -> Vec<(PathBuf, String)> {
     let columns = read();
     let root = repo_root();
     vec![(
-        root.join("crates/fossil-sinks/src/generated.rs"),
+        root.join("crates/fossil-df/src/corpus/generated.rs"),
         emit_rust(&columns),
     )]
 }

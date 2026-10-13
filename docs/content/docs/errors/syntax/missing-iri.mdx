@@ -1,0 +1,41 @@
+---
+title: A declaration without its IRI
+description: "`syntax/missing-iri` — a declared type, or a field of one, written without the `@iri(\"…\")` that names it."
+---
+
+A type declared in the program writes every IRI it means: the type's on the line above it, and each
+field's at the start of the field's line. This field has none:
+
+```fossil
+@iri("https://schema.org/Person")
+type Person
+    name: String
+```
+
+```text
+syntax/missing-iri
+  × `name` has no `@iri`: a declared type and each of its fields write their IRI
+  help: write it above a type and before each field, whole and in a string: `@iri("https://
+        schema.org/name")`. There is no base it could fall back to and no prefix it could expand
+        through, so a name nobody wrote never becomes an IRI.
+```
+
+A `type Person` with no `@iri` above it is the same report, naming `Person`. The label is zero-width,
+where the attribute should begin. The rest of the declaration is still read, so a second field
+missing its IRI is reported too, and a field that has one is not lost.
+
+## Why fossil refuses it
+
+The name a program writes and the IRI the corpus carries are two different things, and a
+declaration is where the program says which goes with which. Inventing the IRI from the name would
+need a base to put in front of it or a prefix to expand it through, and the grammar has neither: a
+name nobody wrote would become an IRI nobody chose, and two programs that spelled one word alike
+would mean the same predicate by accident. That is the argument of
+[Types declared in the program](/docs/design/declared), which also says what would bring a base back.
+
+## How to repair it
+
+- **Write the IRI**, whole and in a string, before the field: `@iri("https://schema.org/name") name:
+  String`. For the type, on the line above `type Person`.
+- **If the vocabulary already exists as a shape document**, import the type instead of declaring it
+  — `type { Person } := io.shex("person.shex")` — and the document supplies every IRI.

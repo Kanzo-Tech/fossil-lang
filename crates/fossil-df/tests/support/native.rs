@@ -5,8 +5,8 @@
 //! Two halves, and they are two hosts on purpose:
 //!
 //! - **check** — a [`System`] over the real filesystem, with the whole provider
-//!   registry (`fossil_descriptors_output::PROVIDERS`) and a descriptor cache
-//!   `fossil_lsp::profile::profile_and_register` fills before the compile,
+//!   registry (`fossil_hir::providers::PROVIDERS`), the sources
+//!   `profile::profile_and_register` describes before the compile,
 //!   and every shape document the program names registered from disk. It is the
 //!   editor's view of a program: forward-propagated source types, every
 //!   diagnostic, and [`render_diagnostics`] drawing them as `fossil check` drew
@@ -27,15 +27,18 @@
 // The executor is single-threaded, so its futures are not `Send` and need not be.
 #![allow(clippy::future_not_send)]
 
-use std::collections::{BTreeMap, HashMap};
+#[path = "profile.rs"]
+pub(crate) mod profile;
+
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{Db as _, Diagnostic, FossilDb, SourceFile, System, file_at};
+use fossil_base::{Diagnostic, FossilDb, SourceFile, System, file_at};
+use fossil_df::corpus::manifest::Manifest;
 use fossil_df::{Executor, RunReport};
 use fossil_hir::documents::{documents_named, register_missing_documents, registry_key};
-use fossil_sinks::manifest::Manifest;
 use futures::TryStreamExt;
 use miette::{GraphicalReportHandler, GraphicalTheme, LabeledSpan, NamedSource, SourceSpan};
 use object_store::memory::InMemory;
@@ -46,7 +49,7 @@ use object_store::{ObjectStore, ObjectStoreExt};
 /// The host every check here runs on: every row of the provider registry, the
 /// types-reading ones included.
 pub(crate) fn check_host() -> NativeSystem {
-    NativeSystem::with_providers(fossil_descriptors_output::PROVIDERS)
+    NativeSystem::with_providers(fossil_hir::providers::PROVIDERS)
 }
 
 /// A database over a fresh [`check_host`] holding the program at `path`: its
@@ -61,10 +64,8 @@ pub(crate) fn open_db(path: &Path) -> (FossilDb, SourceFile) {
     let file = SourceFile::new(&db, text, path.to_string_lossy().into_owned());
     // A source that cannot be described is skipped, not fatal: the compile then
     // has no forward-propagated type for it, which is what the checker reports.
-    fossil_lsp::profile::profile_and_register(
-        db.system(),
-        &fossil_lineage::inputs(&db, file, &HashMap::new()),
-    );
+    let inputs = fossil_hir::lineage::inputs(&db, file);
+    profile::profile_and_register(&mut db, &inputs);
     register_shape_documents(&mut db, file);
     (db, file)
 }
@@ -348,7 +349,7 @@ async fn run_dir_async(
         connections
             .iter()
             .map(|(name, url)| ((*name).to_string(), (*url).to_string()))
-            .collect::<HashMap<_, _>>(),
+            .collect(),
     );
     for missing in exec.missing_documents() {
         let rel = missing

@@ -44,10 +44,8 @@
 //! This is a table of *behaviour*, and behaviour is what a table of `fn` is for:
 //! the extension point is a table of `fn`, never a trait object, because a `fn`
 //! pointer gives the `Eq`/`Hash` a memoized core needs and a `dyn` does not. As
-//! against [`crate::system::System::descriptors`], which is a table of *data* and
-//! therefore has no `fn` in it at all — there is nothing there to dispatch, and a
-//! function pointer returning descriptors would be the indirection without the
-//! reason.
+//! against [`crate::sources::Described`], which is *data* and therefore has no
+//! `fn` in it at all — there is nothing there to dispatch.
 //!
 //! # It is data, and it is now only data
 //!

@@ -40,8 +40,8 @@ Here the dropped property is a red build, with the reason on the key.
 
 - **A CURIE** — `ex:name = …`: write the bare name, `name = …`.
 - **An absolute IRI** — `<http://xmlns.com/foaf/0.1/name> = …`: write its last segment, `name = …`.
-- **Two predicates share that last segment**: the bare name is ambiguous, and the repair is a
-  `@rename` above the type binding giving one of them another name
+- **Two predicates share that last segment**: the bare name is ambiguous, and the repair is to
+  declare the type in the program, giving each field its own name
   ([shape/name-collision](/docs/errors/shape/name-collision)). The key is then that name.
 
 Whichever applies, the name has to be one the shape declares; otherwise the next report is

@@ -2,7 +2,7 @@
 //!
 //! The rows whose behaviour the compiler can always link: every row that
 //! reads DATA. A row that decodes a shape language is emitted into
-//! `fossil-descriptors-output` instead — see `xtask::catalogue`.
+//! `fossil_hir::providers` instead — see `xtask::catalogue`.
 //!
 //! Edit `catalogue.bnf` and re-run `cargo xtask catalogue`.
 
@@ -83,6 +83,6 @@ pub static RDF: Provider = Provider {
 /// This is [`crate::system::System::providers`]'s default, and it is a real
 /// answer rather than a stub — a host that decodes no shape document still has
 /// to recognise `io.csv`. A host that compiles programs installs a superset
-/// (`fossil_descriptors_output::PROVIDERS`), and the rows it adds are exactly
+/// (`fossil_hir::providers::PROVIDERS`), and the rows it adds are exactly
 /// the ones `catalogue.bnf` gives a `decodes`.
 pub static DATA: &[&Provider] = &[&CSV, &JSON, &PARQUET, &RDF];

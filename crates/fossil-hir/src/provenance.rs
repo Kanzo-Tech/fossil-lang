@@ -125,7 +125,7 @@ pub struct ExprTypeEntry<'db> {
 /// [`crate::check::typecheck_mapping`] is the SOURCE OF TRUTH for
 /// per-expression types (over the full `HirExpr` space, including `FieldRef`
 /// resolved against the source row). `expr_types` is
-/// the projection — it returns `typecheck_mapping(db, mapping)?.expr_types(db)`,
+/// the projection — it returns `typecheck_mapping(db, mapping).expr_types(db)`,
 /// or an empty table if the mapping had a type error (the error already
 /// emitted ≥1 diagnostic).
 ///
@@ -136,7 +136,7 @@ pub struct ExprTypeEntry<'db> {
 #[salsa::tracked(returns(copy))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn expr_types<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> ExprTypes<'db> {
-    match crate::check::typecheck_mapping(db, mapping) {
+    match crate::check::typecheck_mapping(db, mapping).checked(db) {
         Ok(out) => out.expr_types(db),
         Err(_eg) => ExprTypes::new(db, Vec::new()),
     }

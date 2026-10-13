@@ -269,8 +269,6 @@ fn a_hole_reads_a_quoted_column_so_each_row_of_a_relationship_file_is_a_vertex()
     // `knows` with the date the two met, as a vertex per row of the file: its
     // subject is the two ids, which only the quoted spelling can name, written
     // inside the string's holes (PEP 701's rule — a hole holds an expression).
-    // Last in the document, because the binding below names its shapes in
-    // the document's order.
     let shex = format!(
         "{SHEX}\nex:Knowing {{\n  ex:since  xsd:integer ;\n  ex:knower @ex:Person ;\n  ex:known  @ex:Person\n}}\n"
     );

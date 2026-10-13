@@ -28,10 +28,8 @@ like `str.trim`, or a source constructor like `io.csv`, is a member of a differe
 `User.trim(…)` and `User.csv(…)` land here too. There is no fallback that guesses — a verb is the
 operator a stage becomes, and a name with no row has no operator to become.
 
-This is a different answer from [a verb with no lowering
-yet](/docs/errors/pipeline/unimplemented-verb): that one is in the catalogue and is refused for
-what fossil lacks, this one is refused for what the program wrote. The verbs, and what each takes,
-are on [relations](/docs/book/relations).
+Every verb the catalogue declares has an operator, so this is the one answer for a stage whose verb
+fossil cannot run. The verbs, and what each takes, are on [relations](/docs/book/relations).
 
 ## How to repair it
 

@@ -5,7 +5,7 @@
 //!
 //! The compiler used to read a `.shex` by calling
 //! `db.system().read_file(&resolved)` from inside a tracked query and handing
-//! the bytes to `fossil_shex::ShExDescriptor::from_shex_source`. Two things were
+//! the bytes to `crate::shex::ShExDescriptor::from_shex_source`. Two things were
 //! wrong with that, and they are different problems:
 //!
 //! 1. **`fossil-hir` had to link `ShEx`** to name the return type. That is the
@@ -233,13 +233,7 @@ mod tests {
             .lookup("https://example.org/Person")
             .expect("the shape");
         assert_eq!(p.properties[0].predicate, "https://example.org/name");
-        assert_eq!(
-            shapes
-                .to_graph_schema(&fossil_graph_schema::Renames::default())
-                .nodes[0]
-                .label,
-            "Person"
-        );
+        assert_eq!(shapes.to_graph_schema().nodes[0].label, "Person");
     }
 
     /// A malformed document is `Some(_)` carrying its rejection — never `None`.

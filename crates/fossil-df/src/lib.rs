@@ -35,6 +35,7 @@
 // boxing it would put `Box<Failure>` in every signature a host reads.
 #![allow(clippy::result_large_err)]
 
+pub mod corpus;
 /// The output descriptor a program names, decoded from the document the
 /// checker read — the one resolution every host runs with.
 pub mod descriptor;
@@ -64,10 +65,6 @@ pub use descriptor::output_descriptor;
 /// The executor a host drives. Named at the crate root because it is the
 /// crate's answer, not a detail of the module it is written in.
 pub use executor::Executor;
-/// Re-exported so callers name the program-resident output descriptor that
-/// [`execute_graph`] / [`provider_bindings`] take: it is passed as an argument,
-/// never read through `Db::system()`.
-pub use fossil_descriptors_output::OutputDescriptorKind;
 /// The relation an op index produces — the seam a host (or a test that builds a
 /// [`fossil_mir::MirGraph`] by hand) uses to materialise an intermediate.
 pub use plan::plan_relation;
@@ -90,14 +87,15 @@ use datafusion::prelude::{
     CsvReadOptions, DataFrame, JsonReadOptions, ParquetReadOptions, SessionContext, col, lit,
 };
 use fossil_base::SourceFile;
+use fossil_base::location::SourceAnchor;
 use fossil_graph_schema::{
     Cardinality, EdgeType as GraphEdge, GraphSchema, NodeType, Primitive, Property as NodeProp,
 };
 use fossil_hir::shapes::inner_primitive;
 use fossil_hir::{MappingLoc, def_map::def_map};
-use fossil_location::SourceAnchor;
 use fossil_mir::{Expr, Op, SourceFormat, VProp, apply_output_shape, lower_to_mir_pg};
-use fossil_sinks::generated::{ENDPOINT_SRC, PAYLOAD_ADDRESS, PAYLOAD_IDENTITY};
+
+use crate::corpus::generated::{ENDPOINT_SRC, PAYLOAD_ADDRESS, PAYLOAD_IDENTITY};
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
 /// single source of all type/predicate/cardinality metadata) plus the relation
@@ -149,18 +147,12 @@ pub struct EdgeTable {
 ///
 /// # Errors
 /// Propagates `DataFusion` read/plan/execute errors.
-// The hasher is not ours to choose: `connections` is the host's connection map —
-// the browser's `parse_refs` builds one, a plain `HashMap`. Generalising over
-// `BuildHasher` would add a parameter no caller can vary, which is the same call
-// `fossil-df-wasm` made.
-#[allow(clippy::implicit_hasher)]
 #[tracing::instrument(skip_all, fields(program = %file.path(db)))]
 pub async fn execute_graph<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     file: SourceFile,
-    descriptor: &OutputDescriptorKind,
-    connections: &HashMap<String, String>,
+    descriptor: &GraphSchema,
 ) -> datafusion::error::Result<Graph> {
     // The run's anchor, derived from the PROGRAM and not from the caller: a
     // source URI is a path the program wrote, so the directory it resolves
@@ -169,8 +161,8 @@ pub async fn execute_graph<'db>(
     // anchor — so `io.csv("data/items.csv")` meant a different file depending
     // on where you invoked from, while `io.shex("shop.shex")` in the same
     // program was already resolved beside it.
-    let program_dir = fossil_location::program_dir(file.path(db));
-    let anchor = SourceAnchor::new(&program_dir, connections);
+    let program_dir = fossil_base::location::program_dir(file.path(db));
+    let anchor = SourceAnchor::new(&program_dir, fossil_base::connections(db));
     let mappings: Vec<MappingLoc<'db>> = def_map(db, file).mappings(db).clone();
 
     // Phase 1 (barrier): prepare every mapping's vertex projection, then merge
@@ -288,16 +280,14 @@ struct PreparedVertex {
 ///
 /// # Errors
 /// Propagates `DataFusion` read/plan/execute errors.
-#[allow(clippy::implicit_hasher)] // as `execute_graph` above.
 pub async fn execute_vertex<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
-    descriptor: &OutputDescriptorKind,
-    connections: &HashMap<String, String>,
+    descriptor: &GraphSchema,
 ) -> datafusion::error::Result<(VertexTable, NodeType)> {
-    let program_dir = fossil_location::program_dir(mapping.file(db).path(db));
-    let anchor = SourceAnchor::new(&program_dir, connections);
+    let program_dir = fossil_base::location::program_dir(mapping.file(db).path(db));
+    let anchor = SourceAnchor::new(&program_dir, fossil_base::connections(db));
     let prepared = prepare_vertex(ctx, db, mapping, descriptor, anchor).await?;
     finalize_vertex(ctx, vec![prepared], 0).await
 }
@@ -330,7 +320,7 @@ pub async fn execute_vertex_ops<'db>(
 /// needs — an unresolvable source binding, a mapping with no usable `iri`. It
 /// carries no ops, so executing it would either panic on the `expect`s below or
 /// silently produce an empty graph. Neither is acceptable: the run must fail
-/// with the reason, which the accumulated `Diagnostic` already carries
+/// with the reason, which a reported `Diagnostic` already carries
 /// (`fossil_base` guarantees at least one).
 ///
 /// Checking here is also what makes the `expect`s below sound: a graph that is
@@ -357,12 +347,12 @@ async fn prepare_vertex<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
-    descriptor: &OutputDescriptorKind,
+    descriptor: &GraphSchema,
     anchor: SourceAnchor<'_>,
 ) -> datafusion::error::Result<PreparedVertex> {
     let mir = lower_to_mir_pg(db, mapping);
     refuse_if_poisoned(mir, db)?;
-    let ops = apply_output_shape(mir.ops(db), &descriptor.to_graph_schema());
+    let ops = apply_output_shape(mir.ops(db), descriptor);
     prepare_vertex_ops(ctx, db, &ops, anchor).await
 }
 
@@ -763,12 +753,12 @@ async fn execute_edges<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
-    descriptor: &OutputDescriptorKind,
+    descriptor: &GraphSchema,
     anchor: SourceAnchor<'_>,
 ) -> datafusion::error::Result<Vec<(PreparedEdge, GraphEdge)>> {
     let mir = lower_to_mir_pg(db, mapping);
     refuse_if_poisoned(mir, db)?;
-    let ops = apply_output_shape(mir.ops(db), &descriptor.to_graph_schema());
+    let ops = apply_output_shape(mir.ops(db), descriptor);
     let ops = ops.as_slice();
 
     let mut out = Vec::new();
@@ -826,9 +816,8 @@ async fn execute_edges<'db>(
 /// `candidates − resolved`: the extra `count()` is one more pass over the edge's
 /// input relation, which the run already scans twice (once per orientation).
 ///
-/// This used to say it mirrored `fossil-sinks`'s `writer.rs`. There is no
-/// second writer to mirror any more — `fossil-sinks/src/` is the manifest model
-/// and nothing else, so THIS is where an edge becomes CSR/CSC. Both ends are
+/// There is one writer, and [`crate::corpus`] is the manifest model and nothing
+/// else, so THIS is where an edge becomes CSR/CSC. Both ends are
 /// already the global `dense_id`, and `crate::write()` writes the pair as it is.
 async fn execute_edge(
     ctx: &SessionContext,
@@ -1117,7 +1106,7 @@ fn source_not_found(uri: &str) -> DataFusionError {
 }
 
 /// A header's names made unique by `DuckDB`'s rule, because `DuckDB` is the
-/// engine that DESCRIBES a source (`fossil-profile`'s plan, in the language server and the browser)
+/// engine that DESCRIBES a source (`fossil-profile`'s plan, on DuckDB-WASM in the browser)
 /// and the checker types a program against what it describes: a name already
 /// taken — compared without case — becomes `name_1`, then `name_2`, and a
 /// generated name that is itself taken grows another suffix. `a|a|a_1|b|a` is
@@ -1299,21 +1288,18 @@ pub struct ProviderBinding {
 /// bytes and calls [`register_rdf`] to put the pivoted relation in the ctx
 /// before running [`execute_graph`].
 #[must_use]
-#[allow(clippy::implicit_hasher)] // as `execute_graph` above.
 pub fn provider_bindings(
     db: &dyn fossil_base::Db,
     file: SourceFile,
-    descriptor: &OutputDescriptorKind,
-    connections: &HashMap<String, String>,
+    descriptor: &GraphSchema,
 ) -> Vec<ProviderBinding> {
-    let program_dir = fossil_location::program_dir(file.path(db));
-    let anchor = SourceAnchor::new(&program_dir, connections);
+    let program_dir = fossil_base::location::program_dir(file.path(db));
+    let anchor = SourceAnchor::new(&program_dir, fossil_base::connections(db));
     let mappings = def_map(db, file).mappings(db).clone();
-    let schema = descriptor.to_graph_schema();
     let mut out = Vec::new();
     for mapping in mappings {
         let mir = lower_to_mir_pg(db, mapping);
-        let ops = apply_output_shape(mir.ops(db), &schema);
+        let ops = apply_output_shape(mir.ops(db), descriptor);
 
         let Some((uri, binding)) = ops.iter().find_map(|o| match o {
             Op::Source {

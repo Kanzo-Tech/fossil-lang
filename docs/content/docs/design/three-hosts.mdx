@@ -107,8 +107,8 @@ answered by what the host passes in.
 
 If the embedding host is a browser, a capability only a native binary can perform is a capability the
 product cannot reach. So the direction is that **every capability has one implementation, in a crate
-that compiles to `wasm32`, and each host is a transport over it** — the language server, the wasm
-shim and the executor are projections, and none of them is the API.
+that compiles to `wasm32`, and each host is a transport over it** — the wasm shim and the executor
+are projections, and none of them is the API.
 `cargo xtask wasm-check` derives that set from the cdylib crates, and the compile→run pipeline is
 inside it. Its size is
 deliberately not written here; this page carried a count once and it was stale by the next reading.
@@ -124,12 +124,12 @@ on its own side of the wire.
 
 The browser's wire is not the protocol. A page that already calls the checker in-process has no
 reason to stand up an LSP client to ask what type is under a cursor, so diagnostics, hover, completion and
-definition are plain method calls on an open program, and the language server over stdio is the
-other wire. One implementation, two projections of it — and the rule above is what each of them owes.
+definition are plain method calls on an open program, and that is the one wire an editor has. The
+language server over stdio was the second, and it was [deleted](/docs/design/discarded#the-tooling).
 
-**What would reverse it.** A browser consumer that needs what only the protocol carries — code
-actions, semantic tokens — at which point it earns a projection of its own, and a test that crosses
-both wires with it.
+**What would reverse it.** A consumer that needs the protocol itself — an editor outside a browser —
+at which point it earns a projection of its own, and the rule above is what it owes: a test that
+crosses both wires.
 
 The same measurement settles what a row may carry across that wire, and it is the companion rule:
 
@@ -156,9 +156,9 @@ whole difference between a guard and a comment. A kind past the end of a legend 
 than the host and reads as plain text, so appending stays backwards-compatible and reordering stops
 being an event at all.
 
-Where an implementation can be shared across the boundary, it is: the two hosts that read a
-source's columns — the language server on native DuckDB, a browser on DuckDB-WASM — run one plan,
-`fossil-profile`, compiled into each, and only the engine that answers its queries differs. What
+Where an implementation can be shared across the boundary, it is: what reads a source's
+columns — a browser on DuckDB-WASM, `fossil-df`'s tests on native DuckDB — runs one plan,
+`fossil-profile`, and only the engine that answers its queries differs. What
 the plan reads off `catalogue.bnf` — the reader, its option keyword and the DuckDB→primitive table
 — is generated into that one crate.
 
@@ -178,7 +178,7 @@ missing, not the export.
 spells it — `Diagnostic`, `Hover`, `CompletionItem`, `Location`, `DiagnosticRelatedInformation`,
 `definition`, `completion` — so a host that knows the protocol reads the type without the docs. What
 a program reads is `inputs`, each an `Input` with a `role`, as OpenLineage names a run's `inputs`
-and PROV a generation's `used`; a written reference resolved is a `location`, the word `fossil-location`
+and PROV a generation's `used`; a written reference resolved is a `location`, the word `fossil_base::location`
 and `RunReport.location` share; a descriptor's freshness is an `etag`, RFC 9110's. `job` stays: it names the host's unit of work, and fossil only scopes a credential by it — it is
 OpenLineage's `run.runId`, not OpenLineage's `job`, which names the recurring process a run belongs
 to. What would reverse a name: a reference system that renamed its own, or a fossil concept the

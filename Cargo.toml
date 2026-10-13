@@ -14,7 +14,9 @@ description = "Fossil — a typed compiler for RDF graph construction"
 
 [workspace.dependencies]
 # === Compiler core ===
-salsa = { version = "0.28.5", features = ["accumulator"] }
+# The defaults minus `accumulator`: diagnostics travel in query outputs, so
+# nothing may push into a side channel (`/docs/design/incremental`).
+salsa = { version = "0.28.5", default-features = false, features = ["salsa_unstable", "rayon", "macros", "inventory"] }
 rowan = "0.16"
 logos = "0.16"
 text-size = "1"
@@ -81,15 +83,6 @@ oxrdf = { version = "0.3", features = ["rdf-12"] }
 # === Did-you-mean diagnostics ===
 strsim = "0.11"
 
-# === Sinks ===
-# `arrow-schema` sub-crate ONLY for fossil-sinks (DataType names; pulls no mio/arrow-ipc,
-# either of which would break the wasm32 gate). The `arrow` umbrella stays
-# for native byte-level test deps.
-# Pinned to 58 — the latest published arrow line (59 is not on crates.io as of
-# 2026-05; the prior `= "59"` placeholders were aspirational and never resolved). 58.3.0
-# is what Cargo.lock already resolves transitively via duckdb's parquet.
-arrow-schema = "58"
-arrow = "58"
 # `bytes` is what `object_store` puts and gets — the currency of every file
 # `fossil-df` writes and `fossil-storage` moves. Not a new crate in the tree:
 # `object_store` and `datafusion`'s `parquet` already depend on it, so this line names a
@@ -98,9 +91,9 @@ arrow = "58"
 bytes = "1"
 
 # === The native engine — NATIVE ONLY ===
-# `fossil-lsp` is the one crate on a normal edge; `fossil-df` and `fossil-profile` keep it
-# as a dev-dependency, to read a written corpus back or to bring an engine to a
-# test. `deny.toml`'s
+# No crate links it on a normal edge; `fossil-df` and `fossil-profile` keep it as a
+# dev-dependency, to read a written corpus back or to bring an engine to a test.
+# `deny.toml`'s
 # `duckdb` wrappers list is the enforced version of that sentence.
 duckdb = { version = "1.10502", features = ["bundled"] }
 
@@ -111,11 +104,10 @@ duckdb = { version = "1.10502", features = ["bundled"] }
 unicode-normalization = "0.1"           # the NFC/NFD/NFKC/NFKD reference
 slug = "0.1"                            # the URL-slugification reference
 
-# === LSP — NATIVE ONLY ===
-lsp-server = "0.7"
+# === Editor protocol types ===
+# `fossil-ide` returns `lsp_types` structs and `fossil-wasm` hands them to JS.
 lsp-types = "0.97"
-crossbeam-channel = "0.5"
-# rust-analyzer's UTF-8 ↔ UTF-16 line table — the reference the LSP hosts convert by.
+# rust-analyzer's UTF-8 ↔ UTF-16 line table — the reference the editor host converts by.
 line-index = "0.1"
 
 # === WASM ===
@@ -152,7 +144,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 # === Dev / testing ===
 expect-test = "1"
 # Native temp dirs for integration tests that write Parquet to disk and read it
-# back via duckdb — `fossil-df`, `fossil-profile` and `fossil-lsp`, among its
+# back via duckdb — `fossil-df` and `fossil-profile`, among its
 # dev-dependents. Native-only
 # (uses a real filesystem); no `tests/` target is built for wasm32.
 tempfile = "3"

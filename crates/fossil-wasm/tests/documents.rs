@@ -8,10 +8,10 @@
 // format-string argument.
 #![allow(clippy::literal_string_with_formatting_args)]
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use fossil_hir::documents::MissingDocument;
-use fossil_lineage::{Input, Role};
+use fossil_hir::lineage::{Input, Role};
 use fossil_wasm::FossilWorkspace;
 
 const PROGRAM: &str = "\
@@ -55,8 +55,8 @@ const USERS_DESCRIPTOR: &str = r#"{
   "etag": ""
 }"#;
 
-fn connections() -> HashMap<String, String> {
-    HashMap::from([
+fn connections() -> BTreeMap<String, String> {
+    BTreeMap::from([
         (
             "vocab".to_string(),
             "https://minio.example/shapes".to_string(),
@@ -102,10 +102,10 @@ fn registering_what_is_missing_under_its_key_is_what_the_checker_reads() {
     );
 }
 
-/// The map reaches locations and never keys, so repointing a connection leaves
-/// a registered document registered.
+/// The connections reach locations and never keys, so repointing one leaves a
+/// registered document registered.
 #[test]
-fn a_connection_map_moves_the_location_and_not_the_key() {
+fn a_connection_moves_the_location_and_not_the_key() {
     let mut ws = FossilWorkspace::new();
     let program = ws.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());
     let unmapped = ws.missing_documents_native(program).expect("open");
@@ -116,7 +116,7 @@ fn a_connection_map_moves_the_location_and_not_the_key() {
     assert_eq!(mapped[0].key, unmapped[0].key);
 
     ws.register_document_native(&mapped[0].key, DEMANDS_INTEGER);
-    ws.set_connections_native(HashMap::new());
+    ws.set_connections_native(BTreeMap::new());
     assert!(
         ws.missing_documents_native(program)
             .expect("open")
@@ -144,7 +144,7 @@ fn opening_a_program_registers_no_document_and_an_open_buffer_is_not_missing() {
 }
 
 #[test]
-fn inputs_are_keyed_as_written_and_located_through_the_map() {
+fn inputs_are_keyed_as_written_and_located_through_the_connections() {
     let mut ws = FossilWorkspace::new();
     ws.set_connections_native(connections());
     let program = ws.open_file_native("prog.fossil".to_string(), PROGRAM.to_string());

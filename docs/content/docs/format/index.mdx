@@ -109,8 +109,8 @@ refuses a program whose table names would collide.
 
 `type` is one of `string`, `bool`, `int8` … `int64`, `uint8` … `uint64`, `float`, `double`, `date`,
 `timestamp`, `time` and `decimal` — `corpus.bnf`'s spellings, written by
-`crates/fossil-sinks/src/manifest.rs, data_type_name`. The JSON Schema of the whole document is
-`crates/fossil-sinks/fossil.schema.json`. `iri`, `nullable`, `term_type`, `datatype` and
+`crates/fossil-df/src/corpus/manifest.rs, data_type_name`. The JSON Schema of the whole document is
+`crates/fossil-df/src/corpus/fossil.schema.json`. `iri`, `nullable`, `term_type`, `datatype` and
 `derived_from` are optional and absent when there is nothing to say.
 
 **`derived_from` names each source as the program wrote it** — `@crm/people.csv`, or a path relative

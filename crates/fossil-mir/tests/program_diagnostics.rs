@@ -76,10 +76,9 @@ fn names_nonesuch(p: &Problem) -> bool {
     matches!(p, Problem::UnknownProvider { constructor } if constructor == "io.nonesuch")
 }
 
-/// **The parse errors were present and unreachable.** Salsa accumulates over a
-/// query's dependency subtree and `parse` is only in the subtree of a mapping,
-/// so a file with no mapping had them collected and never drained. An editor
-/// showed a clean document for a file that does not parse.
+/// **The parse errors were present and unreachable.** A per-mapping loop never
+/// reaches `parse`, so a file with no mapping had them computed and never
+/// read. An editor showed a clean document for a file that does not parse.
 #[test]
 fn a_file_the_parser_recovered_no_mapping_from_still_reports() {
     let (db, file) = test_support::db_with_document_at("t.fossil", NO_MAPPING, "p.shex", SHAPE);
@@ -221,6 +220,34 @@ People : Person from Users
         .map(|d| d.problem)
         .collect();
     assert!(errors.is_empty(), "a clean program reported {errors:?}");
+}
+
+/// A declared type beside a clean program adds no diagnostic of its own: it
+/// lowers to the shape vocabulary, and a type no mapping produces is not an
+/// error.
+#[test]
+fn a_declared_type_beside_a_clean_program_reports_nothing() {
+    let program = "\
+type { Person } := io.shex(\"p.shex\")
+
+@iri(\"https://example.org/City\")
+type City
+    @iri(\"https://example.org/name\")  name: String
+    @iri(\"https://example.org/tags\")  tags: Seq<String>
+
+Users := io.csv(\"users.csv\")
+
+People : Person from Users
+    @subject = \"https://example.org/person/{Users.id}\"
+    name = Users.name
+";
+    let (db, file) = test_support::db_with_document_at("t.fossil", program, "p.shex", SHAPE);
+    let errors: Vec<_> = program_diagnostics(&db, file)
+        .into_iter()
+        .filter(|d| d.severity == fossil_graph_schema::Severity::Error)
+        .map(|d| d.problem)
+        .collect();
+    assert!(errors.is_empty(), "a declaration reported {errors:?}");
 }
 
 /// **An internal compiler error reached the browser, and it was found by

@@ -15,7 +15,7 @@ diagnostic below is the one that program produces.
 | [gave a property the wrong type](#2-a-value-the-shape-will-not-accept) | two spans — the expression, and the constraint in the shape document |
 | [left out a required property](#3-a-required-property-the-mapping-never-writes) | the mapping header, and the line in the document that required it |
 | [minted two identities for one type](#4-two-mappings-that-mint-different-identities) | both mappings and both `@subject` expressions |
-| [named a predicate two shapes share](#5-two-predicates-with-the-same-short-name) | both full IRIs, and `@rename` as the repair |
+| [named a predicate two shapes share](#5-two-predicates-with-the-same-short-name) | both full IRIs, and declaring the type as the repair |
 | [wrote a join that names one side twice](#6-a-join-that-names-one-side-twice) | the pipeline, and which of the two sides the condition never mentions |
 
 Each block is the compiler's rendering of the diagnostic, the text the executor refuses a run with;
@@ -93,11 +93,8 @@ changes too.
 them end in the same word there is no principled winner. Numbering them would make the name of a
 property depend on the order of a document you did not write.
 
-**The fix.** Rename one, above the binding, in your program:
-
-<Program src="rename/rename.fossil" region="repair" title="rename.fossil" />
-
-Full program in [naming what you produce](/docs/book/what-you-produce#when-two-of-them-collide).
+**The fix.** Declare the type in your program, where each field writes its own name beside its IRI —
+see [naming what you produce](/docs/book/what-you-produce#declaring-the-type).
 
 ## 6. A join that names one side twice
 

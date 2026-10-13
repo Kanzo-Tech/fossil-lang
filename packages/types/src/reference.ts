@@ -1,7 +1,7 @@
 /**
  * The reference a program writes for a location — the inverse of the one expansion fossil makes.
  *
- * A program writes `@lake/users.csv`, and `fossil_location` expands it through `Host.connections()`'
+ * A program writes `@lake/users.csv`, and `fossil_base::location` expands it through `Host.connections()`'
  * map into `<base>/users.csv`: the connection's base, its trailing `/` trimmed, a `/`, and the path.
  * A host that lists a connection's files holds the other end — a URL — and needs what to write.
  */

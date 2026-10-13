@@ -1,22 +1,10 @@
 //! What an editor publishes for a file: which diagnostics it has, and what they
 //! look like on the LSP wire.
 //!
-//! This is the one place both editor hosts ask. It was two places, and being two
-//! places cost three defects in nine days:
+//! This is the one place an editor asks, so a guard — the [`fossil_base::claimed`]
+//! check that a `.shex` buffer is an INPUT and is not parsed as fossil, the
+//! labels that carry a report's second place — is written once.
 //!
-//! - `d.labels` was dropped on the floor by `fossil-lsp`'s `to_lsp_diagnostic`
-//!   and by `fossil-wasm`'s `to_diagnostic`, so a report whose whole content is a
-//!   RELATION between two places arrived as one squiggle with no second half.
-//!   Both were found separately and fixed separately.
-//! - The [`fossil_base::claimed`] guard — a `.shex` buffer is an INPUT and is not
-//!   parsed as fossil — landed in `fossil-wasm`'s drain in `353228c`, and in
-//!   `fossil-lsp`'s the following day in `470a13b`. The same defect, twice, in
-//!   two files, a day apart. Between the two commits an editor put twenty-one
-//!   squiggles down the length of the user's `ShEx` and the browser did not.
-//! - The worker's `publishDiagnostics` carried `related` where LSP says
-//!   `relatedInformation`, with a flat `uri`/`range` where LSP says a nested
-//!   `location`, because it republished the wasm workspace's JS row shape verbatim.
-//!   A client reading the spec found nothing there.
 //!
 //! The worker transport is deleted since; this module is what made the two
 //! agree by construction rather than by vigilance.
@@ -63,7 +51,7 @@ use crate::related::related_locations;
 /// row declares the extensions it accepts, [`fossil_base::claimed`] asks all of
 /// them at once, and a URI some row READS is an input to a program rather than a
 /// program. Nothing about fossil's syntax is decided here. Both hosts install
-/// `fossil_descriptors_output::PROVIDERS`, and a buffer's registry path is its
+/// `fossil_hir::providers::PROVIDERS`, and a buffer's registry path is its
 /// whole URI in both, which `Provider::accepts` reads exactly as it reads a
 /// path.
 ///
@@ -223,14 +211,6 @@ impl DiagnosticData {
 /// test, or a browser host that opened a buffer by name, produces — is a path
 /// on the local host, `file:///<path>` (RFC 8089: `file://x` would make `x` a
 /// host); `None` for a key that is neither.
-///
-/// **This was three functions across the two hosts and they did not agree.**
-/// `fossil-lsp` had one for goto-def (`UriExt::from_str_maybe`) and a second for
-/// related information (`path_to_uri`, which routed through a `file://`-only
-/// helper and silently dropped every other scheme), and `fossil-wasm` used the
-/// first for goto-def and, for related information, no conversion at all — it
-/// put the raw key on the wire. For the two key shapes an editor actually
-/// produces all three agreed, which is why the disagreement was never seen.
 #[must_use]
 pub fn file_uri(key: &str) -> Option<Uri> {
     use std::str::FromStr as _;
