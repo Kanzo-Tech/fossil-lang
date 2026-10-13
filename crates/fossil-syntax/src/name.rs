@@ -34,6 +34,37 @@ pub fn is_bare(name: &str) -> bool {
     )
 }
 
+/// The binding name a file becomes in a program — `people` for `people.csv`, as a
+/// source a program binds by it: `people := io.csv("people.csv")`.
+///
+/// The extension of the last segment goes; every character an identifier
+/// cannot hold becomes `_`, `/` among them, so `crm/people.csv` is `crm_people`;
+/// and a name that still does not lex as one `IDENT` — one that starts with a
+/// digit, an empty one, a reserved word such as `from` — is prefixed with `_`.
+/// Which characters an identifier holds is ASKED of the lexer, a character at a
+/// time, never restated: the answer is whatever `grammar.bnf, IDENT` lexes, and
+/// the result always [`is_bare`].
+#[must_use]
+pub fn binding_name(file: &str) -> String {
+    let segment_start = file.rfind('/').map_or(0, |i| i + 1);
+    let stem = file[segment_start..]
+        .rfind('.')
+        .map_or(file, |dot| &file[..segment_start + dot]);
+    let held: String = stem
+        .chars()
+        .map(|c| {
+            let mut probe = String::from("a");
+            probe.push(c);
+            if is_bare(&probe) { c } else { '_' }
+        })
+        .collect();
+    if is_bare(&held) {
+        held
+    } else {
+        format!("_{held}")
+    }
+}
+
 /// The one spelling of a member called `name`: the name itself when it
 /// [`is_bare`], else a STRING whose value is the name — `"`, `\` and `{`
 /// escaped as a string literal escapes them, and a line break as `\n`.
@@ -157,6 +188,27 @@ mod tests {
         assert_eq!(spell("type"), "type");
         assert_eq!(spell("as"), "as");
         assert_eq!(spell("truestory"), "truestory");
+    }
+
+    #[test]
+    fn a_file_becomes_a_name_that_lexes_as_one_ident() {
+        for (file, name) in [
+            ("people.csv", "people"),
+            ("Order Date.csv", "Order_Date"),
+            ("2024-sales.parquet", "_2024_sales"),
+            ("crm/people.v2.csv", "crm_people_v2"),
+            ("a.b/c", "a_b_c"),
+            ("café.json", "caf_"),
+            ("from.csv", "_from"),
+            ("true.csv", "_true"),
+            ("type.csv", "type"),
+            (".csv", "_"),
+            ("", "_"),
+        ] {
+            let got = binding_name(file);
+            assert_eq!(got, name, "{file}");
+            assert!(is_bare(&got), "`{got}` from `{file}` lexes as one IDENT");
+        }
     }
 
     #[test]

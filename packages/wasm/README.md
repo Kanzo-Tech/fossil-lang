@@ -24,6 +24,9 @@ artefacts. Every door boots the module itself:
   mappings after it, as the EBNF a constrained decoder (WebLLM's xgrammar) takes. Every name in it
   exists — the sources' columns, the types and their fields, the catalogue's `parse.*` — and what
   it writes is Fossil, for the checker to judge.
+- `bindingName(file, { signal })` — the name a file is bound by in a program: `people` for
+  `people.csv`, `_2024_sales` for `2024-sales.parquet`. The rule is the lexer's
+  (`fossil_syntax::name::binding_name`), so what comes back always lexes as one identifier.
 - `initFossilWasm(bytes)` — Node only: hand over the `.wasm`. A bundled host never calls it.
 
 ## One program in one editor: `openProgram`

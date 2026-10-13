@@ -869,3 +869,12 @@ fn to_diagnostic(
             .collect(),
     }
 }
+
+/// The binding name a file becomes in a program — `people` for `people.csv`,
+/// `_2024_sales` for `2024-sales.parquet` — always one `IDENT`.
+/// `fossil_syntax::name::binding_name` is the rule, asked of the lexer.
+#[wasm_bindgen(js_name = bindingName)]
+#[must_use]
+pub fn binding_name(file: &str) -> String {
+    fossil_syntax::name::binding_name(file)
+}
