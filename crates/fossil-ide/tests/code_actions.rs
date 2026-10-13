@@ -141,8 +141,8 @@ fn split_mapping_action_recompiles_second_order() {
     let db = db();
 
     // The consuming mapping targets the `Contact` shape (the OneOf one) through
-    // the `type` binding that brings the document in — the only way a header
-    // names a shape now.
+    // the `type` binding that brings the document in — the way a header names
+    // an imported shape.
     let src = "\
 type { Contact } := io.shex(\"contact.shex\")
 Contact : Contact from contacts

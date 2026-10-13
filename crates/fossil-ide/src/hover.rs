@@ -181,8 +181,8 @@ fn resolve_hover_target<'db>(
 
     // The hovered property's predicate IRI (for matching a shape constraint).
     //
-    // The key no longer carries it: a body writes a bare `name`, and the IRI is
-    // the shape document's to know. So the short name comes from
+    // The key does not carry it: a body writes a bare `name`, and the IRI is
+    // the type's to know. So the short name comes from
     // the SAME lowered `HirProperty` the checker uses, and the IRI comes from
     // the checker's own `predicates` table — the one `fossil-mir` reads for
     // `rdf_uri`. One table, two consumers, no second resolution.
@@ -275,8 +275,8 @@ User : Person from users
     /// Hover on the identity line (line 3) returns Markdown naming the type —
     /// a REFERENCE — and the `Literal` provenance.
     ///
-    /// It read `IriTemplate`, and that type is gone: an identity is a reference
-    /// to the shape the mapping produces. This fixture registers no document,
+    /// An identity is a reference to the shape the mapping produces, not a
+    /// string template. This fixture registers no document,
     /// so the shape resolves to nothing and the rendering is `Ref<?>`.
     #[test]
     fn hover_on_the_identity_names_a_reference() {
@@ -452,13 +452,10 @@ User : Person from users
                 "https://example.org/Person",
             )]),
         ];
-        // Every variant a caller can construct. There is no count to quote and
-        // there used to be («10 surface-constructible + Error = 11»): three of
-        // the eleven — `Optional`, `Fn` and `Unknown` — were built by this list
-        // and by nothing else in the workspace, and all three are gone. The
-        // third is why this assertion is still worth making: it was CHECKER
-        // state given a type, and this test existed to keep it off the screen.
-        // A kind that cannot be constructed cannot leak.
+        // Every variant a caller can construct, and no count to quote: a count
+        // goes stale where the list does not. The assertion is worth making
+        // because inference state given a type is exactly what must stay off
+        // the screen, and a kind that cannot be constructed cannot leak.
         for kind in &variants {
             let s = render_ty_kind(&db, kind);
             assert!(
