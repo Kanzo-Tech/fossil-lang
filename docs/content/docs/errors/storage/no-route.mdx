@@ -16,7 +16,7 @@ is refused — a storage read answers it as that file's `problem`, and a documen
 reaches a run as `document/unread` with this as its cause. And a credential whose `prefix` is not
 `s3://bucket/…` or `abfss://container@account.dfs.core.windows.net/…` — another scheme, an empty
 bucket, an Azure host that is not `*.dfs.core.windows.net` — has no store to build. A profile
-in `@fossil-lang/profile` raises the same code for a source with no connection that is not an
+in `@fossil-lang/wasm` raises the same code for a source with no connection that is not an
 `http(s)` URL, and reports it through `onWarn` rather than throwing.
 
 ## Why fossil refuses it

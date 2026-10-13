@@ -43,8 +43,8 @@ export type RunOptions = (
       path: string;
     }
 ) & {
-  /** What the host's profile of the sources answered — what `FossilProgram.registerProfile` was
-   *  given — so the run checks the program against the columns the editor checked it against.
+  /** What the editor's `FossilProgram.describe` answered, so the run checks the program against
+   *  the columns the editor checked it against.
    *  Without it every source is an open row. */
   profiled?: Profiled;
   /** Stops the run; it rejects with the signal's reason. */
@@ -78,7 +78,7 @@ export async function run(
     await until(initFossilExecutor(), signal);
     const exec = new FossilExecutor(program, 'files' in options ? options.path : undefined);
     try {
-      if (profiled !== undefined) registerProfile(exec, profiled);
+      if (profiled !== undefined) describedAs(exec, profiled);
       if ('host' in options) {
         const { unread } = await resolveDocuments(exec, options.host, { signal });
         if (unread.length > 0) throw unreadable(unread);
@@ -100,8 +100,8 @@ export async function run(
   }
 }
 
-/** `FossilProgram.registerProfile`, into the run's database. */
-function registerProfile(exec: FossilExecutor, { descriptors, undescribed }: Profiled): void {
+/** What `FossilProgram.describe` gave the editor's checker, into the run's database. */
+function describedAs(exec: FossilExecutor, { descriptors, undescribed }: Profiled): void {
   for (const descriptor of descriptors) exec.registerInferredDescriptor(JSON.stringify(descriptor));
   for (const { source, problem } of undescribed) exec.registerUndescribed(source.key, JSON.stringify(problem));
 }

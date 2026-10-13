@@ -170,8 +170,8 @@ diagnostic list said nothing about a file that 404s, and the only symptom was fi
 had quietly gone empty. A document the host could not read was already a row of `check`; a source
 was not.
 
-**Now both halves go in one call, and `check` derives the row.** `FossilProgram.registerProfile`
-takes `profile`'s result as it came back. Under it are two workspace primitives —
+**Both halves go in one call, and `check` derives the row.** `FossilProgram.describe` profiles what
+the program reads and hands the answer to the checker as it came back. Under it are two workspace primitives —
 `registerInferredDescriptor` and `registerUndescribed(key, problem)` — and the program is the place
 that calls them, for the reason it exists at all: a protocol every host would otherwise write by
 hand, and get the order of wrong. The order does not matter even underneath: the latest answer about

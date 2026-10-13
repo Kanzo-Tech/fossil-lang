@@ -5,7 +5,7 @@ URL the host signed.
 
 A host implements `Host` from `@fossil-lang/types` — `connections()` and
 `credentials(scope, access)`, answering Iceberg REST's `StorageCredential[]` — and hands it to
-`@fossil-lang/corpus`, `@fossil-lang/profile`, `@fossil-lang/executor` or `openProgram`. They
+`@fossil-lang/corpus`, `@fossil-lang/executor` or `openProgram`. They
 come here; a host seldom does.
 
 Each call is handed `{ signal }`, which aborts when fossil stops waiting. A host has 30 s to

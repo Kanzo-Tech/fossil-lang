@@ -84,7 +84,7 @@ failure.
                      ├─▶ crates/fossil-hir/src/providers/generated.rs
                      ├─▶ crates/fossil-profile/src/generated.rs
 catalogue.bnf ──cargo├─▶ crates/fossil-hir/src/stdlib/generated.rs
-              xtask  ├─▶ packages/profile/src/catalogue.generated.ts
+              xtask  ├─▶ packages/wasm/src/catalogue.generated.ts
             catalogue└─▶ docs/content/generated/stdlib.mdx
 
 corpus.bnf ─────cargo──▶ crates/fossil-df/src/corpus/generated.rs

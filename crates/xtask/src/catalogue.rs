@@ -1110,7 +1110,7 @@ fn ts_header(body: &str) -> String {
     )
 }
 
-/// `@fossil-lang/profile`: the constructors a host can `DESCRIBE`, so it asks
+/// `@fossil-lang/wasm`'s `profile`: the constructors a host can `DESCRIBE`, so it asks
 /// for no credential to read a source it has nothing to describe with. What a
 /// `DESCRIBE` means is `fossil-profile`'s, in the wasm module, and not stated
 /// here a second time.
@@ -1282,7 +1282,7 @@ pub fn generated() -> Vec<(PathBuf, String)> {
             rustfmt(&emit_hir_stdlib(&cat)),
         ),
         (
-            root.join("packages/profile/src/catalogue.generated.ts"),
+            root.join("packages/wasm/src/catalogue.generated.ts"),
             emit_ts_profile(&cat),
         ),
         (

@@ -47,9 +47,10 @@ let profile = plan.finish();                // types, keys, inclusions, samples
 
 The browser reaches it through
 `fossil-wasm`'s `Profiler` and runs each query on the page's DuckDB-WASM: `runProfiler` in
-`@fossil-lang/wasm` is the loop (`packages/wasm/src/profile.ts, runProfiler`), and
-`@fossil-lang/profile` reads each source under its credential and hands the plan its name
-(`packages/profile/src/index.ts, profile`). `fossil-df`'s tests run the same plan on the native
+`@fossil-lang/wasm` is the loop (`packages/wasm/src/profile.ts, runProfiler`), and `profile` beside
+it reads each source under its credential and hands the plan its name
+(`packages/wasm/src/describe.ts, profile`). A program's own sources are `program.describe()`: its
+inputs, profiled, handed to the checker, and answered as the value a run takes. `fossil-df`'s tests run the same plan on the native
 `duckdb` crate, so the code is shared and only the engine differs
 ([Three hosts](/docs/design/three-hosts)).
 

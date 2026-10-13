@@ -14,7 +14,11 @@ artefacts. Every door boots the module itself:
   because one extension names two formats — a `.ttl` is `rdf` as data and `shacl` as a schema.
 - `runProfiler(sources, query, { options, signal })` — `fossil-profile`'s plan over some sources,
   each query run by `query` on the host's engine, a phase's queries at once: the profile the language
-  server reads natively, in the page. `@fossil-lang/profile` is what a host calls; this is its loop.
+  server reads natively, in the page. `profile` and `program.describe` are what a host calls; this
+  is their loop.
+- `profile(inputs, { host, engine, options, etag, signal })` — what some sources are, on the host's
+  DuckDB, under the credentials the host vends: before there is a program, the files an assistant is
+  shown. `program.describe` is the same over a program's own inputs.
 - `grammarFor(vocabulary)` — the grammar of Fossil for these names: the `prelude` the request
   already says (the types imported and declared, the sources bound), and the `grammar` of the
   mappings after it, as the EBNF a constrained decoder (WebLLM's xgrammar) takes. Every name in it
@@ -31,7 +35,7 @@ import { fossil } from '@fossil-lang/codemirror-fossil';
 const program = await openProgram('job.fossil', { host, text });   // host: Host
 const extensions = fossil(program, { onNavigate });
 
-program.registerProfile(await profile(await program.inputs(), { host, engine, options: { depth: 'types' } }));
+const profiled = await program.describe({ engine, options: { depth: 'types' } });   // engine: DuckDB
 ```
 
 It boots the module, opens `uri` in its own workspace, and reads the documents the text names
