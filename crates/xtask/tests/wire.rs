@@ -62,7 +62,7 @@ fn the_wire() {
     generator.subschema_for::<fossil_hir::documents::MissingDocument>();
     generator.subschema_for::<fossil_hir::lineage::Input>();
     generator.subschema_for::<fossil_hir::lineage::Format>();
-    generator.subschema_for::<fossil_descriptors_input::InferredDescriptor>();
+    generator.subschema_for::<fossil_base::sources::InferredDescriptor>();
     generator.subschema_for::<fossil_profile::Source>();
     generator.subschema_for::<fossil_profile::Options>();
     generator.subschema_for::<fossil_profile::Query>();

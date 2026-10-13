@@ -514,7 +514,7 @@ impl WasmWorkspace {
 
     // ----- Register a host-introspected descriptor -----
 
-    /// Register an [`fossil_descriptors_input::InferredDescriptor`] for a
+    /// Register an [`fossil_base::sources::InferredDescriptor`] for a
     /// source binding name BEFORE invoking `diagnostics`. The Rust compiler reads
     /// from this registration during forward type propagation — the browser has
     /// no filesystem to introspect a CSV from, so the column types must arrive
@@ -726,7 +726,7 @@ impl FossilWorkspace {
     /// `tests/workspace.rs`.
     ///
     /// `descriptor_json` is the JSON serialisation of
-    /// [`fossil_descriptors_input::InferredDescriptor`].
+    /// [`fossil_base::sources::InferredDescriptor`].
     ///
     /// # Errors
     ///
@@ -764,7 +764,7 @@ impl FossilWorkspace {
     pub fn inferred_descriptor_native(
         &self,
         uri: &str,
-    ) -> Option<fossil_descriptors_input::InferredDescriptor> {
+    ) -> Option<fossil_base::sources::InferredDescriptor> {
         fossil_base::columns(&self.db, uri)
     }
 }

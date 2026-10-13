@@ -32,13 +32,11 @@ test-support = []
 [dependencies]
 salsa = { workspace = true }
 thiserror = { workspace = true }
-smol_str = { workspace = true }
-# `sources::Described` carries an `InferredDescriptor`, keyed by the source URI
-# the program writes. Verified before adding it: fossil-descriptors-input has NO
-# dependency on fossil-base — no cycle. The fossil-base → fossil-descriptors-input
-# direction matches the existing fossil-hir → fossil-descriptors-input
-# direction; descriptors-input remains a leaf data crate.
-fossil-descriptors-input = { path = "../fossil-descriptors-input" }
+# The `serde` feature, and `schemars`, for `sources::InferredDescriptor`: a host
+# sends the columns it found as JSON, and `@fossil-lang/types` is generated
+# from the struct.
+smol_str = { workspace = true, features = ["serde"] }
+schemars = { workspace = true }
 # Three modules name it in a public signature, so it is API and not just tests:
 # `providers` (the `DecodeTypes` row returns `OutputShapes` and `Rejection`),
 # `diagnostic` (`Span` is re-exported from there) and `system`. The

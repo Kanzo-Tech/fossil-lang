@@ -18,8 +18,6 @@ workspace = true
 # fossil-typeck) into one: they shared every type and could not be built apart.
 fossil-base = { path = "../fossil-base" }
 fossil-syntax = { path = "../fossil-syntax" }
-# The checker consumes the input descriptor via this path dep.
-fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 # The primitive lattice `TyKind::Primitive` carries, AND the format-neutral
 # shape vocabulary (`OutputShapes` / `Shape` / `PropertyConstraint` / `Occurs` /
 # `Rejection`) the checker reads instead of a schema language. This crate names

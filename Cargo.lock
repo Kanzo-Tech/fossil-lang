@@ -1678,21 +1678,8 @@ name = "fossil-base"
 version = "0.1.0"
 dependencies = [
  "fossil-base",
- "fossil-descriptors-input",
  "fossil-graph-schema",
  "salsa",
- "serde",
- "serde_json",
- "smol_str",
- "thiserror 1.0.69",
-]
-
-[[package]]
-name = "fossil-descriptors-input"
-version = "0.1.0"
-dependencies = [
- "fossil-graph-schema",
- "indexmap",
  "schemars",
  "serde",
  "serde_json",
@@ -1710,7 +1697,6 @@ dependencies = [
  "duckdb",
  "expect-test",
  "fossil-base",
- "fossil-descriptors-input",
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-mir",
@@ -1777,7 +1763,6 @@ version = "0.1.0"
 dependencies = [
  "expect-test",
  "fossil-base",
- "fossil-descriptors-input",
  "fossil-graph-schema",
  "fossil-syntax",
  "indexmap",
@@ -1801,7 +1786,6 @@ version = "0.1.0"
 dependencies = [
  "expect-test",
  "fossil-base",
- "fossil-descriptors-input",
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-mir",
@@ -1835,7 +1819,6 @@ version = "0.1.0"
 dependencies = [
  "duckdb",
  "fossil-base",
- "fossil-descriptors-input",
  "fossil-graph-schema",
  "schemars",
  "serde",
@@ -1906,7 +1889,6 @@ version = "0.1.0"
 dependencies = [
  "console_error_panic_hook",
  "fossil-base",
- "fossil-descriptors-input",
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-ide",
@@ -5690,7 +5672,7 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "expect-test",
- "fossil-descriptors-input",
+ "fossil-base",
  "fossil-df",
  "fossil-graph-schema",
  "fossil-hir",

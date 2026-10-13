@@ -42,8 +42,8 @@
 //! [`fossil_base::sources::columns`] reads a Salsa input, so describing a
 //! source re-runs every check that read it (`/docs/design/incremental`).
 
+use fossil_base::sources::InferredDescriptor;
 use fossil_base::{Diagnostic, Diagnostics};
-use fossil_descriptors_input::InferredDescriptor;
 use fossil_graph_schema::{Problem, Severity, Span};
 use smol_str::SmolStr;
 
@@ -53,7 +53,7 @@ use crate::def_map::{MappingLoc, def_map};
 use crate::ty::{Record, RecordField, Rows, Ty, TyKind};
 
 /// The source-row [`Ty`] (a `Record`) for a mapping as known from the
-/// host-registered [`fossil_descriptors_input::InferredDescriptor`] ONLY.
+/// host-registered [`fossil_base::sources::InferredDescriptor`] ONLY.
 ///
 /// Side-effect-free: no diagnostics, no filesystem reads — the
 /// descriptor-branch of [`resolve_source_scope`] without the type-check's
@@ -139,7 +139,7 @@ pub fn refused_sources(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) 
 /// (IDE).
 fn field_from_inferred<'db>(
     db: &'db dyn fossil_base::Db,
-    col: &fossil_descriptors_input::InferredColumn,
+    col: &fossil_base::sources::InferredColumn,
 ) -> RecordField<'db> {
     RecordField {
         name: col.name.clone(),
@@ -1271,14 +1271,14 @@ mod tests {
 
     /// The unknown-primitive branch that used to live here is gone with the
     /// string: a non-lattice name no longer reaches the checker at all, it fails
-    /// at the host boundary. `fossil-descriptors-input` owns that test now
+    /// at the host boundary. `fossil_base::sources` owns that test now
     /// (`a_primitive_outside_the_lattice_is_a_deserialisation_error`).
     #[test]
     fn a_column_carries_the_lattice_and_not_its_spelling() {
         let db = db();
-        let inferred = fossil_descriptors_input::InferredDescriptor {
+        let inferred = fossil_base::sources::InferredDescriptor {
             key: "users.csv".into(),
-            columns: vec![fossil_descriptors_input::InferredColumn {
+            columns: vec![fossil_base::sources::InferredColumn {
                 name: "born".into(),
                 primitive: Primitive::GYear,
             }],

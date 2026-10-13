@@ -211,16 +211,14 @@ pub static TABLE: &[&Provider] = &[&CSV, &JSON, &PARQUET, &RDF, &SHEX];
 pub fn register_inferred(db: &mut dyn Db, uri: &str, columns: &[(&str, Primitive)]) {
     crate::sources::describe_columns(
         db,
-        fossil_descriptors_input::InferredDescriptor {
+        crate::sources::InferredDescriptor {
             key: uri.into(),
             columns: columns
                 .iter()
-                .map(
-                    |(name, primitive)| fossil_descriptors_input::InferredColumn {
-                        name: (*name).into(),
-                        primitive: *primitive,
-                    },
-                )
+                .map(|(name, primitive)| crate::sources::InferredColumn {
+                    name: (*name).into(),
+                    primitive: *primitive,
+                })
                 .collect(),
             // Empty means "never fresh", which is right for a table nobody re-reads.
             etag: String::new(),

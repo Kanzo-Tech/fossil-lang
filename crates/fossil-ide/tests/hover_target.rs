@@ -51,7 +51,7 @@ fn host_db() -> FossilDb {
 /// what the browser's `registerProfile` does for real. Its `name` column is
 /// `Integer`; see `SHEX_SRC` for why it is not `String` any more.
 fn register_users(db: &mut dyn fossil_base::Db) {
-    use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
+    use fossil_base::sources::{InferredColumn, InferredDescriptor};
     use fossil_graph_schema::Primitive;
     fossil_base::describe_columns(
         db,

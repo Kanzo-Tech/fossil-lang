@@ -15,11 +15,68 @@
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
-use fossil_descriptors_input::InferredDescriptor;
-use fossil_graph_schema::{Failure, Problem};
+use fossil_graph_schema::{Failure, Primitive, Problem};
+use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
 use crate::db::Db;
+
+/// One column from a host-introspected source.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct InferredColumn {
+    /// Column name as introspected (`DuckDB` `column_name`).
+    #[schemars(with = "String")]
+    pub name: SmolStr,
+    /// The column's place in the lattice — the same enum the checker types
+    /// against, so a host sends `"integer"`, not a name the consumer has to
+    /// look up. A value outside the lattice fails here, at deserialisation,
+    /// naming itself; it does not become a `String` column and a diagnostic
+    /// three crates away.
+    pub primitive: Primitive,
+}
+
+/// A descriptor inferred from a runtime file introspection.
+///
+/// Identified by the source **URI**, which is what the descriptor is about: a
+/// binding name is a name for the *program*'s convenience, and two of them can
+/// point at one file.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct InferredDescriptor {
+    /// The source URI exactly as written in the program — the string inside
+    /// `io.csv("examples/users.csv")`. NOT the resolved location: the host
+    /// resolves (`@conn` aliases, a program-relative path, a signed URL) in
+    /// order to *read* the source, but the checker only ever sees what the
+    /// program says, so that is the only string both ends can agree on.
+    #[schemars(with = "String")]
+    pub key: SmolStr,
+    /// Ordered columns; the order is the source's own and is significant.
+    pub columns: Vec<InferredColumn>,
+    /// An entity tag in RFC 9110's sense (§8.8.3): an opaque validator of the
+    /// state of the source this was read from, which may be weak. A host compares
+    /// it to decide whether to profile the source again; nothing interprets it. A host that can stat a file writes
+    /// `mtime` + size, a host that has a strong `ETag` or a content digest
+    /// writes that instead, and a host that cannot cheaply tell writes `""`, which
+    /// is never fresh, so that source is profiled every time. It is NOT a hash of the bytes,
+    /// and deliberately: hashing means reading the whole source to decide
+    /// whether the source needs reading, which makes the cache cost more than
+    /// the `DESCRIBE` it saves. `mtime` + size is two fields of one `stat`. Its
+    /// one dangerous failure — saying "unchanged" when it changed — needs a file
+    /// restored with the same `mtime` AND the same size, which is what pairing
+    /// the two narrows.
+    pub etag: String,
+}
+
+impl InferredDescriptor {
+    /// Build an empty descriptor for `key` — useful for tests.
+    #[must_use]
+    pub fn empty(key: impl Into<SmolStr>) -> Self {
+        Self {
+            key: key.into(),
+            columns: Vec::new(),
+            etag: String::new(),
+        }
+    }
+}
 
 /// What the host found when it read a source.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,9 +207,6 @@ pub fn refusal_from_json(json: &str) -> Result<Described, Failure> {
 mod tests {
     use std::sync::Arc;
 
-    use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
-    use fossil_graph_schema::Primitive;
-
     use super::*;
     use crate::db::FossilDb;
     use crate::test_support::NativeSystem;
@@ -166,6 +220,44 @@ mod tests {
             }],
             etag: String::new(),
         }
+    }
+
+    #[test]
+    fn inferred_descriptor_round_trips_through_serde() {
+        let d = InferredDescriptor {
+            key: "examples/users.csv".into(),
+            columns: vec![
+                InferredColumn {
+                    name: "id".into(),
+                    primitive: Primitive::Integer,
+                },
+                InferredColumn {
+                    name: "name".into(),
+                    primitive: Primitive::String,
+                },
+            ],
+            etag: "abc123".into(),
+        };
+        let j = serde_json::to_string(&d).expect("serialise");
+        let d2: InferredDescriptor = serde_json::from_str(&j).expect("deserialise");
+        assert_eq!(d, d2);
+    }
+
+    /// The host's wire format is the lattice itself. A name outside it is
+    /// rejected here — where the JSON arrives and the offending value is still
+    /// in hand — instead of being coerced to `String` and reported by the
+    /// checker as a diagnostic about a column.
+    #[test]
+    fn a_primitive_outside_the_lattice_is_a_deserialisation_error() {
+        let json = r#"{"key":"examples/users.csv",
+                       "columns":[{"name":"id","primitive":"decimal"}],
+                       "etag":""}"#;
+        let err = serde_json::from_str::<InferredDescriptor>(json)
+            .expect_err("`decimal` is not in the lattice");
+        assert!(
+            err.to_string().contains("decimal"),
+            "the error names the value the host sent: {err}"
+        );
     }
 
     #[test]

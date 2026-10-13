@@ -32,8 +32,8 @@
 
 use std::collections::{HashMap, VecDeque};
 
+use fossil_base::sources::{InferredColumn, InferredDescriptor};
 use fossil_base::{NativeReader, RowReader};
-use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
 use fossil_graph_schema::Primitive;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

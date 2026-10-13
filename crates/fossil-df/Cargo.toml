@@ -131,8 +131,6 @@ fossil-graph-schema = { path = "../fossil-graph-schema" }
 # (`tests/support/profile.rs`, the profiler's plan on `duckdb`), and the
 # executor never does.
 fossil-profile = { path = "../fossil-profile" }
-# The check host's `System::descriptors` names the cache's type.
-fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 # `tests/census` counts `PROPERTY` nodes in the CST.
 fossil-syntax = { path = "../fossil-syntax" }
 # `tests/programs.rs` renders each diagnostic as `fossil check` rendered it —

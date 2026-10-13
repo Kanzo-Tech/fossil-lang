@@ -33,11 +33,6 @@ fossil-base    = { path = "../fossil-base" }
 fossil-syntax  = { path = "../fossil-syntax" }
 fossil-hir     = { path = "../fossil-hir" }
 fossil-mir     = { path = "../fossil-mir" }
-# WasmSystem stores InferredDescriptors registered
-# by the browser host BEFORE invoking compile() — the
-# Rust forward-propagation path reads them through the System trait accessor,
-# because the browser has no filesystem to introspect a CSV from.
-fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 smol_str = { workspace = true }
 # `Failure` is what every call here refuses with, and `js` the one function
 # that throws it as a `FossilError` — shared by the three wasm crates.

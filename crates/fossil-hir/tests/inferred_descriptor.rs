@@ -6,9 +6,9 @@
 //! joins them — and that the registry is an input, so describing a source
 //! re-runs a check that already ran (`/docs/design/incremental`).
 
+use fossil_base::sources::{InferredColumn, InferredDescriptor};
 use fossil_base::test_support::NativeSystem;
 use fossil_base::{FossilDb, SourceFile, System, describe_columns};
-use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
 use fossil_graph_schema::Primitive;
 use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::def_map;

@@ -31,7 +31,7 @@ fossil-hir = { path = "../fossil-hir" }
 # to a reader or to JS, from the crates that declare them.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 fossil-wasm = { path = "../fossil-wasm" }
-fossil-descriptors-input = { path = "../fossil-descriptors-input" }
+fossil-base = { path = "../fossil-base" }
 fossil-profile = { path = "../fossil-profile" }
 fossil-ide = { path = "../fossil-ide" }
 fossil-storage = { path = "../fossil-storage" }

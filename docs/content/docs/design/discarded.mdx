@@ -351,7 +351,7 @@ in 58 files across eight crates change import path; nine manifests change a dev-
 
 Against which `fossil-base` sheds 339 lines, one feature — and **no dependency**. Its two path
 dependencies are both held by production code: `fossil-graph-schema` by `shape_documents.rs`,
-`providers.rs` and `diagnostic.rs`, `fossil-descriptors-input` by `system.rs`. No arrow moves on the
+`providers.rs` and `diagnostic.rs`, and `fossil-descriptors-input` by `system.rs` until it became `fossil_base::sources`. No arrow moves on the
 architecture diagram either, because that page reads `[dependencies]` and this is a dev edge.
 
 The rule being applied here indicts what a `base` decides **about a program**. The location decided

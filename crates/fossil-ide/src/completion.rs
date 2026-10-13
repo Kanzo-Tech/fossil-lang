@@ -708,7 +708,7 @@ mod tests {
     /// the columns were offered where the language cannot write anything.
     #[test]
     fn offers_source_fields_after_the_row_binding_s_dot() {
-        use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
+        use fossil_base::sources::{InferredColumn, InferredDescriptor};
         let mut db = db();
         fossil_base::describe_columns(
             &mut db,
