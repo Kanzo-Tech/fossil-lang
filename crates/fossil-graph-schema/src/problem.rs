@@ -764,11 +764,6 @@ catalogue! {
     #[error("the program does not compile; nothing was run")]
     DoesNotCompile {},
 
-    /// The destination a run writes under is not a prefix any store covers.
-    "run/destination-uncovered", "No store covers the destination",
-    #[error("no store covers the destination {destination}")]
-    DestinationUncovered { destination: String },
-
     // ── source, engine, write, layout, storage, corpus, api ─────────────
 
     /// A CSV, JSON or Parquet source names no file in its store.
@@ -1306,9 +1301,6 @@ mod tests {
                 budget: 2 << 30,
             },
             Problem::DoesNotCompile {},
-            Problem::DestinationUncovered {
-                destination: "s3://lake/out/".into(),
-            },
             Problem::DuplicateTable {
                 table: "Person".into(),
             },

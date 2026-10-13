@@ -2613,35 +2613,6 @@
       "x-detail": "\"the program does not compile; nothing was run\""
     },
     {
-      "description": "The destination a run writes under is not a prefix any store covers.",
-      "properties": {
-        "code": {
-          "enum": [
-            "run/destination-uncovered"
-          ],
-          "type": "string"
-        },
-        "data": {
-          "properties": {
-            "destination": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "destination"
-          ],
-          "type": "object"
-        }
-      },
-      "required": [
-        "code",
-        "data"
-      ],
-      "title": "No store covers the destination",
-      "type": "object",
-      "x-detail": "\"no store covers the destination {destination}\""
-    },
-    {
       "description": "A CSV, JSON or Parquet source names no file in its store.",
       "properties": {
         "code": {
