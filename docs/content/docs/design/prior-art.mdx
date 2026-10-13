@@ -63,6 +63,24 @@ expression in an attribute argument. These are the languages, and the control ex
 | **Rust — `s.len()` ≡ `str::len(&s)`** | One catalogue entry reachable by two paths, which is the model for member-call dispatch by receiver type. |
 | **17 mapping languages and 12 schema-as-code systems** surveyed | 15 of the 17 treat a class IRI as an opaque string, and every one of them **derives** the shape from the mapping. Checking the mapping *against* the shape is the inversion, and it is the thesis. |
 
+## Annotations and language-tagged strings
+
+What [Annotations and language-tagged strings](/docs/design/labels) takes, each for one decision.
+
+| source | what it settles |
+| --- | --- |
+| **[ShEx 2.1](https://shex.io/shex-semantics/) §5.9, *Annotations*, and ShExC production [58]** | What an annotation is — `Annotation { predicate:IRIREF object:objectValue }`, on a Shape, an EachOf, a OneOf or a TripleConstraint, affecting no conformance — and how ShExC writes one, `"//" predicate (iri \| literal)`. `@annotate` is its two arguments in order, and `fossil.json` stores it as ShExJ verbatim. |
+| **[SHACL](https://www.w3.org/TR/shacl/) §2.3.2 and §2.3.2.1, `sh:name` and `sh:description`; §4.4.4, `sh:languageIn`** | That SHACL's labels are non-validating properties a processor ignores, that a local `sh:name` is to be preferred over a global label of the `rdf:Property`, «one value per language tag»; and that a shape's languages are «basic language ranges as per [BCP47]». |
+| **W3C Data Shapes WG, [ISSUE-112](https://www.w3.org/2014/data-shapes/track/issues/112)** (2015) | Why `sh:name` exists: `rdfs:label` on a property shape labels the shape, by RDFS's own definition, not the property in context. So `sh:name` is carried as itself, and annotations are never written as triples about the predicate. |
+| **[RDF 1.1 Concepts](https://www.w3.org/TR/rdf11-concepts/) §3.3, *Literals*** | That a literal has a language tag «if and only if the datatype IRI is `rdf:langString`», and that the tag «MUST be well-formed according to section 2.2.9 of [BCP47]» — which is the check, and why a reader that drops the tag writes ill-formed RDF. |
+| **BCP 47 — RFC 5646 §2.1.1 and §2.2.9, and RFC 4647 §2.1 and §3.3.1** | Well-formedness of a tag, its case-insensitivity, and the basic language ranges and basic filtering that SHACL's `sh:languageIn` and ShEx's language stems both match by. `oxilangtag`, already in the lock through `oxrdf`, implements the first. |
+| **[R2RML](https://www.w3.org/TR/r2rml/) §7.5, `rr:language`, and [RML](https://rml.io/specs/rml/) §6.5, `rml:languageMap`** | A constant tag and a tag read per row, the two things `str.lang`'s second argument is; and RML's fallback for an invalid tag, which is not taken. |
+| **[SPARQL 1.1 Query](https://www.w3.org/TR/sparql11-query/) §17.4.2.11, `STRLANG`, and production [145] `LANGTAG`** | The constructor `str.lang` is named for, and the lexical rule of `"…"@en`, which Turtle and ShExC share. |
+| **The Rust Reference, literal suffixes** | That a suffix is part of its literal's token, which is why the `@` of a tag must touch the quote and never lexes as an attribute. |
+| **[RDFa Core Initial Context](https://www.w3.org/2011/rdfa-context/rdfa-1.1)** | The W3C's list of predefined prefixes, which a predicate's CURIE is checked against and refused with — and whose `schema:` is `http://schema.org/`, the measured reason not to expand through it. |
+| **Delta Lake's protocol, *Protocol Evolution* and *Table Features*** | The version rule: unrecognised fields are «never required in order to correctly interpret» a table, and a change that is not forward-compatible raises the version a reader must implement — for the tables that use it. So annotations stay `fossil/1`, and a corpus with a language column is `fossil/2`. |
+| **`shex_ast` 0.3.1** (rudof) | That its AST carries annotations and its compact printer prints them as `//`, and that its conversion to `SchemaIR` drops them (`cnv_annotations` is a `TODO`) — so the decoder reads the AST. |
+
 ## RDF 1.2
 
 | source | what it settles |
