@@ -16,8 +16,9 @@
 //!
 //! # Versions
 //!
-//! Inside `fossil/1` only optional fields a reader may ignore are added.
-//! Changing what a fixed column or a byte means is `fossil/2`. A reader refuses
+//! `fossil/1` changes in place: a change to the format ships in the release
+//! whose reader reads it, and no reader branches on which writer wrote a
+//! corpus (`/docs/design/corpus#one-format-changed-in-place`). A reader refuses
 //! a `format` it does not know before it reads a byte of Parquet, and ignores
 //! any field it does not know.
 
@@ -26,6 +27,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::generated::ColumnRole;
+pub use fossil_graph_schema::{Annotation, AnnotationObject, ObjectLiteral};
 
 /// The format a corpus is written in.
 pub const FOSSIL_FORMAT: &str = "fossil/1";
@@ -105,6 +107,12 @@ pub struct Manifest {
     /// their types and, inside a type, them. Absent when there is none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub property_tables: Vec<PropertyTable>,
+    /// Every column of the program's whose every value is a value of another
+    /// table's candidate key or identity column — the shape of an edge the
+    /// program did not declare. Counted by the writer over every row it
+    /// wrote. Absent when there is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inclusions: Vec<Inclusion>,
 }
 
 /// One vertex type's table.
@@ -115,6 +123,10 @@ pub struct VertexTable {
     /// The type's IRI, when the program's shape document gives one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iri: Option<String>,
+    /// The type's annotations — ShEx 2.1's `Annotation` (§5.9), as its shape
+    /// or its declaration carries them. Absent when there is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<Annotation>,
     /// The table's Parquet file, relative to the corpus root.
     pub path: String,
     /// The key column: `dense_id`, global and gapless across every vertex table,
@@ -124,6 +136,10 @@ pub struct VertexTable {
     pub identity: String,
     /// Rows in the file.
     pub record_count: u64,
+    /// The columns never null and never repeated, of a type a key can be —
+    /// the writer's count over every row. Absent when there is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidate_keys: Vec<String>,
     /// The sources the table's rows were derived from — PROV-O's
     /// `prov:wasDerivedFrom` — each as the program wrote it (`@conn/path`, or a
     /// path), never the location it resolved to. Sorted. Absent when there is
@@ -144,6 +160,9 @@ pub struct EdgeTable {
     /// The relation's IRI, when the program's shape document gives one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iri: Option<String>,
+    /// The relation's annotations — those of the field that declares it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<Annotation>,
     /// The table's Parquet file, relative to the corpus root.
     pub path: String,
     /// The column holding the source vertex's `dense_id`, and its table.
@@ -152,6 +171,10 @@ pub struct EdgeTable {
     pub destination: Endpoint,
     /// Rows in the file.
     pub record_count: u64,
+    /// The columns never null and never repeated, of a type a key can be —
+    /// the writer's count over every row. Absent when there is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidate_keys: Vec<String>,
     /// The sources the table's rows were derived from — PROV-O's
     /// `prov:wasDerivedFrom` — each as the program wrote it (`@conn/path`, or a
     /// path), never the location it resolved to. Sorted. Absent when there is
@@ -175,6 +198,10 @@ pub struct PropertyTable {
     pub source: Endpoint,
     /// Rows in the file.
     pub record_count: u64,
+    /// The columns never null and never repeated, of a type a key can be —
+    /// the writer's count over every row. Absent when there is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub candidate_keys: Vec<String>,
     /// The sources the table's rows were derived from — PROV-O's
     /// `prov:wasDerivedFrom` — each as the program wrote it (`@conn/path`, or a
     /// path), never the location it resolved to. Sorted. Absent when there is
@@ -224,6 +251,60 @@ pub struct Property {
     /// Absent on a column of the program's.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<ColumnRole>,
+    /// The field's annotations, on a program's column. Absent when there is
+    /// none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<Annotation>,
+    /// The column's counts over every row of its table, taken by the writer.
+    /// Absent in a corpus written before the writer counted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stats: Option<Stats>,
+}
+
+/// A column's counts — Parquet's `Statistics` names, and the ones a source's
+/// profile uses (`fossil_profile::ColumnStats`). Every value is the text the
+/// corpus's `triples` gives it, the natural lexical form of the column's type;
+/// one longer than [`fossil_profile::MAX_VALUE_BYTES`] is left out, never cut.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Stats {
+    /// Rows with no value.
+    pub null_count: u64,
+    /// Distinct non-null values, exactly.
+    pub distinct_count: u64,
+    /// The least value; absent for a column with none, or one too long to keep.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_value: Option<String>,
+    /// The greatest value, on the same terms.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_value: Option<String>,
+    /// The ten commonest non-null values that occur at least twice, most
+    /// frequent first and ties by value. Absent when no value repeats, or when
+    /// one of the ten is too long to keep.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_values: Vec<TopValue>,
+}
+
+/// One of a column's commonest values, and how many rows hold it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct TopValue {
+    pub value: String,
+    pub count: u64,
+}
+
+/// Every value of `from` is a value of `to`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct Inclusion {
+    /// A column of the program's.
+    pub from: ColumnAt,
+    /// A candidate key, or an `identity` column.
+    pub to: ColumnAt,
+}
+
+/// A column of a table of the corpus.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ColumnAt {
+    pub table: String,
+    pub column: String,
 }
 
 impl Manifest {
@@ -334,6 +415,8 @@ mod tests {
             datatype: None,
             nullable,
             role: None,
+            annotations: Vec::new(),
+            stats: None,
         }
     }
 
@@ -359,6 +442,8 @@ mod tests {
                         name
                     },
                 ],
+                annotations: Vec::new(),
+                candidate_keys: Vec::new(),
             }],
             edge_tables: vec![EdgeTable {
                 name: edge_table_name("Person", "knows", "Person"),
@@ -379,6 +464,8 @@ mod tests {
                     column("src", "uint32", false),
                     column("dst", "uint32", false),
                 ],
+                annotations: Vec::new(),
+                candidate_keys: Vec::new(),
             }],
             property_tables: vec![PropertyTable {
                 name: property_table_name("Person", "nickname"),
@@ -393,7 +480,9 @@ mod tests {
                     column("src", "uint32", false),
                     column("nickname", "string", false),
                 ],
+                candidate_keys: Vec::new(),
             }],
+            inclusions: Vec::new(),
         }
     }
 

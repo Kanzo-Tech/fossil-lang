@@ -33,6 +33,8 @@ pub enum ColumnRole {
     Identity,
     /// One end of a relation, a vertex's global `dense_id`.
     Endpoint,
+    /// The BCP 47 tag of a language-tagged value, beside it.
+    Language,
 }
 
 /// One column the writer emits.
@@ -80,11 +82,21 @@ pub const EDGE_COLUMNS: &[WriterColumn] = &[
 ];
 
 /// Every column of a property row, in writer order.
-pub const PROPERTY_COLUMNS: &[WriterColumn] = &[WriterColumn {
-    name: "src",
-    data_type: "uint32",
-    role: ColumnRole::Endpoint,
-}];
+pub const PROPERTY_COLUMNS: &[WriterColumn] = &[
+    WriterColumn {
+        name: "src",
+        data_type: "uint32",
+        role: ColumnRole::Endpoint,
+    },
+    WriterColumn {
+        name: "lang",
+        data_type: "string",
+        role: ColumnRole::Language,
+    },
+];
+
+/// The language column of a property row — the BCP 47 tag of a language-tagged value, beside it.
+pub const PROPERTY_LANGUAGE: &str = "lang";
 
 /// The column the manifest's `source` endpoint names as its `key`.
 pub const ENDPOINT_SRC: &str = "src";

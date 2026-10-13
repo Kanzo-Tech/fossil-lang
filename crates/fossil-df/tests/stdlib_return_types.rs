@@ -80,6 +80,8 @@ const fn sql_type_of(ty: ScalarTy) -> &'static str {
         // A year is stored as its integer (`/docs/format`).
         ScalarTy::GYear => "INTEGER",
         ScalarTy::SeqString => "VARCHAR[]",
+        // `str.lang`'s two fields by position: the form, then the tag.
+        ScalarTy::LangString => "STRUCT(VARCHAR, VARCHAR)",
     }
 }
 
@@ -91,6 +93,10 @@ const fn sql_type_of(ty: ScalarTy) -> &'static str {
 /// per-row valid argument would make this a test of the arguments, and
 /// `DESCRIBE` never looks at one.
 fn dummy(ty: ScalarTy) -> String {
+    if ty == ScalarTy::LangString {
+        // An unnamed struct has no type to `CAST` to; `row` is its literal.
+        return "row('abc', 'en')".to_string();
+    }
     let literal = match ty {
         ScalarTy::String => "'abc'",
         ScalarTy::Integer => "2",
@@ -100,6 +106,7 @@ fn dummy(ty: ScalarTy) -> String {
         ScalarTy::DateTime => "'2026-05-21 00:00:00'",
         ScalarTy::GYear => "2026",
         ScalarTy::SeqString => "['a', 'b']",
+        ScalarTy::LangString => unreachable!("returned above"),
     };
     format!("CAST({literal} AS {})", sql_type_of(ty))
 }

@@ -2,17 +2,56 @@
 // `UPDATE_EXPECT=1 cargo test -p xtask --test wire` rewrites it.
 
 /**
+ * A ShEx 2.1 `Annotation` (§5.9): a predicate and an RDF object, about a type, a field or a
+ * relation — never about the data. ShExJ's shape, with one word changed: a literal's datatype IRI
+ * is `datatype`, the word a corpus column already uses for it, where ShExJ writes `type`
+ * (`/docs/design/labels`).
+ */
+export interface Annotation {
+  /**
+   * ShExJ's `objectValue`: an IRI as a bare string, or a literal.
+   */
+  object: AnnotationObject;
+  /**
+   * The predicate, a whole IRI.
+   */
+  predicate: string;
+}
+
+/**
+ * An annotation's object — ShExJ's `objectValue`.
+ */
+export type AnnotationObject = string | ObjectLiteral;
+
+/**
+ * A column of a table of the corpus.
+ */
+export interface ColumnAt {
+  column: string;
+  table: string;
+}
+
+/**
  * What a column IS — never what a reader does with it.
  *
  * A reader names the roles it means, never a list of names. It is data in `fossil.json` too: a
  * writer column's `role` in its table's `properties`, spelled as the variant in lowercase.
  */
-export type ColumnRole = 'address' | 'identity' | 'endpoint';
+export type ColumnRole = 'address' | 'identity' | 'endpoint' | 'language';
 
 /**
  * One relation's table.
  */
 export interface EdgeTable {
+  /**
+   * The relation's annotations — those of the field that declares it.
+   */
+  annotations?: Annotation[];
+  /**
+   * The columns never null and never repeated, of a type a key can be — the writer's count over
+   * every row. Absent when there is none.
+   */
+  candidate_keys?: string[];
   /**
    * The sources the table's rows were derived from — PROV-O's `prov:wasDerivedFrom` — each as
    * the program wrote it (`@conn/path`, or a path), never the location it resolved to. Sorted.
@@ -68,6 +107,20 @@ export interface Endpoint {
 }
 
 /**
+ * Every value of `from` is a value of `to`.
+ */
+export interface Inclusion {
+  /**
+   * A column of the program's.
+   */
+  from: ColumnAt;
+  /**
+   * A candidate key, or an `identity` column.
+   */
+  to: ColumnAt;
+}
+
+/**
  * The whole of `fossil.json`.
  */
 export interface Manifest {
@@ -80,6 +133,12 @@ export interface Manifest {
    */
   format: 'fossil/1';
   /**
+   * Every column of the program's whose every value is a value of another table's candidate key or
+   * identity column — the shape of an edge the program did not declare. Counted by the writer
+   * over every row it wrote. Absent when there is none.
+   */
+  inclusions?: Inclusion[];
+  /**
    * One per multi-valued property, in the order the compiled schema lists their types and, inside a
    * type, them. Absent when there is none.
    */
@@ -91,9 +150,32 @@ export interface Manifest {
 }
 
 /**
+ * A literal object: its lexical form, and a language tag or a datatype IRI. A plain string carries
+ * neither.
+ */
+export interface ObjectLiteral {
+  /**
+   * The datatype IRI of a typed literal; ShExJ's `type`.
+   */
+  datatype?: string;
+  /**
+   * The BCP 47 tag of a language-tagged string.
+   */
+  language?: string;
+  /**
+   * The lexical form.
+   */
+  value: string;
+}
+
+/**
  * One column.
  */
 export interface Property {
+  /**
+   * The field's annotations, on a program's column. Absent when there is none.
+   */
+  annotations?: Annotation[];
   /**
    * The literal datatype the shape declares, as the IRI it wrote — a mapping's `rr:datatype`.
    * Absent where it declares none.
@@ -117,6 +199,11 @@ export interface Property {
    */
   role?: ColumnRole;
   /**
+   * The column's counts over every row of its table, taken by the writer. Absent in a corpus
+   * written before the writer counted.
+   */
+  stats?: Stats;
+  /**
    * The RDF term type the shape declares for the values, as R2RML's IRI — `RR_IRI` or
    * `RR_LITERAL` — which a mapping states as `rr:termType`. Absent where no shape declares one,
    * and a reader then takes R2RML's default: a literal of the column's natural datatype (R2RML
@@ -134,6 +221,11 @@ export interface Property {
  * term (R2RML §10.2) and an array is no Core SQL.
  */
 export interface PropertyTable {
+  /**
+   * The columns never null and never repeated, of a type a key can be — the writer's count over
+   * every row. Absent when there is none.
+   */
+  candidate_keys?: string[];
   /**
    * The sources the table's rows were derived from — PROV-O's `prov:wasDerivedFrom` — each as
    * the program wrote it (`@conn/path`, or a path), never the location it resolved to. Sorted.
@@ -164,9 +256,57 @@ export interface PropertyTable {
 }
 
 /**
+ * A column's counts — Parquet's `Statistics` names, and the ones a source's profile uses
+ * (`fossil_profile::ColumnStats`). Every value is the text the corpus's `triples` gives it, the
+ * natural lexical form of the column's type; one longer than `fossil_profile::MAX_VALUE_BYTES` is
+ * left out, never cut.
+ */
+export interface Stats {
+  /**
+   * Distinct non-null values, exactly.
+   */
+  distinct_count: number;
+  /**
+   * The greatest value, on the same terms.
+   */
+  max_value?: string;
+  /**
+   * The least value; absent for a column with none, or one too long to keep.
+   */
+  min_value?: string;
+  /**
+   * Rows with no value.
+   */
+  null_count: number;
+  /**
+   * The ten commonest non-null values that occur at least twice, most frequent first and ties by
+   * value. Absent when no value repeats, or when one of the ten is too long to keep.
+   */
+  top_values?: TopValue[];
+}
+
+/**
+ * One of a column's commonest values, and how many rows hold it.
+ */
+export interface TopValue {
+  count: number;
+  value: string;
+}
+
+/**
  * One vertex type's table.
  */
 export interface VertexTable {
+  /**
+   * The type's annotations — ShEx 2.1's `Annotation` (§5.9), as its shape or its declaration
+   * carries them. Absent when there is none.
+   */
+  annotations?: Annotation[];
+  /**
+   * The columns never null and never repeated, of a type a key can be — the writer's count over
+   * every row. Absent when there is none.
+   */
+  candidate_keys?: string[];
   /**
    * The sources the table's rows were derived from — PROV-O's `prov:wasDerivedFrom` — each as
    * the program wrote it (`@conn/path`, or a path), never the location it resolved to. Sorted.

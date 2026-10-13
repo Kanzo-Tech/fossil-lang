@@ -58,6 +58,7 @@ pub mod session;
 /// The catalog rendered for this engine: which `DataFusion` function each
 /// stdlib entry becomes, and which rows this engine cannot render.
 pub mod stdlib;
+mod facts;
 /// The corpus, written: one Parquet per table, `fossil.json` last.
 pub mod write;
 
@@ -95,7 +96,9 @@ use fossil_hir::shapes::inner_primitive;
 use fossil_hir::{MappingLoc, def_map::def_map};
 use fossil_mir::{Expr, Op, SourceFormat, VProp, apply_output_shape, lower_to_mir_pg};
 
-use crate::corpus::generated::{ENDPOINT_SRC, PAYLOAD_ADDRESS, PAYLOAD_IDENTITY};
+use crate::corpus::generated::{
+    ENDPOINT_SRC, PAYLOAD_ADDRESS, PAYLOAD_IDENTITY, PROPERTY_LANGUAGE,
+};
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
 /// single source of all type/predicate/cardinality metadata) plus the relation
@@ -222,10 +225,11 @@ pub async fn execute_graph<'db>(
         edge_types.push(edge_type);
     }
 
-    let schema = GraphSchema {
+    let mut schema = GraphSchema {
         nodes,
         edges: edge_types,
     };
+    carry_from_descriptor(&mut schema, descriptor);
     Ok(Graph {
         schema,
         vertices,
@@ -400,6 +404,7 @@ async fn prepare_vertex_ops<'db>(
         label: type_name,
         iri: rdf_type,
         properties: props.iter().map(|p| node_property(db, p)).collect(),
+        annotations: Vec::new(),
     };
 
     Ok(PreparedVertex {
@@ -574,7 +579,7 @@ async fn finalize_vertex(
             col(PAYLOAD_IDENTITY).alias("__subject"),
             col(PAYLOAD_ADDRESS).alias(ENDPOINT_SRC),
         ])?;
-        let batches = row_per_value(
+        let rows = row_per_value(
             df.clone()
                 .select(vec![col(PAYLOAD_IDENTITY), column(&name)])?,
             &name,
@@ -587,14 +592,18 @@ async fn finalize_vertex(
             &["__subject"],
             None,
         )?
-        .select(vec![col(ENDPOINT_SRC), column(&name)])?
-        .distinct()?
-        .sort(vec![
-            col(ENDPOINT_SRC).sort(true, false),
-            column(&name).sort(true, false),
-        ])?
-        .collect()
-        .await?;
+        .select(vec![col(ENDPOINT_SRC), column(&name)])?;
+        // `(src, value)`; a language-tagged value is a struct whose order is
+        // its form's and then its tag's, so the same sort orders both.
+        let batches = rows
+            .distinct()?
+            .sort(vec![
+                col(ENDPOINT_SRC).sort(true, false),
+                column(&name).sort(true, false),
+            ])?
+            .collect()
+            .await?;
+        let batches = language_tagged(batches, &name)?;
         let derived_from = property_sources
             .iter()
             .find(|(n, _)| *n == name)
@@ -616,6 +625,49 @@ async fn finalize_vertex(
         },
         node,
     ))
+}
+
+/// A language-tagged value is `str.lang`'s two-field struct; its property
+/// table has it as two columns, the lexical form under the property's name and
+/// the tag under `lang` (`corpus.bnf`). A struct whose form is null is no value.
+/// Any other value passes through as the one column it is.
+///
+/// It is split on the collected batches and not in the plan: `DataFusion` 54's
+/// `push_down_leaf_projections` pushes a field access below a projection that
+/// both aliases a column to its own name and keeps the qualified original, and
+/// refuses the plan as ambiguous — which every mapping writing `category =
+/// Row.category` beside a tagged field does.
+fn language_tagged(
+    batches: Vec<RecordBatch>,
+    name: &str,
+) -> datafusion::error::Result<Vec<RecordBatch>> {
+    use datafusion::arrow::array::{Array as _, StructArray};
+    use datafusion::arrow::compute::{filter_record_batch, is_not_null};
+    batches
+        .into_iter()
+        .map(|batch| {
+            let Some(tagged) = batch
+                .column_by_name(name)
+                .and_then(|c| c.as_any().downcast_ref::<StructArray>())
+                .filter(|s| s.num_columns() == 2)
+            else {
+                return Ok(batch);
+            };
+            let (form, tag) = (Arc::clone(tagged.column(0)), Arc::clone(tagged.column(1)));
+            let src = batch
+                .column_by_name(ENDPOINT_SRC)
+                .cloned()
+                .ok_or_else(|| DataFusionError::Internal("a property table has a `src`".into()))?;
+            let schema = Arc::new(Schema::new(vec![
+                Field::new(ENDPOINT_SRC, src.data_type().clone(), false),
+                Field::new(name, form.data_type().clone(), true),
+                Field::new(PROPERTY_LANGUAGE, tag.data_type().clone(), true),
+            ]));
+            let present = is_not_null(&form)?;
+            let split = RecordBatch::try_new(schema, vec![src, form, tag])?;
+            Ok(filter_record_batch(&split, &present)?)
+        })
+        .collect()
 }
 
 /// One row per value of `column`. The RDF pivot spells a multi-valued
@@ -657,6 +709,34 @@ fn node_property(db: &dyn fossil_base::Db, prop: &VProp<'_>) -> NodeProp {
         } else {
             Cardinality::Multi
         },
+        annotations: Vec::new(),
+        languages: Vec::new(),
+    }
+}
+
+/// What the descriptor says of each type, field and relation that the plan
+/// does not carry: their annotations, and the languages a tagged field admits.
+/// The plan's schema is built from what the mappings wrote; these are facts of
+/// the shape, read off it by name.
+fn carry_from_descriptor(schema: &mut GraphSchema, descriptor: &GraphSchema) {
+    for node in &mut schema.nodes {
+        let Some(declared) = descriptor.node(&node.label) else {
+            continue;
+        };
+        node.annotations.clone_from(&declared.annotations);
+        for p in &mut node.properties {
+            if let Some(d) = declared.properties.iter().find(|d| d.name == p.name) {
+                p.annotations.clone_from(&d.annotations);
+                p.languages.clone_from(&d.languages);
+            }
+        }
+    }
+    for edge in &mut schema.edges {
+        if let Some(d) = descriptor.edges.iter().find(|d| {
+            (&d.source, &d.label, &d.destination) == (&edge.source, &edge.label, &edge.destination)
+        }) {
+            edge.annotations.clone_from(&d.annotations);
+        }
     }
 }
 
@@ -787,6 +867,7 @@ async fn execute_edges<'db>(
                 } else {
                     Cardinality::Multi
                 },
+                annotations: Vec::new(),
             };
             out.push((prepared, edge_type));
         }

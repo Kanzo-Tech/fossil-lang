@@ -134,6 +134,16 @@ fn render_run(corpus: &native::Corpus) -> String {
             columns.join(", "),
         );
     }
+    for p in &manifest.property_tables {
+        let columns: Vec<&str> = p.properties.iter().map(|c| c.name.as_str()).collect();
+        let _ = writeln!(
+            out,
+            "property {} × {} — {}",
+            p.name,
+            p.record_count,
+            columns.join(", "),
+        );
+    }
     if manifest.edge_tables.is_empty() {
         out.push_str("NO EDGE TYPE was written\n");
     }
@@ -170,6 +180,7 @@ fn unnamed_or_missing(corpus: &native::Corpus) -> Vec<String> {
         .iter()
         .map(|v| v.path.clone())
         .chain(manifest.edge_tables.iter().map(|e| e.path.clone()))
+        .chain(manifest.property_tables.iter().map(|p| p.path.clone()))
         .collect();
     named.push("fossil.json".to_string());
     let mut findings = Vec::new();

@@ -1,0 +1,52 @@
+// What a type, a field and a relation are called, in which language, and a
+// name in the language it is written in — `/docs/design/labels`, end to end.
+//
+// `@annotation` is a ShEx annotation, a predicate and an object, written
+// where `@iri` is and stacked above the field when there are several. A
+// `LangString` field is a property table with a `lang` column whatever its
+// count; `str.lang` gives a value its tag, from a column (`rml:languageMap`)
+// or a constant (`rr:language`).
+
+// #region declaration
+@iri("https://schema.org/Person")
+@annotation("http://www.w3.org/2000/01/rdf-schema#label", "Nobel laureate"@en)
+@annotation("http://www.w3.org/2000/01/rdf-schema#label", "galardonado con el Nobel"@es)
+type Laureate
+    @iri("https://schema.org/name")
+    name: Seq<LangString>
+
+    @iri("https://schema.org/birthDate")
+    @annotation("http://www.w3.org/2000/01/rdf-schema#label", "birth date"@en)
+    @annotation("http://www.w3.org/2000/01/rdf-schema#label", "fecha de nacimiento"@es)
+    birthDate: Date
+
+    @iri("https://nobel.example/vocab/awarded")
+    @annotation("http://www.w3.org/2000/01/rdf-schema#label", "awarded"@en)
+    awarded: Seq<Ref<Prize>>
+
+@iri("https://nobel.example/vocab/Prize")
+type Prize
+    @iri("https://nobel.example/vocab/category")  category: String
+    @iri("https://nobel.example/vocab/motivation")  motivation: Option<LangString>
+// #endregion declaration
+
+LaureateRow := io.csv("data/laureate.csv")
+NameRow     := io.csv("data/laureate_name.csv")
+PrizeRow    := io.csv("data/prize.csv")
+
+// #region mappings
+Laureates : Laureate from LaureateRow.join(NameRow, on = LaureateRow.id == NameRow.laureate)
+    @subject  = "https://nobel.example/laureate/{LaureateRow.id}"
+    name      = NameRow.name.lang(NameRow.lang)
+    birthDate = LaureateRow.birth_date
+
+Awards : Laureate from LaureateRow.join(PrizeRow, on = LaureateRow.id == PrizeRow.laureate)
+    @subject  = "https://nobel.example/laureate/{LaureateRow.id}"
+    birthDate = LaureateRow.birth_date
+    awarded   = Prize(PrizeRow.id)
+
+Prizes : Prize from PrizeRow
+    @subject   = "https://nobel.example/prize/{PrizeRow.id}"
+    category   = PrizeRow.category
+    motivation = PrizeRow.motivation.lang("en")
+// #endregion mappings

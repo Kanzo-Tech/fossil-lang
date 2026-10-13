@@ -172,7 +172,7 @@ pub(crate) async fn write_in_memory(
     storage
         .with_store("mem://out/", Arc::clone(&out) as Arc<dyn ObjectStore>)
         .expect("route the in-memory store");
-    let written = fossil_df::write(graph, &storage, MEMORY_DEST)
+    let written = fossil_df::write(graph, &datafusion::prelude::SessionContext::new(), &storage, MEMORY_DEST)
         .await
         .expect("write");
     let mut files = std::collections::BTreeMap::new();
