@@ -315,7 +315,7 @@ export interface InferredDescriptor {
  * One input a program reads — `Input` in `@fossil-lang/types`, and the one answer to «what does
  * this program read»: the editor's, the introspecting host's and the executor's.
  *
- * The name is `OpenLineage`'s `RunEvent.inputs[]` and PROV's `prov:used`, and not LSP's
+ * The name is `OpenLineage`'s `RunEvent.inputs[]` and PROV's `prov:used`, and not an editor's
  * `references`, which are the usages of a symbol.
  */
 export interface Input {
