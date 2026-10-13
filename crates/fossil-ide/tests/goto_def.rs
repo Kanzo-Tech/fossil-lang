@@ -309,6 +309,10 @@ Users : Person from User
     let f = program(&mut db, SRC);
     // Line 5 is `    email = User.email`; column 18 is inside the member `email`.
     assert!(goto_definition(&db, f, 5, 18).is_empty());
+    // The key on the same line is the shape's predicate, not the binding.
+    let key = goto_definition(&db, f, 5, 5);
+    assert_eq!(key.len(), 1, "{key:?}");
+    assert_ne!(key[0].file, f, "the key goes to the shape document");
     // …while the binding itself does resolve, so the silence above is the
     // position's and not the name's.
     let binding = goto_definition(&db, f, 1, 1);

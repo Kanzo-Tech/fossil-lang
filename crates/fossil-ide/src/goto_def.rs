@@ -31,7 +31,6 @@
 use std::ops::Range;
 
 use fossil_base::SourceFile;
-use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::MappingLoc;
 use fossil_hir::shapes::resolve_target_shape;
 
@@ -101,10 +100,10 @@ pub fn goto_definition(
 /// targets.
 ///
 /// The type is the mapping's own target, [`resolve_target_shape`], and the key
-/// resolves through the checker's `predicates` table — the one hover and
-/// `fossil-mir` read — so a key lands where the checker says it is. `None` when
-/// the type does not resolve: the binding line says nothing about which
-/// predicates a document declares, so there is no fallback for a key.
+/// resolves through the type's own short names — the table completion offers
+/// keys from — so a key goes to its declaration whether or not the mapping
+/// checks. `None` when the type does not resolve: the binding line says nothing
+/// about which predicates a document declares, so there is no fallback for a key.
 fn key_target(
     db: &dyn fossil_base::Db,
     mapping: MappingLoc<'_>,
@@ -112,14 +111,8 @@ fn key_target(
 ) -> Option<NavigationTarget> {
     let shape = resolve_target_shape(db, mapping)?;
     let home = shape.file?;
-    let iri = typecheck_mapping(db, mapping)
-        .checked(db)
-        .ok()?
-        .predicates(db)
-        .iter()
-        .find(|p| p.name.as_str() == key)?
-        .iri
-        .clone();
+    let (names, _collisions) = shape.short_names();
+    let iri = names.into_iter().find(|p| p.name.as_str() == key)?.iri;
     let span = shape.constraint_for(&iri).and_then(|c| c.span);
     Some(NavigationTarget {
         file: home,
