@@ -145,6 +145,11 @@ pub struct HirBody<'db> {
     /// identity's three obligations. Mapping-relative.
     #[returns(ref)]
     pub diagnostics: Vec<fossil_base::Diagnostic>,
+    /// The body has no `@subject`, and [`Self::diagnostics`] already says so: a
+    /// lowering that needs the identity propagates this rather than saying it
+    /// again.
+    #[returns(copy)]
+    pub no_subject: Option<fossil_base::ErrorGuaranteed>,
 }
 
 /// One reference, and where its NAME is written.
@@ -256,6 +261,7 @@ pub fn body<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> HirB
     // rather than about a token, and the message wants the mapping's name.
     let mut subjects: Vec<(usize, fossil_graph_schema::Span)> = Vec::new();
     let mut sink = fossil_base::Diagnostics::new();
+    let mut no_subject = None;
     if let Some(node) = mapping_cst.syntax() {
         let name = mapping_name(&node);
         if let Some(body_node) = node
@@ -280,7 +286,7 @@ pub fn body<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> HirB
                     expr_count = expr_count.saturating_add(1);
                 }
             }
-            check_identity(&mut sink, &name, &subjects, &body_node);
+            no_subject = check_identity(&mut sink, &name, &subjects, &body_node);
         }
     }
     HirBody::new(
@@ -290,6 +296,7 @@ pub fn body<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> HirB
         expr_count,
         ref_spans,
         sink.into_vec(),
+        no_subject,
     )
 }
 
@@ -412,8 +419,23 @@ fn check_identity(
     name: &str,
     subjects: &[(usize, fossil_graph_schema::Span)],
     body_node: &SyntaxNode,
-) {
+) -> Option<fossil_base::ErrorGuaranteed> {
     use fossil_graph_schema::Problem;
+    let Some(&(index, first_span)) = subjects.first() else {
+        let r = body_node.text_range();
+        return Some(
+            sink.raise(
+                fossil_base::Diagnostic::new(
+                    fossil_graph_schema::Severity::Error,
+                    Problem::MissingSubject {
+                        mapping: name.to_string(),
+                    },
+                    fossil_graph_schema::Span::new(r.start().into(), r.end().into()),
+                )
+                .with_help("the first line of a mapping body is `@subject = <expr>`"),
+            ),
+        );
+    };
     let mut emit = |span: fossil_graph_schema::Span, problem: Problem, help: &str| {
         sink.push(
             fossil_base::Diagnostic::new(fossil_graph_schema::Severity::Error, problem, span)
@@ -421,15 +443,6 @@ fn check_identity(
         );
     };
     let mapping = || name.to_string();
-    let Some(&(index, first_span)) = subjects.first() else {
-        let r = body_node.text_range();
-        emit(
-            fossil_graph_schema::Span::new(r.start().into(), r.end().into()),
-            Problem::MissingSubject { mapping: mapping() },
-            "the first line of a mapping body is `@subject = <expr>`",
-        );
-        return;
-    };
     if let Some(&(_, second_span)) = subjects.get(1) {
         emit(
             second_span,
@@ -448,6 +461,7 @@ fn check_identity(
             "the identity comes before what it identifies",
         );
     }
+    None
 }
 
 #[cfg(test)]

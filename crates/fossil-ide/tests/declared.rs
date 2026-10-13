@@ -93,3 +93,15 @@ fn a_key_goes_to_its_field() {
         "name"
     );
 }
+
+#[test]
+fn a_mapping_without_its_subject_is_told_once() {
+    let (db, _) = program();
+    let text = PROGRAM.replace("    @subject = \"https://shop.example/p/{Row.name}\"\n", "");
+    let file = SourceFile::new(&db, text, "/p/no-subject.fossil".to_string());
+    let missing: Vec<_> = fossil_ide::diagnostics(&db, file)
+        .into_iter()
+        .filter(|d| d.problem.code() == "identity/missing-subject")
+        .collect();
+    assert_eq!(missing.len(), 1, "{missing:#?}");
+}

@@ -178,6 +178,9 @@ fn lower_mapping<'db>(
     // fatal: the old empty-string default produced vertices whose subject was
     // `""`, which dedups every row of the mapping into a single blank node.
     let iri_span_line = iri_property_line(db, mapping, body);
+    if let Some(eg) = body.no_subject(db) {
+        return Err(eg);
+    }
     let Some(id) = lower_iri_property(m, body, db, sink, iri_span_line) else {
         return Err(sink.report(
             span,
