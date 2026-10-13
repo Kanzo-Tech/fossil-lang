@@ -2,14 +2,14 @@
 // `UPDATE_EXPECT=1 cargo test -p xtask --test wire` rewrites it.
 
 /**
- * A ShEx 2.1 `Annotation` (§5.9): a predicate and an RDF object, about a type, a field or a
- * relation — never about the data. ShExJ's shape, with one word changed: a literal's datatype IRI
- * is `datatype`, the word a corpus column already uses for it, where ShExJ writes `type`
+ * A `ShEx` 2.1 `Annotation` (§5.9): a predicate and an RDF object, about a type, a field or a
+ * relation — never about the data. `ShExJ`'s shape, with one word changed: a literal's datatype
+ * IRI is `datatype`, the word a corpus column already uses for it, where `ShExJ` writes `type`
  * (`/docs/design/labels`).
  */
 export interface Annotation {
   /**
-   * ShExJ's `objectValue`: an IRI as a bare string, or a literal.
+   * `ShExJ`'s `objectValue`: an IRI as a bare string, or a literal.
    */
   object: AnnotationObject;
   /**
@@ -19,7 +19,7 @@ export interface Annotation {
 }
 
 /**
- * An annotation's object — ShExJ's `objectValue`.
+ * An annotation's object — `ShExJ`'s `objectValue`.
  */
 export type AnnotationObject = string | ObjectLiteral;
 
@@ -155,7 +155,7 @@ export interface Manifest {
  */
 export interface ObjectLiteral {
   /**
-   * The datatype IRI of a typed literal; ShExJ's `type`.
+   * The datatype IRI of a typed literal; `ShExJ`'s `type`.
    */
   datatype?: string;
   /**
@@ -298,7 +298,7 @@ export interface TopValue {
  */
 export interface VertexTable {
   /**
-   * The type's annotations — ShEx 2.1's `Annotation` (§5.9), as its shape or its declaration
+   * The type's annotations — `ShEx` 2.1's `Annotation` (§5.9), as its shape or its declaration
    * carries them. Absent when there is none.
    */
   annotations?: Annotation[];

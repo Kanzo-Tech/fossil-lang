@@ -44,7 +44,7 @@
   },
   "definitions": {
     "Annotation": {
-      "description": "A ShEx 2.1 `Annotation` (§5.9): a predicate and an RDF object, about a type, a field or a relation — never about the data. ShExJ's shape, with one word changed: a literal's datatype IRI is `datatype`, the word a corpus column already uses for it, where ShExJ writes `type` (`/docs/design/labels`).",
+      "description": "A `ShEx` 2.1 `Annotation` (§5.9): a predicate and an RDF object, about a type, a field or a relation — never about the data. `ShExJ`'s shape, with one word changed: a literal's datatype IRI is `datatype`, the word a corpus column already uses for it, where `ShExJ` writes `type` (`/docs/design/labels`).",
       "type": "object",
       "required": [
         "object",
@@ -52,7 +52,7 @@
       ],
       "properties": {
         "object": {
-          "description": "ShExJ's `objectValue`: an IRI as a bare string, or a literal.",
+          "description": "`ShExJ`'s `objectValue`: an IRI as a bare string, or a literal.",
           "allOf": [
             {
               "$ref": "#/definitions/AnnotationObject"
@@ -66,14 +66,14 @@
       }
     },
     "AnnotationObject": {
-      "description": "An annotation's object — ShExJ's `objectValue`.",
+      "description": "An annotation's object — `ShExJ`'s `objectValue`.",
       "anyOf": [
         {
           "description": "An IRI, written as a bare string.",
           "type": "string"
         },
         {
-          "description": "A literal: ShExJ's `ObjectLiteral`.",
+          "description": "A literal: `ShExJ`'s `ObjectLiteral`.",
           "allOf": [
             {
               "$ref": "#/definitions/ObjectLiteral"
@@ -264,7 +264,7 @@
       ],
       "properties": {
         "datatype": {
-          "description": "The datatype IRI of a typed literal; ShExJ's `type`.",
+          "description": "The datatype IRI of a typed literal; `ShExJ`'s `type`.",
           "type": "string"
         },
         "language": {
@@ -458,7 +458,7 @@
       ],
       "properties": {
         "annotations": {
-          "description": "The type's annotations — ShEx 2.1's `Annotation` (§5.9), as its shape or its declaration carries them. Absent when there is none.",
+          "description": "The type's annotations — `ShEx` 2.1's `Annotation` (§5.9), as its shape or its declaration carries them. Absent when there is none.",
           "type": "array",
           "items": {
             "$ref": "#/definitions/Annotation"

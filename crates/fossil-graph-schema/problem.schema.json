@@ -380,7 +380,7 @@
       "x-detail": "\"`{tag}` is not a well-formed BCP 47 language tag\""
     },
     {
-      "description": "An IRI written as a prefixed name — `\"rdfs:label\"` — whose scheme is a prefix of the RDFa Core Initial Context. There are no prefixes, so it would be an IRI whose scheme is `rdfs`; `expands_to` is the IRI meant.",
+      "description": "An IRI written as a prefixed name — `\"rdfs:label\"` — whose scheme is a prefix of the `RDFa` Core Initial Context. There are no prefixes, so it would be an IRI whose scheme is `rdfs`; `expands_to` is the IRI meant.",
       "properties": {
         "code": {
           "enum": [
@@ -1331,7 +1331,7 @@
       "x-detail": "\"the branches of `? :` have different types: {then} and {otherwise}\""
     },
     {
-      "description": "A constant language tag outside the languages the property's shape admits (`sh:languageIn`, a ShEx language value set).",
+      "description": "A constant language tag outside the languages the property's shape admits (`sh:languageIn`, a `ShEx` language value set).",
       "properties": {
         "code": {
           "enum": [

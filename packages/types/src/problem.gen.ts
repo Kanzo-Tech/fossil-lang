@@ -316,7 +316,7 @@ export interface ProblemData {
     tag: string;
   };
   /**
-   * An IRI written as a prefixed name — `"rdfs:label"` — whose scheme is a prefix of the RDFa
+   * An IRI written as a prefixed name — `"rdfs:label"` — whose scheme is a prefix of the `RDFa`
    * Core Initial Context. There are no prefixes, so it would be an IRI whose scheme is `rdfs`;
    * `expands_to` is the IRI meant.
    */
@@ -523,7 +523,7 @@ export interface ProblemData {
   };
   /**
    * A constant language tag outside the languages the property's shape admits (`sh:languageIn`, a
-   * ShEx language value set).
+   * `ShEx` language value set).
    */
   'type/language-not-allowed': {
     languages: string[];
