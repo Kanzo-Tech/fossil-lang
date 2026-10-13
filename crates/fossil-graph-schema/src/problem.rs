@@ -364,8 +364,9 @@ catalogue! {
 
     // ── name ────────────────────────────────────────────────────────────
 
-    /// A shape name no `type { … } := …` binding introduces. `declared` is
-    /// the names the program does bind.
+    /// A type name nothing in the program introduces — in a mapping header,
+    /// an edge or a field's `Ref<…>`. `declared` is the names the program does
+    /// have, declared or imported.
     "name/unknown-shape", "Not a shape this program declares",
     #[error("`{shape}` is not a shape this program declares")]
     UnknownShape { shape: String, declared: Vec<String> },
@@ -413,6 +414,23 @@ catalogue! {
     "name/unknown-source", "Not a source binding",
     #[error("{}", unknown_source(.binding, .bound_to.as_deref()))]
     UnknownSource { binding: String, bound_to: Option<String> },
+
+    /// A field's type that names no type a field can have. `types` is the
+    /// names a field's type is written in.
+    "name/unknown-type", "Not a type a field can have",
+    #[error("`{name}` is not a type a field can have — it is one of {}", code_list(.types))]
+    UnknownType { name: String, types: Vec<String> },
+
+    /// A field written twice in one declared type.
+    "name/duplicate-field", "A field written twice",
+    #[error("`{type_name}` has two fields called `{field}`")]
+    DuplicateField { type_name: String, field: String },
+
+    /// A type name the program introduces twice — declared twice, imported
+    /// twice, or declared and imported.
+    "name/duplicate-type", "A type introduced twice",
+    #[error("`{name}` is introduced twice, and a type name names one type")]
+    DuplicateType { name: String },
 
     // ── argument ────────────────────────────────────────────────────────
 
@@ -494,6 +512,12 @@ catalogue! {
     #[error("the branches of `? :` have different types: {then} and {otherwise}")]
     BranchMismatch { then: String, otherwise: String },
 
+    /// A field's type the shape vocabulary cannot carry — `Option<Seq<T>>`,
+    /// `Ref<String>`, `Option` alone. `reason` says which rule it breaks.
+    "type/invalid-field-type", "Not a field type",
+    #[error("`{written}` is not a field type: {reason}")]
+    InvalidFieldType { written: String, reason: String },
+
     // ── shape ───────────────────────────────────────────────────────────
 
     /// No shape document where one is needed. `binding` is the binding that
@@ -528,14 +552,17 @@ catalogue! {
     #[error("unresolved shape reference `{reference}` in shape `{shape}`")]
     UnresolvedReference { reference: String, shape: String },
 
-    /// A binding that names more shapes than its document declares; names
-    /// bind by position, and `position` is the surplus name's.
-    "shape/binding-arity", "More names than shapes",
-    #[error(
-        "the binding names {named} shape(s) and the document declares {declared}, so `{name}`, \
-         at position {position}, binds nothing"
-    )]
-    BindingArity { name: String, named: u64, declared: u64, position: u64 },
+    /// An import that names a shape its document does not declare. The name
+    /// is a shape's local name; `declared` is the ones the document has.
+    "shape/not-in-document", "Not a shape the document declares",
+    #[error("`{name}` is not a shape `{document}` declares — it declares {}", code_list(.declared))]
+    NotInDocument { name: String, document: String, declared: Vec<String> },
+
+    /// An import of a local name two shapes of its document share. `first`
+    /// and `second` are their IRIs.
+    "shape/ambiguous-import", "Two shapes share the imported name",
+    #[error("`{name}` names two shapes of `{document}`: `{first}` and `{second}`")]
+    AmbiguousImport { name: String, document: String, first: String, second: String },
 
     /// A program whose sources declare two different output shapes; one
     /// program writes one.

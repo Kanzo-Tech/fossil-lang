@@ -152,7 +152,8 @@ STRING_CLOSE   := '"'
 
 (* Comments — discarded by lexer. `// #region name` / `// #endregion name` are
    ordinary comments; the docs transclude program fragments by those markers,
-   which is why 17 of the 23 conformance programs carry them. *)
+   which is why 23 of the 24 conformance programs outside `errors/` carry
+   them. *)
 COMMENT        := '//' (any char except NEWLINE)*
 
 (* Operators *)

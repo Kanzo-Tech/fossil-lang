@@ -28,8 +28,8 @@ mod support;
 /// A program whose one mapping writes `name` from a CSV column, and which
 /// names its output shape document.
 ///
-/// `Person` is a local label bound positionally to the first shape the
-/// document declares — there is no CURIE and no prefix to expand. The
+/// `Person` is the local name of the shape the document declares, imported by
+/// that name — there is no CURIE and no prefix to expand. The
 /// property key is the bare name: `name`, the last segment of
 /// `http://example.org/name`, which is the predicate the shape below
 /// declares. The identity is the language slot `@subject`, first line of the

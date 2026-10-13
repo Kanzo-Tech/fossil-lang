@@ -1,18 +1,20 @@
 ---
 title: Naming what you produce
-description: Point a program at a ShEx or a SHACL document, learn what names you get from it, and what happens when two predicates end in the same word.
+description: Declare the types a program produces, or import them from a ShEx or a SHACL document by name — what names you get, and what happens when two predicates end in the same word.
 ---
 
-Every fossil program begins by naming the document that describes its output. Property names come
-from there, so it is not an optional line: without it there is nothing to call a property.
+Every fossil program begins by saying what it produces: the types its mappings write, each with its
+properties. Property names come from there, so it is not an optional line: without a type there is
+nothing to call a property. A type is **imported** from a shape document somebody maintains, or
+**declared** in the program itself; below the parser the two are the same thing.
 
 <Program src="shop/shop.shex" title="shop.shex" />
 
 <Program src="shop/shop.fossil" region="shapes" title="shop.fossil" />
 
-Three things happen on that line. The document is read; two of its shapes are pulled into scope under
-the names you chose; and from then on `Person` and `Order` are types, with a known set of properties, a
-known kind of value on each, and a known number of them allowed.
+Three things happen on that line. The document is read; two of its shapes are pulled into scope by
+their names; and from then on `Person` and `Order` are types, with a known set of properties, a known
+kind of value on each, and a known number of them allowed.
 
 SHACL is the other half of the same door — a different reader, the same program:
 
@@ -24,28 +26,51 @@ The bare keys `label` and `price` come out of `sh:path shop:label` and `sh:path 
 `email` and `name` come out of a ShEx triple constraint. Whichever document you write, every property
 of the type you get carries the same three things: a name, a kind of value, and a count.
 
-## Binding is by position
+## Importing by name
 
-The names on the left are yours. They bind to the shapes **in the order the document declares them**,
-never by matching what they are called. `Person` is the first shape in `shop.shex`, `Order` the
-second. Call them `Buyer` and `Sale` and the output is byte for byte the same, because the IRI written
-into the graph is the one in the document.
+A name between the braces is the **local name** of a shape the document declares — the last segment
+of its IRI, so `shop:Person` and `<https://shop.example/voc#Person>` are both `Person`. `as` gives it
+another name in the program, and the IRI written into the graph is still the document's:
+
+<Program src="declared/declared.fossil" region="import" title="declared.fossil" />
+
+`declared.shex` declares `Region` and then `Place`; the import takes `Place`, wherever it sits, and the
+program calls it `City`.
 
 | what you write | what you get |
 | --- | --- |
-| as many names as the document declares | the Nth name takes the Nth shape |
-| **fewer** names than shapes | a prefix binds, the rest of the document is ignored, and that is not an error |
-| **more** names than shapes | the surplus binds nothing — *the binding names 2 shape(s) and the document declares 1, so `Extra`, at position 2, binds nothing*, reported at the **use** of the name and silent if you never use it |
-| the same names, after the document is reordered | the program rebinds, quietly |
+| a local name the document declares | that shape |
+| `Place as City` | the shape `Place`, called `City` in the program |
+| a name the document does not declare | an error listing the ones it does — *`Town` is not a shape `declared.shex` declares — it declares `Region`, `Place`* |
+| a name two of its shapes share | an error naming both IRIs; declare the type instead |
+| the same names, after the document is reordered | the same program |
 
-The last row is the cost, and it is worth knowing the day you go and tidy a document up; shape
-documents are files you version and review, which is what makes it a fair trade.
-
-What the local name buys is the rest of your program — the header that says `from`, and the diagnostic
-that has to name something — which is also what lets two documents live in one program without
-arguing. A Spanish register and an English one, each with its own vocabulary:
+The renaming is also what lets two documents live in one program without arguing. A Spanish register
+and an English one, each with its own vocabulary, the English one's `Person` renamed:
 
 <Program src="multi-document/multi-document.fossil" title="multi-document.fossil" />
+
+## Declaring the type
+
+When the vocabulary is yours, the type can be written in the program instead — a name, its fields,
+their types, and every IRI, whole, in a string: the type's above it, each field's on the field's line.
+
+<Program src="declared/declared.fossil" region="declaration" title="declared.fossil" />
+
+A field's type is written as the checker prints it. A primitive — `String`, `Integer`, `Float`, `Bool`,
+`Date`, `DateTime`, `Time`, `GYear`, `AnyUri` — is exactly one value of it; `Option<T>` is zero or one;
+`Seq<T>` zero or more; and `Ref<City>` is a reference to a node of the type `City`, declared or
+imported, which is an edge. The count is said once, outermost, so `Option<Seq<T>>` is refused rather
+than read as one of the two things it could mean.
+
+A mapping that produces a declared type is checked exactly as one that produces an imported shape —
+a required field never written, a key the type does not declare, a value of the wrong type — and the
+corpus cannot tell them apart:
+
+<Program src="declared/declared.fossil" region="mappings" title="declared.fossil" />
+
+There is no base IRI and no prefix: a missing `@iri` is an error, so a name nobody wrote never becomes
+an IRI. [Types declared in the program](/docs/design/declared) argues the form.
 
 ## What a name looks like once you have it
 
@@ -68,8 +93,6 @@ number them. It stops, and it names both IRIs:
 
 <Program src="errors/shape/name-collision/expected/diagnostic.txt" title="program.fossil" />
 
-The repair is to declare the type in the program rather than import it, so that each field writes
-its own name beside its IRI and two IRIs ending alike are two fields with two names. The parser reads
-a declaration, and the checker does not yet: [Types declared in the program](/docs/design/declared)
-is where that is going. Until it arrives, a document whose predicates collide cannot be written
-against, and fossil says so rather than choosing for you.
+The repair is to [declare the type](#declaring-the-type) in the program rather than import it, so
+that each field writes its own name beside its IRI and two IRIs ending alike are two fields with two
+names — `name` and `handle` above, `schema:name` and `shop:name`.

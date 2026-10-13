@@ -380,7 +380,7 @@
       "x-detail": "\"`{callee}` calls something that is not a function name; only a catalogued name may be called\""
     },
     {
-      "description": "A shape name no `type { … } := …` binding introduces. `declared` is the names the program does bind.",
+      "description": "A type name nothing in the program introduces — in a mapping header, an edge or a field's `Ref<…>`. `declared` is the names the program does have, declared or imported.",
       "properties": {
         "code": {
           "enum": [
@@ -677,6 +677,104 @@
       "title": "Not a source binding",
       "type": "object",
       "x-detail": "\"{}\", unknown_source(.binding, .bound_to.as_deref())"
+    },
+    {
+      "description": "A field's type that names no type a field can have. `types` is the names a field's type is written in.",
+      "properties": {
+        "code": {
+          "enum": [
+            "name/unknown-type"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "types": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "name",
+            "types"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "Not a type a field can have",
+      "type": "object",
+      "x-detail": "\"`{name}` is not a type a field can have — it is one of {}\",\ncode_list(.types)"
+    },
+    {
+      "description": "A field written twice in one declared type.",
+      "properties": {
+        "code": {
+          "enum": [
+            "name/duplicate-field"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "type_name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "type_name"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "A field written twice",
+      "type": "object",
+      "x-detail": "\"`{type_name}` has two fields called `{field}`\""
+    },
+    {
+      "description": "A type name the program introduces twice — declared twice, imported twice, or declared and imported.",
+      "properties": {
+        "code": {
+          "enum": [
+            "name/duplicate-type"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "A type introduced twice",
+      "type": "object",
+      "x-detail": "\"`{name}` is introduced twice, and a type name names one type\""
     },
     {
       "description": "A call given fewer arguments than it requires or more than it takes.",
@@ -1142,6 +1240,39 @@
       "x-detail": "\"the branches of `? :` have different types: {then} and {otherwise}\""
     },
     {
+      "description": "A field's type the shape vocabulary cannot carry — `Option<Seq<T>>`, `Ref<String>`, `Option` alone. `reason` says which rule it breaks.",
+      "properties": {
+        "code": {
+          "enum": [
+            "type/invalid-field-type"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "reason": {
+              "type": "string"
+            },
+            "written": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "reason",
+            "written"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "Not a field type",
+      "type": "object",
+      "x-detail": "\"`{written}` is not a field type: {reason}\""
+    },
+    {
       "description": "No shape document where one is needed. `binding` is the binding that names none; absent when the program names none at all.",
       "properties": {
         "code": {
@@ -1349,40 +1480,33 @@
       "x-detail": "\"unresolved shape reference `{reference}` in shape `{shape}`\""
     },
     {
-      "description": "A binding that names more shapes than its document declares; names bind by position, and `position` is the surplus name's.",
+      "description": "An import that names a shape its document does not declare. The name is a shape's local name; `declared` is the ones the document has.",
       "properties": {
         "code": {
           "enum": [
-            "shape/binding-arity"
+            "shape/not-in-document"
           ],
           "type": "string"
         },
         "data": {
           "properties": {
             "declared": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "document": {
+              "type": "string"
             },
             "name": {
               "type": "string"
-            },
-            "named": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "position": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
             }
           },
           "required": [
             "declared",
-            "name",
-            "named",
-            "position"
+            "document",
+            "name"
           ],
           "type": "object"
         }
@@ -1391,9 +1515,50 @@
         "code",
         "data"
       ],
-      "title": "More names than shapes",
+      "title": "Not a shape the document declares",
       "type": "object",
-      "x-detail": "\"the binding names {named} shape(s) and the document declares {declared}, so `{name}`, \\\n         at position {position}, binds nothing\""
+      "x-detail": "\"`{name}` is not a shape `{document}` declares — it declares {}\",\ncode_list(.declared)"
+    },
+    {
+      "description": "An import of a local name two shapes of its document share. `first` and `second` are their IRIs.",
+      "properties": {
+        "code": {
+          "enum": [
+            "shape/ambiguous-import"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "document": {
+              "type": "string"
+            },
+            "first": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "second": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "document",
+            "first",
+            "name",
+            "second"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "Two shapes share the imported name",
+      "type": "object",
+      "x-detail": "\"`{name}` names two shapes of `{document}`: `{first}` and `{second}`\""
     },
     {
       "description": "A program whose sources declare two different output shapes; one program writes one.",

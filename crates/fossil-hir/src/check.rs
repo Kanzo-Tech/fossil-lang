@@ -534,7 +534,7 @@ impl Checker<'_> {
             .constraints
             .iter()
             .filter(|c| c.occurs.demands_one_or_more())
-            .map(|c| (SmolStr::from(local_name(&c.predicate)), c.predicate.clone()))
+            .map(|c| (c.name.clone(), c.predicate.clone()))
             .filter(|(short, _)| {
                 !properties
                     .iter()
@@ -549,7 +549,7 @@ impl Checker<'_> {
             .constraints
             .iter()
             .filter(|c| !c.occurs.demands_one_or_more())
-            .map(|c| SmolStr::from(local_name(&c.predicate)))
+            .map(|c| c.name.clone())
             .collect();
         let declared_at: Vec<(SmolStr, Option<(Span, SmolStr)>)> = missing
             .iter()
@@ -1681,8 +1681,8 @@ impl<'db> Expr<'db> {
                 self.span_of(expr_id),
             )
             .with_help(
-                "so there is no identity to build. A `type { … } := io.shex(…)` binding \
-                 introduces the name, and the Nth name takes the Nth shape the document declares",
+                "so there is no identity to build. A type is declared in the program, or \
+                 imported by its local name with `type { … } := io.shex(…)`",
             );
             self.raise(d);
             return unresolved();

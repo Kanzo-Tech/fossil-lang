@@ -1,0 +1,32 @@
+---
+title: A field written twice
+description: "`name/duplicate-field` — one declared type writes two fields with the same name, so a mapping writing that name would mean either."
+---
+
+A declared type writes the same field name twice:
+
+```fossil
+@iri("https://schema.org/Person")
+type Person
+    @iri("https://schema.org/name")          name: String
+    @iri("https://shop.example/vocab/name")  name: String
+```
+
+```text
+`Person` has two fields called `name`
+```
+
+The error is on the second one. The first is kept, so the rest of the program is still checked.
+
+## Why fossil refuses it
+
+A field's name is what a mapping body writes, and the field is the one place that name is given a
+predicate. Two fields of one name would make `name = Row.name` mean either predicate, which is the
+collision [`shape/name-collision`](/docs/errors/shape/name-collision) refuses in an imported shape —
+and a declaration exists to be the repair for that, by giving each predicate a name of its own.
+
+## How to repair it
+
+- **Give the second field its own name.** Two predicates whose IRIs end alike are two fields with two
+  names: `name` and `handle` above.
+- **Delete it**, if it is the same predicate written twice.

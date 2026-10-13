@@ -40,6 +40,9 @@
 
 pub mod body;
 pub mod check;
+/// Types declared in the program, lowered to the shape vocabulary a document
+/// decoder produces.
+pub mod declared;
 pub mod def_map;
 pub mod didyoumean;
 /// The source spelling of a lowered node — the HIR said back in surface syntax.

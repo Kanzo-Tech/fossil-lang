@@ -320,8 +320,7 @@ pub struct ShExDescriptor {
     /// cost: `values()` handed back six different orders in six parses, because
     /// Rust seeds its hasher per process. Anything downstream that iterates —
     /// [`Self::to_graph_schema`] builds `nodes`/`edges` from this — was
-    /// non-deterministic across runs, and `type { A, B } = io.shex(...)` binds
-    /// positionally, which needs this order to be the file's. rudof preserves it for both `ShExC` and `ShExJ`; we were
+    /// non-deterministic across runs. rudof preserves it for both `ShExC` and `ShExJ`; we were
     /// the ones throwing it away on insert.
     shapes: Vec<ShapeBinding>,
     /// Resolved IRI → index into `shapes`. Lookup only; never iterated.
@@ -377,8 +376,7 @@ impl ShExDescriptor {
     /// decoded document the middle of the compiler reads instead of a schema
     /// language. No `shex_ast` or `rudof_iri` type survives the crossing.
     ///
-    /// Shapes keep the document's declaration order (`type { A, B } = io.shex(…)`
-    /// binds by position). Every lowering error
+    /// Shapes keep the document's declaration order. Every lowering error
     /// becomes a [`Rejection`]; the shapes that DID lower are still there, which
     /// is what the `ShEx`-typed original did too.
     #[must_use]
@@ -392,6 +390,7 @@ impl ShExDescriptor {
                     .constraints
                     .iter()
                     .map(|c| PropertyConstraint {
+                        name: fossil_graph_schema::local_name(c.predicate.as_str()).to_string(),
                         predicate: c.predicate.to_string(),
                         term: c.term.clone(),
                         targets: c.targets.clone(),
@@ -493,7 +492,7 @@ impl ShExDescriptor {
     }
 
     /// Iterator over every resolved shape binding, **in declaration order**.
-    /// Callers may rely on that: `type { A, B } = io.shex(…)` binds by position.
+    /// Callers may rely on that.
     pub fn shapes(&self) -> impl Iterator<Item = &ShapeBinding> {
         self.shapes.iter()
     }
@@ -1336,7 +1335,7 @@ shop:Order {
     /// The document's declaration order. This also asserted that `closed` was
     /// carried over per shape, and it was the ONLY reader of that field in the
     /// workspace — the checker never saw it. The field is gone; the ordering
-    /// half is the half the positional `type { A, B }` binding relies on.
+    /// half is what keeps the output model's node order the document's.
     #[test]
     fn output_shapes_keep_declaration_order() {
         let doc = order_shapes();

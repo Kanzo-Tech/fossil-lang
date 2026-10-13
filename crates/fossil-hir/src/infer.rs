@@ -47,9 +47,9 @@ use fossil_descriptors_input::InferredDescriptor;
 use fossil_graph_schema::{Problem, Severity, Span};
 use smol_str::SmolStr;
 
-use fossil_graph_schema::{Primitive, Shape, local_name};
+use fossil_graph_schema::{Primitive, Shape};
 
-use crate::def_map::{MappingLoc, ShapeBindError, def_map};
+use crate::def_map::{MappingLoc, def_map};
 use crate::ty::{Record, RecordField, Rows, Ty, TyKind};
 
 /// The source-row [`Ty`] (a `Record`) for a mapping as known from the
@@ -300,7 +300,7 @@ fn resolve_leaf_row<'db>(
                 return Ok(None);
             }
         };
-        // `shape_iri` came out of THIS document, by position, in `def_map` —
+        // `shape_iri` came out of THIS document, by name, in `def_map` —
         // same path, same decoder, same query. A miss here is not a user error
         // and there is no message that would help one, so it is reported as
         // what it is.
@@ -319,27 +319,12 @@ fn resolve_leaf_row<'db>(
 
     // A destructuring member that bound no shape, reported by CAUSE. One
     // message used to cover all four and blamed the member's name for every
-    // one of them, so an unreadable file read as a misspelt name. Binding is
-    // positional now — the Nth name takes the Nth shape the document declares —
-    // so "matches no shape" is not among the causes any more: the name is a
-    // free local label and selects nothing.
+    // one of them, so an unreadable file read as a misspelt name.
     if let Some(err) = dm.lookup_source_shape_error(db, source_name) {
-        let problem = match err {
-            ShapeBindError::NoSchema => Problem::NoDocument {
-                binding: Some(source_name.to_string()),
-            },
-            ShapeBindError::Document(problem) => problem,
-            ShapeBindError::Arity {
-                declared,
-                named,
-                position,
-            } => Problem::BindingArity {
-                name: source_name.to_string(),
-                named: named as u64,
-                declared: declared as u64,
-                position: position as u64,
-            },
-        };
+        let document = dm
+            .lookup_source_schema_binding(db, source_name)
+            .map(|(_, d)| d);
+        let problem = err.problem(source_name, document.as_deref());
         let _eg = sink.report(Span::new(0, 0), problem);
         return Ok(None);
     }
@@ -1031,9 +1016,9 @@ fn pipe_error(
 /// pivoted row's entity IRI, so `@subject = User.subject` is an identity built
 /// from an IRI rather than from text.
 ///
-/// The field name is the predicate's local name — the last segment of its IRI —
-/// taken from the one [`local_name`] the vocabulary owns rather than a fourth
-/// copy of it.
+/// The field name is the constraint's [`name`](fossil_graph_schema::PropertyConstraint::name)
+/// — for a document, the predicate's [`local_name`](fossil_graph_schema::local_name), which the decoder took from
+/// the one function the vocabulary owns rather than a fourth copy of it.
 #[must_use]
 pub(crate) fn record_from_shape<'db>(db: &'db dyn fossil_base::Db, shape: &Shape) -> Ty<'db> {
     // Every pivoted RDF row carries its entity IRI in `subject`, and that IRI
@@ -1053,7 +1038,7 @@ pub(crate) fn record_from_shape<'db>(db: &'db dyn fossil_base::Db, shape: &Shape
             Ty::reference(db, c.targets.iter().map(SmolStr::from))
         };
         fields.push(RecordField {
-            name: SmolStr::from(local_name(&c.predicate)),
+            name: SmolStr::from(c.name.as_str()),
             ty,
         });
     }
@@ -1343,6 +1328,7 @@ mod tests {
         let db = db();
         let constraint =
             |predicate: &str, datatype: Option<Primitive>, targets: &[&str]| PropertyConstraint {
+                name: fossil_graph_schema::local_name(predicate).to_string(),
                 predicate: predicate.to_string(),
                 term: datatype.map(|p: Primitive| Term::Literal(Some(p.to_xsd_iri().into()))),
                 targets: targets.iter().map(|t| (*t).to_string()).collect(),

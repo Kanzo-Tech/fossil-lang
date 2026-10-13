@@ -17,10 +17,12 @@ there may be. This one says a `shop:Person` has exactly one `shop:name`, and tha
 
 <Program src="hello/hello.shex" title="hello.shex" />
 
-The braces on the left pull one shape out of it under the local name `Person`, and `:=` is the binder
-that introduces the name. From here on `Person` is a **type** the compiler knows, with a set of
-properties you never wrote down — and naming a document is not optional, because every property key
-you write is the name of a predicate one of them declares.
+The braces on the left pull one shape out of it by its local name, `Person` — the last segment of
+`shop:Person` — and `:=` is the binder that introduces the name. From here on `Person` is a **type**
+the compiler knows, with a set of properties you never wrote down — and a type is not optional,
+because every property key you write is the name of a predicate one declares. (A type can also be
+declared in the program itself; [naming what you produce](/docs/book/what-you-produce#declaring-the-type)
+shows how.)
 
 ## Line 3 — what you are reading
 

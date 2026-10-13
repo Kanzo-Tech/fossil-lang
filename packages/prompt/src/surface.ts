@@ -75,7 +75,8 @@ export const FORBIDDEN: readonly ForbiddenForm[] = [
   },
   {
     form: '`#[rdf(…)]` attributes and `type T(…) do … end`',
-    instead: 'shapes are declared in the ShEx or SHACL document, never in the program',
+    instead:
+      'a type is imported from a ShEx or SHACL document with `type { … } := io.shex("…")`, or declared as `@iri("…")` above `type Name` with one `@iri("…") field: Type` line per field',
     refused: '#[rdf(type = "http://example.org/Person")]\ntype Person(name) do end\n',
   },
   {

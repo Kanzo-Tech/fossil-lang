@@ -53,7 +53,7 @@ use crate::memory::{BUDGET, Budget, Refusal};
 /// `wasm32-unknown-unknown`).
 ///
 /// `providers` installs the type-reading rows: a mapping header names a bare
-/// type bound positionally by `type { … } := io.shex("…")`, so the vertex label
+/// type imported by `type { … } := io.shex("…")`, so the vertex label
 /// and every predicate come from the registered document, decoded by its row.
 #[derive(Debug, Default)]
 struct ExecutorSystem;

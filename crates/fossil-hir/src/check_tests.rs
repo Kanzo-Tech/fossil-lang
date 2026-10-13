@@ -582,6 +582,7 @@ Contact : Person from users
             Some(row_record(db, &[("name", Primitive::String)])),
             Some(ResolvedShape {
                 constraints: vec![crate::shapes::ShapeConstraint {
+                    name: smol_str::SmolStr::from("name"),
                     predicate: smol_str::SmolStr::from("https://example.org/name"),
                     value_ty: None,
                     term: None,
@@ -656,6 +657,7 @@ Orders : Order from Purchase
             Some(row_record(db, &[("reference", Primitive::String)])),
             Some(ResolvedShape {
                 constraints: vec![crate::shapes::ShapeConstraint {
+                    name: smol_str::SmolStr::from("total"),
                     predicate: smol_str::SmolStr::from("https://shop.example/voc#total"),
                     value_ty: Some(Ty::new(db, TyKind::Primitive(Primitive::Float))),
                     term: None,
@@ -745,6 +747,7 @@ Orders : Order from Purchase
             Some(row_record(db, &[("reference", Primitive::String)])),
             Some(ResolvedShape {
                 constraints: vec![crate::shapes::ShapeConstraint {
+                    name: smol_str::SmolStr::from("total"),
                     predicate: smol_str::SmolStr::from("https://shop.example/voc#total"),
                     value_ty: Some(Ty::new(db, TyKind::Primitive(Primitive::Float))),
                     term: None,
@@ -850,6 +853,7 @@ Orders : Order from Purchase
             )),
             Some(ResolvedShape {
                 constraints: vec![crate::shapes::ShapeConstraint {
+                    name: smol_str::SmolStr::from("total"),
                     predicate: smol_str::SmolStr::from("https://shop.example/voc#total"),
                     value_ty: Some(Ty::new(db, TyKind::Primitive(Primitive::Float))),
                     term: None,
@@ -908,6 +912,7 @@ fn a_wrong_type_with_no_repair_says_nothing() {
             Some(row_record(db, &[("name", Primitive::Date)])),
             Some(ResolvedShape {
                 constraints: vec![crate::shapes::ShapeConstraint {
+                    name: smol_str::SmolStr::from("name"),
                     predicate: smol_str::SmolStr::from("https://example.org/name"),
                     value_ty: Some(Ty::new(db, TyKind::Primitive(Primitive::Bool))),
                     term: None,
@@ -951,8 +956,8 @@ fn a_wrong_type_with_no_repair_says_nothing() {
 /// # The message moved, and the assertions moved with it
 ///
 /// It asserted four renderings emitted per MAPPING. A header names a bare name now, so the
-/// document is read where the NAME is bound (`type { T } := io.shex(…)`,
-/// `def_map`'s positional binding) and every one of these four failures lands
+/// document is read where the NAME is bound (`type { Person as T } :=
+/// io.shex(…)`, `def_map`'s binding by local name) and every one of these failures lands
 /// there first; by the time a mapping asks for its target shape there is no
 /// shape IRI left to fail with, and `resolve_target_shape` answers `None`.
 /// `crate::shapes`'s
@@ -966,21 +971,12 @@ fn a_wrong_type_with_no_repair_says_nothing() {
 /// the CURIE: a bare name that binds nothing is a name nobody declared, which
 /// is a different sentence and the last case below.
 ///
-/// # The arity row, and why it is spelled out to the last word
+/// # The name row, spelled out to the last word
 ///
-/// `ShapeBindError::Arity` is the fifth, and the one nothing went red for. Its
-/// message interpolated the count in front of a literal `th` and printed «there
-/// is no 3th shape»; `bbedcc1` rewrote the clause and no test in the tree
-/// carried either spelling, before the fix or after. So the substring below is
-/// the whole clause and not a keyword — a rendering defect is invisible to a
-/// substring that stops before the rendering — and the binding names THREE
-/// shapes on purpose, because 1, 2 and 3 are exactly the ordinals English is
-/// irregular for and 3 is the largest of them.
-///
-/// That binding has TWO surplus names, which is why it is read twice below. The
-/// second reading is the one nothing covered: the number in the last clause is
-/// the NAME's position, so `Second` must be told 2. It was told 3, because
-/// `named` is the binding's total and both surplus names read it.
+/// A name the document does not declare is the last cause, and its message is
+/// held whole — the list included — because a substring that stops before the
+/// list is blind to the list being wrong. It replaced the arity row, whose
+/// message printed «there is no 3th shape» once and no keyword assertion saw.
 #[test]
 fn a_named_document_that_cannot_answer_says_which_way_it_failed() {
     use fossil_base::test_support::{PERSON_DOCUMENT, db_with_document};
@@ -999,47 +995,36 @@ fn a_named_document_that_cannot_answer_says_which_way_it_failed() {
     // message must carry).
     let cases: &[(String, &str, &str, &str)] = &[
         (
-            program("missing.shex", "T", "T"),
+            program("missing.shex", "Person as T", "T"),
             "person.shex",
             PERSON_DOCUMENT,
             "the document `missing.shex` is not registered",
         ),
         (
-            program("person.unknown", "T", "T"),
+            program("person.unknown", "Person as T", "T"),
             "person.unknown",
             PERSON_DOCUMENT,
             "`io.shex` does not read `person.unknown`",
         ),
         (
-            program("broken.shex", "T", "T"),
+            program("broken.shex", "Person as T", "T"),
             "broken.shex",
             "!malformed expected a shape line\n",
             "expected a shape line",
         ),
         (
-            program("person.shex", "T", "Persn"),
+            program("person.shex", "Person as T", "Persn"),
             "person.shex",
             PERSON_DOCUMENT,
             "`Persn` is not a shape this program declares",
         ),
         (
-            // `PERSON_DOCUMENT` declares one shape and the binding names three,
-            // so `Third` — the surplus name the header uses — binds nothing.
-            program("person.shex", "T, Second, Third", "Third"),
+            // `PERSON_DOCUMENT` declares `Person` and nothing else, so `Third`
+            // — the name the header uses — names no shape of it.
+            program("person.shex", "Person as T, Third", "Third"),
             "person.shex",
             PERSON_DOCUMENT,
-            "the binding names 3 shape(s) and the document declares 1, so `Third`, at \
-             position 3, binds nothing",
-        ),
-        (
-            // The SECOND surplus name of the same binding, and the row that
-            // says the last clause is about this name and not about the
-            // binding: `Second` is position 2 and was told there is no shape 3.
-            program("person.shex", "T, Second, Third", "Second"),
-            "person.shex",
-            PERSON_DOCUMENT,
-            "the binding names 3 shape(s) and the document declares 1, so `Second`, at \
-             position 2, binds nothing",
+            "`Third` is not a shape `person.shex` declares — it declares `Person`",
         ),
     ];
 
@@ -1817,7 +1802,7 @@ fn null_compares_with_anything_and_assigns_to_nothing() {
 #[test]
 fn a_property_written_from_null_is_refused() {
     let src = "\
-type { T } := io.shex(\"person.shex\")
+type { Person as T } := io.shex(\"person.shex\")
 users := io.csv(\"x.csv\")
 User : T from users
     @subject = \"http://example.org/u/{users.id}\"

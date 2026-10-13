@@ -9,7 +9,7 @@
 //! reported by `missing_documents`, registered under its key — and the run's
 //! output descriptor is decoded from that registration. The assertion on the
 //! vertex table's `iri` is the guard that the document was READ: a bare header
-//! name is bound positionally against it, and a run that skipped it writes no
+//! name is bound by name against it, and a run that skipped it writes no
 //! type IRI.
 
 #![allow(clippy::literal_string_with_formatting_args)]
@@ -155,7 +155,7 @@ async fn csv_program_runs_through_the_storage_seam() {
     assert_eq!(v.record_count, 3);
 
     // The document was READ, not merely named: a bare header name is bound
-    // positionally against the shape document, so this IRI exists only if
+    // by name against the shape document, so this IRI exists only if
     // `executor.shex` reached the checker.
     assert_eq!(
         v.iri.as_deref(),

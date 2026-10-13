@@ -50,9 +50,9 @@ use smol_str::SmolStr;
 /// promise that a shape decoder will take it, and that is the correct division:
 /// this function parses nothing to decide.
 ///
-/// A program that names none yields an empty list. That is a program the
-/// checker rejects — naming a shape document is mandatory — but the rejection
-/// is the checker's, and this function only reports what is written.
+/// A program that names none yields an empty list — one whose types are all
+/// declared, or one with no type at all, which the checker rejects; the
+/// rejection is the checker's, and this function only reports what is written.
 #[must_use]
 pub fn documents_named(db: &dyn Db, file: SourceFile) -> Vec<SmolStr> {
     let def_map = crate::def_map::def_map(db, file);

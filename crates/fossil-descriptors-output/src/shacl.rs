@@ -80,12 +80,14 @@
 //!
 //! # Declaration order is load-bearing
 //!
-//! `type { A, B } := io.shacl("shapes.ttl")` binds **by position** — the Nth
-//! name to the Nth declared shape, not by matching names — so the order shapes
-//! come out in is the order the document declares them: first appearance as a
-//! subject in the Turtle. The store this
-//! replaces used a `BTreeMap`, whose iteration is alphabetical by subject IRI;
-//! with one shape that is invisible, and with two it silently swaps what a
+//! `type { A, B } := io.shacl("shapes.ttl")` binds by local name, but the
+//! order shapes come out in still reaches a person and a corpus: the shapes an
+//! import naming none is told about, the first and second of two that share a
+//! name, and the node types the output model lists. So it is the order the
+//! document declares them: first appearance as a subject in the Turtle. The
+//! store this replaces used a `BTreeMap`, whose iteration is alphabetical by
+//! subject IRI; with two shapes that is a different answer from the
+//! document's, and when binding was positional it silently swapped what a
 //! program bound. `crates/fossil-shex/examples/declaration_order.rs` measured
 //! the same class of bug once already.
 
@@ -246,6 +248,7 @@ pub fn decode_shacl(_uri: &str, turtle: &str) -> Result<OutputShapes, Rejection>
                 continue;
             };
             properties.push(PropertyConstraint {
+                name: fossil_graph_schema::local_name(path).to_string(),
                 predicate: path.to_string(),
                 term: term_of(&store, &psh.value),
                 targets: edge_targets(&store, &psh.value),
@@ -451,7 +454,7 @@ ex:PersonShape a sh:NodeShape ;
         assert!(contact.iter().all(|e| e.source == "Person"));
     }
 
-    /// Positional binding reads shapes in DECLARATION order. Alphabetically
+    /// Shapes come out in DECLARATION order. Alphabetically
     /// `ex:A…` sorts before `ex:Z…`; the document declares Z first, and the
     /// `BTreeMap` this walk used to iterate would have swapped them.
     #[test]

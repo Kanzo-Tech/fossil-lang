@@ -111,7 +111,7 @@ const RDF_TTL: &str = r#"@prefix ex: <https://ex.org/> .
 <https://ex.org/person/2> a ex:Person ; ex:name "Linus" .
 "#;
 
-const RDF_PROGRAM: &str = r#"type { PersonShape } := io.shex("people.shex")
+const RDF_PROGRAM: &str = r#"type { Person as PersonShape } := io.shex("people.shex")
 
 { Person } := io.rdf("people.ttl", schema = io.shex("people.shex"))
 

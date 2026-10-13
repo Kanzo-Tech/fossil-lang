@@ -222,9 +222,9 @@ People : Person from Users
     assert!(errors.is_empty(), "a clean program reported {errors:?}");
 }
 
-/// A declared type parses and nothing below the parser reads it yet, so beside
-/// a clean program it adds no diagnostic — neither a refusal of the form nor an
-/// error about a name nothing bound.
+/// A declared type beside a clean program adds no diagnostic of its own: it
+/// lowers to the shape vocabulary, and a type no mapping produces is not an
+/// error.
 #[test]
 fn a_declared_type_beside_a_clean_program_reports_nothing() {
     let program = "\
@@ -233,7 +233,7 @@ type { Person } := io.shex(\"p.shex\")
 @iri(\"https://example.org/City\")
 type City
     @iri(\"https://example.org/name\")  name: String
-    @iri(\"https://example.org/tags\")  tags: Option<Seq<String>>
+    @iri(\"https://example.org/tags\")  tags: Seq<String>
 
 Users := io.csv(\"users.csv\")
 

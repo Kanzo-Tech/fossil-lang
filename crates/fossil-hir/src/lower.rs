@@ -60,6 +60,14 @@ pub struct HirFile<'db> {
     /// cannot bind. File-absolute unless a diagnostic says otherwise.
     #[returns(ref)]
     pub diagnostics: Vec<Diagnostic>,
+    /// The types the program DECLARES, lowered to the vocabulary a document
+    /// decoder produces — [`crate::declared::lower_declarations`].
+    ///
+    /// Here and not in a query of its own, for the reason everything else in
+    /// this struct is: a query keyed on the file re-runs on every keystroke,
+    /// and `tests/invalidation_regression.rs` counts them.
+    #[returns(ref)]
+    pub declared: fossil_graph_schema::OutputShapes,
 }
 
 impl<'db> HirFile<'db> {
@@ -395,8 +403,8 @@ pub enum HirExpr {
     /// `buyer = Person(User.email)` — an EDGE: «the `Person` whose identity is
     /// built from this email».
     ///
-    /// `target` is the LOCAL type name as written — one of the names a
-    /// `type { … } := …` binding introduced — and not the shape IRI, so a
+    /// `target` is the LOCAL type name as written — one the program declares or
+    /// imports — and not the shape IRI, so a
     /// diagnostic can quote what the author wrote. `def_map`'s
     /// [`lookup_type`](crate::def_map::DefMap::lookup_type) resolves it wherever
     /// the IRI is wanted.
@@ -418,22 +426,17 @@ pub enum HirExpr {
     ///
     /// The Nth argument fills the Nth hole of the target's `@subject` template,
     /// in order of appearance, and it is the value that GOES IN the hole rather
-    /// than an input to whatever expression the template writes there. Two
-    /// consequences, both intended:
-    ///
-    /// - The language has ONE binding rule. `type { A, B } := …` already binds
-    ///   the Nth name to the Nth declared shape, and
-    ///   a second, by-name rule here would be a second idea.
-    /// - The hole's spelling stays private. Binding by name would make the
-    ///   identifier inside `{…}` — `{User.email}` — part of the type's public
-    ///   API, so renaming a column in the mapping that DEFINES an identity would
-    ///   break every mapping that references it.
+    /// than an input to whatever expression the template writes there. The reason
+    /// that decides it: the hole's spelling stays private. Binding by name would
+    /// make the identifier inside `{…}` — `{User.email}` — part of the type's
+    /// public API, so renaming a column in the mapping that DEFINES an identity
+    /// would break every mapping that references it. (It also said the language
+    /// then had one binding rule, because the type import bound by position; the
+    /// import binds by name now, and grammar.bnf's edge comment records it.)
     ///
     /// Arity is checked against the template's hole count
     /// ([`crate::identity::subject_templates`]) and a mismatch is a diagnostic
-    /// naming both numbers, in the shape of
-    /// [`ShapeBindError::Arity`](crate::def_map::ShapeBindError::Arity) — the
-    /// check positional binding gives away free.
+    /// naming both numbers — the check positional binding gives away free.
     Edge { target: SmolStr, args: Vec<HirExpr> },
     /// `18` — an integer literal.
     IntLit(i64),
@@ -553,7 +556,8 @@ pub fn lower_to_hir<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> HirF
             _ => {}
         }
     }
-    HirFile::new(db, mappings, source_pipes, diagnostics.into_vec())
+    let declared = crate::declared::lower_declarations(db, dm, &cst.root(db).syntax(), sink);
+    HirFile::new(db, mappings, source_pipes, diagnostics.into_vec(), declared)
 }
 
 /// **The provider a binding names, checked against what its POSITION asks of
@@ -1853,10 +1857,10 @@ fn lower_mapping_node<'db>(
 ///
 /// 1. **Nobody bound the name.** A typo, or a `type { … } := io.shex(…)` line
 ///    that was never written.
-/// 2. **The binding is there and it FAILED.** `type { Person } =
+/// 2. **The binding is there and it FAILED.** `type { Person } :=
 ///    io.shex("shop.shex")` with no such document, an unreadable one, one no
-///    decoder claims, or more names than the document declares shapes.
-///    `TypeEntry::shape_error` records which, as a
+///    decoder claims, one that declares no shape called `Person` or two; or a
+///    declaration with no `@iri`. `TypeEntry::shape_error` records which, as a
 ///    [`ShapeBindError`](crate::def_map::ShapeBindError).
 ///
 /// Case 2 had no reader in the workspace: `DefMap::lookup_type_error`'s only
@@ -1869,47 +1873,36 @@ fn lower_mapping_node<'db>(
 /// This is the mirror of [`crate::infer`]'s treatment of a source binding that
 /// bound no shape (`lookup_source_shape_error`), which has always reported by
 /// cause. The two sides of the same table now behave the same way.
-fn unbound_shape_problem(
+pub(crate) fn unbound_shape_problem(
     db: &dyn fossil_base::Db,
     dm: crate::def_map::DefMap<'_>,
     shape_name: &SmolStr,
 ) -> (Problem, Option<String>) {
     use crate::def_map::ShapeBindError;
 
-    if let Some(err) = dm.lookup_type_error(db, shape_name.as_str()) {
-        return match err {
-            ShapeBindError::NoSchema => (
-                Problem::NoDocument {
-                    binding: Some(shape_name.to_string()),
-                },
-                Some(format!(
-                    "give it one — `type {{ {shape_name} }} := io.shex(\"shop.shex\")`"
-                )),
+    if let Some(entry) = dm.types(db).iter().find(|t| t.name == *shape_name)
+        && let Some(err) = &entry.shape_error
+    {
+        let problem = err.problem(shape_name, entry.document.as_deref());
+        let help = match err {
+            ShapeBindError::NoSchema => Some(format!(
+                "give it one — `type {{ {shape_name} }} := io.shex(\"shop.shex\")`"
+            )),
+            ShapeBindError::Document(_) | ShapeBindError::NoIri => Some(format!(
+                "`{shape_name}` is declared and bound nothing, so this is checked against nothing"
+            )),
+            ShapeBindError::NotInDocument { .. } => Some(
+                "an import names a shape by its local name, the last segment of its IRI; \
+                 `as` renames it in the program"
+                    .to_string(),
             ),
-            ShapeBindError::Document(problem) => (
-                problem,
-                Some(format!(
-                    "`{shape_name}` is declared and bound nothing, so this mapping is checked \
-                     against nothing"
-                )),
-            ),
-            // The number is this NAME's position — `named` is the binding's
-            // total, and reading it here told every surplus name the last one's
-            // number.
-            ShapeBindError::Arity {
-                declared,
-                named,
-                position,
-            } => (
-                Problem::BindingArity {
-                    name: shape_name.to_string(),
-                    named: named as u64,
-                    declared: declared as u64,
-                    position: position as u64,
-                },
-                None,
+            ShapeBindError::Ambiguous { .. } => Some(
+                "the document has two shapes by that name, and the compiler does not choose: \
+                 declare the type in the program, with the IRI it needs in `@iri`"
+                    .to_string(),
             ),
         };
+        return (problem, help);
     }
 
     // Case 1: the name is not in the table at all. Only now is it honest to
@@ -1927,8 +1920,8 @@ fn unbound_shape_problem(
         .map_or_else(
             || {
                 if declared.is_empty() {
-                    "this program declares no `type { … } := io.shex(…)` binding, so it has \
-                     no shape names at all"
+                    "this program declares no type and imports none, so it has no type names \
+                     at all"
                         .to_string()
                 } else {
                     format!("the names it binds are {}", declared.join(", "))

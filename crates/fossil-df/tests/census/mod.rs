@@ -50,6 +50,8 @@ pub(crate) struct TypeBinding {
     pub(crate) error: Option<ShapeBindError>,
     /// The document the constructor named.
     pub(crate) document: Option<String>,
+    /// Declared in the program rather than imported from a document.
+    pub(crate) declared: bool,
 }
 
 /// One `Name := …` binding, and what the reading made of its right-hand side.
@@ -190,7 +192,12 @@ impl ProgramCensus {
             out.push_str("(none)\n");
         }
         for t in &self.types {
-            let _ = write!(out, "{} ← {}", t.name, t.document.as_deref().unwrap_or("?"));
+            let from = if t.declared {
+                "declared"
+            } else {
+                t.document.as_deref().unwrap_or("?")
+            };
+            let _ = write!(out, "{} ← {from}", t.name);
             match (&t.shape_iri, &t.error) {
                 (Some(iri), _) => {
                     let _ = writeln!(out, " = {iri}");
@@ -269,6 +276,7 @@ pub(crate) fn census(path: &Path) -> ProgramCensus {
             shape_iri: t.shape_iri.as_ref().map(ToString::to_string),
             error: t.shape_error.clone(),
             document: t.document.as_ref().map(ToString::to_string),
+            declared: t.declared,
         })
         .collect();
 

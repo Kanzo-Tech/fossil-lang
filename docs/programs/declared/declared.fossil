@@ -1,0 +1,44 @@
+// A type declared in the program, beside one imported from a document by name.
+//
+// `Person` is written here, every IRI whole: its type's above it, each field's
+// on the field's line. `name` and `handle` are two predicates whose IRIs both
+// end in `name`, and they collide nowhere, because a field's name is what the
+// program writes. `City` is the shape `declared.shex` calls `Place`, imported
+// by that name and renamed with `as`: the document declares `Region` first, and
+// the import still takes `Place`.
+
+// #region import
+type { Place as City } := io.shex("declared.shex")
+// #endregion import
+
+// #region declaration
+@iri("https://schema.org/Person")
+type Person
+    @iri("https://schema.org/name")          name: String
+    @iri("https://shop.example/vocab/name")  handle: Option<String>
+    @iri("https://schema.org/knows")         knows: Seq<Ref<Person>>
+    @iri("https://schema.org/homeLocation")  livesIn: Ref<City>
+// #endregion declaration
+
+CityRow   := io.csv("data/city.csv")
+PersonRow := io.csv("data/person.csv")
+KnowsRow  := io.csv("data/knows.csv")
+
+Cities : City from CityRow
+    @subject = "https://geo.example/place/{CityRow.id}"
+    name     = CityRow.name
+
+// #region mappings
+People : Person from PersonRow
+    @subject = "https://shop.example/person/{PersonRow.id}"
+    name     = PersonRow.name
+    handle   = PersonRow.handle
+    livesIn  = City(PersonRow.city)
+
+Friends : Person from PersonRow.join(KnowsRow, on = PersonRow.id == KnowsRow.person)
+    @subject = "https://shop.example/person/{PersonRow.id}"
+    name     = PersonRow.name
+    handle   = PersonRow.handle
+    livesIn  = City(PersonRow.city)
+    knows    = Person(KnowsRow.knows)
+// #endregion mappings

@@ -307,6 +307,7 @@ fn run_db_wired_fixture(bucket: &str, name: &str) -> String {
 /// One predicate constrained to an XSD datatype, or to nothing.
 fn constraint(predicate: &str, datatype: Option<Primitive>, occurs: Occurs) -> PropertyConstraint {
     PropertyConstraint {
+        name: fossil_graph_schema::local_name(predicate).to_string(),
         predicate: predicate.to_string(),
         term: datatype.map(|p: Primitive| Term::Literal(Some(p.to_xsd_iri().into()))),
         targets: Vec::new(),

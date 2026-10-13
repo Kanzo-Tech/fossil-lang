@@ -1,0 +1,39 @@
+---
+title: Not a type a field can have
+description: "`name/unknown-type` — a declared field's type names neither a primitive nor one of the three constructors, and the refusal lists the names there are."
+---
+
+A field of a declared type is written in the names the checker prints: a primitive — `String`,
+`Integer`, `Float`, `Bool`, `Date`, `DateTime`, `Time`, `GYear`, `AnyUri` — or one of `Option`, `Seq`
+and `Ref`. Anything else names no type:
+
+```fossil
+@iri("https://schema.org/Person")
+type Person
+    @iri("https://schema.org/name")  name: Strng
+```
+
+```text
+`Strng` is not a type a field can have — it is one of `String`, `Integer`, `Float`, `Bool`, `Date`, `DateTime`, `Time`, `GYear`, `AnyUri`, `Option`, `Seq`, `Ref`
+help: did you mean `String`?
+```
+
+The names are case-sensitive: `string` is not `String`.
+
+## Why fossil refuses it
+
+The field's type is what every mapping that writes it is checked against, and what the corpus writes
+as the literal's datatype. A name that is no type would leave the field unchecked and its column
+untyped. The list is the lattice the checker already has
+(`crates/fossil-graph-schema/src/lib.rs, Primitive`) and the three constructors, and nothing else —
+[Types declared in the program](/docs/design/declared) says why there are no more.
+
+A type of the program itself — `City`, declared or imported — is not written bare: a field holding a
+node of it is `Ref<City>`, and the bare name is refused as
+[`type/invalid-field-type`](/docs/errors/type/invalid-field-type).
+
+## How to repair it
+
+- **The name is misspelt.** The `help` suggests the nearest one.
+- **The value is a number with a fraction, a date, a year.** Each has its primitive: `Float`, `Date`,
+  `GYear`.

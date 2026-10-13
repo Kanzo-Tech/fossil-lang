@@ -1,0 +1,10 @@
+PREFIX geo: <https://geo.example/>
+PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+
+geo:Region {
+  geo:name xsd:string
+}
+
+geo:Place {
+  geo:name xsd:string
+}

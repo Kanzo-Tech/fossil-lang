@@ -89,6 +89,15 @@ struct OutputShapesRepr {
     rejections: Vec<Rejection>,
 }
 
+/// By what it says — the shapes and the rejections. The index is derived from
+/// the shapes, so two values equal by [`PartialEq`] hash alike.
+impl std::hash::Hash for OutputShapes {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.shapes.hash(state);
+        self.rejections.hash(state);
+    }
+}
+
 impl From<OutputShapesRepr> for OutputShapes {
     fn from(repr: OutputShapesRepr) -> Self {
         Self::new(repr.shapes, repr.rejections)
@@ -109,7 +118,7 @@ impl From<OutputShapes> for OutputShapesRepr {
 pub const SUBJECT_COLUMN: &str = "subject";
 
 /// One shape: a set of predicates a subject of this type may carry.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Shape {
     /// The shape's IRI, fully resolved — the key the output model is addressed
     /// by (`NodeType::iri`).
@@ -138,10 +147,19 @@ pub struct Shape {
 
 /// One predicate of a [`Shape`] — the format-neutral collapse of a `ShEx`
 /// `TripleConstraint` / a SHACL property shape.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PropertyConstraint {
-    /// The full predicate IRI, fully resolved. [`local_name`] derives from it
-    /// the bare name the program writes.
+    /// The bare name a program writes for this predicate — a body's property
+    /// key, and the column the corpus names.
+    ///
+    /// A decoder writes [`local_name`] of [`Self::predicate`]: a document says
+    /// nothing else a name could come from. A declared type writes the field's
+    /// own name, which is the whole point of declaring one — two predicates
+    /// whose last segments coincide are two fields with two names
+    /// (`/docs/design/declared`). It is carried rather than derived because
+    /// only the second source knows it.
+    pub name: String,
+    /// The full predicate IRI, fully resolved.
     pub predicate: String,
     /// The RDF term the document declares for the value, verbatim, or `None`
     /// when it declares none. A decoder writes [`Term::Iri`] for an IRI-valued
@@ -223,7 +241,7 @@ impl PropertyConstraint {
 /// replaces had both `Exact(n)` and `Range { min: n, max: Some(n) }` for the
 /// same cardinality, and its `is_single_valued` answered `true` for the first
 /// and `false` for the second. A pair cannot hold two spellings of one fact.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Occurs {
     /// Minimum number of values. `0` = optional.
     pub min: u32,
@@ -277,7 +295,7 @@ impl Occurs {
 /// carries the predicate IRIs of each branch instead: enough to *name* the split
 /// in a diagnostic, not enough to re-emit the document's own syntax. Re-emitting
 /// syntax is the decoder's job, and it is the decoder that knows the syntax.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Rejection {
     /// A disjunction the compiler does not support. `disjuncts` carries the
     /// predicate IRIs of each branch, in order — `disjuncts.len()` is the number
@@ -302,9 +320,8 @@ impl OutputShapes {
     /// **A repeated IRI keeps its FIRST declaration and its first slot.** The
     /// alternative — last one wins — is what a `HashMap::insert` does for free,
     /// and either rule is arbitrary, but only one of them leaves the order
-    /// alone: a later duplicate that overwrites an earlier slot moves the shape
-    /// that positional binding is counting on. So the duplicate is dropped
-    /// entirely, not merged and not appended.
+    /// alone, and the order is what a diagnostic lists the shapes in. So the
+    /// duplicate is dropped entirely, not merged and not appended.
     #[must_use]
     pub fn new(shapes: Vec<Shape>, rejections: Vec<Rejection>) -> Self {
         let mut kept: Vec<Shape> = Vec::with_capacity(shapes.len());
@@ -330,15 +347,14 @@ impl OutputShapes {
         Self::new(Vec::new(), vec![rejection])
     }
 
-    /// Every shape, **in declaration order**. Callers may rely on that:
-    /// `type { A, B } := io.shex(…)` binds **by position**, the Nth name to the
-    /// Nth declared shape, so `A` is the first shape the document declares and
-    /// `B` the second — the local name selects nothing and is free to be
-    /// anything. A `HashMap` lived where this `Vec` is until
-    /// `crates/fossil-shex/examples/declaration_order.rs` measured what it cost
-    /// — six parses of one document handed back six different orders, because
-    /// Rust seeds its hasher per process. The order is the document's; it is not
-    /// ours to choose.
+    /// Every shape, **in declaration order**. An import binds by local name and
+    /// not by position, but the order still reaches a person: an import naming
+    /// no shape lists the ones the document declares, and two shapes sharing a
+    /// local name are named first-then-second. A `HashMap` lived where this
+    /// `Vec` is until `crates/fossil-shex/examples/declaration_order.rs`
+    /// measured what it cost — six parses of one document handed back six
+    /// different orders, because Rust seeds its hasher per process. The order
+    /// is the document's; it is not ours to choose.
     pub fn shapes(&self) -> impl Iterator<Item = &Shape> {
         self.shapes.iter()
     }
@@ -369,9 +385,10 @@ impl OutputShapes {
     /// document checks [`Self::rejections`] first. That was already true of the
     /// `ShEx` original, which lowered the non-rejected parts of every shape.
     ///
-    /// Every label is [`local_name`] of its IRI: a predicate's last segment is
-    /// the property key a program writes, and two that coincide are a
-    /// collision the checker refuses rather than a name this function chooses.
+    /// A node's label is [`local_name`] of its IRI; a property's or an edge's is
+    /// [`PropertyConstraint::name`], the key a program writes, and two that
+    /// coincide are a collision the checker refuses rather than a name this
+    /// function chooses.
     #[must_use]
     pub fn to_graph_schema(&self) -> GraphSchema {
         let mut nodes = Vec::new();
@@ -380,7 +397,7 @@ impl OutputShapes {
             let label = local_name(&shape.iri).to_string();
             let mut properties = Vec::new();
             for c in &shape.properties {
-                let name = local_name(&c.predicate).to_string();
+                let name = c.name.clone();
                 let cardinality = c.occurs.collapse();
                 if c.targets.is_empty() {
                     properties.push(Property {
@@ -422,6 +439,7 @@ mod tests {
 
     fn prop(predicate: &str, datatype: Option<Primitive>, occurs: Occurs) -> PropertyConstraint {
         PropertyConstraint {
+            name: local_name(predicate).into(),
             predicate: predicate.into(),
             term: datatype.map(|p| Term::Literal(Some(p.to_xsd_iri().into()))),
             targets: Vec::new(),
@@ -432,6 +450,7 @@ mod tests {
 
     fn edge(predicate: &str, targets: &[&str], occurs: Occurs) -> PropertyConstraint {
         PropertyConstraint {
+            name: local_name(predicate).into(),
             predicate: predicate.into(),
             term: None,
             targets: targets.iter().map(|t| (*t).to_string()).collect(),
@@ -451,8 +470,7 @@ mod tests {
     // -- declaration order + first declaration wins ------------------------
 
     /// The order is the document's. Nothing sorts, nothing hashes on the way
-    /// out — the destructuring binds by position, the Nth name to the Nth
-    /// declared shape.
+    /// out.
     #[test]
     fn shapes_iterate_in_declaration_order() {
         let doc = OutputShapes::new(

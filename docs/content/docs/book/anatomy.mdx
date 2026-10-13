@@ -27,11 +27,11 @@ The program is the third thing — the piece that says *this column becomes that
 
 <Program src="shop/shop.fossil" region="shapes" title="shop.fossil" context />
 
-`io.shex(...)` reads the shape document, and the braces on the left pull two shapes out of it under
-local names. They bind **by position**, and the label you choose never reaches the output: rename
-`Person` to `Persona` and the graph is byte for byte the same, because the IRI written as the node's
-type comes from the document. See
-[naming what you produce](/docs/book/what-you-produce#binding-is-by-position).
+`io.shex(...)` reads the shape document, and the braces on the left pull two shapes out of it **by
+their local names** — the last segment of each shape's IRI. `Person as Persona` would call it
+something else in the program, and the graph would be byte for byte the same, because the IRI
+written as the node's type comes from the document. A type can also be declared in the program
+instead; see [naming what you produce](/docs/book/what-you-produce#importing-by-name).
 
 `io` is where the readers live: `io.shex`, `io.shacl`, `io.csv`, `io.json`, `io.parquet`, `io.rdf`.
 None of them take anything on the left, because they are what makes the thing.

@@ -167,6 +167,7 @@ pub fn decode_lines(_uri: &str, text: &str) -> Result<OutputShapes, Rejection> {
                     |target| (None, vec![target.to_string()]),
                 );
                 shape.properties.push(PropertyConstraint {
+                    name: fossil_graph_schema::local_name(&predicate).to_string(),
                     predicate,
                     term,
                     targets,

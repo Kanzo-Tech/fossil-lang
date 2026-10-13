@@ -17,10 +17,12 @@ use fossil_hir::def_map::def_map;
 ///
 /// Two places name one, in this order:
 ///
-/// 1. **`type { … } := io.shex("shop.shex")`** — what the CHECKER resolves the
-///    mappings against, so it wins: the document the run classifies edges with
-///    has to be the document the program compiled against, or a CSV program
-///    gets `ACCEPT_ALL_DEFAULT` and emits zero edges.
+/// 1. **The program's types** — declared (`@iri("…") type Person`) or imported
+///    (`type { … } := io.shex("shop.shex")`), as
+///    [`fossil_hir::shapes::program_shapes`] gathers them. It is what the
+///    CHECKER resolves the mappings against, so it wins: the types the run
+///    classifies edges with have to be the ones the program compiled against,
+///    or a CSV program gets `ACCEPT_ALL_DEFAULT` and emits zero edges.
 /// 2. `io.rdf(schema = io.shex(…))` — an RDF input whose shape doubles as the
 ///    output contract, for a program that reads a graph and writes one back.
 ///
@@ -31,10 +33,11 @@ use fossil_hir::def_map::def_map;
 /// The document is unregistered, named by no provider or by one that reads no
 /// types, has an extension the row declines, or fails to decode.
 pub fn output_descriptor(db: &dyn Db, file: SourceFile) -> Result<OutputDescriptorKind, Failure> {
-    let def_map = def_map(db, file);
-    if let Some((constructor, document)) = def_map.output_shape_binding(db) {
-        return decode(db, file, constructor.as_deref(), &document);
+    if let Some(shapes) = fossil_hir::shapes::program_shapes(db, file)? {
+        return Ok(OutputDescriptorKind::Lowered(shapes.to_graph_schema()));
     }
+
+    let def_map = def_map(db, file);
 
     let mut schema: Option<(Option<&str>, &str)> = None;
     for s in def_map.sources(db) {

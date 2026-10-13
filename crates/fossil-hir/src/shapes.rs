@@ -14,10 +14,11 @@
 //! learns which language the document was written in. Same cut `0e6898d` made
 //! for `fossil-mir`.
 //!
-//! # The document the program names
+//! # The types the program has
 //!
-//! [`resolve_target_shape`] reads the shape document the PROGRAM brings in with
-//! `type { … } := io.shex("…")`. It used to take the descriptor as a borrowed
+//! [`resolve_target_shape`] reads the type the PROGRAM has: one it declares
+//! (`crate::declared`), or one it imports with `type { … } := io.shex("…")`.
+//! For an import it reads the shape document. It used to take the descriptor as a borrowed
 //! ARGUMENT threaded in by the host; the in-query caller had nothing to thread
 //! and passed `ACCEPT_ALL_DEFAULT`, so backward checking was off for every
 //! program compiled through the checker — an axis with exactly one value.
@@ -29,9 +30,9 @@
 //! [`crate::shape_documents::shape_document`], so an edit to the `.shex` invalidates every
 //! mapping checked against it.
 //!
-//! Naming no document is an ERROR: a property key is a bare name whose meaning
-//! is the last segment of a predicate IRI **the document declares**, so a
-//! program with no document cannot write a single property. `lower_to_hir`
+//! Having no type is an ERROR: a property key is a bare name whose meaning is
+//! the name of a predicate **a type declares**, so a program that neither
+//! declares nor imports one cannot write a single property. `lower_to_hir`
 //! reports it, at the header whose name bound nothing.
 //!
 //! # Every failure is reported at the BINDING, and none of them here
@@ -43,16 +44,16 @@
 //! gone, and the reason is the ORDER, not the fixtures.
 //!
 //! A mapping header names a bare LOCAL name. [`crate::def_map`] binds those
-//! names POSITIONALLY, against this module's own [`decoded_document`], before
+//! names BY NAME, against this module's own [`decoded_document`], before
 //! anything asks a mapping for its target shape. So a document that cannot
 //! answer fails THERE: the binding takes a
 //! [`ShapeBindError`](crate::def_map::ShapeBindError), `lookup_type` answers
 //! `None`, [`crate::lower`] reports it by cause (`unbound_shape_problem`, which
 //! carries the did-you-mean over the names the program bound) and leaves
 //! `shape_iri` empty — and an empty shape IRI reads here as «no shape clause».
-//! `Undeclared` was doubly unreachable on top of that: a positional binding
-//! hands over the Nth shape the document DECLARES, so the IRI can only be one
-//! the document declares.
+//! `Undeclared` was doubly unreachable on top of that: a binding hands over a
+//! shape the document DECLARES, so the IRI can only be one the document
+//! declares.
 //!
 //! Every way a program can fail to bring a shape in was driven through
 //! [`resolve_target_shape`] to settle it — the corpus is
@@ -89,6 +90,8 @@ use crate::ty::{Ty, TyKind};
 /// are made, and making them once here is the point of the type.
 #[derive(Debug, Clone)]
 pub struct ShapeConstraint<'db> {
+    /// The name a body writes for it — [`PropertyConstraint::name`].
+    pub name: SmolStr,
     /// The predicate IRI (fully-resolved string form).
     pub predicate: SmolStr,
     /// The type a value must have to satisfy this constraint, or `None` when
@@ -158,6 +161,7 @@ impl<'db> ResolvedShape<'db> {
             .properties
             .iter()
             .map(|c| ShapeConstraint {
+                name: SmolStr::from(c.name.as_str()),
                 predicate: SmolStr::from(c.predicate.as_str()),
                 value_ty: expected_value_ty(db, c),
                 term: c.term.clone(),
@@ -176,10 +180,10 @@ impl<'db> ResolvedShape<'db> {
     /// The shape's predicates by the SHORT NAME a program writes, and the
     /// collisions that make some of them unwritable.
     ///
-    /// The short name is [`fossil_graph_schema::local_name`] — the last
-    /// segment of the IRI. That is the same function
-    /// `OutputShapes::to_graph_schema` emits the column with, which is what
-    /// stops a predicate being written under one name and emitted under
+    /// The short name is [`ShapeConstraint::name`] — for a document, the last
+    /// segment of the IRI; for a declared type, the field's own name. It is the
+    /// same name `OutputShapes::to_graph_schema` emits the column with, which is
+    /// what stops a predicate being written under one name and emitted under
     /// another.
     ///
     /// **A collision is an error naming both IRIs, and never a numeric suffix.**
@@ -200,7 +204,7 @@ impl<'db> ResolvedShape<'db> {
         let mut table: Vec<Predicate> = Vec::with_capacity(self.constraints.len());
         let mut collisions: Vec<NameCollision> = Vec::new();
         for c in &self.constraints {
-            let short = SmolStr::from(fossil_graph_schema::local_name(&c.predicate));
+            let short = c.name.clone();
             if let Some(first) = table.iter().find(|p| p.name == short) {
                 collisions.push(NameCollision {
                     name: short,
@@ -436,18 +440,19 @@ pub fn inner_primitive<'db>(db: &'db dyn fossil_base::Db, ty: Ty<'db>) -> Option
     }
 }
 
-/// Resolve a mapping's target shape against the document the PROGRAM names.
+/// Resolve a mapping's target shape against the type the PROGRAM has —
+/// declared in it, or imported from a document it names.
 ///
-/// `None` means the mapping has nothing to check against. Every way a named
-/// document can fail to produce a shape is reported at the `type` binding, by
+/// `None` means the mapping has nothing to check against. Every way a type name
+/// can fail to produce a shape is reported at the use, by
 /// `crate::lower::unbound_shape_problem`, and leaves the mapping's shape IRI
 /// empty, so nothing is left to report here.
 pub fn resolve_target_shape<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
 ) -> Option<ResolvedShape<'db>> {
-    // The mapping's fully-resolved target shape IRI (prefix already expanded by
-    // `lower_to_hir`). A mapping with no shape clause yields no resolution.
+    // The mapping's fully-resolved target shape IRI. A mapping with no shape
+    // clause yields no resolution.
     let file = mapping.file(db);
     let hir = crate::lower::lower_to_hir(db, file);
     let shape_iri = hir.mapping(db, mapping.index(db))?.shape_iri.clone();
@@ -455,23 +460,28 @@ pub fn resolve_target_shape<'db>(
         return None;
     }
 
-    // The document that declared THIS shape — the binding whose `type { … } :=
-    // io.shex("…")` introduced it, not the first document the file happens to
-    // name. A program with two documents resolved its second mapping against the
-    // wrong one until `shape_binding_for` existed; the fixture is
-    // `docs/programs/multi-document`. A program that names none has no
-    // output contract.
-    let dm = crate::def_map::def_map(db, file);
-    let (constructor, document) = dm.shape_binding_for(db, shape_iri.as_str())?;
+    // The type that introduced THIS shape — not the first document the file
+    // happens to name. A program with two documents resolved its second mapping
+    // against the wrong one until the lookup went by type; the fixture is
+    // `docs/programs/multi-document`.
+    let entry = crate::def_map::def_map(db, file).type_of_shape(db, shape_iri.as_str())?;
 
-    // This is the SECOND decode of the same document, and the first one has
-    // already decided everything: `shape_iri` is non-empty only because
-    // `def_map` decoded this document, positionally, and took a shape out of
-    // it. So a failure here would have failed there — where it is reported, by
-    // cause, with the `io.shex("…")` node's own span — and a shape the lookup
-    // misses cannot exist, because the IRI came out of this document's
-    // declaration list.
-    let shapes = decoded_document(db, file, constructor.as_deref(), document.as_str()).ok()?;
+    // For an import this is the SECOND decode of the same document, and the
+    // first one has already decided everything: `shape_iri` is non-empty only
+    // because `def_map` decoded this document and took a shape out of it. So a
+    // failure here would have failed there — where it is reported, by cause —
+    // and a shape the lookup misses cannot exist, because the IRI came out of
+    // this document's declaration list.
+    let (shapes, document) = if entry.declared {
+        (
+            hir.declared(db).clone(),
+            SmolStr::from(file.path(db).as_str()),
+        )
+    } else {
+        let document = entry.document.clone()?;
+        let shapes = decoded_document(db, file, entry.constructor.as_deref(), &document).ok()?;
+        (shapes, document)
+    };
     let shape = shapes.lookup(shape_iri.as_str())?;
 
     // Filter the document's rejections to this shape so the consuming mapping
@@ -484,6 +494,46 @@ pub fn resolve_target_shape<'db>(
         .collect();
 
     Some(ResolvedShape::from_shape(db, shape, rejections, document))
+}
+
+/// Every type the program has, as one [`OutputShapes`]: its declarations, then
+/// each document its imports name, in written order — what a run classifies
+/// edges and cardinalities with, so a run reads the types the checker read.
+///
+/// `Ok(None)` for a program with no type at all. A shape two sources both carry
+/// keeps its first ([`OutputShapes::new`]); the checker resolves each mapping
+/// against the one its type names.
+///
+/// # Errors
+///
+/// A document an import names that [`decoded_document`] refuses — which the
+/// checker has already reported, so a host only meets this on a program it was
+/// told does not compile.
+pub fn program_shapes(
+    db: &dyn fossil_base::Db,
+    file: fossil_base::SourceFile,
+) -> Result<Option<OutputShapes>, Problem> {
+    let dm = crate::def_map::def_map(db, file);
+    if dm.types(db).is_empty() {
+        return Ok(None);
+    }
+    let mut shapes: Vec<Shape> = crate::lower::lower_to_hir(db, file)
+        .declared(db)
+        .shapes()
+        .cloned()
+        .collect();
+    let mut rejections: Vec<Rejection> = Vec::new();
+    let mut read: Vec<&SmolStr> = Vec::new();
+    for entry in dm.types(db) {
+        let Some(document) = entry.document.as_ref().filter(|d| !read.contains(d)) else {
+            continue;
+        };
+        read.push(document);
+        let decoded = decoded_document(db, file, entry.constructor.as_deref(), document)?;
+        shapes.extend(decoded.shapes().cloned());
+        rejections.extend(decoded.rejections().iter().cloned());
+    }
+    Ok(Some(OutputShapes::new(shapes, rejections)))
 }
 
 /// `true` iff a rejection belongs to the shape identified by `shape_iri`.
@@ -515,6 +565,7 @@ mod tests {
 
     fn prop(datatype: Option<Primitive>, targets: &[&str]) -> PropertyConstraint {
         PropertyConstraint {
+            name: "p".into(),
             predicate: "https://example.org/p".into(),
             term: datatype.map(|p: Primitive| Term::Literal(Some(p.to_xsd_iri().into()))),
             targets: targets.iter().map(|t| (*t).to_string()).collect(),
@@ -630,7 +681,7 @@ User : Person from users
                 }
                 && d.help
                     .as_deref()
-                    .is_some_and(|h| h.contains("no shape names at all"))),
+                    .is_some_and(|h| h.contains("no type names at all"))),
             "and the program is still told so, got: {:?}",
             diagnostics
                 .iter()
@@ -721,7 +772,7 @@ User : Person from users
                 src_naming("empty.shex"),
                 "empty.shex",
                 "\n",
-                "the binding names 1 shape(s) and the document declares 0",
+                "`Person` is not a shape `empty.shex` declares — it declares none",
             ),
             (
                 "a local name nobody bound — the misspelling that used to reach \
@@ -759,12 +810,12 @@ User : Person from users
                 "`person.shex` is named by no provider",
             ),
             (
-                "two names and one declared shape — the second binds nothing",
+                "a name the document does not declare — it declares only `Person`",
                 good.replace("type { Person }", "type { Person, City }")
                     .replace(": Person from", ": City from"),
                 "person.shex",
                 PERSON_DOCUMENT,
-                "the binding names 2 shape(s) and the document declares 1",
+                "`City` is not a shape `person.shex` declares — it declares `Person`",
             ),
         ];
 

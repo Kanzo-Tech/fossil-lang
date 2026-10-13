@@ -1,0 +1,33 @@
+---
+title: A type introduced twice
+description: "`name/duplicate-type` — one type name is declared twice, imported twice, or declared and imported, and a type name names one type."
+---
+
+A program introduces the same type name twice — two declarations, two imports, or one of each:
+
+```fossil
+type { Place as City } := io.shex("places.shex")
+
+@iri("https://schema.org/City")
+type City
+    @iri("https://schema.org/name")  name: String
+```
+
+```text
+`City` is introduced twice, and a type name names one type
+```
+
+The error is on the second one.
+
+## Why fossil refuses it
+
+A mapping header, an edge and a field's `Ref<…>` each name a type, and each has to mean one shape. With
+two, the first would win every lookup and the second would vanish without a word — a declaration
+nobody could ever write against.
+
+## How to repair it
+
+- **Rename one.** A declaration by its own name; an import with `as`:
+  `type { Place as Town } := io.shex("places.shex")`.
+- **Delete one**, if both say the same thing — a declaration that copies a shape a document already
+  has is the case to look for.

@@ -42,7 +42,7 @@ const GRAPH_SHEX: &str = r#"{ "@context": "http://www.w3.org/ns/shex.jsonld", "t
 // `type { … }` binding is what puts shape NAMES in scope for a mapping header.
 // The vertex type is still `KB` because it comes from the shape's own IRI,
 // never from the local label.
-const CPI_FOSSIL: &str = r#"type { KBShape, ProjectShape } := io.shex("graph.shex")
+const CPI_FOSSIL: &str = r#"type { KB as KBShape, Project as ProjectShape } := io.shex("graph.shex")
 
 { KB, Project } := io.rdf("graph.ttl", schema = io.shex("graph.shex"))
 
@@ -122,7 +122,7 @@ fn run_rdf_writes_typed_multi_shape_graph_with_multivalued_edges() {
 // map, not just the positional data. The `type { … }` binding reads the same
 // document by a program-relative path; what this test is FOR is the `schema =`
 // argument, which is the reference a regex over the data URI cannot see.
-const CPI_FOSSIL_CONN: &str = r#"type { KBShape, ProjectShape } := io.shex("vocab/graph.shex")
+const CPI_FOSSIL_CONN: &str = r#"type { KB as KBShape, Project as ProjectShape } := io.shex("vocab/graph.shex")
 
 { KB, Project } := io.rdf("@data/graph.ttl", schema = io.shex("@vocab/graph.shex"))
 
@@ -185,7 +185,7 @@ const LEAF_SHEX: &str = r#"{ "@context": "http://www.w3.org/ns/shex.jsonld", "ty
   {"type":"ShapeDecl","id":"https://ex.org/Tag","shapeExpr":{"type":"Shape"}}
 ] }"#;
 
-const LEAF_FOSSIL: &str = r#"type { ItemShape, TagShape } := io.shex("graph.shex")
+const LEAF_FOSSIL: &str = r#"type { Item as ItemShape, Tag as TagShape } := io.shex("graph.shex")
 
 { Item, Tag } := io.rdf("graph.ttl", schema = io.shex("graph.shex"))
 

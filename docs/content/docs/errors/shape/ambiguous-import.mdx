@@ -1,0 +1,40 @@
+---
+title: Two shapes share the imported name
+description: "`shape/ambiguous-import` — an import names a local name two shapes of the document share, and fossil names both IRIs rather than choosing."
+---
+
+An import names a shape by its local name, the last segment of its IRI. Two shapes of one document can
+end in the same segment — a document that mixes two vocabularies is the usual way:
+
+```shex
+PREFIX geo:   <https://geo.example/>
+PREFIX other: <https://other.example/>
+
+geo:Tag   { }
+other:Tag { }
+```
+
+```fossil
+type { Tag } := io.shex("tags.shex")
+```
+
+```text
+`Tag` names two shapes of `tags.shex`: `https://geo.example/Tag` and `https://other.example/Tag`
+```
+
+A document whose shapes share a local name is not an error by itself: only an import of that name is.
+
+## Why fossil refuses it
+
+The compiler does not choose between the two, and it does not number them (`Tag`, `Tag2`). A name
+that depends on anything but its own label — the order of the document, how many others share it —
+renames something a program already writes when the document changes, which is the failure
+FSharp.Data's numeric suffixes produced ([the naming rule](/docs/design/type-providers)). Naming
+both IRIs gives the author exactly what the repair needs to quote.
+
+## How to repair it
+
+- **Declare the type in the program**, with the IRI you meant in its `@iri`
+  ([Types declared in the program](/docs/design/declared)). A declared type and an imported one are
+  the same thing to the checker.
+- **Change the document**, if it is yours, so its shapes' local names differ.

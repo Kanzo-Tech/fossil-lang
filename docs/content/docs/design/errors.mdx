@@ -311,15 +311,15 @@ reachable from a fixture has a page*.
 Nothing below is invented: each code is one or more of the sites counted above, merged where they
 are the same mistake. The dead `ParseDiagnostic::InconsistentDedent` gets no code; its variant goes.
 
-**Compile — 67 codes** (plus `internal/bug`, below):
+**Compile — 72 codes** (plus `internal/bug`, below):
 
 | Area | Codes |
 | --- | --- |
 | `syntax` (13) | `expected-token`, `unexpected-token`, `unknown-character`, `missing-iri`, `misplaced-attribute`, `invalid-mapping-header`, `invalid-property-name`, `number-out-of-range`, `incomplete-conditional`, `uncalled-function`, `invalid-callee`, `needless-quotes`, `hole-in-member-name` |
-| `name` (8) | `unknown-shape`, `unknown-property`, `unknown-field`, `row-not-in-scope`, `unknown-function`, `unknown-parameter`, `unknown-source`, `dotted-column` |
+| `name` (11) | `unknown-shape`, `unknown-property`, `unknown-field`, `row-not-in-scope`, `unknown-function`, `unknown-parameter`, `unknown-source`, `dotted-column`, `unknown-type`, `duplicate-field`, `duplicate-type` |
 | `argument` (6) | `arity`, `duplicate`, `skipped-parameter`, `positional-after-named`, `named-on-edge`, `alias-in-value-call` |
-| `type` (7) | `property-mismatch`, `argument-mismatch`, `relation-as-value`, `expected-bool`, `expected-number`, `incomparable`, `branch-mismatch` |
-| `shape` (7) | `no-document`, `name-collision`, `missing-required-property`, `unsupported-disjunction`, `cyclic-reference`, `unresolved-reference`, `binding-arity` |
+| `type` (8) | `property-mismatch`, `argument-mismatch`, `relation-as-value`, `expected-bool`, `expected-number`, `incomparable`, `branch-mismatch`, `invalid-field-type` |
+| `shape` (8) | `no-document`, `name-collision`, `missing-required-property`, `unsupported-disjunction`, `cyclic-reference`, `unresolved-reference`, `not-in-document`, `ambiguous-import` |
 | `document` (2) | `not-registered`, `unparseable` |
 | `provider` (6) | `unknown`, `wrong-capability`, `wrong-extension`, `invalid-reader-option`, `foreign-reader-option`, `bare-document-path` |
 | `identity` (6) | `missing-subject`, `duplicate-subject`, `subject-not-first`, `conflicting`, `edge-without-template`, `edge-arity` |

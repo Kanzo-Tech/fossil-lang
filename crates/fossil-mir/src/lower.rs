@@ -189,8 +189,8 @@ fn lower_mapping<'db>(
 
     // Nothing here GUESSES an edge from template shapes: the lookup already
     // exists downstream, where `apply_output_shape` classifies a predicate as an
-    // edge when the SHAPE says its range is a shape. Naming a shape document is
-    // MANDATORY, so that path is always available.
+    // edge when the SHAPE says its range is a shape. A mapping targets a type,
+    // declared or imported, so that path is always available.
 
     // Classify each non-`iri` property: FieldRef/StringLit → vertex prop;
     // IRI-template that resolves to another subject → edge; dangling template /

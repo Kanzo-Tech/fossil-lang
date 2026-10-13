@@ -1,0 +1,39 @@
+---
+title: Not a shape the document declares
+description: "`shape/not-in-document` — an import names a shape by a local name the document does not declare, and the refusal lists the ones it does."
+---
+
+An import names a shape by its **local name** — the last segment of the shape's IRI, so
+`geo:Place` and `<https://geo.example/Place>` are both `Place`. A name the document does not declare
+has nothing to bind:
+
+```fossil
+type { Town } := io.shex("places.shex")
+```
+
+```text
+`Town` is not a shape `places.shex` declares — it declares `Region`, `Place`
+```
+
+The list is the document's, in the order it declares the shapes. The error is reported where the name
+is used — the mapping header that produces it, or the `from` that reads it on the source side
+(`{ Town } := io.rdf(…, schema = io.shex(…))`), where the same rule binds the same member list.
+
+## Why fossil refuses it
+
+A mapping is checked against the shape its type names. A name that names no shape leaves the mapping
+with nothing to be checked against, so every property of it would be written blind.
+
+The import used to bind **by position** — the Nth name took the Nth shape, whatever it was called — and
+then this mistake could not happen, because no name was ever looked up. The cost was the one
+[Types declared in the program](/docs/design/declared) records: reordering a document rebound every
+program that read it, silently. Binding by name makes a reordered document harmless and a misnamed
+import loud.
+
+## How to repair it
+
+- **Use the shape's own local name**, from the list, and rename it in the program with `as` if you
+  want another: `type { Place as Town } := io.shex("places.shex")`.
+- **The shape is in another document.** Import it from there, in an import of its own.
+- **The shape is not anywhere yet.** Declare it in the program:
+  [Types declared in the program](/docs/design/declared) shows how.

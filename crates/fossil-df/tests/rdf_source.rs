@@ -114,7 +114,7 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
 // a typed KB→Project edge that UNNESTs to two edges (kb/1 points at two projects).
 //
 // The destructuring binds the SOURCE names, and `type { … } := io.shex(…)` binds
-// the SHAPE names positionally against the same document — so `KB : KB from KB`
+// the SHAPE names, by local name, against the same document — so `KB : KB from KB`
 // reads type, then binding, and the two `KB`s are two namespaces, not one name
 // written twice.
 const KB_PROGRAM: &str = "\
