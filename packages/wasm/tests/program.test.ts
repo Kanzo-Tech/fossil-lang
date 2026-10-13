@@ -84,7 +84,12 @@ describe('openProgram', () => {
       // Opened empty: nothing is under any cursor until the text arrives.
       expect(program.hover(line, character)).toBeNull();
       program.update(PROGRAM);
-      await program.describe({ engine: USERS, options: TYPES });
+      // `name` as the shape types it, so the expression types and hover has a type to show.
+      const typed = describingEngine([
+        { column_name: 'id', column_type: 'VARCHAR' },
+        { column_name: 'name', column_type: 'BIGINT' },
+      ]);
+      await program.describe({ engine: typed, options: TYPES });
       expect(program.hover(line, character)).not.toBeNull();
       expect(program.completion(line, character).length).toBeGreaterThan(0);
     } finally {
