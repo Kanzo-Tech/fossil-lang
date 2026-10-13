@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
 use fossil_base::test_support::db_with_document_at;
-use fossil_base::{Diagnostic, FossilDb, SourceFile, System};
+use fossil_base::{FossilDb, SourceFile, System};
 use fossil_graph_schema::{Cardinality, EdgeType, GraphSchema, NodeType, Primitive, Property};
 use fossil_hir::def_map::def_map;
 use fossil_mir::{Op, apply_output_shape, lower_to_mir_pg};
@@ -148,7 +148,7 @@ Thing : Thing from filtered
     // «poisoned because the source did not resolve» from «poisoned because the
     // body failed to type-check», and the two would both satisfy every
     // assertion above.
-    let diags = lower_to_mir_pg::accumulated::<Diagnostic>(&db, mapping);
+    let diags = mir.diagnostics(&db);
     assert!(
         diags.iter().any(|d| matches!(
             &d.problem,

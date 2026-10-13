@@ -32,7 +32,7 @@ pub mod test_support;
 
 pub use db::{Db, FossilDb};
 pub use diagnostic::{Diagnostic, SpanFrame, SpanLabel};
-pub use error::{ErrorGuaranteed, bug, raise, report};
+pub use error::{Diagnostics, ErrorGuaranteed};
 pub use files::{FileRegistry, Files, SourceFile, file_at, register_document, register_file};
 pub use providers::{
     CONSTRUCTOR_PREFIX, Capability, Catalogue, NativeReader, Provider, Registry, RowReader,

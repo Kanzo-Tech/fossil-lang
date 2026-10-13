@@ -197,7 +197,7 @@ fn resolve_hover_target<'db>(
             PropertyKey::Subject => None,
         });
     let predicate_iri = short_name.and_then(|name| {
-        let output = typecheck_mapping(db, mapping).ok()?;
+        let output = typecheck_mapping(db, mapping).checked(db).ok()?;
         output
             .predicates(db)
             .iter()

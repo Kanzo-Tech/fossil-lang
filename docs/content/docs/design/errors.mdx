@@ -159,8 +159,8 @@ argument for this shape over a `code: &'static str` field beside a free `message
   something the data does not carry, and a consumer that wants the column name reads `data.column`.
 - **The JSON Schema is derived**, so the TypeScript union is generated rather than restated (below).
 
-**`Diagnostic` keeps its spans and swaps `message: String` for `problem: Problem`.** It stays the salsa
-accumulator, keeps `severity`, `span`, `frame`, `labels`, `help`, `suggestion_source` and `did_you_mean`
+**`Diagnostic` keeps its spans and swaps `message: String` for `problem: Problem`.** It keeps
+`severity`, `span`, `frame`, `labels`, `help`, `suggestion_source` and `did_you_mean`
 — everything positional, which a run failure has none of. `message` becomes `problem.to_string()`. That
 is the one-layer rule applied: there is one type that says *what went wrong* (`Problem`) and one that
 says *where in a program* (`Diagnostic`), and a compile diagnostic is the second holding the first. A

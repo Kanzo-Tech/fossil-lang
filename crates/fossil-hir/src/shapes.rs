@@ -66,10 +66,8 @@
 //!
 //! # Why the failure is returned and not emitted here
 //!
-//! A `salsa` accumulator panics outside an active tracked function
-//! (`Accumulator::push`: "cannot accumulate values outside of an active tracked
-//! function"), and this is a plain-Rust helper that IDE features call directly.
-//! So it reports by value, exactly as [`crate::def_map`]'s
+//! This is a plain-Rust helper that IDE features call directly, with no sink
+//! to report into and no use for one. So it returns the failure, exactly as [`crate::def_map`]'s
 //! [`ShapeBindError`](crate::def_map::ShapeBindError) already does for the
 //! source side, and [`crate::check`] — which runs inside `typecheck_mapping` —
 //! turns it into a diagnostic.
@@ -639,8 +637,7 @@ User : Person from users
             resolve_target_shape(&db, first_mapping(&db, file)).is_none(),
             "the name bound nothing, so there is no output contract"
         );
-        let diagnostics =
-            crate::lower::lower_to_hir::accumulated::<fossil_base::Diagnostic>(&db, file);
+        let diagnostics = crate::lower::lower_to_hir(&db, file).diagnostics(&db);
         assert!(
             diagnostics.iter().any(|d| d.problem
                 == fossil_graph_schema::Problem::UnknownShape {
@@ -651,7 +648,10 @@ User : Person from users
                     .as_deref()
                     .is_some_and(|h| h.contains("no shape names at all"))),
             "and the program is still told so, got: {:?}",
-            diagnostics.iter().map(|d| d.message()).collect::<Vec<_>>(),
+            diagnostics
+                .iter()
+                .map(fossil_base::Diagnostic::message)
+                .collect::<Vec<_>>(),
         );
     }
 
@@ -792,13 +792,15 @@ User : Person from users
                  contract and no error of its own — got an answer that is not \
                  `None` for:\n{src}"
             );
-            let diagnostics =
-                crate::lower::lower_to_hir::accumulated::<fossil_base::Diagnostic>(&db, file);
+            let diagnostics = crate::lower::lower_to_hir(&db, file).diagnostics(&db);
             assert!(
                 diagnostics.iter().any(|d| d.message().contains(expected)),
                 "{wrong}: and the failure is reported where it happened, by \
                  cause — expected {expected:?}, got: {:?}",
-                diagnostics.iter().map(|d| d.message()).collect::<Vec<_>>(),
+                diagnostics
+                    .iter()
+                    .map(fossil_base::Diagnostic::message)
+                    .collect::<Vec<_>>(),
             );
         }
     }

@@ -222,12 +222,16 @@ fn document_targets(
     let span = match wanted {
         Wanted::Shape(_) => shape.span,
         Wanted::Predicate(key) => {
-            let Some(iri) = typecheck_mapping(db, mapping).ok().and_then(|out| {
-                out.predicates(db)
-                    .iter()
-                    .find(|p| p.name.as_str() == key.as_str())
-                    .map(|p| p.iri.clone())
-            }) else {
+            let Some(iri) = typecheck_mapping(db, mapping)
+                .checked(db)
+                .ok()
+                .and_then(|out| {
+                    out.predicates(db)
+                        .iter()
+                        .find(|p| p.name.as_str() == key.as_str())
+                        .map(|p| p.iri.clone())
+                })
+            else {
                 return Vec::new();
             };
             shape.constraint_for(&iri).and_then(|c| c.span)

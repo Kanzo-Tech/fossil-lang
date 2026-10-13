@@ -14,7 +14,9 @@ description = "Fossil — a typed compiler for RDF graph construction"
 
 [workspace.dependencies]
 # === Compiler core ===
-salsa = { version = "0.28.5", features = ["accumulator"] }
+# The defaults minus `accumulator`: diagnostics travel in query outputs, so
+# nothing may push into a side channel (`/docs/design/incremental`).
+salsa = { version = "0.28.5", default-features = false, features = ["salsa_unstable", "rayon", "macros", "inventory"] }
 rowan = "0.16"
 logos = "0.16"
 text-size = "1"

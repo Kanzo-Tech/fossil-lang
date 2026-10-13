@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use expect_test::expect_file;
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{Diagnostic, FossilDb, SourceFile, System};
+use fossil_base::{FossilDb, SourceFile, System};
 use fossil_syntax::{SyntaxKind, SyntaxNode, parse};
 
 /// Parse `src`, render its CST without trivia, and count its diagnostics.
@@ -17,7 +17,7 @@ fn parse_fixture(src: &str) -> (String, usize) {
     let db = FossilDb::new(system);
     let file = SourceFile::new(&db, src.to_string(), "fixture.fossil".to_string());
     let cst = parse(&db, file);
-    let diagnostics = parse::accumulated::<Diagnostic>(&db, file).len();
+    let diagnostics = cst.diagnostics(&db).len();
     (render_node(&cst.root(&db).syntax(), 0), diagnostics)
 }
 

@@ -16,9 +16,8 @@
 //! - [`HirExpr::FieldRef`] is just the name of a column of the one row in scope.
 //! - [`HirExpr::StringLit`] holds the literal text without surrounding quotes.
 
-use fossil_base::{Diagnostic, SourceFile};
+use fossil_base::{Diagnostic, Diagnostics, SourceFile};
 use fossil_graph_schema::{Problem, Severity, Span};
-use salsa::Accumulator;
 use smol_str::SmolStr;
 
 use crate::def_map::def_map;
@@ -44,8 +43,8 @@ pub struct HirFile<'db> {
     ///
     /// The `Err` carries [`fossil_base::ErrorGuaranteed`], which is to say the
     /// diagnostic is already published — `lower_mapping_node` emits exactly one
-    /// per declined header, into this query's accumulator, which
-    /// `fossil_mir::program_diagnostics` drains file-level. A consumer
+    /// per declined header, into [`Self::diagnostics`], which
+    /// `fossil_mir::program_diagnostics` collects file-level. A consumer
     /// propagates the taint; it does not report again.
     #[returns(ref)]
     pub mappings: Vec<Result<HirMapping, fossil_base::ErrorGuaranteed>>,
@@ -56,6 +55,11 @@ pub struct HirFile<'db> {
     /// here or they are lowered twice.
     #[returns(ref)]
     pub source_pipes: Vec<HirSourcePipe>,
+    /// What lowering the file's top-level items found: a header it could not
+    /// read, a provider or schema argument it refuses, a pipeline stage it
+    /// cannot bind. File-absolute unless a diagnostic says otherwise.
+    #[returns(ref)]
+    pub diagnostics: Vec<Diagnostic>,
 }
 
 impl<'db> HirFile<'db> {
@@ -498,6 +502,8 @@ pub fn lower_to_hir<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> HirF
     let dm = def_map(db, file);
     let type_names = bound_type_names(db, dm);
 
+    let mut diagnostics = Diagnostics::new();
+    let sink = &mut diagnostics;
     let mut mappings = Vec::new();
     let mut source_pipes = Vec::new();
     for child in cst.root(db).syntax().children() {
@@ -506,7 +512,7 @@ pub fn lower_to_hir<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> HirF
                 // Pushed unconditionally — see `HirFile::mappings`. A `MAPPING`
                 // node that contributes no slot renumbers every mapping after
                 // it, which is a silent wrong answer rather than a missing one.
-                mappings.push(lower_mapping_node(db, &child, dm).map(|mut m| {
+                mappings.push(lower_mapping_node(db, sink, &child, dm).map(|mut m| {
                     // `Orders : Order from Purchase.join(User, on = …)`.
                     // `MappingHeader := IDENT SHAPE_SEP ShapeExpr 'from'
                     // Expression` (grammar.bnf), so a `from` clause derives a
@@ -523,7 +529,7 @@ pub fn lower_to_hir<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> HirF
                     // draws `from` it, which puts it through the same
                     // `source_pipes` lookup every named pipeline uses — one
                     // path, in the checker and in `fossil-mir` both.
-                    if let Some(pipe) = lower_from_pipe(db, &child, &m.name, &type_names) {
+                    if let Some(pipe) = lower_from_pipe(db, sink, &child, &m.name, &type_names) {
                         m.source_binding = pipe.name.clone();
                         source_pipes.push(pipe);
                     }
@@ -531,33 +537,33 @@ pub fn lower_to_hir<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> HirF
                 }));
             }
             fossil_syntax::SyntaxKind::SOURCE_DEF => {
-                check_provider(db, &child, fossil_base::Capability::ReadRows);
-                check_schema_arg(db, &child);
-                if let Some(p) = lower_source_pipe(db, &child, &type_names) {
+                check_provider(db, sink, &child, fossil_base::Capability::ReadRows);
+                check_schema_arg(db, sink, &child);
+                if let Some(p) = lower_source_pipe(db, sink, &child, &type_names) {
                     source_pipes.push(p);
                 }
             }
             fossil_syntax::SyntaxKind::MULTI_SOURCE_DEF => {
-                check_provider(db, &child, fossil_base::Capability::ReadRows);
-                check_schema_arg(db, &child);
+                check_provider(db, sink, &child, fossil_base::Capability::ReadRows);
+                check_schema_arg(db, sink, &child);
             }
             fossil_syntax::SyntaxKind::TYPE_DEF => {
-                check_provider(db, &child, fossil_base::Capability::ReadTypes);
-                check_renames(db, file, &child);
+                check_provider(db, sink, &child, fossil_base::Capability::ReadTypes);
+                check_renames(db, sink, file, &child);
             }
             _ => {}
         }
     }
-    HirFile::new(db, mappings, source_pipes)
+    HirFile::new(db, mappings, source_pipes, diagnostics.into_vec())
 }
 
 /// **Every `@rename` above a `type` binding, checked against the binding and
 /// against the document** — with a real span, because this is the one place
 /// that has the nodes.
 ///
-/// `crate::def_map::def_map` reads the same attributes and cannot report on
-/// them: it is signatures-only and runs where `fossil_base::report` is not valid, so
-/// it silently keeps the renames that match a bound name and drops the rest.
+/// `crate::def_map::def_map` reads the same attributes and does not report on
+/// them: it is signatures-only, so it silently keeps the renames that match a
+/// bound name and drops the rest.
 /// «Drops the rest» is the failure this function exists to stop — a `@rename`
 /// that renames nothing is a line the author wrote to fix a collision, which
 /// then still collides, and the diagnostic they get is about the collision they
@@ -575,7 +581,12 @@ pub fn lower_to_hir<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> HirF
 /// A binding whose document could not be read is NOT reported here. It has
 /// already been reported, as a `ShapeBindError`, against the binding itself; a
 /// second message per rename would be N messages about one missing file.
-fn check_renames(db: &dyn fossil_base::Db, file: SourceFile, type_def: &fossil_syntax::SyntaxNode) {
+fn check_renames(
+    db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
+    file: SourceFile,
+    type_def: &fossil_syntax::SyntaxNode,
+) {
     use fossil_syntax::SyntaxKind;
 
     let renames = crate::def_map::parse_renames(type_def);
@@ -622,7 +633,7 @@ fn check_renames(db: &dyn fossil_base::Db, file: SourceFile, type_def: &fossil_s
                 |s| format!("did you mean `{s}`?"),
             );
             diagnose(
-                db,
+                sink,
                 node,
                 Problem::RenameUnknownType {
                     shape: r.type_name.to_string(),
@@ -684,7 +695,7 @@ fn check_renames(db: &dyn fossil_base::Db, file: SourceFile, type_def: &fossil_s
             |s| format!("did you mean `{s}`?"),
         );
         diagnose(
-            db,
+            sink,
             node,
             Problem::RenameUnknownPredicate {
                 shape: r.type_name.to_string(),
@@ -722,6 +733,7 @@ fn check_renames(db: &dyn fossil_base::Db, file: SourceFile, type_def: &fossil_s
 /// always been — the `fossil providers` listing.
 fn check_provider(
     db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     node: &fossil_syntax::SyntaxNode,
     wanted: fossil_base::Capability,
 ) {
@@ -741,7 +753,7 @@ fn check_provider(
         // `resolve_source`, which already has a message for it.
         if constructor.starts_with(fossil_base::CONSTRUCTOR_PREFIX) {
             diagnose_item(
-                db,
+                sink,
                 node,
                 Problem::UnknownProvider {
                     constructor: constructor.to_string(),
@@ -753,7 +765,7 @@ fn check_provider(
     };
     if !row.provides(wanted) {
         diagnose_item(
-            db,
+            sink,
             node,
             Problem::WrongCapability {
                 constructor: row.constructor(),
@@ -768,7 +780,7 @@ fn check_provider(
         && !row.accepts(&uri)
     {
         diagnose_item(
-            db,
+            sink,
             node,
             Problem::WrongExtension {
                 constructor: row.constructor(),
@@ -777,7 +789,7 @@ fn check_provider(
             Some(crate::refusals::decline_extension(row, &uri)),
         );
     }
-    check_reader_option(db, node, &constructor);
+    check_reader_option(sink, node, &constructor);
 }
 
 /// **The reader option a source header wrote, checked against the row that has
@@ -805,7 +817,7 @@ fn check_provider(
 /// position goes through [`place_args`] and `crate::check`, which already
 /// resolve a named argument against the signature.
 fn check_reader_option(
-    db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     node: &fossil_syntax::SyntaxNode,
     constructor: &SmolStr,
 ) {
@@ -813,7 +825,7 @@ fn check_reader_option(
     if let Some(arg) = crate::def_map::parse_reader_option(node, Some(constructor)) {
         let Some(value) = arg.value else {
             emit_item(
-                db,
+                sink,
                 arg.span,
                 Problem::InvalidReaderOption {
                     option: arg.name.to_string(),
@@ -826,7 +838,7 @@ fn check_reader_option(
         };
         if value.len() != 1 {
             emit_item(
-                db,
+                sink,
                 arg.span,
                 Problem::InvalidReaderOption {
                     option: arg.name.to_string(),
@@ -848,7 +860,7 @@ fn check_reader_option(
     for (name, owner) in crate::def_map::reader_option_names() {
         if let Some((_, span)) = written.iter().find(|(n, _)| n == name) {
             emit_item(
-                db,
+                sink,
                 *span,
                 Problem::ForeignReaderOption {
                     option: name.to_string(),
@@ -909,7 +921,11 @@ fn answers_about(
 /// The span is the ARGUMENT's, not the binding's — `crate::def_map::SchemaArg`
 /// carries it out of `crate::def_map::parse_schema_arg`, the one reader of
 /// this argument.
-fn check_schema_arg(db: &dyn fossil_base::Db, node: &fossil_syntax::SyntaxNode) {
+fn check_schema_arg(
+    db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
+    node: &fossil_syntax::SyntaxNode,
+) {
     let Some(arg) = crate::def_map::parse_schema_arg(node) else {
         return;
     };
@@ -919,7 +935,7 @@ fn check_schema_arg(db: &dyn fossil_base::Db, node: &fossil_syntax::SyntaxNode) 
     }
     let Some(constructor) = arg.provider else {
         emit_item(
-            db,
+            sink,
             arg.span,
             Problem::BareDocumentPath {
                 document: arg.document.map_or_else(|| "schema".to_string(), |d| d.to_string()),
@@ -932,7 +948,7 @@ fn check_schema_arg(db: &dyn fossil_base::Db, node: &fossil_syntax::SyntaxNode) 
     };
     let Some(row) = fossil_base::provider(table, &constructor) else {
         emit_item(
-            db,
+            sink,
             arg.span,
             Problem::UnknownProvider {
                 constructor: constructor.to_string(),
@@ -944,7 +960,7 @@ fn check_schema_arg(db: &dyn fossil_base::Db, node: &fossil_syntax::SyntaxNode) 
     let types = fossil_base::Capability::ReadTypes;
     if !row.provides(types) {
         emit_item(
-            db,
+            sink,
             arg.span,
             Problem::WrongCapability {
                 constructor: row.constructor(),
@@ -958,7 +974,7 @@ fn check_schema_arg(db: &dyn fossil_base::Db, node: &fossil_syntax::SyntaxNode) 
         && !row.accepts(&document)
     {
         emit_item(
-            db,
+            sink,
             arg.span,
             Problem::WrongExtension {
                 constructor: row.constructor(),
@@ -1002,6 +1018,7 @@ fn check_schema_arg(db: &dyn fossil_base::Db, node: &fossil_syntax::SyntaxNode) 
 /// two were told apart by which `SyntaxKind` the parser happened to build.
 fn lower_source_pipe(
     db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     source_def: &fossil_syntax::SyntaxNode,
     types: &[SmolStr],
 ) -> Option<HirSourcePipe> {
@@ -1019,7 +1036,14 @@ fn lower_source_pipe(
         .children()
         .next()?;
 
-    lower_pipe_expr(db, &rhs, name, crate::def_map::item_span(source_def), types)
+    lower_pipe_expr(
+        db,
+        sink,
+        &rhs,
+        name,
+        crate::def_map::item_span(source_def),
+        types,
+    )
 }
 
 /// The `from` clause of a mapping header, when it derives a relation rather than
@@ -1033,6 +1057,7 @@ fn lower_source_pipe(
 /// nothing.
 fn lower_from_pipe(
     db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     mapping: &fossil_syntax::SyntaxNode,
     mapping_name: &SmolStr,
     types: &[SmolStr],
@@ -1049,6 +1074,7 @@ fn lower_from_pipe(
         .next()?;
     lower_pipe_expr(
         db,
+        sink,
         &rhs,
         mapping_name.clone(),
         crate::def_map::item_span(&header),
@@ -1063,6 +1089,7 @@ fn lower_from_pipe(
 /// them one production and two walks would be two answers to one question.
 fn lower_pipe_expr(
     db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     rhs: &fossil_syntax::SyntaxNode,
     name: SmolStr,
     span: Span,
@@ -1105,7 +1132,7 @@ fn lower_pipe_expr(
 
     let mut ops = Vec::with_capacity(stages.len());
     for (verb, call) in &stages {
-        match lower_source_stage(db, verb, call, &name, &base, types) {
+        match lower_source_stage(db, sink, verb, call, &name, &base, types) {
             Some(op) => ops.push(op),
             // **A stage that did not lower must not delete the binding.**
             // `Working := Row.where(not Row.faulty)` — `not` has no `HirExpr`
@@ -1189,7 +1216,7 @@ fn named_arg_name(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
 /// every `Receiver::Relation` row, out of [`SigSpec`] — which is what a
 /// signature was already for on the scalar side.
 fn bind_stage_args<'a>(
-    db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     row: &'a crate::stdlib::RegistryEntry,
     stage: &fossil_syntax::SyntaxNode,
     pipe: &str,
@@ -1255,7 +1282,7 @@ fn bind_stage_args<'a>(
                 None if param.arity == Arity::Optional => Vec::new(),
                 None => {
                     diagnose(
-                        db,
+                        sink,
                         stage,
                         Problem::StageArity {
                             verb: row.member.to_string(),
@@ -1283,7 +1310,7 @@ fn bind_stage_args<'a>(
             || param.arity == Arity::Optional;
         if !filled {
             diagnose(
-                db,
+                sink,
                 stage,
                 Problem::StageArity {
                     verb: row.member.to_string(),
@@ -1299,7 +1326,7 @@ fn bind_stage_args<'a>(
 
     if let Some(extra) = positional.pop_front() {
         diagnose(
-            db,
+            sink,
             &extra,
             Problem::StageArity {
                 verb: row.member.to_string(),
@@ -1324,15 +1351,22 @@ impl BoundArgs<'_> {
     /// The three readers below are chosen by the row's [`SigTy`]: a `Column` is
     /// read as a name and a `Predicate` as an expression, and which one applies
     /// is the row's to say rather than the arm's.
-    fn value(&self, db: &dyn fossil_base::Db, i: usize, types: &[SmolStr]) -> Option<HirExpr> {
+    fn value(
+        &self,
+        db: &dyn fossil_base::Db,
+        sink: &mut Diagnostics,
+        i: usize,
+        types: &[SmolStr],
+    ) -> Option<HirExpr> {
         let (_, nodes) = self.slots.get(i)?;
-        lower_expr_inner(db, nodes.first()?, types)
+        lower_expr_inner(db, sink, nodes.first()?, types)
     }
 
     /// The column names at declared position `i`, qualified by their bindings.
     fn columns(
         &self,
         db: &dyn fossil_base::Db,
+        sink: &mut Diagnostics,
         i: usize,
         pipe: &str,
         base: &SmolStr,
@@ -1341,10 +1375,11 @@ impl BoundArgs<'_> {
         let (param, nodes) = self.slots.get(i)?;
         let mut cols = Vec::with_capacity(nodes.len());
         for node in nodes {
-            let Some(HirExpr::ColumnRef { binding, column }) = lower_expr_inner(db, node, types)
+            let Some(HirExpr::ColumnRef { binding, column }) =
+                lower_expr_inner(db, sink, node, types)
             else {
                 diagnose(
-                    db,
+                    sink,
                     node,
                     Problem::InvalidStageArgument {
                         parameter: param.name.to_string(),
@@ -1370,6 +1405,7 @@ impl BoundArgs<'_> {
     fn aggregations(
         &self,
         db: &dyn fossil_base::Db,
+        sink: &mut Diagnostics,
         i: usize,
         pipe: &str,
         base: &SmolStr,
@@ -1381,9 +1417,10 @@ impl BoundArgs<'_> {
         for node in nodes {
             let name = named_arg_name(node)?;
             let value = node.children().next()?;
-            let Some(HirExpr::Call { func, args, .. }) = lower_expr_inner(db, &value, types) else {
+            let Some(HirExpr::Call { func, args, .. }) = lower_expr_inner(db, sink, &value, types)
+            else {
                 diagnose(
-                    db,
+                    sink,
                     &value,
                     Problem::NotAnAggregate {
                         name: name.to_string(),
@@ -1400,7 +1437,7 @@ impl BoundArgs<'_> {
                 .and_then(|r| r.agg_fn().map(|_| r))
             else {
                 diagnose(
-                    db,
+                    sink,
                     &value,
                     Problem::NotAnAggregate {
                         name: name.to_string(),
@@ -1421,7 +1458,7 @@ impl BoundArgs<'_> {
             };
             let [HirExpr::ColumnRef { binding, column }] = args.as_slice() else {
                 diagnose(
-                    db,
+                    sink,
                     &value,
                     Problem::InvalidStageArgument {
                         parameter: name.to_string(),
@@ -1447,7 +1484,7 @@ impl BoundArgs<'_> {
     /// The binding named at declared position `i`, with its `X as Y` alias.
     fn binding(
         &self,
-        db: &dyn fossil_base::Db,
+        sink: &mut Diagnostics,
         i: usize,
         pipe: &str,
     ) -> Option<(SmolStr, Option<SmolStr>)> {
@@ -1458,7 +1495,7 @@ impl BoundArgs<'_> {
         let node = nodes.first()?;
         let Some(name) = bare_name(node) else {
             diagnose(
-                db,
+                sink,
                 node,
                 Problem::InvalidStageArgument {
                     parameter: param.name.to_string(),
@@ -1570,6 +1607,7 @@ fn example_call(row: &crate::stdlib::RegistryEntry, base: &SmolStr) -> String {
 /// verbs named rather than swept into a wildcard. Adding a variant is a compile error here and nowhere else.
 fn lower_source_stage(
     db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     verb: &SmolStr,
     stage: &fossil_syntax::SyntaxNode,
     pipe: &str,
@@ -1580,7 +1618,7 @@ fn lower_source_stage(
 
     let Some(row) = stdlib().lookup_member(Receiver::Relation, verb) else {
         diagnose(
-            db,
+            sink,
             stage,
             Problem::UnknownVerb {
                 verb: verb.to_string(),
@@ -1596,16 +1634,16 @@ fn lower_source_stage(
         unreachable!("`{verb}` is a Relation row with a scalar lowering")
     };
 
-    let bound = bind_stage_args(db, row, stage, pipe, base)?;
+    let bound = bind_stage_args(sink, row, stage, pipe, base)?;
 
     match op {
-        PlanOp::Where => Some(HirSourceOp::Where(bound.value(db, 0, types)?)),
+        PlanOp::Where => Some(HirSourceOp::Where(bound.value(db, sink, 0, types)?)),
         PlanOp::Select => Some(HirSourceOp::Select(
-            bound.columns(db, 0, pipe, base, types)?,
+            bound.columns(db, sink, 0, pipe, base, types)?,
         )),
         PlanOp::Join => {
-            let (right, alias) = bound.binding(db, 0, pipe)?;
-            let on = bound.value(db, 1, types)?;
+            let (right, alias) = bound.binding(sink, 0, pipe)?;
+            let on = bound.value(db, sink, 1, types)?;
             Some(HirSourceOp::Join { right, alias, on })
         }
         PlanOp::Distinct => Some(HirSourceOp::Distinct),
@@ -1615,15 +1653,15 @@ fn lower_source_stage(
         // aggregation at all, which is the rule that keeps this verb from
         // being a second spelling of `select(…).distinct()`.
         PlanOp::GroupBy => {
-            let keys = bound.columns(db, 0, pipe, base, types)?;
-            let aggs = bound.aggregations(db, 1, pipe, base, types)?;
+            let keys = bound.columns(db, sink, 0, pipe, base, types)?;
+            let aggs = bound.aggregations(db, sink, 1, pipe, base, types)?;
             Some(HirSourceOp::GroupBy { keys, aggs })
         }
         PlanOp::Union => {
-            let (right, alias) = bound.binding(db, 0, pipe)?;
+            let (right, alias) = bound.binding(sink, 0, pipe)?;
             if let Some(alias) = alias {
                 diagnose(
-                    db,
+                    sink,
                     stage,
                     Problem::UnionAlias {
                         pipeline: pipe.to_string(),
@@ -1639,7 +1677,7 @@ fn lower_source_stage(
         // is not one of them, so no program reaches this arm.
         PlanOp::Source => {
             diagnose(
-                db,
+                sink,
                 stage,
                 Problem::Bug {
                     what: format!("`{verb}` reached a pipeline of `{pipe}` as a stage"),
@@ -1747,21 +1785,20 @@ fn bare_name(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
 /// walks the whole-file CST and its offsets are already file-absolute:
 /// [`diagnose_item`].
 fn diagnose(
-    db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     node: &fossil_syntax::SyntaxNode,
     problem: Problem,
     help: Option<String>,
 ) {
     let range = node.text_range();
-    with_help(
+    sink.push(with_help(
         Diagnostic::new(
             Severity::Error,
             problem,
             Span::new(range.start().into(), range.end().into()),
         ),
         help,
-    )
-    .accumulate(db);
+    ));
 }
 
 fn with_help(d: Diagnostic, help: Option<String>) -> Diagnostic {
@@ -1786,14 +1823,14 @@ fn with_help(d: Diagnostic, help: Option<String>) -> Diagnostic {
 /// resets to zero. Different frame, different emitter, and not in this
 /// module.
 fn diagnose_item(
-    db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     node: &fossil_syntax::SyntaxNode,
     problem: Problem,
     help: Option<String>,
 ) {
     let range = node.text_range();
     emit_item(
-        db,
+        sink,
         Span::new(range.start().into(), range.end().into()),
         problem,
         help,
@@ -1802,10 +1839,8 @@ fn diagnose_item(
 
 /// [`diagnose_item`] for a span that is not a whole node — an argument inside a
 /// call, whose extent the node it was read from gives.
-fn emit_item(db: &dyn fossil_base::Db, span: Span, problem: Problem, help: Option<String>) {
-    with_help(Diagnostic::new(Severity::Error, problem, span), help)
-        .file_absolute()
-        .accumulate(db);
+fn emit_item(sink: &mut Diagnostics, span: Span, problem: Problem, help: Option<String>) {
+    sink.push(with_help(Diagnostic::new(Severity::Error, problem, span), help).file_absolute());
 }
 
 /// A `MAPPING` node whose header this cannot read: report it once, keep the
@@ -1823,7 +1858,7 @@ fn emit_item(db: &dyn fossil_base::Db, span: Span, problem: Problem, help: Optio
 /// `MAPPING` node, because the body under it is still checked —
 /// `fossil_mir::lower_to_mir_pg` forces `crate::body::body` before it poisons.
 fn decline_mapping(
-    db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     node: &fossil_syntax::SyntaxNode,
     why: &str,
 ) -> fossil_base::ErrorGuaranteed {
@@ -1831,8 +1866,7 @@ fn decline_mapping(
         .children()
         .find(|c| c.kind() == fossil_syntax::SyntaxKind::MAPPING_HEADER)
         .map_or_else(|| node.text_range(), |h| h.text_range());
-    fossil_base::raise(
-        db,
+    sink.raise(
         Diagnostic::new(
             Severity::Error,
             Problem::InvalidMappingHeader {
@@ -1865,6 +1899,7 @@ fn decline_mapping(
 /// expansion the program spelled out.
 fn lower_mapping_node<'db>(
     db: &'db dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     node: &fossil_syntax::SyntaxNode,
     dm: crate::def_map::DefMap<'db>,
 ) -> Result<HirMapping, fossil_base::ErrorGuaranteed> {
@@ -1873,7 +1908,7 @@ fn lower_mapping_node<'db>(
     let header = node
         .children()
         .find(|c| c.kind() == SyntaxKind::MAPPING_HEADER)
-        .ok_or_else(|| decline_mapping(db, node, "there is no header here"))?;
+        .ok_or_else(|| decline_mapping(sink, node, "there is no header here"))?;
     // Properties are NOT collected here — the body() Salsa
     // query owns them. The MAPPING_BODY's presence is no longer required for
     // a successful header lowering; an empty-bodied mapping is still a valid
@@ -1898,7 +1933,7 @@ fn lower_mapping_node<'db>(
         .filter_map(fossil_syntax::SyntaxElement::into_token)
         .find(|t| t.kind() == SyntaxKind::IDENT)
         .map(|t| SmolStr::from(t.text()))
-        .ok_or_else(|| decline_mapping(db, node, "it names nothing"))?;
+        .ok_or_else(|| decline_mapping(sink, node, "it names nothing"))?;
 
     // ShapeExpr → its one IDENT: the shape's NAME (grammar.bnf, ShapeExpr).
     // There is no `IRI_EXPR` under it any more and no prefix to expand — the
@@ -1911,7 +1946,7 @@ fn lower_mapping_node<'db>(
     let shape_expr = header
         .children()
         .find(|c| c.kind() == SyntaxKind::SHAPE_EXPR)
-        .ok_or_else(|| decline_mapping(db, node, "there is no `: Shape` after the name"))?;
+        .ok_or_else(|| decline_mapping(sink, node, "there is no `: Shape` after the name"))?;
     let Some(shape_name) = shape_expr
         .children_with_tokens()
         .filter_map(fossil_syntax::SyntaxElement::into_token)
@@ -1928,7 +1963,7 @@ fn lower_mapping_node<'db>(
             name,
             shape_iri: SmolStr::default(),
             source_binding: source_binding_of(&header)
-                .ok_or_else(|| decline_mapping(db, node, "it reads `from` nothing"))?,
+                .ok_or_else(|| decline_mapping(sink, node, "it reads `from` nothing"))?,
         });
     };
 
@@ -1951,7 +1986,7 @@ fn lower_mapping_node<'db>(
         // `spans::rebase_to_file` would shift it by the mapping's own start —
         // zero for the first mapping in a file, and wrong for every one after.
         let (problem, help) = unbound_shape_problem(db, dm, &shape_name);
-        diagnose_item(db, &shape_expr, problem, help);
+        diagnose_item(sink, &shape_expr, problem, help);
         SmolStr::default()
     });
 
@@ -1959,7 +1994,7 @@ fn lower_mapping_node<'db>(
         name,
         shape_iri,
         source_binding: source_binding_of(&header)
-            .ok_or_else(|| decline_mapping(db, node, "it reads `from` nothing"))?,
+            .ok_or_else(|| decline_mapping(sink, node, "it reads `from` nothing"))?,
     })
 }
 
@@ -2109,14 +2144,16 @@ fn source_binding_of(header: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
 /// matches on it.
 pub(crate) fn lower_property_public(
     db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     node: &fossil_syntax::SyntaxNode,
     types: &[SmolStr],
 ) -> Option<HirProperty> {
-    lower_property(db, node, types)
+    lower_property(db, sink, node, types)
 }
 
 fn lower_property(
     db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     node: &fossil_syntax::SyntaxNode,
     types: &[SmolStr],
 ) -> Option<HirProperty> {
@@ -2131,7 +2168,12 @@ fn lower_property(
         .children()
         .find(|c| c.kind() == SyntaxKind::PROPERTY_LHS)
     else {
-        diagnose(db, node, Problem::InvalidPropertyName { name: None }, None);
+        diagnose(
+            sink,
+            node,
+            Problem::InvalidPropertyName { name: None },
+            None,
+        );
         return None;
     };
     // Use `descendants_with_tokens` so nested IDENT/SHAPE_SEP tokens are still
@@ -2159,7 +2201,7 @@ fn lower_property(
             if t.text() != fossil_syntax::attr::SUBJECT {
                 let name = t.text();
                 diagnose(
-                    db,
+                    sink,
                     &lhs_node,
                     Problem::MisplacedAttribute {
                         attribute: name.to_string(),
@@ -2178,7 +2220,7 @@ fn lower_property(
         [t] if t.kind() == SyntaxKind::IDENT => PropertyKey::Name(SmolStr::from(t.text())),
         _ => {
             diagnose(
-                db,
+                sink,
                 &lhs_node,
                 Problem::InvalidPropertyName {
                     name: Some(lhs_node.text().to_string().trim().to_string()),
@@ -2193,7 +2235,7 @@ fn lower_property(
     // syntax error when there is none, so a PROPERTY with no EXPR is fossil's.
     let Some(expr_node) = node.children().find(|c| c.kind() == SyntaxKind::EXPR) else {
         diagnose(
-            db,
+            sink,
             node,
             Problem::Bug {
                 what: "a property reached lowering with no value".to_string(),
@@ -2204,7 +2246,7 @@ fn lower_property(
     };
     // `lower_expr` reports its own refusals — every arm that returns `None`
     // there emits first, which is what makes this `?` silent-free.
-    let value = lower_expr(db, &expr_node, types)?;
+    let value = lower_expr(db, sink, &expr_node, types)?;
 
     Some(HirProperty { key, value })
 }
@@ -2237,12 +2279,13 @@ fn lower_property(
 /// data.
 fn lower_expr(
     db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     expr_node: &fossil_syntax::SyntaxNode,
     types: &[SmolStr],
 ) -> Option<HirExpr> {
     let Some(inner) = expr_node.children().next() else {
         diagnose(
-            db,
+            sink,
             expr_node,
             Problem::Bug {
                 what: "an expression reached lowering empty".to_string(),
@@ -2251,7 +2294,7 @@ fn lower_expr(
         );
         return None;
     };
-    lower_expr_inner(db, &inner, types)
+    lower_expr_inner(db, sink, &inner, types)
 }
 
 /// Lower an expression node that is already unwrapped from its `EXPR` parent.
@@ -2280,6 +2323,7 @@ fn unescape_braces(text: &str) -> SmolStr {
 /// above it.
 fn lower_expr_inner(
     db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     inner: &fossil_syntax::SyntaxNode,
     types: &[SmolStr],
 ) -> Option<HirExpr> {
@@ -2287,8 +2331,8 @@ fn lower_expr_inner(
 
     let inner = inner.clone();
     match inner.kind() {
-        SyntaxKind::POSTFIX_EXPR => lower_postfix(db, &inner, types),
-        SyntaxKind::BINARY_EXPR => lower_binary(db, &inner, types),
+        SyntaxKind::POSTFIX_EXPR => lower_postfix(db, sink, &inner, types),
+        SyntaxKind::BINARY_EXPR => lower_binary(db, sink, &inner, types),
         // Grouping is not a form. `(.a and .b)` means what `.a and .b` means,
         // so the parens are tokens and the one child node is the whole of it.
         //
@@ -2301,9 +2345,9 @@ fn lower_expr_inner(
         SyntaxKind::PAREN_EXPR => inner
             .children()
             .next()
-            .and_then(|grouped| lower_expr_inner(db, &grouped, types)),
-        SyntaxKind::TERNARY_EXPR => lower_ternary(db, &inner, types),
-        SyntaxKind::UNARY_EXPR => lower_unary(db, &inner, types),
+            .and_then(|grouped| lower_expr_inner(db, sink, &grouped, types)),
+        SyntaxKind::TERNARY_EXPR => lower_ternary(db, sink, &inner, types),
+        SyntaxKind::UNARY_EXPR => lower_unary(db, sink, &inner, types),
         SyntaxKind::INTERP_STRING_EXPR => {
             let mut parts = Vec::new();
             for child in inner.children_with_tokens() {
@@ -2319,7 +2363,9 @@ fn lower_expr_inner(
                         // The hole's expression is the one node inside it; the
                         // braces are tokens. A hole that failed to parse leaves
                         // no node, and its diagnostic is already recorded.
-                        let hole = n.children().find_map(|e| lower_expr_inner(db, &e, types))?;
+                        let hole = n
+                            .children()
+                            .find_map(|e| lower_expr_inner(db, sink, &e, types))?;
                         parts.push(InterpolationPart::Hole(hole));
                     }
                     _ => {}
@@ -2359,7 +2405,7 @@ fn lower_expr_inner(
                 return match n.text().replace('_', "").parse::<i64>() {
                     Ok(v) => Some(HirExpr::IntLit(v)),
                     Err(e) => {
-                        Diagnostic::new(
+                        sink.push(Diagnostic::new(
                             Severity::Error,
                             Problem::NumberOutOfRange {
                                 literal: n.text().to_string(),
@@ -2367,8 +2413,7 @@ fn lower_expr_inner(
                                 reason: e.to_string(),
                             },
                             span,
-                        )
-                        .accumulate(db);
+                        ));
                         None
                     }
                 };
@@ -2384,7 +2429,7 @@ fn lower_expr_inner(
                 return match digits.parse::<f64>() {
                     Ok(v) => Some(HirExpr::FloatLit(FloatBits::new(v))),
                     Err(e) => {
-                        Diagnostic::new(
+                        sink.push(Diagnostic::new(
                             Severity::Error,
                             Problem::NumberOutOfRange {
                                 literal: f.text().to_string(),
@@ -2392,8 +2437,7 @@ fn lower_expr_inner(
                                 reason: e.to_string(),
                             },
                             span,
-                        )
-                        .accumulate(db);
+                        ));
                         None
                     }
                 };
@@ -2432,14 +2476,13 @@ fn lower_expr_inner(
                 let range = inner.text_range();
                 let span = Span::new(range.start().into(), range.end().into());
                 let text = inner.text().to_string();
-                Diagnostic::new(
+                sink.push(Diagnostic::new(
                     Severity::Error,
                     Problem::UnsupportedExpression {
                         expression: text.trim().to_string(),
                     },
                     span,
-                )
-                .accumulate(db);
+                ));
                 None
             }
         }
@@ -2448,18 +2491,19 @@ fn lower_expr_inner(
             let span = Span::new(range.start().into(), range.end().into());
             let source = inner.text().to_string();
             let source = source.trim();
-            Diagnostic::new(
-                Severity::Error,
-                Problem::UnsupportedExpression {
-                    expression: source.to_string(),
-                },
-                span,
-            )
-            .with_help(format!(
-                "a property value may be a template, a field reference, a string literal or a \
+            sink.push(
+                Diagnostic::new(
+                    Severity::Error,
+                    Problem::UnsupportedExpression {
+                        expression: source.to_string(),
+                    },
+                    span,
+                )
+                .with_help(format!(
+                    "a property value may be a template, a field reference, a string literal or a \
                  call (parsed as {other:?})"
-            ))
-            .accumulate(db);
+                )),
+            );
             None
         }
     }
@@ -2478,6 +2522,7 @@ fn lower_expr_inner(
 /// `0 - x` / `x == false`.
 fn lower_unary(
     db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     node: &fossil_syntax::SyntaxNode,
     types: &[SmolStr],
 ) -> Option<HirExpr> {
@@ -2492,7 +2537,7 @@ fn lower_unary(
             _ => None,
         })?;
 
-    let operand = lower_expr_inner(db, &node.children().next()?, types)?;
+    let operand = lower_expr_inner(db, sink, &node.children().next()?, types)?;
     Some(HirExpr::UnaryOp {
         op,
         operand: Box::new(operand),
@@ -2507,6 +2552,7 @@ fn lower_unary(
 /// is not a ternary the HIR can carry.
 fn lower_ternary(
     db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     node: &fossil_syntax::SyntaxNode,
     types: &[SmolStr],
 ) -> Option<HirExpr> {
@@ -2520,20 +2566,19 @@ fn lower_ternary(
         let range = node.text_range();
         let span = Span::new(range.start().into(), range.end().into());
         let source = node.text().to_string();
-        Diagnostic::new(
+        sink.push(Diagnostic::new(
             Severity::Error,
             Problem::IncompleteConditional {
                 expression: source.trim().to_string(),
             },
             span,
-        )
-        .accumulate(db);
+        ));
         return None;
     }
 
-    let cond = lower_expr_inner(db, &parts[0], types)?;
-    let then = lower_expr_inner(db, &parts[1], types)?;
-    let otherwise = lower_expr_inner(db, &parts[2], types)?;
+    let cond = lower_expr_inner(db, sink, &parts[0], types)?;
+    let then = lower_expr_inner(db, sink, &parts[1], types)?;
+    let otherwise = lower_expr_inner(db, sink, &parts[2], types)?;
     Some(HirExpr::Ternary {
         cond: Box::new(cond),
         then: Box::new(then),
@@ -2555,6 +2600,7 @@ fn lower_ternary(
 /// number, which is why `arithmetic` spells it.
 fn lower_binary(
     db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     node: &fossil_syntax::SyntaxNode,
     types: &[SmolStr],
 ) -> Option<HirExpr> {
@@ -2609,7 +2655,7 @@ fn lower_binary(
         // fourteenth operator added to the parser and forgotten here should
         // say so rather than be silently dropped.
         other => {
-            Diagnostic::new(
+            sink.push(Diagnostic::new(
                 Severity::Error,
                 Problem::UnsupportedExpression { expression: source },
                 span,
@@ -2617,8 +2663,8 @@ fn lower_binary(
             .with_help(format!(
                 "`{}` has no lowering ({other:?}); a compiler gap, not a mistake in the program",
                 op_token.text()
-            ))
-            .accumulate(db);
+            )))
+            ;
             return None;
         }
     };
@@ -2626,8 +2672,8 @@ fn lower_binary(
     let mut operands = node.children();
     let lhs_node = operands.next()?;
     let rhs_node = operands.next()?;
-    let lhs = lower_expr_inner(db, &lhs_node, types)?;
-    let rhs = lower_expr_inner(db, &rhs_node, types)?;
+    let lhs = lower_expr_inner(db, sink, &lhs_node, types)?;
+    let rhs = lower_expr_inner(db, sink, &rhs_node, types)?;
 
     Some(HirExpr::BinOp {
         op,
@@ -2645,6 +2691,7 @@ fn lower_binary(
 /// hold an `LPAREN`", and the callee's dotted name is read off the chain below.
 fn lower_postfix(
     db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     node: &fossil_syntax::SyntaxNode,
     types: &[SmolStr],
 ) -> Option<HirExpr> {
@@ -2693,30 +2740,30 @@ fn lower_postfix(
                 .next()
                 .is_none()
         {
-            Diagnostic::new(
+            sink.push(Diagnostic::new(
                 Severity::Error,
                 Problem::DottedColumn {
                     reference: source,
                     quoted: crate::display::column_ref(head, column),
                 },
                 span,
-            )
-            .accumulate(db);
+            ));
             return None;
         }
 
         // `name = str.slug` — a function named but never applied. v0.1 has
         // no function values: partial application is not in the grammar, so
         // this is an error, not a value that quietly becomes text.
-        Diagnostic::new(
-            Severity::Error,
-            Problem::UncalledFunction {
-                function: source.to_string(),
-            },
-            span,
-        )
-        .with_help(format!("write `{source}(...)` with its arguments"))
-        .accumulate(db);
+        sink.push(
+            Diagnostic::new(
+                Severity::Error,
+                Problem::UncalledFunction {
+                    function: source.to_string(),
+                },
+                span,
+            )
+            .with_help(format!("write `{source}(...)` with its arguments")),
+        );
         return None;
     }
 
@@ -2748,51 +2795,58 @@ fn lower_postfix(
         match candidates.as_slice() {
             [entry] => {
                 let name = entry.name.clone();
-                let recv = lower_expr_inner(db, &recv_node, types)?;
+                let recv = lower_expr_inner(db, sink, &recv_node, types)?;
                 // The receiver already occupies parameter 0, so the written
                 // arguments start at 1 — which is exactly what a named argument
                 // has to know to refuse `x.trim(text = y)` as a value given
                 // twice rather than accept it as a second `text`.
                 let mut args = vec![recv];
-                args.extend(place_args(db, node, types, Some(&entry.sig), &name, 1)?);
+                args.extend(place_args(
+                    db,
+                    sink,
+                    node,
+                    types,
+                    Some(&entry.sig),
+                    &name,
+                    1,
+                )?);
                 return Some(HirExpr::Call { func: name, args });
             }
             [] => {
-                Diagnostic::new(
+                sink.push(Diagnostic::new(
                     Severity::Error,
                     Problem::UnknownFunction {
                         function: member.to_string(),
                         unknown_namespace: None,
                     },
                     span,
-                )
-                .accumulate(db);
+                ));
                 return None;
             }
             // No two catalogue rows share a member name for one receiver, so
             // a second candidate is a catalogue fossil shipped wrong.
             many => {
-                Diagnostic::new(
+                sink.push(Diagnostic::new(
                     Severity::Error,
                     Problem::Bug {
                         what: format!("`.{member}` is a member of {} catalogue rows", many.len()),
                     },
                     span,
-                )
-                .accumulate(db);
+                ));
                 return None;
             }
         }
     }
 
     let Some(func) = dotted_name(&callee) else {
-        Diagnostic::new(
-            Severity::Error,
-            Problem::InvalidCallee { callee: source },
-            span,
-        )
-        .with_help("e.g. `str.trim(User.name)`")
-        .accumulate(db);
+        sink.push(
+            Diagnostic::new(
+                Severity::Error,
+                Problem::InvalidCallee { callee: source },
+                span,
+            )
+            .with_help("e.g. `str.trim(User.name)`"),
+        );
         return None;
     };
 
@@ -2815,7 +2869,7 @@ fn lower_postfix(
             .lookup(func.as_str())
             .map(|e| &e.sig)
     };
-    let args = place_args(db, node, types, sig, &func, 0)?;
+    let args = place_args(db, sink, node, types, sig, &func, 0)?;
 
     if is_edge {
         return Some(HirExpr::Edge {
@@ -2853,6 +2907,7 @@ fn lower_postfix(
 /// reported as an arity error against a call the author did not write.
 fn place_args(
     db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     call_node: &fossil_syntax::SyntaxNode,
     types: &[SmolStr],
     sig: Option<&crate::stdlib::SigSpec>,
@@ -2861,17 +2916,19 @@ fn place_args(
 ) -> Option<Vec<HirExpr>> {
     use fossil_syntax::SyntaxKind;
 
-    let emit = |node: &fossil_syntax::SyntaxNode, problem: Problem, help: Option<String>| {
+    let emit = |sink: &mut Diagnostics,
+                node: &fossil_syntax::SyntaxNode,
+                problem: Problem,
+                help: Option<String>| {
         let r = node.text_range();
-        with_help(
+        sink.push(with_help(
             Diagnostic::new(
                 Severity::Error,
                 problem,
                 Span::new(r.start().into(), r.end().into()),
             ),
             help,
-        )
-        .accumulate(db);
+        ));
     };
 
     let Some(list) = call_node
@@ -2903,6 +2960,7 @@ fn place_args(
                 let name = name.text().to_string();
                 let Some(sig) = sig else {
                     emit(
+                        sink,
                         &arg,
                         Problem::NamedOnEdge {
                             argument: arg.text().to_string().trim().to_string(),
@@ -2917,6 +2975,7 @@ fn place_args(
                     let suggestion =
                         crate::didyoumean::did_you_mean(&name, available.iter().copied());
                     emit(
+                        sink,
                         &arg,
                         Problem::UnknownParameter {
                             function: func.to_string(),
@@ -2929,6 +2988,7 @@ fn place_args(
                 };
                 if at < offset {
                     emit(
+                        sink,
                         &arg,
                         Problem::DuplicateArgument {
                             function: func.to_string(),
@@ -2941,6 +3001,7 @@ fn place_args(
                 }
                 if slots.get(at).is_some_and(Option::is_some) {
                     emit(
+                        sink,
                         &arg,
                         Problem::DuplicateArgument {
                             function: func.to_string(),
@@ -2955,12 +3016,13 @@ fn place_args(
                     .children()
                     .find(|c| c.kind() != SyntaxKind::ERROR)
                     .as_ref()
-                    .and_then(|n| lower_expr_inner(db, n, types))?;
+                    .and_then(|n| lower_expr_inner(db, sink, n, types))?;
                 put(&mut slots, at, inner);
                 first_named.get_or_insert(name);
             }
             SyntaxKind::ALIAS_ARG => {
                 emit(
+                    sink,
                     &arg,
                     Problem::AliasInValueCall {
                         alias: arg.text().to_string().trim().to_string(),
@@ -2973,6 +3035,7 @@ fn place_args(
             _ => {
                 if let Some(named) = &first_named {
                     emit(
+                        sink,
                         &arg,
                         Problem::PositionalAfterNamed {
                             argument: arg.text().to_string().trim().to_string(),
@@ -2993,7 +3056,7 @@ fn place_args(
                 put(
                     &mut slots,
                     next_positional,
-                    lower_expr_inner(db, &inner, types)?,
+                    lower_expr_inner(db, sink, &inner, types)?,
                 );
                 next_positional += 1;
             }
@@ -3010,6 +3073,7 @@ fn place_args(
                 .and_then(|s| s.params.get(at))
                 .map_or_else(|| at.to_string(), |p| p.name.to_string());
             emit(
+                sink,
                 &list,
                 Problem::SkippedParameter {
                     function: func.to_string(),
@@ -3095,6 +3159,36 @@ User : Person from users
 shape https://example.org/Person
 prop https://example.org/name - 1 1
 ";
+
+    /// What lowering `mapping`'s body said, and what the parse it reads said.
+    fn body_diagnostics(
+        db: &dyn fossil_base::Db,
+        mapping: crate::def_map::MappingLoc<'_>,
+    ) -> Vec<fossil_base::Diagnostic> {
+        let mut out = crate::body::body(db, mapping).diagnostics(db).clone();
+        out.extend(
+            fossil_syntax::parse(db, mapping.file(db))
+                .diagnostics(db)
+                .iter()
+                .cloned(),
+        );
+        out
+    }
+
+    /// What lowering the file said, and what the parse it reads said.
+    fn file_diagnostics(
+        db: &dyn fossil_base::Db,
+        file: fossil_base::SourceFile,
+    ) -> Vec<fossil_base::Diagnostic> {
+        let mut out = lower_to_hir(db, file).diagnostics(db).clone();
+        out.extend(
+            fossil_syntax::parse(db, file)
+                .diagnostics(db)
+                .iter()
+                .cloned(),
+        );
+        out
+    }
 
     fn lower_src(src: &str) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
         let system: Arc<dyn fossil_base::System> =
@@ -3241,7 +3335,7 @@ prop https://example.org/name - 1 1
         ));
         let m = crate::def_map::def_map(&db, file).mappings(&db)[0];
         let props = crate::body::body(&db, m).properties(&db);
-        let diags = crate::body::body::accumulated::<fossil_base::Diagnostic>(&db, m);
+        let diags = body_diagnostics(&db, m);
         assert!(
             diags
                 .iter()
@@ -3259,9 +3353,9 @@ prop https://example.org/name - 1 1
             let (db, file) = lower_src(src);
             let m = crate::def_map::def_map(&db, file).mappings(&db)[0];
             let _ = crate::body::body(&db, m);
-            crate::body::body::accumulated::<fossil_base::Diagnostic>(&db, m)
+            body_diagnostics(&db, m)
                 .iter()
-                .map(|d| d.message())
+                .map(fossil_base::Diagnostic::message)
                 .collect::<Vec<_>>()
         };
         assert!(
@@ -3303,7 +3397,7 @@ prop https://example.org/name - 1 1
             1,
             "the good property survives; only the bad attribute drops"
         );
-        let diags = crate::body::body::accumulated::<Diagnostic>(&db, mapping);
+        let diags = body_diagnostics(&db, mapping);
         assert!(
             diags.iter().any(|d| d.message().contains("@sensitive")),
             "the diagnostic must name the attribute, got {diags:?}"
@@ -3356,11 +3450,14 @@ User : Person from users
         let dm = crate::def_map::def_map(&db, file);
         let mloc = *dm.mappings(&db).first().expect("one mapping");
 
-        let diagnostics = crate::body::body::accumulated::<fossil_base::Diagnostic>(&db, mloc);
+        let diagnostics = body_diagnostics(&db, mloc);
         assert!(
             diagnostics.is_empty(),
             "a call the lowering understands must raise nothing, got: {:?}",
-            diagnostics.iter().map(|d| d.message()).collect::<Vec<_>>(),
+            diagnostics
+                .iter()
+                .map(fossil_base::Diagnostic::message)
+                .collect::<Vec<_>>(),
         );
 
         let props = crate::body::body(&db, mloc).properties(&db);
@@ -3406,11 +3503,14 @@ User : Person from users
         let dm = crate::def_map::def_map(&db, file);
         let mloc = *dm.mappings(&db).first().expect("one mapping");
 
-        let diagnostics = crate::body::body::accumulated::<fossil_base::Diagnostic>(&db, mloc);
+        let diagnostics = body_diagnostics(&db, mloc);
         assert!(
             diagnostics.is_empty(),
             "a comparison the lowering understands must raise nothing, got: {:?}",
-            diagnostics.iter().map(|d| d.message()).collect::<Vec<_>>(),
+            diagnostics
+                .iter()
+                .map(fossil_base::Diagnostic::message)
+                .collect::<Vec<_>>(),
         );
         let props = crate::body::body(&db, mloc).properties(&db);
         assert_eq!(props.len(), 2);
@@ -3453,11 +3553,14 @@ User : Person from users
         let dm = crate::def_map::def_map(&db, file);
         let mloc = *dm.mappings(&db).first().expect("one mapping");
 
-        let diagnostics = crate::body::body::accumulated::<fossil_base::Diagnostic>(&db, mloc);
+        let diagnostics = body_diagnostics(&db, mloc);
         assert!(
             diagnostics.is_empty(),
             "`(users.age >= 18)` must lower without a word, got: {:?}",
-            diagnostics.iter().map(|d| d.message()).collect::<Vec<_>>(),
+            diagnostics
+                .iter()
+                .map(fossil_base::Diagnostic::message)
+                .collect::<Vec<_>>(),
         );
         let props = crate::body::body(&db, mloc).properties(&db);
         assert_eq!(props.len(), 2);
@@ -3504,7 +3607,7 @@ User : Person from users
         let dm = crate::def_map::def_map(&db, file);
         let mloc = *dm.mappings(&db).first().expect("one mapping");
 
-        let diagnostics = crate::body::body::accumulated::<fossil_base::Diagnostic>(&db, mloc);
+        let diagnostics = body_diagnostics(&db, mloc);
         assert!(
             !diagnostics.is_empty(),
             "an expression the lowering cannot read must produce a diagnostic",
@@ -3550,11 +3653,14 @@ User : Person from users
         let dm = crate::def_map::def_map(&db, file);
         let mloc = *dm.mappings(&db).first().expect("one mapping");
 
-        let diagnostics = crate::body::body::accumulated::<fossil_base::Diagnostic>(&db, mloc);
+        let diagnostics = body_diagnostics(&db, mloc);
         assert!(
             diagnostics.is_empty(),
             "arithmetic must lower without a word, got: {:?}",
-            diagnostics.iter().map(|d| d.message()).collect::<Vec<_>>(),
+            diagnostics
+                .iter()
+                .map(fossil_base::Diagnostic::message)
+                .collect::<Vec<_>>(),
         );
         let props = crate::body::body(&db, mloc).properties(&db);
         assert_eq!(props.len(), 2, "the arithmetic property survives lowering");
@@ -3605,13 +3711,15 @@ User : Person from users
             2,
             "lowering carries the call; resolving the name is the checker's job"
         );
-        let diags =
-            crate::check::typecheck_mapping::accumulated::<fossil_base::Diagnostic>(&db, mloc);
+        let diags = crate::check::typecheck_mapping(&db, mloc).diagnostics(&db);
         assert!(
             diags.iter().any(|d| d.message().contains("`str.slugg`")
                 && d.help.as_deref() == Some("did you mean `str.slug`?")),
             "the checker must name the function and suggest one, got: {:?}",
-            diags.iter().map(|d| d.message()).collect::<Vec<_>>(),
+            diags
+                .iter()
+                .map(fossil_base::Diagnostic::message)
+                .collect::<Vec<_>>(),
         );
     }
 
@@ -3644,13 +3752,16 @@ User : Persn from users
 ";
         let (db, file) =
             fossil_base::test_support::db_with_document(TYPO, "personas.shex", PERSONAS_DOCUMENT);
-        let diags = lower_to_hir::accumulated::<fossil_base::Diagnostic>(&db, file);
+        let diags = file_diagnostics(&db, file);
         assert!(
             diags
                 .iter()
                 .any(|d| d.help.as_deref() == Some("did you mean `Person`?")),
             "a name one edit from a bound one must suggest it, got: {:?}",
-            diags.iter().map(|d| d.message()).collect::<Vec<_>>(),
+            diags
+                .iter()
+                .map(fossil_base::Diagnostic::message)
+                .collect::<Vec<_>>(),
         );
     }
 
@@ -3714,13 +3825,16 @@ Good : Person from Users
             "Good",
             "the healthy mapping keeps its own index"
         );
-        let diags = lower_to_hir::accumulated::<fossil_base::Diagnostic>(&db, file);
+        let diags = file_diagnostics(&db, file);
         assert!(
             diags
                 .iter()
                 .any(|d| d.message().contains("this is not a mapping header")),
             "and the decline is reported, once, where it happened: {:?}",
-            diags.iter().map(|d| d.message()).collect::<Vec<_>>(),
+            diags
+                .iter()
+                .map(fossil_base::Diagnostic::message)
+                .collect::<Vec<_>>(),
         );
     }
 
@@ -3839,11 +3953,14 @@ Sales := Adults.join(Person, on = User.person_id == Person.id).where(User.total 
 ";
         let (db, file) = db_with(PIPES);
         let hir = lower_to_hir(&db, file);
-        let diags = lower_to_hir::accumulated::<Diagnostic>(&db, file);
+        let diags = file_diagnostics(&db, file);
         assert!(
             diags.is_empty(),
             "the three verbs raise nothing, got: {:?}",
-            diags.iter().map(|d| d.message()).collect::<Vec<_>>(),
+            diags
+                .iter()
+                .map(fossil_base::Diagnostic::message)
+                .collect::<Vec<_>>(),
         );
 
         let pipes = hir.source_pipes(&db);
@@ -3910,11 +4027,14 @@ Tree := Node.join(Node as Other, on = Node.parent == Other.id)
 ";
         let (db, file) = db_with(SELF_JOIN);
         let hir = lower_to_hir(&db, file);
-        let diags = lower_to_hir::accumulated::<Diagnostic>(&db, file);
+        let diags = file_diagnostics(&db, file);
         assert!(
             diags.is_empty(),
             "a self-join raises nothing, got: {:?}",
-            diags.iter().map(|d| d.message()).collect::<Vec<_>>(),
+            diags
+                .iter()
+                .map(fossil_base::Diagnostic::message)
+                .collect::<Vec<_>>(),
         );
 
         let pipes = hir.source_pipes(&db);
@@ -3947,11 +4067,14 @@ Both := User.join(Person, on = User.person_id == Person.id)
 ";
         let (db, file) = db_with(COLLIDING);
         let hir = lower_to_hir(&db, file);
-        let diags = lower_to_hir::accumulated::<Diagnostic>(&db, file);
+        let diags = file_diagnostics(&db, file);
         assert!(
             diags.is_empty(),
             "a shared column name is no longer an error, got: {:?}",
-            diags.iter().map(|d| d.message()).collect::<Vec<_>>(),
+            diags
+                .iter()
+                .map(fossil_base::Diagnostic::message)
+                .collect::<Vec<_>>(),
         );
         assert_eq!(hir.source_pipes(&db).len(), 1, "the join must lower");
     }
@@ -3972,8 +4095,11 @@ Sales := Order.join(Person)
             "the pipeline must not lower, got {:?}",
             hir.source_pipes(&db),
         );
-        let diags = lower_to_hir::accumulated::<Diagnostic>(&db, file);
-        let msg = diags.first().map(|d| d.message()).unwrap_or_default();
+        let diags = file_diagnostics(&db, file);
+        let msg = diags
+            .first()
+            .map(fossil_base::Diagnostic::message)
+            .unwrap_or_default();
         assert!(
             msg.contains("on = <predicate>"),
             "the diagnostic must show the form that works, got {msg:?}"
@@ -3992,8 +4118,11 @@ Odd := User.regroup(User.age)
         let (db, file) = db_with(UNKNOWN);
         let hir = lower_to_hir(&db, file);
         assert!(hir.source_pipes(&db).is_empty());
-        let diags = lower_to_hir::accumulated::<Diagnostic>(&db, file);
-        let msg = diags.first().map(|d| d.message()).unwrap_or_default();
+        let diags = file_diagnostics(&db, file);
+        let msg = diags
+            .first()
+            .map(fossil_base::Diagnostic::message)
+            .unwrap_or_default();
         assert!(
             msg.contains("regroup") && msg.contains("where"),
             "the diagnostic must name the verb and the ones that exist, got {msg:?}"

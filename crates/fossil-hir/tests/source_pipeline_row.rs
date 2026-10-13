@@ -24,8 +24,10 @@
 use fossil_base::test_support::{db_with_document, register_inferred};
 use fossil_base::{Diagnostic, FossilDb, SourceFile};
 use fossil_graph_schema::Primitive;
+use fossil_hir::body::body;
 use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::def_map;
+use fossil_hir::lower::lower_to_hir;
 use fossil_hir::ty::TyKind;
 
 /// One shape, one un-narrowed predicate. The mapping below writes `name`, and
@@ -99,11 +101,14 @@ fn db_with(
     db_reading(pipe, "pedidos", "id", descriptors)
 }
 
-/// Column names of the row the mapping sees, or the diagnostics that stopped it.
+/// Column names of the row the mapping sees, or the diagnostics that stopped it:
+/// the check's, and those of the body, the lowering and the parse it reads — a
+/// pipeline stage the lowering refused is why its row could not be built.
 fn row_of(db: &FossilDb, file: SourceFile) -> Result<Vec<String>, Vec<String>> {
     let mappings = def_map(db, file).mappings(db).clone();
     let mapping = *mappings.first().expect("one mapping");
-    match typecheck_mapping(db, mapping) {
+    let checked = typecheck_mapping(db, mapping);
+    match checked.checked(db) {
         Ok(out) => {
             let Some(row) = out.source_row(db) else {
                 return Ok(Vec::new());
@@ -113,9 +118,13 @@ fn row_of(db: &FossilDb, file: SourceFile) -> Result<Vec<String>, Vec<String>> {
             };
             Ok(rec.fields(db).iter().map(|f| f.name.to_string()).collect())
         }
-        Err(_) => Err(typecheck_mapping::accumulated::<Diagnostic>(db, mapping)
+        Err(_) => Err(checked
+            .diagnostics(db)
             .iter()
-            .map(|d| d.message())
+            .chain(body(db, mapping).diagnostics(db))
+            .chain(lower_to_hir(db, file).diagnostics(db))
+            .chain(fossil_syntax::parse(db, file).diagnostics(db))
+            .map(Diagnostic::message)
             .collect()),
     }
 }

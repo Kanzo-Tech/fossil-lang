@@ -954,7 +954,7 @@ impl Problem {
 /// [`Problem::DoesNotCompile`] relates. The span is **file-absolute**.
 ///
 /// `fossil_base::Diagnostic` cannot be named here: that crate depends on this
-/// one and is the salsa accumulator. This is its positional part reduced to
+/// one. This is its positional part reduced to
 /// the span, and the same [`Problem`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Related {

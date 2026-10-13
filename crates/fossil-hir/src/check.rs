@@ -32,13 +32,12 @@
 //!
 //! # No silent coercion
 //!
-//! Every type mismatch emits a [`Diagnostic`] via [`fossil_base::raise`] AND
-//! produces an [`ErrorGuaranteed`]. `typecheck_mapping` returns `Err` when the
-//! body has even one type error.
+//! Every type mismatch emits a [`Diagnostic`] via [`Diagnostics::raise`] AND
+//! produces an [`ErrorGuaranteed`]. `typecheck_mapping`'s output is poisoned
+//! when the body has even one type error.
 
-use fossil_base::{Diagnostic, ErrorGuaranteed, SourceFile, SpanFrame};
+use fossil_base::{Diagnostic, Diagnostics, ErrorGuaranteed, SourceFile, SpanFrame};
 use fossil_graph_schema::{Problem, Severity, Span};
-use salsa::Accumulator;
 use smol_str::SmolStr;
 
 use crate::body::{ExprId, body};
@@ -78,27 +77,60 @@ pub struct TypeckOutput<'db> {
     /// copies it into `fossil.json`.
     #[returns(ref)]
     pub predicates: Vec<Predicate>,
+    /// What the check found, the refusals among them.
+    #[returns(ref)]
+    pub diagnostics: Vec<Diagnostic>,
+    /// The taint of the first refusal in [`Self::diagnostics`], if the check
+    /// refused. The fields above are then incomplete, and [`Self::checked`] is
+    /// how a reader declines them.
+    #[returns(copy)]
+    pub poisoned: Option<ErrorGuaranteed>,
+}
+
+impl<'db> TypeckOutput<'db> {
+    /// This output when the check passed, or the taint when it refused.
+    ///
+    /// # Errors
+    ///
+    /// The [`ErrorGuaranteed`] of the first refusal; its diagnostic is already
+    /// in [`Self::diagnostics`], so a caller propagates it and reports nothing.
+    pub fn checked(self, db: &'db dyn fossil_base::Db) -> Result<Self, ErrorGuaranteed> {
+        self.poisoned(db).map_or(Ok(self), Err)
+    }
 }
 
 /// The ONE Salsa-tracked checker entry per mapping.
 ///
 /// Reads `body` + `spans` + the source row + the target shape,
-/// runs the plain-Rust bidirectional checker, and returns a [`TypeckOutput`].
-/// Returns `Err(ErrorGuaranteed)` if the body has any type error (every error
-/// also pushes ≥1 [`Diagnostic`] to the accumulator).
-#[salsa::tracked(returns(clone))]
+/// runs the plain-Rust bidirectional checker, and returns a [`TypeckOutput`]
+/// carrying what it found. A body with any type error still returns one, with
+/// [`TypeckOutput::poisoned`] set.
+#[salsa::tracked(returns(copy))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn typecheck_mapping<'db>(
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
-) -> Result<TypeckOutput<'db>, ErrorGuaranteed> {
+) -> TypeckOutput<'db> {
     let hir_body = body(db, mapping);
     let spans_table = spans(db, mapping);
     // A source pipeline whose row algebra does not add up taints the mapping and
     // stops here. Checking the body against a row that could not be
     // built would report a second, invented error for every property that reads a
     // column the join was supposed to bring.
-    let source_scope = resolve_source_scope(db, mapping)?;
+    let mut sink = Diagnostics::new();
+    let source_scope = match resolve_source_scope(db, &mut sink, mapping) {
+        Ok(scope) => scope,
+        Err(eg) => {
+            return TypeckOutput::new(
+                db,
+                ExprTypes::new(db, Vec::new()),
+                None,
+                Vec::new(),
+                sink.into_vec(),
+                Some(eg),
+            );
+        }
+    };
     let source_row = source_scope.as_ref().and_then(|s| s.flat(db));
     // This used to pass `ACCEPT_ALL_DEFAULT` — one literal that turned backward
     // checking off for every program compiled through the checker, because the
@@ -140,6 +172,7 @@ pub fn typecheck_mapping<'db>(
             relation: source_binding_name(db, mapping),
             spans: SpanSource::Table(spans_table),
             entries: Vec::new(),
+            sink,
             first_error: None,
             expected_ref: None,
         },
@@ -162,11 +195,14 @@ pub fn typecheck_mapping<'db>(
     }
     cx.check_required_properties(properties);
 
-    let first_error = cx.expr.first_error;
     let expr_types = ExprTypes::new(db, cx.expr.entries);
-    first_error.map_or_else(
-        || Ok(TypeckOutput::new(db, expr_types, source_row, predicates)),
-        Err,
+    TypeckOutput::new(
+        db,
+        expr_types,
+        source_row,
+        predicates,
+        cx.expr.sink.into_vec(),
+        cx.expr.first_error,
     )
 }
 
@@ -409,7 +445,6 @@ impl Checker<'_> {
         if let Some(Predicate { iri, .. }) = self.predicates.iter().find(|p| p.name == *name) {
             return Some(iri.clone());
         }
-        let db = self.expr.db;
         let candidates: Vec<&str> = self.predicates.iter().map(|p| p.name.as_str()).collect();
         let suggestion = did_you_mean(name.as_str(), candidates.iter().copied());
         let mut d = Diagnostic::new(
@@ -423,7 +458,7 @@ impl Checker<'_> {
         if let Some(s) = suggestion {
             d = d.with_help(format!("did you mean `{s}`?"));
         }
-        let eg = fossil_base::raise(db, d);
+        let eg = self.expr.sink.raise(d);
         self.expr.record_error(eg);
         None
     }
@@ -507,7 +542,7 @@ impl Checker<'_> {
                  between two. Give one of them another name above the binding: \
                  @rename({type_name}, \"{second}\" as {alias})"
             ));
-            let eg = fossil_base::raise(db, d);
+            let eg = self.expr.sink.raise(d);
             self.expr.record_error(eg);
         }
     }
@@ -530,7 +565,6 @@ impl Checker<'_> {
     fn check_required_properties(&mut self, properties: &[HirProperty]) {
         use std::fmt::Write as _;
 
-        let db = self.expr.db;
         let header_span = self.header_span();
         let Some(shape) = self.resolved_shape.as_ref() else {
             return;
@@ -617,7 +651,7 @@ impl Checker<'_> {
                 );
                 let _ = write!(help, " {list} {verb} optional and may stay out.");
             }
-            let eg = fossil_base::raise(db, d.with_help(help));
+            let eg = self.expr.sink.raise(d.with_help(help));
             self.expr.record_error(eg);
         }
     }
@@ -626,7 +660,6 @@ impl Checker<'_> {
         let Some(shape) = self.resolved_shape.as_ref() else {
             return;
         };
-        let db = self.expr.db;
         let header_span = self.header_span();
         // Clone the data we need so we don't hold a borrow of `self` across the
         // mutable `record_error` calls.
@@ -674,22 +707,21 @@ impl Checker<'_> {
                     );
                     let n = disjuncts.len();
                     // Structured suggestion carrier — NOT a Markdown
-                    // delimiter. Accumulate directly (informational; no
-                    // ErrorGuaranteed).
-                    Diagnostic::new(
-                        Severity::Error,
-                        Problem::UnsupportedDisjunction {
-                            shape: shape_iri.to_string(),
-                            branches: n as u64,
-                        },
-                        header_span,
-                    )
-                    .with_suggestion_source(suggestion)
-                    .accumulate(db);
+                    // delimiter. Pushed without a taint: informational.
+                    self.expr.sink.push(
+                        Diagnostic::new(
+                            Severity::Error,
+                            Problem::UnsupportedDisjunction {
+                                shape: shape_iri.to_string(),
+                                branches: n as u64,
+                            },
+                            header_span,
+                        )
+                        .with_suggestion_source(suggestion),
+                    );
                 }
                 Rejection::CyclicRef { path } => {
-                    let eg = fossil_base::report(
-                        db,
+                    let eg = self.expr.sink.report(
                         header_span,
                         Problem::CyclicReference {
                             path: path.iter().map(ToString::to_string).collect(),
@@ -698,8 +730,7 @@ impl Checker<'_> {
                     self.expr.record_error(eg);
                 }
                 Rejection::UnresolvedRef { label, in_shape } => {
-                    let eg = fossil_base::report(
-                        db,
+                    let eg = self.expr.sink.report(
                         header_span,
                         Problem::UnresolvedReference {
                             reference: label.to_string(),
@@ -709,8 +740,7 @@ impl Checker<'_> {
                     self.expr.record_error(eg);
                 }
                 Rejection::Malformed(m) => {
-                    let eg = fossil_base::report(
-                        db,
+                    let eg = self.expr.sink.report(
                         header_span,
                         Problem::Unparseable {
                             document: document.clone(),
@@ -833,9 +863,8 @@ mod tests;
 /// nothing must not reject a `String`. See
 /// [`crate::shapes::ShapeConstraint::value_ty`].
 ///
-/// Plain-Rust (NOT `#[salsa::tracked]`). Called from within the tracked
-/// [`typecheck_mapping`] frame (and from tests' tracked shims) so its
-/// diagnostic emissions are valid.
+/// Plain-Rust (NOT `#[salsa::tracked]`). It reports into the checker's sink,
+/// which [`typecheck_mapping`] returns in its output.
 ///
 /// `property` is the name the BODY wrote for the slot that refused the value,
 /// and `source_value` the lowered right-hand side — the message names the slot,
@@ -1180,6 +1209,9 @@ pub struct Expr<'db> {
     pub(crate) relation: SmolStr,
     pub(crate) spans: SpanSource<'db>,
     pub(crate) entries: Vec<ExprTypeEntry<'db>>,
+    /// What this checker found. Its owner moves it into the output of the
+    /// query it runs inside.
+    pub(crate) sink: Diagnostics,
     /// First type error encountered (if any). Every error also pushes a
     /// diagnostic, so any `Some(eg)` here implies >= 1 emitted `Diagnostic`.
     pub(crate) first_error: Option<ErrorGuaranteed>,
@@ -1213,6 +1245,7 @@ impl<'db> Expr<'db> {
             relation,
             spans: SpanSource::At(at),
             entries: Vec::new(),
+            sink: Diagnostics::new(),
             first_error: None,
             expected_ref: None,
         }
@@ -1245,7 +1278,7 @@ impl<'db> Expr<'db> {
     /// Raise a built [`Diagnostic`], in the frame this checker's spans are in.
     ///
     /// THE emission point, and it is one so that the frame is decided once.
-    /// `fossil_base::report` at each call site defaults to
+    /// `Diagnostics::report` at each call site defaults to
     /// `SpanFrame::MappingRelative` — correct for a body and silently wrong for
     /// a pipeline, whose span is already file-absolute.
     ///
@@ -1259,7 +1292,7 @@ impl<'db> Expr<'db> {
         } else {
             d
         };
-        let eg = fossil_base::raise(self.db, d);
+        let eg = self.sink.raise(d);
         self.record_error(eg);
         eg
     }

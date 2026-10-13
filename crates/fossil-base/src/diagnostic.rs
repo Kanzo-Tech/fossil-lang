@@ -1,9 +1,9 @@
-//! Salsa accumulator for diagnostics.
+//! What a diagnostic is.
 //!
-//! Any `#[salsa::tracked]` query can build a [`Diagnostic`] via the struct
-//! literal or via [`Diagnostic::new`] and call `.accumulate(db)`; the host
-//! (LSP / WASM / executor) collects them via
-//! `query::accumulated::<Diagnostic>(db, input)`.
+//! A query that can find a mistake builds a [`Diagnostic`] via the struct
+//! literal or via [`Diagnostic::new`], pushes it into the
+//! [`Diagnostics`](crate::Diagnostics) sink it owns, and returns them in its
+//! output; `fossil_mir::program_diagnostics` is the union every host reads.
 //!
 //! ## `suggestion_source` field
 //!
@@ -144,8 +144,7 @@ impl SpanLabel {
     }
 }
 
-#[salsa::accumulator]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Diagnostic {
     pub severity: Severity,
     /// What went wrong — the code and its data. The message a person reads is

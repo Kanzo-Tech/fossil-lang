@@ -373,9 +373,9 @@ fn a_schema_argument_on_a_data_provider_names_both() {
 // ------------------------------------- once per mistake, and never zero times
 
 /// **A binding's diagnostic is reported ONCE**, whatever the mapping count.
-/// Salsa accumulates over a query's whole dependency subtree and `lower_to_hir`
-/// is in every mapping's, so one mistake in a three-mapping program came out
-/// three times — and there is no mapping it belongs to.
+/// `lower_to_hir` is read by every mapping, so a collector that reads it per
+/// mapping prints one mistake in a three-mapping program three times — and
+/// there is no mapping it belongs to.
 #[test]
 fn a_binding_diagnostic_is_reported_once_not_once_per_mapping() {
     let diagnostics = check_program(&[

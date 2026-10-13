@@ -24,8 +24,8 @@
 //! through the file registry and the source row through the source registry,
 //! so forward propagation (SC#1) is exercised **end-to-end through the
 //! production query path**: `run_db_wired_fixture` writes a real `SourceFile`
-//! whose path lets the relative `io.shex("…")` argument resolve, then drains
-//! the diagnostics the query accumulated. These fixtures are labelled
+//! whose path lets the relative `io.shex("…")` argument resolve, then reads
+//! the diagnostics the query and what it read returned. These fixtures are labelled
 //! **Db-wired**.
 //!
 //! Backward checking (SC#2) and the value-disjunction rejection (SC#4) are NOT
@@ -201,6 +201,28 @@ fn render_diagnostic(out: &mut String, diag: &Diagnostic) {
 // Forward-propagation driver (Db-wired — production query path)
 // ---------------------------------------------------------------------------
 
+/// What the check of `mapping` says, and what every query it reads says: the
+/// mapping's body, the file's parse and its lowering — the whole of what a
+/// reader of this one mapping is told.
+fn read_by_check(db: &dyn Db, mapping: fossil_hir::def_map::MappingLoc<'_>) -> Vec<Diagnostic> {
+    let file = mapping.file(db);
+    let mut out = typecheck_mapping(db, mapping).diagnostics(db).clone();
+    out.extend(body(db, mapping).diagnostics(db).iter().cloned());
+    out.extend(
+        fossil_syntax::parse(db, file)
+            .diagnostics(db)
+            .iter()
+            .cloned(),
+    );
+    out.extend(
+        fossil_hir::lower::lower_to_hir(db, file)
+            .diagnostics(db)
+            .iter()
+            .cloned(),
+    );
+    out
+}
+
 /// Drive a fixture **end-to-end through the production `typecheck_mapping`
 /// query**. The `mapping.fossil`'s `io.shex("…")` path is resolved relative to
 /// the fixture directory, so the target shape is bound by the real
@@ -257,12 +279,7 @@ fn run_db_wired_fixture(bucket: &str, name: &str) -> String {
     let mappings = def_map(&db, file).mappings(&db).clone();
     let mut all_diags: Vec<Diagnostic> = Vec::new();
     for mloc in &mappings {
-        let _ = typecheck_mapping(&db, *mloc);
-        all_diags.extend(
-            typecheck_mapping::accumulated::<Diagnostic>(&db, *mloc)
-                .into_iter()
-                .cloned(),
-        );
+        all_diags.extend(read_by_check(&db, *mloc));
     }
 
     if all_diags.is_empty() {
@@ -569,8 +586,7 @@ fn a_split_branch_with_no_predicate_still_parses() {
     );
     let db = new_db();
     let file = SourceFile::new(&db, full.clone(), "split.fossil".to_string());
-    fossil_syntax::parse(&db, file);
-    let errors = fossil_syntax::parse::accumulated::<Diagnostic>(&db, file);
+    let errors = fossil_syntax::parse(&db, file).diagnostics(&db);
     assert!(
         errors.is_empty(),
         "the split did not parse: {errors:?}\n{full}"
@@ -647,9 +663,9 @@ fn the_generated_split_suggestion_compiles() {
 
     for mloc in &mappings {
         let result = typecheck_mapping(&db, *mloc);
-        let diags = typecheck_mapping::accumulated::<Diagnostic>(&db, *mloc);
+        let diags = read_by_check(&db, *mloc);
         assert!(
-            result.is_ok(),
+            result.checked(&db).is_ok(),
             "split-suggestion mapping #{} failed to type-check: {:#?}",
             mloc.index(&db),
             diags
@@ -665,7 +681,11 @@ fn the_generated_split_suggestion_compiles() {
              line; got {props:#?}",
             mloc.index(&db),
         );
-        let body_diags = body::accumulated::<Diagnostic>(&db, *mloc);
+        let body_diags: Vec<&Diagnostic> = body(&db, *mloc)
+            .diagnostics(&db)
+            .iter()
+            .chain(fossil_syntax::parse(&db, file).diagnostics(&db))
+            .collect();
         assert!(
             body_diags.is_empty(),
             "the generated split must lower without complaint: {body_diags:#?}"
@@ -831,8 +851,8 @@ fn the_recommended_rename_parses_and_repairs_the_collision() {
     );
     register_document(&mut db, "colliding.shex", COLLIDING_DOCUMENT);
     let mapping = def_map(&db, file).mappings(&db)[0];
-    let before: Vec<String> = typecheck_mapping::accumulated::<Diagnostic>(&db, mapping)
-        .into_iter()
+    let before: Vec<String> = read_by_check(&db, mapping)
+        .iter()
         .map(Diagnostic::message)
         .collect();
     assert!(
@@ -841,8 +861,8 @@ fn the_recommended_rename_parses_and_repairs_the_collision() {
     );
 
     // 2. The repair, taken from the `help:` and put where it says.
-    let helps: Vec<String> = typecheck_mapping::accumulated::<Diagnostic>(&db, mapping)
-        .into_iter()
+    let helps: Vec<String> = read_by_check(&db, mapping)
+        .iter()
         .filter_map(|d| d.help.clone())
         .collect();
     let clause = rename_clause(&helps);
@@ -862,8 +882,8 @@ fn the_recommended_rename_parses_and_repairs_the_collision() {
         1,
         "the repaired program must still parse into its one mapping:\n{repaired}"
     );
-    let after: Vec<String> = typecheck_mapping::accumulated::<Diagnostic>(&db2, mappings[0])
-        .into_iter()
+    let after: Vec<String> = read_by_check(&db2, mappings[0])
+        .iter()
         .map(Diagnostic::message)
         .collect();
     assert!(
@@ -884,8 +904,8 @@ fn the_recommended_rename_parses_and_repairs_the_collision() {
     let file3 = SourceFile::new(&db3, with_use.clone(), "colliding.fossil".to_string());
     register_document(&mut db3, "colliding.shex", COLLIDING_DOCUMENT);
     let m3 = def_map(&db3, file3).mappings(&db3)[0];
-    let diags: Vec<String> = typecheck_mapping::accumulated::<Diagnostic>(&db3, m3)
-        .into_iter()
+    let diags: Vec<String> = read_by_check(&db3, m3)
+        .iter()
         .map(Diagnostic::message)
         .collect();
     assert!(

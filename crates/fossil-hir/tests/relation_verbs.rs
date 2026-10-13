@@ -12,7 +12,7 @@
 //!   variant fails to build.
 
 use fossil_base::test_support::{db_with_document, register_inferred};
-use fossil_base::{Diagnostic, FossilDb, SourceFile};
+use fossil_base::{FossilDb, SourceFile};
 use fossil_graph_schema::Primitive;
 use fossil_hir::lower::lower_to_hir;
 
@@ -48,9 +48,11 @@ fn diagnostics(pipe: &str) -> Vec<String> {
         db_with_document(&program(pipe), "v.shex", DOCUMENT);
     register_inferred(&mut db, "o.csv", COLUMNS);
     register_inferred(&mut db, "p.csv", COLUMNS);
-    let _ = lower_to_hir(&db, file);
-    lower_to_hir::accumulated::<Diagnostic>(&db, file)
+    // The lowering's own, then the parse's it reads.
+    lower_to_hir(&db, file)
+        .diagnostics(&db)
         .iter()
+        .chain(fossil_syntax::parse(&db, file).diagnostics(&db))
         .map(|d| {
             d.help.as_ref().map_or_else(
                 || d.message(),

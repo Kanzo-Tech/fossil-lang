@@ -7,7 +7,7 @@
 //! re-runs a check that already ran (`/docs/design/incremental`).
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{Diagnostic, FossilDb, SourceFile, System, describe_columns};
+use fossil_base::{FossilDb, SourceFile, System, describe_columns};
 use fossil_descriptors_input::{InferredColumn, InferredDescriptor};
 use fossil_graph_schema::Primitive;
 use fossil_hir::check::typecheck_mapping;
@@ -119,8 +119,8 @@ fn describing_a_source_after_a_check_re_runs_the_check() {
     )]);
     let unknown_name = |db: &FossilDb| {
         let mapping = *def_map(db, file).mappings(db).first().expect("one mapping");
-        let _ = typecheck_mapping(db, mapping);
-        typecheck_mapping::accumulated::<Diagnostic>(db, mapping)
+        typecheck_mapping(db, mapping)
+            .diagnostics(db)
             .iter()
             .any(|d| d.problem.code() == "name/unknown-field")
     };

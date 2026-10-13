@@ -42,7 +42,7 @@
 //! [`fossil_base::sources::columns`] reads a Salsa input, so describing a
 //! source re-runs every check that read it (`/docs/design/incremental`).
 
-use fossil_base::{Diagnostic, bug, report};
+use fossil_base::{Diagnostic, Diagnostics};
 use fossil_descriptors_input::InferredDescriptor;
 use fossil_graph_schema::{Problem, Severity, Span};
 use smol_str::SmolStr;
@@ -57,8 +57,8 @@ use crate::ty::{Record, RecordField, Rows, Ty, TyKind};
 ///
 /// Side-effect-free: no diagnostics, no filesystem reads — the
 /// descriptor-branch of [`resolve_source_scope`] without the type-check's
-/// diagnostic emission. For IDE features (completion, hover) that want
-/// the source schema OUTSIDE a tracked query. Returns `None` when no descriptor
+/// refusals. For IDE features (completion, hover) that want the source schema
+/// whatever else the check found. Returns `None` when no descriptor
 /// is registered for the mapping's source URI — the host did not pre-introspect.
 #[must_use]
 pub fn source_row_inferred<'db>(
@@ -149,13 +149,14 @@ fn field_from_inferred<'db>(
 
 /// The scope a mapping's `from` clause puts in the body — see [`Rows`].
 ///
-/// Plain-Rust helper (NOT `#[salsa::tracked]`) — called from within the
-/// `typecheck_mapping` tracked query so its diagnostic emits are valid.
+/// Plain-Rust helper (NOT `#[salsa::tracked]`): what it refuses goes into
+/// `sink`, which `typecheck_mapping` returns in its output.
 ///
 /// Reads `def_map(db, file)` only (NEVER walks the FILE CST from
 /// `mapping_cst_node`) — see the module docs for the Serious #6 rationale.
 pub fn resolve_source_scope<'db>(
     db: &'db dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     mapping: MappingLoc<'db>,
 ) -> Result<Option<Rows<'db>>, fossil_base::ErrorGuaranteed> {
     let file = mapping.file(db);
@@ -167,18 +168,19 @@ pub fn resolve_source_scope<'db>(
     };
     let source_name = hir_mapping.source_binding.clone();
 
-    resolve_binding_scope(db, file, source_name.as_str(), &[]).map(Some)
+    resolve_binding_scope(db, sink, file, source_name.as_str(), &[]).map(Some)
 }
 
 /// The row type of a source BINDING, by name — [`resolve_binding_scope`]
 /// flattened. `None` when the binding declares no schema.
 pub fn resolve_binding_row<'db>(
     db: &'db dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     file: fossil_base::SourceFile,
     source_name: &str,
     resolving: &[&str],
 ) -> Result<Option<Ty<'db>>, fossil_base::ErrorGuaranteed> {
-    Ok(resolve_binding_scope(db, file, source_name, resolving)?.flat(db))
+    Ok(resolve_binding_scope(db, sink, file, source_name, resolving)?.flat(db))
 }
 
 /// The [`Rows`] of a source BINDING, by name.
@@ -198,6 +200,7 @@ pub fn resolve_binding_row<'db>(
 /// depth of 32, which reported a long legal chain as a cycle.
 pub fn resolve_binding_scope<'db>(
     db: &'db dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     file: fossil_base::SourceFile,
     source_name: &str,
     resolving: &[&str],
@@ -216,7 +219,7 @@ pub fn resolve_binding_scope<'db>(
     {
         if resolving.contains(&source_name) {
             return Err(pipe_error(
-                db,
+                sink,
                 pipe,
                 Problem::PipelineCycle {
                     pipeline: source_name.to_string(),
@@ -231,9 +234,9 @@ pub fn resolve_binding_scope<'db>(
         // whether or not anybody registered a descriptor for `Contact`.
         let mut within = resolving.to_vec();
         within.push(source_name);
-        let mut scope = resolve_binding_scope(db, file, pipe.base.as_str(), &within)?;
+        let mut scope = resolve_binding_scope(db, sink, file, pipe.base.as_str(), &within)?;
         for op in &pipe.ops {
-            scope = apply_source_op(db, file, pipe, op, scope, &within)?;
+            scope = apply_source_op(db, sink, file, pipe, op, scope, &within)?;
         }
         return Ok(scope);
     }
@@ -242,7 +245,7 @@ pub fn resolve_binding_scope<'db>(
     // name its own row answers to.
     Ok(Rows::one(
         source_name,
-        resolve_leaf_row(db, file, dm, source_name)?,
+        resolve_leaf_row(db, sink, file, dm, source_name)?,
     ))
 }
 
@@ -258,6 +261,7 @@ pub fn resolve_binding_scope<'db>(
 #[allow(clippy::unnecessary_wraps)]
 fn resolve_leaf_row<'db>(
     db: &'db dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     file: fossil_base::SourceFile,
     dm: crate::def_map::DefMap<'db>,
     source_name: &str,
@@ -289,8 +293,7 @@ fn resolve_leaf_row<'db>(
         ) {
             Ok(d) => d,
             Err(problem) => {
-                let _eg = fossil_base::raise(
-                    db,
+                let _eg = sink.raise(
                     Diagnostic::new(Severity::Error, problem, Span::new(0, 0))
                         .with_help(format!("`{source_name}` has no row to type against")),
                 );
@@ -302,8 +305,7 @@ fn resolve_leaf_row<'db>(
         // and there is no message that would help one, so it is reported as
         // what it is.
         let Some(shape) = document.lookup(shape_iri.as_str()) else {
-            let _eg = bug(
-                db,
+            let _eg = sink.bug(
                 Span::new(0, 0),
                 format!(
                     "`{schema_path}` bound `{source_name}` to shape `{shape_iri}` and no longer \
@@ -338,7 +340,7 @@ fn resolve_leaf_row<'db>(
                 position: position as u64,
             },
         };
-        let _eg = report(db, Span::new(0, 0), problem);
+        let _eg = sink.report(Span::new(0, 0), problem);
         return Ok(None);
     }
 
@@ -360,6 +362,7 @@ fn resolve_leaf_row<'db>(
 /// cannot carry that.
 fn apply_source_op<'db>(
     db: &'db dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     file: fossil_base::SourceFile,
     pipe: &crate::lower::HirSourcePipe,
     op: &crate::lower::HirSourceOp,
@@ -389,8 +392,8 @@ fn apply_source_op<'db>(
             // `hello.fossil` and every program like it, is where the engine's
             // late refusal used to be the only one there was.
             HirSourceOp::Join { right, alias, on } => {
-                let right = right_scope(db, file, right, alias.as_ref(), resolving)?;
-                check_join_condition(db, pipe, on, &scope, &right)?;
+                let right = right_scope(db, sink, file, right, alias.as_ref(), resolving)?;
+                check_join_condition(sink, pipe, on, &scope, &right)?;
                 Ok(scope.concat(right))
             }
             // A union answers to ONE name whether or not either side has a
@@ -409,7 +412,7 @@ fn apply_source_op<'db>(
         // columns the predicate names still have to exist — a filter on a column
         // that is not there is a program that would run and keep everything.
         HirSourceOp::Where(pred) => {
-            typecheck_stage(db, file, pipe, "seq.where", pred, &scope)?;
+            typecheck_stage(db, sink, file, pipe, "seq.where", pred, &scope)?;
             Ok(scope)
         }
         // `select` restricts, and it restricts EACH ROW: `Employee.id` stays a
@@ -427,7 +430,7 @@ fn apply_source_op<'db>(
             let mut kept: Vec<(SmolStr, Vec<RecordField<'db>>)> =
                 scope.bindings().map(|b| (b.clone(), Vec::new())).collect();
             for col in cols {
-                let f = column_of(db, pipe, &scope, col)?;
+                let f = column_of(db, sink, pipe, &scope, col)?;
                 if let Some((_, out)) = kept.iter_mut().find(|(b, _)| b == &col.binding) {
                     out.push(f);
                 }
@@ -447,10 +450,10 @@ fn apply_source_op<'db>(
         // `User.id` land on different entries; only a BARE name — which the
         // surface has no spelling for — would flatten into finding the first.
         HirSourceOp::Join { right, alias, on } => {
-            let right = right_scope(db, file, right, alias.as_ref(), resolving)?;
+            let right = right_scope(db, sink, file, right, alias.as_ref(), resolving)?;
             let Some(_) = right.fields(db) else {
                 return Err(pipe_error(
-                    db,
+                    sink,
                     pipe,
                     Problem::SchemalessJoin {
                         pipeline: pipe.name.to_string(),
@@ -476,8 +479,8 @@ fn apply_source_op<'db>(
             // sides». Typing first means a misspelled column is reported as a
             // misspelled column and not as a side that goes unmentioned.
             let joined = scope.clone().concat(right.clone());
-            typecheck_stage(db, file, pipe, "seq.join", on, &joined)?;
-            check_join_condition(db, pipe, on, &scope, &right)?;
+            typecheck_stage(db, sink, file, pipe, "seq.join", on, &joined)?;
+            check_join_condition(sink, pipe, on, &scope, &right)?;
             Ok(joined)
         }
         // `distinct` keeps rows, not columns, and names none of them: the row
@@ -490,7 +493,7 @@ fn apply_source_op<'db>(
         // COLUMN of a known binding are different mistakes.
         HirSourceOp::GroupBy { keys, aggs } => {
             for col in keys.iter().chain(aggs.iter().map(|a| &a.column)) {
-                column_of(db, pipe, &scope, col)?;
+                column_of(db, sink, pipe, &scope, col)?;
             }
             Ok(grouped_scope(db, pipe, &scope, keys, aggs))
         }
@@ -500,7 +503,7 @@ fn apply_source_op<'db>(
         // equal types is not a stricter rule than the backend's, it is the
         // backend's rule stated where a user can be told about it.
         HirSourceOp::Union { right } => {
-            let right = right_scope(db, file, right, None, resolving)?;
+            let right = right_scope(db, sink, file, right, None, resolving)?;
             let (Some(left_fields), Some(right_fields)) = (scope.fields(db), right.fields(db))
             else {
                 // The right side declares no schema. Nothing can be compared,
@@ -511,7 +514,7 @@ fn apply_source_op<'db>(
             };
             if left_fields.len() != right_fields.len() {
                 return Err(pipe_error(
-                    db,
+                    sink,
                     pipe,
                     Problem::UnionMismatch {
                         pipeline: pipe.name.to_string(),
@@ -524,7 +527,7 @@ fn apply_source_op<'db>(
             for (i, (l, r)) in left_fields.iter().zip(right_fields.iter()).enumerate() {
                 if l.name != r.name || l.ty != r.ty {
                     return Err(pipe_error(
-                        db,
+                        sink,
                         pipe,
                         Problem::UnionMismatch {
                             pipeline: pipe.name.to_string(),
@@ -549,6 +552,7 @@ fn apply_source_op<'db>(
 /// same scope.
 fn column_of<'db>(
     db: &'db dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     pipe: &crate::lower::HirSourcePipe,
     scope: &Rows<'db>,
     col: &crate::lower::SelectedColumn,
@@ -556,7 +560,7 @@ fn column_of<'db>(
     let (binding, column) = (&col.binding, &col.column);
     let Some(fields) = scope.fields_of(db, binding) else {
         return Err(pipe_error(
-            db,
+            sink,
             pipe,
             Problem::RowNotInScope {
                 binding: binding.to_string(),
@@ -572,7 +576,7 @@ fn column_of<'db>(
         .cloned()
         .ok_or_else(|| {
             pipe_error(
-                db,
+                sink,
                 pipe,
                 Problem::UnknownField {
                     field: fossil_syntax::name::spell(column).into_owned(),
@@ -660,12 +664,13 @@ fn grouped_scope<'db>(
 /// spellings would be a way to name one row twice.
 fn right_scope<'db>(
     db: &'db dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     file: fossil_base::SourceFile,
     right: &SmolStr,
     alias: Option<&SmolStr>,
     resolving: &[&str],
 ) -> Result<Rows<'db>, fossil_base::ErrorGuaranteed> {
-    let scope = resolve_binding_scope(db, file, right.as_str(), resolving)?;
+    let scope = resolve_binding_scope(db, sink, file, right.as_str(), resolving)?;
     Ok(match alias {
         Some(a) => scope.rename_to(db, a),
         None => scope,
@@ -691,6 +696,7 @@ fn right_scope<'db>(
 /// pipeline ends up with would check it against a row it never saw.
 fn typecheck_stage<'db>(
     db: &'db dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     file: fossil_base::SourceFile,
     pipe: &crate::lower::HirSourcePipe,
     verb: &str,
@@ -700,6 +706,7 @@ fn typecheck_stage<'db>(
     let at = pipe.span;
     let mut cx = crate::check::Expr::over_relation(db, file, pipe.base.clone(), scope.clone(), at);
     let ty = cx.synth(crate::body::ExprId(0), condition);
+    sink.extend(cx.sink.into_vec());
 
     // The signature is what says a condition is wanted here, so it is what the
     // refusal rests on. A `seq/` row that lost its `Predicate` parameter is a
@@ -728,7 +735,7 @@ fn typecheck_stage<'db>(
             at,
         )
         .file_absolute();
-        return Err(fossil_base::raise(db, d));
+        return Err(sink.raise(d));
     }
 
     cx.first_error.map_or(Ok(()), Err)
@@ -795,7 +802,7 @@ enum ConditionSide {
 /// mean admitting an arbitrary expression as a key, which is the theta join
 /// again wearing an `==`.
 fn check_join_condition<'db>(
-    db: &'db dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     pipe: &crate::lower::HirSourcePipe,
     on: &crate::lower::HirExpr,
     left: &Rows<'db>,
@@ -812,7 +819,7 @@ fn check_join_condition<'db>(
         } = conjunct
         else {
             return Err(join_error(
-                db,
+                sink,
                 pipe,
                 Problem::JoinNotEquality {
                     pipeline: pipe.name.to_string(),
@@ -828,7 +835,7 @@ fn check_join_condition<'db>(
         for operand in [lhs.as_ref(), rhs.as_ref()] {
             let HirExpr::ColumnRef { binding, column } = operand else {
                 return Err(join_error(
-                    db,
+                    sink,
                     pipe,
                     Problem::JoinKeyNotColumn {
                         pipeline: pipe.name.to_string(),
@@ -844,7 +851,7 @@ fn check_join_condition<'db>(
             };
             let Some(side) = side_of(left, right, binding) else {
                 return Err(join_error(
-                    db,
+                    sink,
                     pipe,
                     Problem::RowNotInScope {
                         binding: binding.to_string(),
@@ -873,7 +880,7 @@ fn check_join_condition<'db>(
                 ("right", left)
             };
             return Err(join_error(
-                db,
+                sink,
                 pipe,
                 Problem::JoinOneSide {
                     pipeline: pipe.name.to_string(),
@@ -947,7 +954,7 @@ fn binding_list(rows: &Rows<'_>) -> String {
 /// File-absolute for the reason every pipeline diagnostic is: a pipeline's span
 /// is measured against the file and the default frame is `MappingRelative`.
 fn join_error(
-    db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     pipe: &crate::lower::HirSourcePipe,
     problem: Problem,
     help: &str,
@@ -955,7 +962,7 @@ fn join_error(
     let d = Diagnostic::new(Severity::Error, problem, pipe.span)
         .with_help(help)
         .file_absolute();
-    fossil_base::raise(db, d)
+    sink.raise(d)
 }
 
 /// A union side's columns, each `name: Type`.
@@ -973,11 +980,11 @@ fn column_list(db: &dyn fossil_base::Db, fields: &[RecordField<'_>]) -> Vec<Stri
 }
 
 fn pipe_error(
-    db: &dyn fossil_base::Db,
+    sink: &mut Diagnostics,
     pipe: &crate::lower::HirSourcePipe,
     problem: Problem,
 ) -> fossil_base::ErrorGuaranteed {
-    report(db, pipe.span, problem)
+    sink.report(pipe.span, problem)
 }
 
 /// Build a `Record` [`Ty`] from a decoded [`Shape`] — the COMPILE-TIME source
@@ -1118,10 +1125,15 @@ mod tests {
     /// what stops the fix from being "accept anything".
     #[test]
     fn a_derived_relation_carries_the_binding_it_derives_from_and_not_its_own_name() {
-        #[salsa::tracked(returns(clone))]
-        fn shim(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> String {
-            let scope =
-                resolve_binding_scope(db, file, "Reachable", &[]).expect("a legal pipeline");
+        fn scope_text(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> String {
+            let scope = resolve_binding_scope(
+                db,
+                &mut fossil_base::Diagnostics::new(),
+                file,
+                "Reachable",
+                &[],
+            )
+            .expect("a legal pipeline");
             format!(
                 "{} | Contact={} Reachable={} Nobody={}",
                 render(db, &scope),
@@ -1139,7 +1151,7 @@ mod tests {
             "derived.fossil".to_string(),
         );
         assert_eq!(
-            shim(&db, file),
+            scope_text(&db, file),
             "Contact{?} | Contact=true Reachable=false Nobody=false",
             "`Reachable` derives from `Contact`, so `Contact` is the row a body \
              names; the relation's own name is not a row and neither is a \
@@ -1154,10 +1166,15 @@ mod tests {
     /// not have» refusal.
     #[test]
     fn a_binding_the_relation_does_not_draw_on_is_not_in_scope() {
-        #[salsa::tracked(returns(clone))]
-        fn shim(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> String {
-            let scope =
-                resolve_binding_scope(db, file, "Reachable", &[]).expect("a legal pipeline");
+        fn scope_text(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> String {
+            let scope = resolve_binding_scope(
+                db,
+                &mut fossil_base::Diagnostics::new(),
+                file,
+                "Reachable",
+                &[],
+            )
+            .expect("a legal pipeline");
             format!("{} | Other={}", render(db, &scope), scope.has("Other"))
         }
 
@@ -1170,7 +1187,7 @@ mod tests {
             "genuine.fossil".to_string(),
         );
         assert_eq!(
-            shim(&db, file),
+            scope_text(&db, file),
             "Contact{?} | Other=false",
             "a binding that exists in the file but not in this relation is still \
              a row this mapping does not have"
@@ -1184,9 +1201,10 @@ mod tests {
     /// ambiguity at all.
     #[test]
     fn a_self_join_puts_both_sides_in_scope_under_two_names() {
-        #[salsa::tracked(returns(clone))]
-        fn shim(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> String {
-            let scope = resolve_binding_scope(db, file, "Pairs", &[]).expect("a legal pipeline");
+        fn scope_text(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> String {
+            let scope =
+                resolve_binding_scope(db, &mut fossil_base::Diagnostics::new(), file, "Pairs", &[])
+                    .expect("a legal pipeline");
             render(db, &scope)
         }
 
@@ -1198,7 +1216,7 @@ mod tests {
                 .to_string(),
             "selfjoin.fossil".to_string(),
         );
-        assert_eq!(shim(&db, file), "Node{?} + Other{?}");
+        assert_eq!(scope_text(&db, file), "Node{?} + Other{?}");
     }
 
     /// **The trap, measured in the one place it can bite.** Two sources with a
@@ -1208,9 +1226,10 @@ mod tests {
     /// the assertion cannot pass by accident.
     #[test]
     fn a_qualified_reference_resolves_against_its_own_side_of_a_join() {
-        #[salsa::tracked(returns(clone))]
-        fn shim(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> String {
-            let scope = resolve_binding_scope(db, file, "Both", &[]).expect("a legal join");
+        fn scope_text(db: &dyn fossil_base::Db, file: fossil_base::SourceFile) -> String {
+            let scope =
+                resolve_binding_scope(db, &mut fossil_base::Diagnostics::new(), file, "Both", &[])
+                    .expect("a legal join");
             let ty = |binding: &str| {
                 scope
                     .row_of(binding)
@@ -1257,7 +1276,7 @@ mod tests {
             "join.fossil".to_string(),
         );
         assert_eq!(
-            shim(&db, file),
+            scope_text(&db, file),
             "Left{id,k} + Right{id,k} | Left.id=Primitive(Integer) Right.id=Primitive(String) \
              flat=Some([\"id\", \"k\", \"id\", \"k\"])",
             "each side answers with its OWN `id`; the flat row still holds both, \

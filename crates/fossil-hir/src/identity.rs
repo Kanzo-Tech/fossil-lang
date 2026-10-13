@@ -15,20 +15,20 @@
 //! is a fact about a FILE, and this is the file-keyed query that holds the
 //! table it is a fact about.
 //!
-//! # Two queries, and the split is about accumulators
+//! # Two queries, and the split is about the whole-file read
 //!
-//! `subject_templates` holds the table and emits NOTHING. `check_identities`
-//! reads that table and emits the disagreement diagnostics. They are separate
-//! because salsa collects an accumulator over a query's whole dependency
-//! subtree: `subject_templates` is read from inside `typecheck_mapping` and
-//! `lower_to_mir_pg` (an edge constructor needs it), so a diagnostic pushed
-//! there comes back out of EVERY mapping that constructs an edge — once per
-//! mapping, for a fact about the file. A file-level drain would dedup it and
-//! the LSP, which drains per mapping and does not, would show it N times.
+//! `subject_templates` holds the table and reports NOTHING. `check_identities`
+//! reads that table and returns the disagreement diagnostics. They are separate
+//! because a disagreement names two mappings, so its spans are rebased onto the
+//! file here, and rebasing reads `parse(db, file)`
+//! ([`crate::spans::mapping_start_offset`]). `subject_templates` is read from
+//! inside `typecheck_mapping` and `lower_to_mir_pg` (an edge constructor needs
+//! it); were the diagnostics in its output, every edit that shifts a byte would
+//! change it and re-run every mapping that constructs an edge.
 //!
 //! So the check is its own file-keyed query that nothing per-mapping reads, and
-//! hosts drain it beside `def_map` and `lower_to_hir` — the two other file-level
-//! drains that exist for exactly this reason.
+//! `fossil_mir::program_diagnostics` collects it beside `def_map` and
+//! `lower_to_hir`.
 //!
 //! Xiao et al. (ESWC 2018) ASSUME the property in as many words — *«it is
 //! desired that each IRI can be constructed by at most one IRI template, and we
@@ -271,25 +271,24 @@ pub fn subject_templates<'db>(
 /// Every mapping that produces `T` must declare the same `@subject`; two that
 /// disagree are an ERROR naming both mappings and both templates. It may not be
 /// a warning: a warning about identity is ignored, and the result is two
-/// entities where there was one. Returns how many disagreements
-/// it reported, so a test can assert the count without draining the accumulator;
-/// the diagnostics themselves are what callers want.
+/// entities where there was one. Returns one diagnostic per disagreement,
+/// file-absolute.
 ///
 /// # Nothing per-mapping may call this
 ///
-/// It accumulates. See the module docs: a diagnostic pushed from a query that
-/// `typecheck_mapping` reads comes back out once per mapping. Hosts drain it
-/// once per FILE, beside `def_map` and `lower_to_hir`.
-#[salsa::tracked(returns(copy))]
-#[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
-pub fn check_identities(db: &dyn fossil_base::Db, file: SourceFile) -> usize {
-    use salsa::Accumulator as _;
-
+/// It reads the whole file to rebase its spans. See the module docs: a
+/// per-mapping reader would re-run on every edit. Hosts read it once per FILE,
+/// beside `def_map` and `lower_to_hir`.
+#[salsa::tracked(returns(ref))]
+pub fn check_identities(
+    db: &dyn fossil_base::Db,
+    file: SourceFile,
+) -> Vec<fossil_base::Diagnostic> {
     let dm = def_map(db, file);
     let table = subject_templates(db, file);
     let templates = table.templates(db);
 
-    let mut reported = 0usize;
+    let mut reported = Vec::new();
     // The FIRST mapping to produce a shape is the reference every later one is
     // read against, so three disagreeing mappings give two diagnostics and each
     // names the definition — rather than a chain where the second is blamed
@@ -304,7 +303,6 @@ pub fn check_identities(db: &dyn fossil_base::Db, file: SourceFile) -> usize {
         if identity_form(&first.template) == identity_form(&later.template) {
             continue;
         }
-        reported += 1;
 
         // The type's name as the PROGRAM wrote it — `Person`, not
         // `https://shop.example/voc#Person`. A message about a mapping header
@@ -333,32 +331,33 @@ pub fn check_identities(db: &dyn fossil_base::Db, file: SourceFile) -> usize {
             t.span.shifted(base)
         };
 
-        fossil_base::Diagnostic::new(
-            fossil_graph_schema::Severity::Error,
-            fossil_graph_schema::Problem::ConflictingIdentity {
-                first: first.mapping_name.to_string(),
-                second: later.mapping_name.to_string(),
-                shape: type_name.to_string(),
-            },
-            absolute(later),
-        )
-        .file_absolute()
-        .with_label(
-            absolute(first),
-            format!("`{}` mints this one", first.mapping_name),
-            fossil_base::SpanFrame::FileAbsolute,
-        )
-        .with_label(
-            absolute(later),
-            format!("`{}` mints this one", later.mapping_name),
-            fossil_base::SpanFrame::FileAbsolute,
-        )
-        .with_help(format!(
-            "a type has one identity. Every mapping that produces {type_name} writes the same \
+        reported.push(
+            fossil_base::Diagnostic::new(
+                fossil_graph_schema::Severity::Error,
+                fossil_graph_schema::Problem::ConflictingIdentity {
+                    first: first.mapping_name.to_string(),
+                    second: later.mapping_name.to_string(),
+                    shape: type_name.to_string(),
+                },
+                absolute(later),
+            )
+            .file_absolute()
+            .with_label(
+                absolute(first),
+                format!("`{}` mints this one", first.mapping_name),
+                fossil_base::SpanFrame::FileAbsolute,
+            )
+            .with_label(
+                absolute(later),
+                format!("`{}` mints this one", later.mapping_name),
+                fossil_base::SpanFrame::FileAbsolute,
+            )
+            .with_help(format!(
+                "a type has one identity. Every mapping that produces {type_name} writes the same \
              @subject, so that an edge naming {type_name} reaches the same node whichever \
              mapping emitted it."
-        ))
-        .accumulate(db);
+            )),
+        );
     }
     reported
 }
@@ -434,15 +433,9 @@ mod tests {
     use fossil_base::test_support::{PERSON_DOCUMENT, db_with_document};
 
     /// The disagreement diagnostics alone.
-    ///
-    /// `check_identities::accumulated` yields its whole dependency subtree —
-    /// every `body`, `lower_to_hir` and `def_map` diagnostic the file produced —
-    /// which is why `fossil_mir::program_diagnostics` filters this drain by frame. These
-    /// fixtures are clean, so the filter here is belt-and-braces: it keeps a
-    /// failure in one of those readable as ITS failure rather than as this one.
     fn conflicts(db: &fossil_base::FossilDb, file: SourceFile) -> Vec<&fossil_base::Diagnostic> {
-        check_identities::accumulated::<fossil_base::Diagnostic>(db, file)
-            .into_iter()
+        check_identities(db, file)
+            .iter()
             .filter(|d| d.problem.code() == "identity/conflicting")
             .collect()
     }
@@ -485,7 +478,7 @@ B : Person from more
              is the first one written"
         );
         assert_eq!(
-            check_identities(&db, file),
+            check_identities(&db, file).len(),
             0,
             "`{{users.id}}` and `{{more.id}}` are the same identity over two \
              sources: the row binder is local to each mapping"
@@ -515,7 +508,7 @@ Imported : Person from Legacy
     fn two_mappings_that_mint_different_identities_for_one_type_are_an_error() {
         let (db, file) = db_with_document(TWO_IDENTITIES, "person.shex", PERSON_DOCUMENT);
         assert_eq!(
-            check_identities(&db, file),
+            check_identities(&db, file).len(),
             1,
             "one disagreement, one report"
         );
@@ -576,7 +569,7 @@ Imported : Person from Legacy
     fn the_same_identity_over_two_sources_is_one_identity() {
         let agreeing = TWO_IDENTITIES.replace("Legacy.account_id", "Legacy.email");
         let (db, file) = db_with_document(&agreeing, "person.shex", PERSON_DOCUMENT);
-        assert_eq!(check_identities(&db, file), 0);
+        assert_eq!(check_identities(&db, file).len(), 0);
         assert!(
             conflicts(&db, file).is_empty(),
             "`{{User.email}}` and `{{Legacy.email}}` are one identity written twice"
@@ -593,7 +586,11 @@ Imported : Person from Legacy
              @subject = \"https://shop.example/person/{{User.email}}\"\n    name = User.name\n"
         );
         let (db, file) = db_with_document(&three, "person.shex", PERSON_DOCUMENT);
-        assert_eq!(check_identities(&db, file), 2, "two later, two reports");
+        assert_eq!(
+            check_identities(&db, file).len(),
+            2,
+            "two later, two reports"
+        );
         let diags = conflicts(&db, file);
         let messages: Vec<String> = diags.iter().map(|d| d.message()).collect();
         assert_eq!(

@@ -25,7 +25,7 @@
 //!   program written by an author writes it.
 
 use fossil_base::test_support::{db_with_document, register_inferred};
-use fossil_base::{Diagnostic, FossilDb, SourceFile};
+use fossil_base::{FossilDb, SourceFile};
 use fossil_graph_schema::Primitive;
 use fossil_hir::lower::lower_to_hir;
 
@@ -52,10 +52,12 @@ fn diagnostics(binding: &str) -> Vec<String> {
         db_with_document(&program(binding), "v.shex", DOCUMENT);
     register_inferred(&mut db, "u.csv", COLUMNS);
     register_inferred(&mut db, "u.json", COLUMNS);
-    let _ = lower_to_hir(&db, file);
-    lower_to_hir::accumulated::<Diagnostic>(&db, file)
+    // The lowering's own, then the parse's it reads.
+    lower_to_hir(&db, file)
+        .diagnostics(&db)
         .iter()
-        .map(|d| d.message())
+        .chain(fossil_syntax::parse(&db, file).diagnostics(&db))
+        .map(fossil_base::Diagnostic::message)
         .collect()
 }
 

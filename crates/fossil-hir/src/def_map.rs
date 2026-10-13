@@ -567,8 +567,8 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                 // name each addresses. A rename addressed to a name the binding
                 // does not introduce belongs to nobody and is dropped HERE —
                 // `crate::lower` reports it, over the same nodes, with a real
-                // span. This query stays diagnostic-free (it is signatures-only
-                // and runs outside a frame where `fossil_base::report` is valid).
+                // span. This query stays diagnostic-free: one mistake gets one
+                // report, and the lowering is where the span is.
                 let renames = parse_renames(&item);
                 for (name, (shape_iri, shape_error)) in members.into_iter().zip(bound) {
                     let mine = renames

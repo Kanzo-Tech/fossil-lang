@@ -330,7 +330,7 @@ pub async fn execute_vertex_ops<'db>(
 /// needs — an unresolvable source binding, a mapping with no usable `iri`. It
 /// carries no ops, so executing it would either panic on the `expect`s below or
 /// silently produce an empty graph. Neither is acceptable: the run must fail
-/// with the reason, which the accumulated `Diagnostic` already carries
+/// with the reason, which a reported `Diagnostic` already carries
 /// (`fossil_base` guarantees at least one).
 ///
 /// Checking here is also what makes the `expect`s below sound: a graph that is

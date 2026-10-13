@@ -44,23 +44,16 @@ pub(crate) fn db_with_shapes(
     (db, file)
 }
 
-/// Every diagnostic the file's mappings accumulate, in mapping order.
+/// Every diagnostic the file produces, as every host reads them.
 ///
 /// A mapping that does not compile makes `execute_*` return
 /// `Plan("the mapping did not compile; see the reported diagnostics")` — a
 /// message that names no diagnostic. This is how a test says which.
 pub(crate) fn diagnostics(db: &FossilDb, file: SourceFile) -> Vec<String> {
-    let def_map = fossil_hir::def_map::def_map(db, file);
-    let mut out = Vec::new();
-    for mapping in def_map.mappings(db) {
-        let _ = fossil_mir::lower_to_mir_pg(db, *mapping);
-        out.extend(
-            fossil_mir::lower_to_mir_pg::accumulated::<fossil_base::Diagnostic>(db, *mapping)
-                .into_iter()
-                .map(fossil_base::Diagnostic::message),
-        );
-    }
-    out
+    fossil_mir::program_diagnostics(db, file)
+        .iter()
+        .map(fossil_base::Diagnostic::message)
+        .collect()
 }
 
 /// A [`fossil_storage::Host`] that vends nothing: every store a test needs is

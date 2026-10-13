@@ -94,7 +94,7 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
 | Component | Version | Notes |
 |-----------|---------|-------|
 | Rust toolchain | 1.90 | per `rust-toolchain.toml`; bumped from 1.85 to unblock wasm-bindgen-cli 0.2.120 install |
-| salsa | 0.28.5 + `accumulator` feature | incremental query framework; ≥0.28.5 for RUSTSEC-2026-0308. 0.28 returns by reference by default, so every tracked item that predates it names `returns(clone)` or `returns(copy)`, the 0.26 default |
+| salsa | 0.28.5, defaults minus `accumulator` | incremental query framework; diagnostics travel in query outputs (`/docs/design/incremental`); ≥0.28.5 for RUSTSEC-2026-0308. 0.28 returns by reference by default, so every tracked item that predates it names `returns(clone)` or `returns(copy)`, the 0.26 default |
 | rowan | 0.16 | lossless CST |
 | logos | 0.16 | lexer |
 | miette | 7.6 | diagnostics |

@@ -16,7 +16,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use fossil_base::{Diagnostic, FossilDb, SourceFile, System, file_at};
+use fossil_base::{FossilDb, SourceFile, System, file_at};
 use fossil_hir::documents::{documents_named, registry_key};
 use fossil_hir::shape_documents::shape_document;
 use salsa::Setter as _;
@@ -145,19 +145,12 @@ fn expects_integer(p: &fossil_graph_schema::Problem) -> bool {
     matches!(p, fossil_graph_schema::Problem::PropertyMismatch { expected, .. } if expected == "Integer")
 }
 
-/// Every mapping's diagnostics, drained the way `check` drains them.
+/// The program's diagnostics, read the way `check` reads them.
 fn diagnostics(db: &FossilDb, file: SourceFile) -> Vec<fossil_graph_schema::Problem> {
-    let def_map = fossil_hir::def_map::def_map(db, file);
-    let mut out = Vec::new();
-    for mapping in def_map.mappings(db) {
-        let _ = fossil_mir::lower_to_mir_pg(db, *mapping);
-        out.extend(
-            fossil_mir::lower_to_mir_pg::accumulated::<Diagnostic>(db, *mapping)
-                .into_iter()
-                .map(|d| d.problem.clone()),
-        );
-    }
-    out
+    fossil_mir::program_diagnostics(db, file)
+        .into_iter()
+        .map(|d| d.problem)
+        .collect()
 }
 
 /// The registration itself: the document the program names lands under the

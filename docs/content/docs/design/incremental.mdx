@@ -54,27 +54,23 @@ describes its sources, so a run checks a program with open rows where the editor
 columns. The two agree on every program the editor accepted — an open row refuses less — and the gap
 closes with the next section.
 
-## Where this is going
+## Diagnostics are returned by value
 
-**One database.** The editor's workspace and the executor build two databases from two `Db`
-implementations, and the JavaScript hosts learn two objects that repeat `setConnections`,
-`missingDocuments` and `registerDocument`. One concrete database, used by both, makes a run execute the
-plan the editor checked, from the same inputs. The executor stays a separate wasm module — the editor
-does not load DataFusion — but it compiles the same database type.
+A query that can find a mistake returns what it found in its output, as ty and rust-analyzer do.
+Diagnostics were a Salsa accumulator, and an accumulator can only be pushed from inside a query —
+which is why the tests carried tracked wrapper functions whose only job was to be a query, and why a
+helper that found a mistake needed a database to report it to.
 
-**Diagnostics returned by value.** A diagnostic is a Salsa accumulator today, and an accumulator can
-only be pushed from inside a query, which is why the tests carry tracked wrapper functions whose only
-job is to be a query — and why a helper that finds a mistake needs a database to report it to. ty and
-rust-analyzer return diagnostics in a query's output instead, and fossil does the same:
-
-- **A query that can find a mistake carries its diagnostics in its output** — the parse, the def map,
-  the lowering, the check of one mapping, the identity check, the lowering to MIR. A check that
-  refuses still returns an output, with the refusal among its diagnostics and the poison beside it.
+- **A query that can find a mistake carries its diagnostics in its output** — the parse, the
+  lowering, a mapping's body, the check of one mapping, the identity check, the lowering to MIR. A
+  check that refuses still returns an output, with the refusal among its diagnostics and the poison
+  beside it (`crates/fossil-hir/src/check.rs, TypeckOutput`).
 - **A helper reports into a sink it is handed**, not into the database, and the sink is what mints the
-  `ErrorGuaranteed` a poisoned result carries. The rule that a refusal cannot be silent stays a type:
-  the only way to get the token is to push a diagnostic.
+  `ErrorGuaranteed` a poisoned result carries (`crates/fossil-base/src/error.rs, Diagnostics`). The
+  rule that a refusal cannot be silent stays a type: the only way to get the token is to push a
+  diagnostic.
 - **The program's diagnostics are the union of those outputs**, collected by one function every host
-  calls, as now.
+  calls (`crates/fossil-mir/src/diagnostics.rs, program_diagnostics`).
 - **A test builds a database with what it needs** — files, documents, described sources — and calls
   the real query, or hands a helper a sink of its own. No tracked function exists to be a test's
   frame.
@@ -82,6 +78,14 @@ rust-analyzer return diagnostics in a query's output instead, and fossil does th
 **What would reverse it:** a diagnostic whose producer is not the query whose output carries it —
 reported from deep inside a query on behalf of another. An accumulator is the tool for that, and
 fossil has no such case: every diagnostic belongs to the query that found it.
+
+## Where this is going
+
+**One database.** The editor's workspace and the executor build two databases from two `Db`
+implementations, and the JavaScript hosts learn two objects that repeat `setConnections`,
+`missingDocuments` and `registerDocument`. One concrete database, used by both, makes a run execute the
+plan the editor checked, from the same inputs. The executor stays a separate wasm module — the editor
+does not load DataFusion — but it compiles the same database type.
 
 **The connections are an input.** They travel as an argument to three plain functions today, so
 nothing that depends on them is memoised.

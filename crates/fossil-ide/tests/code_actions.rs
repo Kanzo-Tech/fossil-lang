@@ -224,7 +224,7 @@ Contact : Contact from contacts
     for m in mappings {
         let r = fossil_hir::typecheck_mapping(&db, m);
         assert!(
-            r.is_ok(),
+            r.checked(&db).is_ok(),
             "the split-mapping edit must re-compile cleanly (no new type errors); \
              mapping failed in edited doc:\n{edited}",
         );
