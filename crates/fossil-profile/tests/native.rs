@@ -103,11 +103,11 @@ fn a_profile_says_what_the_files_are() {
     assert_eq!(awards.rows, Some(4));
     assert!(!awards.sampled);
     assert_eq!(
-        awards.keys,
+        awards.candidate_keys,
         ["id"],
         "a laureate and a category repeat, and a share is a measurement"
     );
-    assert_eq!(laureates.keys, ["id", "name"]);
+    assert_eq!(laureates.candidate_keys, ["id", "name"]);
     assert_eq!(awards.sample.len(), 2);
     assert_eq!(awards.sample[0][0].as_deref(), Some("1903-physics-1"));
 
@@ -201,7 +201,7 @@ fn a_sample_reads_the_counts_from_the_first_rows_and_says_so() {
         rows.sampled,
         "the counts read a sample, so the keys are candidates"
     );
-    assert_eq!(rows.keys, ["id"]);
+    assert_eq!(rows.candidate_keys, ["id"]);
     assert!(rows.sample.is_empty(), "shown: 0 keeps no rows");
 }
 

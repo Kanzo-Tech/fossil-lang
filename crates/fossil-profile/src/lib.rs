@@ -14,8 +14,19 @@
 //! on, so `introspect` could be written twice; which pairs of columns to test
 //! and what a count means are logic, and two copies of logic drift.
 //!
-//! Every query casts what it selects to `VARCHAR`, so the two engines answer in
-//! one form: rows of text cells, `None` for SQL `NULL`.
+//! # The plan is data
+//!
+//! Each query is an [`Ask`] — the counts of a relation, the commonest values of
+//! a column, an inclusion between two, a sample — and SQL is one rendering of
+//! it, [`Ask::sql`], `DuckDB`'s, which the two hosts that profile SOURCES run.
+//! The corpus writer profiles the TABLES it wrote with the same plan
+//! ([`Profiler::over_tables`]) on `DataFusion`, which has no SQL in this build,
+//! and renders the same `Ask` as a `DataFusion` plan. Which queries to run, how
+//! to prune them and what a count means stay here; only the rendering is per
+//! engine (`/docs/design/facts`).
+//!
+//! Every query answers in text, so the engines answer in one form: rows of text
+//! cells, `None` for SQL `NULL`.
 //!
 //! [`run`] is the loop for a host that runs one query at a time: it brings the
 //! one thing a host owns, a function from SQL to rows, and this crate links no
@@ -44,6 +55,15 @@ pub mod generated;
 /// A query's answer: its rows, each cell the text of a value or `None` for `NULL`.
 pub type Rows = Vec<Vec<Option<String>>>;
 
+/// The longest value a profile keeps, in bytes. A longer one is left out,
+/// never cut: a prefix is a value the column does not hold, and a reader shows
+/// these to a person and filters by them (`/docs/design/facts`). 64 bytes hold
+/// a date, a number, a code or a short name, and not a description.
+pub const MAX_VALUE_BYTES: usize = 64;
+
+/// How many of a column's commonest values a profile keeps.
+pub const TOP_VALUES: usize = 10;
+
 /// A source to profile, as its host can read it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[schemars(rename = "ProfileSource")]
@@ -62,6 +82,41 @@ pub struct Source {
     /// The host's validator for the bytes it read: carried into the descriptor.
     #[serde(default)]
     pub etag: String,
+}
+
+/// A table the host already holds, with no reader: the columns are known, so
+/// it is not described. What the corpus writer profiles.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Table {
+    /// The name the host's engine holds it under.
+    pub name: SmolStr,
+    pub columns: Vec<TableColumn>,
+}
+
+/// One column of a [`Table`]: its name, its type, and which side of an
+/// inclusion it may stand on.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TableColumn {
+    pub name: SmolStr,
+    pub primitive: Primitive,
+    pub kind: ColumnKind,
+}
+
+/// What an inclusion may test a column as. A source's columns are all
+/// [`Self::Value`]; a corpus's are pruned two ways a source's cannot be: only a
+/// program's column is a dependent side, and one whose values are IRIs is tested
+/// against the identity columns alone (`/docs/design/facts`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColumnKind {
+    /// A value: the dependent side, tested against keys of its own type.
+    Value,
+    /// An IRI-valued value: the dependent side, tested against identities.
+    Reference,
+    /// What a reference names — a vertex's `subject`. Never dependent.
+    Identity,
+    /// A column the writer emits whose meaning is declared — an address, an
+    /// endpoint, a tag. Counted, and never either side.
+    Declared,
 }
 
 /// How far a profile goes.
@@ -97,6 +152,13 @@ impl Options {
         shown: 0,
         depth: Depth::Types,
     };
+
+    /// Every row, and no sample kept: what the corpus writer counts with.
+    pub const WHOLE: Self = Self {
+        sample: 0,
+        shown: 0,
+        depth: Depth::Whole,
+    };
 }
 
 impl Default for Options {
@@ -109,7 +171,7 @@ impl Default for Options {
     }
 }
 
-/// One query for the host to run.
+/// One query for the host to run, as `DuckDB` SQL — [`Ask::sql`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[schemars(rename = "ProfileQuery")]
 pub struct Query {
@@ -118,13 +180,166 @@ pub struct Query {
     pub sql: String,
 }
 
-/// A column's counts, over the rows the profile read.
+/// What a query reads: a source through its reader, or a table the host holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Relation {
+    /// `read_csv_auto('people.csv', delim='|')` — [`relation`]'s rendering.
+    Read(String),
+    /// A table the host's engine holds under this name.
+    Table(SmolStr),
+}
+
+impl Relation {
+    /// The relation in `DuckDB` SQL.
+    #[must_use]
+    pub fn sql(&self) -> String {
+        match self {
+            Self::Read(read) => read.clone(),
+            Self::Table(name) => ident(name),
+        }
+    }
+}
+
+/// One query of the plan, as data. Each answers in text cells.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Ask {
+    /// The relation's columns and their engine types: a row `[name, type]`
+    /// per column.
+    Describe { relation: Relation },
+    /// One row: the rows read, then per column its distinct non-null values,
+    /// its non-null values, its least and its greatest value.
+    Counts {
+        relation: Relation,
+        /// The rows read; `0` reads every row.
+        sample: u64,
+        columns: Vec<SmolStr>,
+    },
+    /// A row `[value, count]` for each of the [`TOP_VALUES`] commonest
+    /// non-null values that occur at least twice, most frequent first and ties
+    /// by value.
+    TopValues {
+        relation: Relation,
+        sample: u64,
+        column: SmolStr,
+    },
+    /// One row: the distinct non-null values of `column`, and how many of them
+    /// `key` does not hold. The referenced side is read whole.
+    Inclusion {
+        dependent: Relation,
+        sample: u64,
+        column: SmolStr,
+        referenced: Relation,
+        key: SmolStr,
+    },
+    /// The first `shown` rows, every cell as text.
+    Sample {
+        relation: Relation,
+        columns: Vec<SmolStr>,
+        shown: u64,
+    },
+}
+
+impl Ask {
+    /// `DuckDB`'s rendering — what both hosts that profile sources run.
+    #[must_use]
+    pub fn sql(&self) -> String {
+        let read = |relation: &Relation, sample: u64| match sample {
+            0 => format!("(SELECT * FROM {})", relation.sql()),
+            n => format!("(SELECT * FROM {} LIMIT {n})", relation.sql()),
+        };
+        match self {
+            Self::Describe { relation } => format!("DESCRIBE SELECT * FROM {}", relation.sql()),
+            Self::Counts {
+                relation,
+                sample,
+                columns,
+            } => {
+                let mut select = vec!["CAST(count(*) AS VARCHAR)".to_string()];
+                for c in columns {
+                    let name = ident(c);
+                    select.push(format!("CAST(count(DISTINCT {name}) AS VARCHAR)"));
+                    select.push(format!("CAST(count({name}) AS VARCHAR)"));
+                    select.push(format!("CAST(min({name}) AS VARCHAR)"));
+                    select.push(format!("CAST(max({name}) AS VARCHAR)"));
+                }
+                format!(
+                    "SELECT {} FROM {} AS s",
+                    select.join(", "),
+                    read(relation, *sample)
+                )
+            }
+            Self::TopValues {
+                relation,
+                sample,
+                column,
+            } => format!(
+                "SELECT {text} AS v, CAST(count(*) AS VARCHAR) FROM {from} AS s \
+                 WHERE {col} IS NOT NULL GROUP BY {col} HAVING count(*) >= 2 \
+                 ORDER BY count(*) DESC, v LIMIT {TOP_VALUES}",
+                text = text(column),
+                col = ident(column),
+                from = read(relation, *sample),
+            ),
+            Self::Inclusion {
+                dependent,
+                sample,
+                column,
+                referenced,
+                key,
+            } => format!(
+                "SELECT CAST(count(*) AS VARCHAR), CAST(count(*) FILTER (WHERE y.v IS NULL) AS VARCHAR) \
+                 FROM (SELECT DISTINCT {from} AS v FROM {dependent} AS a WHERE {col} IS NOT NULL) AS x \
+                 LEFT JOIN (SELECT DISTINCT {to} AS v FROM {referenced} AS b) AS y ON x.v = y.v",
+                from = text(column),
+                col = ident(column),
+                dependent = read(dependent, *sample),
+                to = text(key),
+                referenced = read(referenced, 0),
+            ),
+            Self::Sample {
+                relation,
+                columns,
+                shown,
+            } => {
+                let select: Vec<String> = columns.iter().map(|c| text(c)).collect();
+                format!(
+                    "SELECT {} FROM {} LIMIT {shown}",
+                    select.join(", "),
+                    relation.sql()
+                )
+            }
+        }
+    }
+}
+
+/// A column's counts, over the rows the profile read — Parquet's `Statistics`
+/// names, which the corpus's `fossil.json` uses for the same facts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ColumnStats {
     #[schemars(with = "String")]
     pub name: SmolStr,
-    pub distinct: u64,
-    pub nulls: u64,
+    /// Rows with no value.
+    pub null_count: u64,
+    /// Distinct non-null values.
+    pub distinct_count: u64,
+    /// The least value, as text; absent with no value, or one longer than
+    /// [`MAX_VALUE_BYTES`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_value: Option<String>,
+    /// The greatest value, on the same terms.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_value: Option<String>,
+    /// The commonest values that occur at least twice; absent when none
+    /// repeats, or when one of them is longer than [`MAX_VALUE_BYTES`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub top_values: Vec<TopValue>,
+}
+
+/// One of a column's commonest values, and how many rows hold it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct TopValue {
+    pub value: String,
+    pub count: u64,
 }
 
 /// One source, profiled.
@@ -136,9 +351,10 @@ pub struct SourceProfile {
     pub rows: Option<u64>,
     pub sampled: bool,
     pub columns: Vec<ColumnStats>,
-    /// The columns that are candidate keys: never null, never repeated.
+    /// The columns that are candidate keys: of a type a key can be, never null,
+    /// never repeated.
     #[schemars(with = "Vec<String>")]
-    pub keys: Vec<SmolStr>,
+    pub candidate_keys: Vec<SmolStr>,
     /// Its first rows, every cell as text, in the descriptor's column order.
     pub sample: Rows,
 }
@@ -222,12 +438,22 @@ const fn keyable(p: Primitive) -> bool {
     !matches!(p, Primitive::Float | Primitive::Bool)
 }
 
+/// A value the profile keeps: present, and no longer than [`MAX_VALUE_BYTES`].
+fn kept(cell: Option<&Option<String>>) -> Option<String> {
+    cell.cloned()
+        .flatten()
+        .filter(|v| v.len() <= MAX_VALUE_BYTES)
+}
+
 #[derive(Debug)]
 struct State {
-    source: Source,
-    relation: String,
+    key: SmolStr,
+    etag: String,
+    format: Option<String>,
+    relation: Relation,
     described: bool,
     columns: Vec<InferredColumn>,
+    kinds: Vec<ColumnKind>,
     rows: Option<u64>,
     stats: Vec<ColumnStats>,
     sample: Rows,
@@ -237,6 +463,7 @@ struct State {
 enum Pending {
     Describe(usize),
     Stats(usize),
+    Top(usize, usize),
     Inclusion {
         from: (usize, usize),
         to: (usize, usize),
@@ -248,21 +475,23 @@ enum Pending {
 enum Phase {
     Describe,
     Stats,
+    Top,
     Inclusions,
     Sample,
     Done,
 }
 
-/// The plan: describe every source, count each one's columns, test the
-/// inclusions the types allow, keep a sample. A phase's queries are handed out
-/// together, so a host may run them at once; the next phase begins once all of
-/// them are answered.
+/// The plan: describe every source, count each one's columns, find the
+/// commonest values of a column whose values repeat, test the inclusions the
+/// types allow, keep a sample. A phase's queries are handed out together, so a
+/// host may run them at once; the next phase begins once all of them are
+/// answered.
 #[derive(Debug)]
 pub struct Profiler {
     options: Options,
     states: Vec<State>,
     phase: Phase,
-    queue: VecDeque<Query>,
+    queue: VecDeque<(u32, Ask)>,
     pending: HashMap<u32, Pending>,
     next_id: u32,
     inclusions: Vec<Inclusion>,
@@ -280,21 +509,63 @@ impl Profiler {
             let Some(reader) = native_reader(&source.format) else {
                 continue;
             };
-            if states.iter().any(|s| s.source.key == source.key) {
+            if states.iter().any(|s| s.key == source.key) {
                 continue;
             }
-            let relation = relation(reader, &source.name, source.option.as_deref());
+            let relation = Relation::Read(relation(reader, &source.name, source.option.as_deref()));
             states.push(State {
-                source,
+                key: source.key,
+                etag: source.etag,
+                format: Some(source.format),
                 relation,
                 described: false,
                 columns: Vec::new(),
+                kinds: Vec::new(),
                 rows: None,
                 stats: Vec::new(),
                 sample: Vec::new(),
             });
         }
-        let mut plan = Self {
+        let mut plan = Self::with(states, options);
+        for i in 0..plan.states.len() {
+            let relation = plan.states[i].relation.clone();
+            plan.ask(Ask::Describe { relation }, Pending::Describe(i));
+        }
+        plan
+    }
+
+    /// A plan over tables the host already holds, whose columns are known: no
+    /// `DESCRIBE`, and each column tested only on the side of an inclusion its
+    /// [`ColumnKind`] allows. What the corpus writer counts what it wrote with.
+    #[must_use]
+    pub fn over_tables(tables: impl IntoIterator<Item = Table>, options: Options) -> Self {
+        let states = tables
+            .into_iter()
+            .map(|t| State {
+                key: t.name.clone(),
+                etag: String::new(),
+                format: None,
+                relation: Relation::Table(t.name),
+                described: true,
+                kinds: t.columns.iter().map(|c| c.kind).collect(),
+                columns: t
+                    .columns
+                    .into_iter()
+                    .map(|c| InferredColumn {
+                        name: c.name,
+                        primitive: c.primitive,
+                    })
+                    .collect(),
+                rows: None,
+                stats: Vec::new(),
+                sample: Vec::new(),
+            })
+            .collect();
+        Self::with(states, options)
+    }
+
+    fn with(states: Vec<State>, options: Options) -> Self {
+        Self {
             options,
             states,
             phase: Phase::Describe,
@@ -303,33 +574,25 @@ impl Profiler {
             next_id: 0,
             inclusions: Vec::new(),
             failed: Vec::new(),
-        };
-        for i in 0..plan.states.len() {
-            let sql = format!("DESCRIBE SELECT * FROM {}", plan.states[i].relation);
-            plan.ask(sql, Pending::Describe(i));
         }
-        plan
     }
 
-    fn ask(&mut self, sql: String, what: Pending) {
+    fn ask(&mut self, ask: Ask, what: Pending) {
         let id = self.next_id;
         self.next_id += 1;
         self.pending.insert(id, what);
-        self.queue.push_back(Query { id, sql });
+        self.queue.push_back((id, ask));
     }
 
-    /// What the counts read from source `i`: a sample of it, or all of it.
-    fn sampled(&self, i: usize) -> String {
-        let relation = &self.states[i].relation;
-        match self.options.sample {
-            0 => format!("(SELECT * FROM {relation})"),
-            n => format!("(SELECT * FROM {relation} LIMIT {n})"),
-        }
-    }
-
-    /// The next query to run, or `None` when there is none to hand out now:
-    /// either the profile is done, or the phase waits on answers still out.
+    /// The next query to run as `DuckDB` SQL, or `None` when there is none to
+    /// hand out now: either the profile is done, or the phase waits on answers
+    /// still out.
     pub fn next_query(&mut self) -> Option<Query> {
+        self.next_ask().map(|(id, ask)| Query { id, sql: ask.sql() })
+    }
+
+    /// The next query to run, as data, for a host that renders it itself.
+    pub fn next_ask(&mut self) -> Option<(u32, Ask)> {
         while self.queue.is_empty() && self.pending.is_empty() && self.phase != Phase::Done {
             self.advance();
         }
@@ -347,39 +610,62 @@ impl Profiler {
             Phase::Describe if self.options.depth == Depth::Types => Phase::Done,
             Phase::Describe => {
                 for i in 0..self.states.len() {
-                    let columns = &self.states[i].columns;
-                    if columns.is_empty() {
+                    let state = &self.states[i];
+                    if state.columns.is_empty() {
                         continue;
                     }
-                    let mut select = vec!["CAST(count(*) AS VARCHAR)".to_string()];
-                    for c in columns {
-                        let name = ident(&c.name);
-                        select.push(format!("CAST(count(DISTINCT {name}) AS VARCHAR)"));
-                        select.push(format!("CAST(count({name}) AS VARCHAR)"));
-                    }
-                    let sql = format!("SELECT {} FROM {} AS s", select.join(", "), self.sampled(i));
-                    self.ask(sql, Pending::Stats(i));
+                    let ask = Ask::Counts {
+                        relation: state.relation.clone(),
+                        sample: self.options.sample,
+                        columns: state.columns.iter().map(|c| c.name.clone()).collect(),
+                    };
+                    self.ask(ask, Pending::Stats(i));
                 }
                 Phase::Stats
             }
             Phase::Stats => {
+                // Only a column whose values repeat has commonest values: one
+                // with as many distinct values as values has none to find.
+                let mut asks = Vec::new();
+                for (i, state) in self.states.iter().enumerate() {
+                    for (c, stats) in state.stats.iter().enumerate() {
+                        let present = state
+                            .rows
+                            .unwrap_or_default()
+                            .saturating_sub(stats.null_count);
+                        if stats.distinct_count < present {
+                            asks.push((
+                                Ask::TopValues {
+                                    relation: state.relation.clone(),
+                                    sample: self.options.sample,
+                                    column: stats.name.clone(),
+                                },
+                                Pending::Top(i, c),
+                            ));
+                        }
+                    }
+                }
+                for (ask, what) in asks {
+                    self.ask(ask, what);
+                }
+                Phase::Top
+            }
+            Phase::Top => {
                 self.plan_inclusions();
                 Phase::Inclusions
             }
             Phase::Inclusions => {
                 for i in 0..self.states.len() {
-                    let columns = &self.states[i].columns;
-                    if columns.is_empty() || self.options.shown == 0 {
+                    let state = &self.states[i];
+                    if state.columns.is_empty() || self.options.shown == 0 {
                         continue;
                     }
-                    let select: Vec<String> = columns.iter().map(|c| text(&c.name)).collect();
-                    let sql = format!(
-                        "SELECT {} FROM {} LIMIT {}",
-                        select.join(", "),
-                        self.states[i].relation,
-                        self.options.shown
-                    );
-                    self.ask(sql, Pending::Sample(i));
+                    let ask = Ask::Sample {
+                        relation: state.relation.clone(),
+                        columns: state.columns.iter().map(|c| c.name.clone()).collect(),
+                        shown: self.options.shown,
+                    };
+                    self.ask(ask, Pending::Sample(i));
                 }
                 Phase::Sample
             }
@@ -387,37 +673,48 @@ impl Profiler {
         };
     }
 
-    /// Every pair a type allows: a column with values, and a candidate key of
-    /// the same primitive that is not the column itself.
+    /// Every pair the types and the kinds allow: a dependent column with
+    /// values, and a referenced column of the same primitive that is not the
+    /// column itself — a candidate key for a value, an identity for a
+    /// reference.
     fn plan_inclusions(&mut self) {
         let mut asks = Vec::new();
         for (b, target) in self.states.iter().enumerate() {
-            for key in &self.keys(b) {
-                let Some(k) = target.columns.iter().position(|c| &c.name == key) else {
-                    continue;
+            let keys = self.candidate_keys(b);
+            for (k, key) in target.columns.iter().enumerate() {
+                let to = target.kinds.get(k).copied().unwrap_or(ColumnKind::Value);
+                let referable = match to {
+                    ColumnKind::Identity => true,
+                    ColumnKind::Value | ColumnKind::Reference => keys.contains(&key.name),
+                    ColumnKind::Declared => false,
                 };
-                let kind = target.columns[k].primitive;
+                if !referable {
+                    continue;
+                }
                 for (a, dependent) in self.states.iter().enumerate() {
                     for (c, column) in dependent.columns.iter().enumerate() {
-                        let has_values = dependent
-                            .stats
-                            .get(c)
-                            .is_some_and(|s| dependent.rows.is_some_and(|rows| s.nulls < rows));
-                        if (a, c) == (b, k) || column.primitive != kind || !has_values {
+                        let from = dependent.kinds.get(c).copied().unwrap_or(ColumnKind::Value);
+                        let pairs = match (from, to) {
+                            (ColumnKind::Value, ColumnKind::Value | ColumnKind::Reference) => {
+                                column.primitive == key.primitive
+                            }
+                            (ColumnKind::Reference, ColumnKind::Identity) => true,
+                            _ => false,
+                        };
+                        let has_values = dependent.stats.get(c).is_some_and(|s| {
+                            dependent.rows.is_some_and(|rows| s.null_count < rows)
+                        });
+                        if (a, c) == (b, k) || !pairs || !has_values {
                             continue;
                         }
-                        let sql = format!(
-                            "SELECT CAST(count(*) AS VARCHAR), CAST(count(*) FILTER (WHERE y.v IS NULL) AS VARCHAR) \
-                             FROM (SELECT DISTINCT {from} AS v FROM {dependent} AS a WHERE {col} IS NOT NULL) AS x \
-                             LEFT JOIN (SELECT DISTINCT {to} AS v FROM (SELECT * FROM {referenced}) AS b) AS y ON x.v = y.v",
-                            from = text(&column.name),
-                            col = ident(&column.name),
-                            dependent = self.sampled(a),
-                            to = text(key),
-                            referenced = target.relation,
-                        );
                         asks.push((
-                            sql,
+                            Ask::Inclusion {
+                                dependent: dependent.relation.clone(),
+                                sample: self.options.sample,
+                                column: column.name.clone(),
+                                referenced: target.relation.clone(),
+                                key: key.name.clone(),
+                            },
                             Pending::Inclusion {
                                 from: (a, c),
                                 to: (b, k),
@@ -427,14 +724,14 @@ impl Profiler {
                 }
             }
         }
-        for (sql, what) in asks {
-            self.ask(sql, what);
+        for (ask, what) in asks {
+            self.ask(ask, what);
         }
     }
 
     /// Source `i`'s candidate keys: columns a key can be, never null and never
     /// repeated in the rows read — and there were rows.
-    fn keys(&self, i: usize) -> Vec<SmolStr> {
+    fn candidate_keys(&self, i: usize) -> Vec<SmolStr> {
         let state = &self.states[i];
         let Some(rows) = state.rows.filter(|&r| r > 0) else {
             return Vec::new();
@@ -443,7 +740,9 @@ impl Profiler {
             .columns
             .iter()
             .zip(&state.stats)
-            .filter(|(c, s)| keyable(c.primitive) && s.nulls == 0 && s.distinct == rows)
+            .filter(|(c, s)| {
+                keyable(c.primitive) && s.null_count == 0 && s.distinct_count == rows
+            })
             .map(|(c, _)| c.name.clone())
             .collect()
     }
@@ -459,8 +758,8 @@ impl Profiler {
         };
         match what {
             Pending::Describe(i) => {
-                let reader = native_reader(&self.states[i].source.format);
                 let state = &mut self.states[i];
+                let reader = state.format.as_deref().and_then(native_reader);
                 state.described = true;
                 state.columns = rows
                     .iter()
@@ -475,6 +774,7 @@ impl Profiler {
                         })
                     })
                     .collect();
+                state.kinds = vec![ColumnKind::Value; state.columns.len()];
             }
             Pending::Stats(i) => {
                 let Some(row) = rows.first() else { return };
@@ -488,15 +788,35 @@ impl Profiler {
                     .iter()
                     .enumerate()
                     .map(|(n, c)| {
-                        let distinct = count(row.get(1 + 2 * n)).unwrap_or(0);
-                        let present = count(row.get(2 + 2 * n)).unwrap_or(0);
+                        let at = 1 + 4 * n;
+                        let present = count(row.get(at + 1)).unwrap_or(0);
                         ColumnStats {
                             name: c.name.clone(),
-                            distinct,
-                            nulls: total.saturating_sub(present),
+                            null_count: total.saturating_sub(present),
+                            distinct_count: count(row.get(at)).unwrap_or(0),
+                            min_value: kept(row.get(at + 2)),
+                            max_value: kept(row.get(at + 3)),
+                            top_values: Vec::new(),
                         }
                     })
                     .collect();
+            }
+            Pending::Top(i, c) => {
+                let top: Option<Vec<TopValue>> = rows
+                    .iter()
+                    .take(TOP_VALUES)
+                    .map(|row| {
+                        Some(TopValue {
+                            value: kept(row.first())?,
+                            count: count(row.get(1))?,
+                        })
+                    })
+                    .collect();
+                if let Some(stats) = self.states[i].stats.get_mut(c) {
+                    // One value too long and the list goes whole: ten values
+                    // with a hole are not the ten commonest.
+                    stats.top_values = top.unwrap_or_default();
+                }
             }
             Pending::Inclusion { from, to } => {
                 let Some(row) = rows.first() else { return };
@@ -505,7 +825,7 @@ impl Profiler {
                 };
                 if values > 0 && missing == 0 {
                     let at = |(s, c): (usize, usize)| ColumnRef {
-                        source: self.states[s].source.key.clone(),
+                        source: self.states[s].key.clone(),
                         column: self.states[s].columns[c].name.clone(),
                     };
                     self.inclusions.push(Inclusion {
@@ -524,11 +844,11 @@ impl Profiler {
             return;
         };
         let i = match what {
-            Pending::Describe(i) | Pending::Stats(i) | Pending::Sample(i) => i,
+            Pending::Describe(i) | Pending::Stats(i) | Pending::Sample(i) | Pending::Top(i, _) => i,
             Pending::Inclusion { from: (a, _), .. } => a,
         };
         self.failed.push(Failure {
-            source: self.states[i].source.key.clone(),
+            source: self.states[i].key.clone(),
             reason: reason.into(),
         });
     }
@@ -537,23 +857,25 @@ impl Profiler {
     /// answered so far.
     #[must_use]
     pub fn finish(self) -> Profile {
-        let keys: Vec<Vec<SmolStr>> = (0..self.states.len()).map(|i| self.keys(i)).collect();
+        let keys: Vec<Vec<SmolStr>> = (0..self.states.len())
+            .map(|i| self.candidate_keys(i))
+            .collect();
         let sampled = self.options.sample;
         let sources = self
             .states
             .into_iter()
             .zip(keys)
             .filter(|(s, _)| s.described)
-            .map(|(s, keys)| SourceProfile {
+            .map(|(s, candidate_keys)| SourceProfile {
                 sampled: sampled > 0 && s.rows.is_some_and(|r| r >= sampled),
                 rows: s.rows,
                 columns: s.stats,
-                keys,
+                candidate_keys,
                 sample: s.sample,
                 descriptor: InferredDescriptor {
-                    key: s.source.key,
+                    key: s.key,
                     columns: s.columns,
-                    etag: s.source.etag,
+                    etag: s.etag,
                 },
             })
             .collect();
@@ -688,10 +1010,23 @@ mod tests {
                 rows
             } else if q.sql.contains("count(DISTINCT \"id\")") && q.sql.contains("awards.csv") {
                 // 4 awards: ids unique, 3 laureates among them, one share repeated.
-                rows(&[&["4", "4", "4", "3", "4", "2", "4"]])
+                rows(&[&[
+                    "4", "4", "4", "1903-physics-1", "1954-chemistry-3", "3", "4", "1", "3", "2",
+                    "4", "0.25", "1.0",
+                ]])
             } else if q.sql.contains("count(DISTINCT \"id\")") {
                 // 3 laureates, ids and names unique.
-                rows(&[&["3", "3", "3", "3", "3"]])
+                rows(&[&[
+                    "3",
+                    "3",
+                    "3",
+                    "1",
+                    "3",
+                    "3",
+                    "3",
+                    "Linus Pauling",
+                    "Pierre Curie",
+                ]])
             } else if q.sql.contains("LEFT JOIN")
                 && q.sql.contains("CAST(\"laureate\"")
                 && q.sql.contains("laureates.csv")
@@ -699,6 +1034,10 @@ mod tests {
                 rows(&[&["3", "0"]])
             } else if q.sql.contains("LEFT JOIN") {
                 rows(&[&["3", "2"]])
+            } else if q.sql.contains("GROUP BY \"laureate\"") {
+                rows(&[&["1", "2"]])
+            } else if q.sql.contains("GROUP BY") {
+                rows(&[&["1.0", "2"], &["0.25", "2"]])
             } else {
                 rows(&[&["x", "1"]])
             };
@@ -717,11 +1056,29 @@ mod tests {
             [Primitive::String, Primitive::Integer, Primitive::Float]
         );
         assert_eq!(
-            awards.keys,
+            awards.candidate_keys,
             ["id"],
             "laureate repeats; a float is never a key"
         );
-        assert_eq!(profile.sources[1].keys, ["id", "name"]);
+        assert_eq!(profile.sources[1].candidate_keys, ["id", "name"]);
+        let laureate = &awards.columns[1];
+        assert_eq!(
+            (laureate.min_value.as_deref(), laureate.max_value.as_deref()),
+            (Some("1"), Some("3"))
+        );
+        assert_eq!(
+            laureate.top_values,
+            [TopValue {
+                value: "1".into(),
+                count: 2
+            }],
+            "a repeated value is one of the commonest"
+        );
+        assert!(
+            awards.columns[0].top_values.is_empty(),
+            "a key repeats nothing, and nothing was asked of it"
+        );
+        assert_eq!(awards.columns[2].top_values.len(), 2);
         assert_eq!(
             profile.inclusions,
             [Inclusion {
@@ -739,9 +1096,92 @@ mod tests {
         assert!(
             asked
                 .iter()
+                .filter(|q| q.contains("LEFT JOIN"))
                 .all(|q| !q.contains("CAST(\"share\" AS VARCHAR) AS v"))
         );
         assert_eq!(awards.sample.len(), 1);
+    }
+
+    /// A value longer than 64 bytes is left out, never cut: a bound becomes
+    /// absent, and a list of commonest values holding one goes whole.
+    #[test]
+    fn a_value_longer_than_64_bytes_is_left_out_and_never_cut() {
+        let long = "x".repeat(MAX_VALUE_BYTES + 1);
+        let mut plan = Profiler::new([csv("a.csv")], Options::default());
+        let q = plan.next_query().expect("a DESCRIBE");
+        plan.feed(q.id, &rows(&[&["note", "VARCHAR"]]));
+        let q = plan.next_query().expect("the counts");
+        plan.feed(q.id, &rows(&[&["4", "2", "4", "a", long.as_str()]]));
+        let q = plan.next_query().expect("the commonest values");
+        assert!(q.sql.contains("LIMIT 10"), "{}", q.sql);
+        plan.feed(q.id, &rows(&[&[long.as_str(), "2"], &["a", "2"]]));
+        while let Some(q) = plan.next_query() {
+            plan.feed(q.id, &[]);
+        }
+        let note = &plan.finish().sources[0].columns[0];
+        assert_eq!(note.min_value.as_deref(), Some("a"));
+        assert_eq!(note.max_value, None);
+        assert!(note.top_values.is_empty());
+    }
+
+    /// Tables the host holds are not described, a declared column is never a
+    /// side of an inclusion, and a reference is tested against identities
+    /// alone, whatever their types.
+    #[test]
+    fn tables_are_counted_without_a_describe_and_pruned_by_kind() {
+        let column = |name: &str, primitive, kind| TableColumn {
+            name: name.into(),
+            primitive,
+            kind,
+        };
+        let mut plan = Profiler::over_tables(
+            [
+                Table {
+                    name: "Person".into(),
+                    columns: vec![
+                        column("dense_id", Primitive::Integer, ColumnKind::Declared),
+                        column("subject", Primitive::AnyUri, ColumnKind::Identity),
+                    ],
+                },
+                Table {
+                    name: "Prize".into(),
+                    columns: vec![
+                        column("dense_id", Primitive::Integer, ColumnKind::Declared),
+                        column("subject", Primitive::AnyUri, ColumnKind::Identity),
+                        column("winner", Primitive::String, ColumnKind::Reference),
+                    ],
+                },
+            ],
+            Options::WHOLE,
+        );
+        let mut inclusions = Vec::new();
+        while let Some((id, ask)) = plan.next_ask() {
+            assert!(!matches!(ask, Ask::Describe { .. } | Ask::Sample { .. }));
+            match &ask {
+                Ask::Counts { columns, .. } => {
+                    let mut row = vec!["2".to_string()];
+                    for _ in columns {
+                        row.extend(["2", "2", "a", "b"].map(String::from));
+                    }
+                    plan.feed(id, &[row.into_iter().map(Some).collect()]);
+                }
+                Ask::Inclusion { column, key, .. } => {
+                    inclusions.push((column.to_string(), key.to_string()));
+                    plan.feed(id, &rows(&[&["2", "0"]]));
+                }
+                _ => plan.feed(id, &[]),
+            }
+        }
+        assert_eq!(
+            inclusions,
+            [
+                ("winner".to_string(), "subject".to_string()),
+                ("winner".to_string(), "subject".to_string())
+            ],
+            "the reference against each identity, and nothing against an address"
+        );
+        let profile = plan.finish();
+        assert_eq!(profile.sources[0].candidate_keys, ["dense_id", "subject"]);
     }
 
     #[test]
