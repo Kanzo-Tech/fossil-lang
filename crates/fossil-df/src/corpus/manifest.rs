@@ -488,10 +488,10 @@ mod tests {
     /// language matches the file it can read rather than a Rust variant name.
     #[test]
     fn a_role_is_spelled_as_corpus_bnf_writes_it() {
-        for column in super::generated::PAYLOAD_COLUMNS
+        for column in crate::corpus::generated::PAYLOAD_COLUMNS
             .iter()
-            .chain(super::generated::EDGE_COLUMNS)
-            .chain(super::generated::PROPERTY_COLUMNS)
+            .chain(crate::corpus::generated::EDGE_COLUMNS)
+            .chain(crate::corpus::generated::PROPERTY_COLUMNS)
         {
             let wire = serde_json::to_value(column.role).unwrap();
             assert_eq!(
@@ -509,10 +509,10 @@ mod tests {
             .iter()
             .map(data_type_name)
             .collect();
-        for column in super::generated::PAYLOAD_COLUMNS
+        for column in crate::corpus::generated::PAYLOAD_COLUMNS
             .iter()
-            .chain(super::generated::EDGE_COLUMNS)
-            .chain(super::generated::PROPERTY_COLUMNS)
+            .chain(crate::corpus::generated::EDGE_COLUMNS)
+            .chain(crate::corpus::generated::PROPERTY_COLUMNS)
         {
             assert!(
                 spelled.iter().any(|s| s == column.data_type),
