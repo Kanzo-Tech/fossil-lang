@@ -19,9 +19,7 @@
 //!    reproduced digests. It is MANUAL and on-demand: nothing in CI runs it, so
 //!    a pass only exists if someone ran it and said so.
 //!
-//! A snapshot tier above these used to lock the generated SQL text; `af39ff4`
-//! deleted the SQL-codegen path and the crate that held it, and the
-//! `sql_sha256` digest below now carries what it used to.
+//! The `sql_sha256` digest below is what locks the SQL text each tier runs.
 //!
 //! # The cross-engine result-set serialization (reproduced byte-for-byte by JS)
 //!
@@ -55,10 +53,8 @@ struct ExecEntry {
     expected_rows: &'static [&'static [&'static str]],
 }
 
-/// The executable corpus, mirroring the shapes the deleted codegen-snapshot
-/// tier locked but in a queryable `SELECT` form (that tier locked the `COPY`
-/// form; executing a `SELECT` is simpler to assert and is what DuckDB-WASM runs
-/// too). Every entry reads a fixture CSV under `examples/` and ends in `ORDER
+/// The executable corpus, in a queryable `SELECT` form (simpler to assert than
+/// a `COPY`, and what DuckDB-WASM runs too). Every entry reads a fixture CSV under `examples/` and ends in `ORDER
 /// BY` for a stable row order. All projected columns are `CAST(... AS VARCHAR)`
 /// so the result serialization is engine-portable.
 const EXEC_CORPUS: &[ExecEntry] = &[
@@ -134,8 +130,8 @@ const EXEC_CORPUS: &[ExecEntry] = &[
     },
     ExecEntry {
         name: "r7_const_fold_extend",
-        // R7 folds `'https://example.org/' || 'user'` to the constant
-        // `'https://example.org/user'` — the executed SQL emits the folded IRI.
+        // `'https://example.org/' || 'user'` folded to the constant
+        // `'https://example.org/user'`.
         sql: "SELECT CAST('https://example.org/user' AS VARCHAR) AS subject \
               FROM read_csv_auto('examples/users.csv', sample_size=-1) ORDER BY id",
         expected_rows: &[
@@ -148,8 +144,8 @@ const EXEC_CORPUS: &[ExecEntry] = &[
     },
     ExecEntry {
         name: "r8_drop_true_filter",
-        // R8 drops the statically-true filter — the executed SQL is the
-        // passthrough projection (no WHERE).
+        // A statically-true filter dropped: the passthrough projection (no
+        // WHERE).
         sql: "SELECT CAST(id AS VARCHAR) AS id, CAST(name AS VARCHAR) AS name \
               FROM read_csv_auto('examples/users.csv', sample_size=-1) ORDER BY id",
         expected_rows: &[
@@ -265,10 +261,9 @@ fn corpus_exec_native_and_write_baseline() {
     // harness reads. Pretty-printed + sorted-key-stable so the checked-in
     // artifact has a stable diff.
     // `tests/wasm_parity/` — beside `run-parity.mjs`, which reads these two
-    // files. It used to write into `crates/fossil-codegen/`, a crate deleted in
-    // `af39ff4`: the directory was recreated on every test run and `members =
-    // ["crates/*"]` then failed to load it, breaking every cargo command in the
-    // workspace until someone deleted it again.
+    // files. Never under `crates/`: a directory created there is picked up by
+    // `members = ["crates/*"]`, and a member with no manifest breaks every
+    // cargo command in the workspace.
     let wasm_parity_dir = root.join("tests/wasm_parity");
     std::fs::create_dir_all(&wasm_parity_dir).expect("create wasm_parity dir");
 
@@ -302,7 +297,7 @@ fn write_baseline(path: &Path, baseline: &[serde_json::Value]) {
 }
 
 /// Serialize the single-sourced SQL map `{ name: sql }` so `run-parity.mjs`
-/// fetches the exact SQL text from the Rust corpus (Task 3 option (a)).
+/// fetches the exact SQL text from the Rust corpus, which is its one source.
 fn write_corpus_sql(path: &Path, baseline: &[serde_json::Value]) {
     let map: serde_json::Map<String, serde_json::Value> = baseline
         .iter()

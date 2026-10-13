@@ -2,7 +2,7 @@
 // LITERAL fossil source, which clippy mistakes for format args.
 #![allow(clippy::literal_string_with_formatting_args)]
 
-//! F5's done-when, through the executor: a source pipeline that compiles,
+//! A source pipeline through the executor: one that compiles,
 //! types, and produces the corpus the program describes — not the one the
 //! source has.
 //!

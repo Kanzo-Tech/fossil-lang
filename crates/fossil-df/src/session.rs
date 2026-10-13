@@ -5,8 +5,7 @@
 //! JS's event loop, and a `DataFusion` operator that spawns a task panics with
 //! «there is no reactor running» — which, under `panic = "abort"`, traps inside
 //! a microtask and leaves the run's promise pending forever. `target_partitions
-//! = 1` keeps the planner from ADDING partitions, and was once thought to be the
-//! whole fix. It is not: a `UNION ALL` of two single-partition scans has two
+//! = 1` keeps the planner from ADDING partitions, and it is not the whole fix: a `UNION ALL` of two single-partition scans has two
 //! partitions by construction, so two mappings of one type put a
 //! `CoalescePartitionsExec` over the union, and that operator spawns one task
 //! per input partition.

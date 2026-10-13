@@ -1,11 +1,10 @@
 //! The relational half of the MIR, executed — the walk from an emit op back to
 //! the sources it reads.
 //!
-//! Until F5 the chain was a straight line: one [`Op::Source`] at index 0 and
-//! every emit op's `input` was 0 by construction, so the backend could find the
-//! source and read it without ever following an index. A source pipeline
-//! (`Adults := User.where(User.age >= 18)`, and `join` with it) makes `input`
-//! mean what it always said it meant: an index into the op list.
+//! The chain is not a straight line from one [`Op::Source`] at index 0: a
+//! source pipeline (`Adults := User.where(User.age >= 18)`, and `join` with it)
+//! puts operators between a source and the emit op that reads it, so `input`
+//! is an index into the op list and the backend follows it.
 //! This module is that walk, and it is the only place that turns a relational
 //! operator into a [`DataFrame`].
 //!
@@ -76,7 +75,7 @@ async fn build(
     };
     match &ops[index] {
         // A source relation is qualified by the binding that names it, which is
-        // the name every `ColRef` reading it carries (CODEGEN-LOWERING-01). It
+        // the name every `ColRef` reading it carries. It
         // is what lets a self-join keep two `label` columns apart, and what
         // lets `Purchase.id` and `User.id` coexist in one joined row.
         Op::Source {
@@ -129,7 +128,7 @@ async fn build(
         } => qualify(input(*l)?.union(input(*r)?)?, relation),
         // `group_by(Order.customer, total = math.sum(Order.amount))`: one
         // DataFusion `aggregate` call, which is why the MIR carries one
-        // operator and not the `GroupBy`+`Aggregate` pair it used to.
+        // operator and not a `GroupBy`+`Aggregate` pair.
         //
         // The keys keep the qualifier they were written with. The aggregate
         // columns have none to keep — DataFusion names a field after the
@@ -166,16 +165,13 @@ async fn build(
 /// `fila(izq) ++ fila(der)`: both sides keep every column they have, under the
 /// relation each is addressed by.
 ///
-/// **Nothing is identified and nothing is dropped.** Until 2026-08-19 this was
-/// `USING (k)` — one key name, present once in the result, with the right side's
-/// copy renamed out of the way and dropped after the equality — and any other
-/// name the two sides shared was refused as a collision. Both rules were the
-/// same rule: the row was flat, so two columns called `id` could not both be
-/// there. The row is not flat any more. `fossil-hir` deleted its half on
-/// 2026-08-14 (ruling 17: `RowScope` keeps one entry per binding and a shared
-/// column name means nothing), and this is the other half — the sides are
-/// qualified rather than flattened, so `Purchase.id` and `User.id` are two
-/// columns and the join has nothing to arbitrate.
+/// **Nothing is identified and nothing is dropped.** Not `USING (k)` — one key
+/// name, present once in the result — and no name the two sides share is a
+/// collision: those are the rules of a flat row, where two columns called `id`
+/// cannot both be there. `fossil-hir`'s `RowScope` keeps one entry per binding,
+/// so a shared column name means nothing there, and this is the other half —
+/// the sides are qualified rather than flattened, so `Purchase.id` and
+/// `User.id` are two columns and the join has nothing to arbitrate.
 ///
 /// A side is re-qualified only when the surface wrote `X as Y`: an alias is a
 /// second name for the same source and the only thing that can tell the two
@@ -229,27 +225,21 @@ fn alias_of(df: DataFrame, side: &JoinSide) -> datafusion::error::Result<DataFra
 /// The admitted form is a conjunction of equalities between column references:
 /// `on = a.k == b.k`, and `on = a.k == b.k and a.j == b.j` for a compound key.
 /// The two columns need NOT share a name — `on = Purchase.user_id == User.id`
-/// is the ordinary case, and the rule that refused it (*"a join key is one name
-/// on both sides"*) was never a decision. It was the only thing this function
-/// could do while every `ColRef` reaching it carried an empty source: with no
-/// binding there was nothing to say which side a name belonged to, so equal
-/// names were the one shape whose plan could be guessed. The binding arrives
-/// now (CODEGEN-LOWERING-01), and the rule went with the ignorance that forced
-/// it.
+/// is the ordinary case. *"A join key is one name on both sides"* is a rule
+/// only a plan with no binding on its `ColRef`s would need: with nothing to say
+/// which side a name belongs to, equal names are the one shape whose plan can
+/// be guessed. The binding arrives, so no such rule is needed.
 ///
-/// What is still refused, and why each survives the deletion:
+/// What is refused, and why:
 ///
 /// - a conjunct that is not `==` between two column references — a join is an
 ///   equijoin here, and a theta join or a constant comparison would silently
 ///   become a nested loop over the product of two corpora;
-/// - a reference qualified by a relation that addresses neither input — this
-///   check was already written and never once fired, because an empty source can
-///   never be unequal to both names. It then fired on programs it should have
-///   admitted: a side answers to a SET of names ([`JoinSide::relations`]), and
-///   while it answered to one, `Both := L.join(R, …)` followed by
-///   `Both.join(T, on = R.k == T.k)` was refused for naming `R`. The refusal
-///   named `Both` as the alternative, and `Both` qualifies no column at all —
-///   `Op::Join` is the composite operator that does NOT re-qualify;
+/// - a reference qualified by a relation that addresses neither input. A side
+///   answers to a SET of names ([`JoinSide::relations`]), so
+///   `Both := L.join(R, …)` followed by `Both.join(T, on = R.k == T.k)` is
+///   admitted for naming `R`, and `Both` addresses nothing — `Op::Join` is
+///   the composite operator that does NOT re-qualify;
 /// - a reference naming a column its own side does not have ([`join`]).
 ///
 /// Which side is written first does not matter: the equality is a filter over
@@ -300,10 +290,10 @@ fn join_equalities(
 
 /// Every name the two sides answer to, rendered for a refusal — `` `L`, `R`, `T` ``.
 ///
-/// A side is a SET of names (see [`JoinSide::relations`]), so this cannot be the
-/// two-name pair it was: after `Both := L.join(R, …)` the left side of a second
-/// join addresses `L` and `R`, and naming it `Both` told the author to write the
-/// one qualifier that would not resolve.
+/// A side is a SET of names (see [`JoinSide::relations`]), so this is not a
+/// two-name pair: after `Both := L.join(R, …)` the left side of a second join
+/// addresses `L` and `R`, and naming it `Both` would tell the author to write
+/// the one qualifier that does not resolve.
 fn addressable(left: &JoinSide, right: &JoinSide) -> String {
     left.names()
         .iter()
@@ -384,7 +374,7 @@ fn agg_call(f: AggFn, arg: DfExpr) -> DfExpr {
 }
 
 /// A `(source, column)` pair as a `DataFusion` column reference — qualified when
-/// the source is known, bare when it is not (a retired `.column`, or a
+/// the source is known, bare when it is not (a bare-name reference, or a
 /// hand-built op list). A bare reference resolves against whichever relation
 /// carries the name, and is ambiguous if two do; that is `DataFusion`'s rule and
 /// its error names both candidates.
@@ -515,15 +505,13 @@ const fn expr_name(e: &Expr<'_>) -> &'static str {
 /// [`join_equalities`] and [`conjuncts`], tested directly.
 ///
 /// Both are private, so `tests/pipeline.rs` can only reach them through the rows
-/// that come out, and until this module existed nothing in `src/plan.rs` was
-/// tested at all. The case every test below is built on is the one `8184c1f`
-/// measured, and it is the case **no count can see**:
+/// that come out. The case every test below is built on is the case **no count
+/// can see**:
 /// `docs/programs/compound-key` joins on two columns, and dropping the
 /// `tenant` conjunct takes the join from four rows to seven while the seven mint
 /// the same four subjects — so the vertex count, the property list and the
-/// mapping census are all equal across the break. The predicate rendered into
-/// that program's `expected/compiled.txt` was the only committed evidence that a
-/// compound key is compound. It is not the only one now:
+/// mapping census are all equal across the break. Beside the predicate
+/// rendered into that program's `expected/compiled.txt`,
 /// [`tests::a_compound_key_is_four_rows_and_one_conjunct_short_is_seven`] is the
 /// number, and [`tests::the_seven_rows_mint_the_same_four_subjects`] is why the
 /// number had to be asserted somewhere the counts are not.
@@ -818,9 +806,8 @@ mod tests {
     }
 
     /// A reference qualified by a relation that is neither input is refused —
-    /// the check the docblock says had never once fired, because until
-    /// `CODEGEN-LOWERING-01` every `ColRef` reaching here carried an empty
-    /// source and an empty source is equal to neither name.
+    /// a check that can fire only because a `ColRef` arrives with its binding:
+    /// an empty source is equal to neither name.
     #[test]
     fn a_conjunct_qualified_by_neither_input_is_refused() {
         let db = db();
@@ -836,16 +823,15 @@ mod tests {
 
     /// **A binding of a previous join keys the next one.** `Both := L.join(R,
     /// …)` leaves a side that answers to `L` AND `R`, and
-    /// `Both.join(T, on = R.k == T.k)` names `R` — which `fossil check` admits
+    /// `Both.join(T, on = R.k == T.k)` names `R` — which the checker admits
     /// (`fossil_hir::check_tests`: *a binding of the left side may key a second
-    /// join*) and which this refused, because the side carried one name and the
-    /// lowering had filled it with the pipeline's.
+    /// join*).
     ///
-    /// The refusal was not a narrower rule but an inverted one: it demanded
-    /// `Both`, and `Both` qualifies no column of the relation —
+    /// `Both` qualifies no column of the relation —
     /// [`Op::Join`](fossil_mir::Op::Join) is the composite operator that does
-    /// not re-qualify. So the name it accepted could not resolve and the name it
-    /// refused was the only one that could. Both halves are asserted here.
+    /// not re-qualify — so a side answering to `Both` alone would accept the
+    /// name that cannot resolve and refuse the one that can. Both halves are
+    /// asserted here.
     #[test]
     fn a_side_is_addressed_by_every_binding_a_previous_join_left() {
         let db = db();
@@ -855,8 +841,7 @@ mod tests {
         join_equalities(&chained, &left, &side(1, "T"))
             .expect("`R` is a binding of the left side, and keys the second join");
 
-        // And the pipeline's own name, which the old refusal named as the
-        // alternative, addresses nothing.
+        // And the pipeline's own name addresses nothing.
         let by_pipeline = eq(&db, col("Both", "k"), col("T", "k"));
         let err = join_equalities(&by_pipeline, &left, &side(1, "T"))
             .expect_err("`Both` qualifies no column: a join re-qualifies neither side");
@@ -867,8 +852,8 @@ mod tests {
         );
     }
 
-    /// **The measurement `8184c1f` made, executed.** Four rows on the key the
-    /// program wrote; seven on the key one conjunct short.
+    /// **The measurement, executed.** Four rows on the key the program wrote;
+    /// seven on the key one conjunct short.
     ///
     /// `data/lines.csv` holds four lines over two tenants and `data/orders.csv`
     /// three orders over the same two, and order number `1001` exists in both —

@@ -7,7 +7,7 @@
 //! expression, resolved through the one identity template that type has. The
 //! `.shex` is the other half — `ex:placedBy @ex:Person` is what classifies the
 //! predicate as an edge rather than a property, and `ex:amount` beside it stays
-//! a column. It used to be GUESSED, by matching a string template against every
+//! a column. Nothing guesses it by matching a string template against every
 //! mapping's subject template.
 //!
 //! And `fossil.json` carries what the governance layer reads off a corpus: the

@@ -441,7 +441,7 @@ mod tests {
     }
 
     /// `fossil/1` grows by optional fields only, so a corpus with no
-    /// multi-valued property writes the document it wrote before there were any.
+    /// multi-valued property writes no `property_tables` field at all.
     #[test]
     fn no_property_table_is_no_field() {
         let mut m = manifest();

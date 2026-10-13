@@ -263,8 +263,8 @@ async fn a_destination_no_store_covers_is_refused() {
 }
 
 /// A program that does not compile is refused as `run/does-not-compile`, and
-/// the failure carries the diagnostics — the executor used to answer a sentence
-/// telling the host to see diagnostics it had no way to reach.
+/// the failure carries the diagnostics, not a sentence telling the host to see
+/// diagnostics it has no way to reach.
 #[tokio::test]
 async fn a_program_that_does_not_compile_fails_with_its_diagnostics() {
     let broken = PROGRAM.replace(
@@ -290,8 +290,8 @@ async fn a_program_that_does_not_compile_fails_with_its_diagnostics() {
 
 /// **A source whose file is not in the store fails as `source/not-found`,
 /// naming the file.** `DataFusion` reads a location that matches nothing as a
-/// relation with no columns, and the run used to fail at the first column the
-/// program read — keasy's unseeded LDBC job answered `engine/failed` with
+/// relation with no columns, so without the check the run would fail at the
+/// first column the program read — `engine/failed` with
 /// `Schema error: No field named "PlaceRow".id`, which reads as a program
 /// mistake. One spelling per object-store format, the CSV one as keasy writes
 /// it: through a connection, with a delimiter.

@@ -47,16 +47,14 @@ pub fn datafusion_name(duckdb_name: &str) -> Option<&'static str> {
         //
         // `string_to_array` lives in the NESTED function package, not the
         // scalar one, so `str.split` needs both the `nested_expressions` feature
-        // and a lookup that searches both — see `render_expr_template`. It was
-        // filed as unrenderable for want of those, beside rows that cannot be
-        // done at all.
+        // and a lookup that searches both — see `render_expr_template`.
         "string_split" => "string_to_array",
         "strptime" => "to_timestamp",
         // Aggregates are not scalar expressions: `math.sum` in a property
         // position is a pipeline with a group-by, which is a different feature.
         // Saying so beats emitting a call that plans wrong.
         //
-        // These four are the WHOLE of `UNREACHABLE_ON_DATAFUSION` now, and they
+        // These four are the WHOLE of `UNREACHABLE_ON_DATAFUSION`, and they
         // are not a capability gap: `math.sum` is how a `group_by`'s
         // aggregations are SPELLED, and `RegistryEntry::agg_fn` turns the row
         // into the `AggFn` that `fossil_mir::lower` reads. Only the scalar
@@ -117,9 +115,9 @@ mod tests {
         );
     }
 
-    /// The two rows that were native-only Rust and are portable SQL now. This is
-    /// the concrete gain of ruling 15 on this engine, so it is pinned rather
-    /// than left as a claim in a comment.
+    /// The two rows that need the most of the engine's regex support are
+    /// portable SQL, and render here. Pinned rather than left as a claim in a
+    /// comment.
     #[test]
     fn slug_and_strip_html_render_on_this_engine() {
         use datafusion::logical_expr::lit;
@@ -139,9 +137,8 @@ mod tests {
     ///
     /// The reconciliation table is append-only by nature: a row leaves the
     /// language and its function names stay behind, spelling out a mapping for
-    /// text nothing writes. Four arms had already outlived their rows —
-    /// `error`, `json_extract_string`, `split_part` and `regexp_matches` — and
-    /// nothing was red, because a mapping nobody reaches cannot be wrong.
+    /// text nothing writes — and nothing goes red, because a mapping nobody
+    /// reaches cannot be wrong.
     ///
     /// It reads this file as text rather than taking a hand-written list of the
     /// arms: a second list here would need the same guard one level up.

@@ -11,19 +11,14 @@
 //! When the two disagree the program type-checks and produces something else,
 //! and nothing anywhere fails.
 //!
-//! It had happened five times in a catalogue of 51 rows, and none of the five
-//! was visible from the Rust:
+//! It is invisible from the Rust. `math.round` is the shape of it: declared
+//! `Integer`, while `round(DOUBLE)` is a `DOUBLE` — which is why its template
+//! is `CAST(round(%0) AS BIGINT)`; `parse.date` over `strptime`, which always
+//! returns a `TIMESTAMP`, is why its template casts to `DATE`.
 //!
-//! | row | declared | the template actually returned |
-//! |---|---|---|
-//! | `validate.regex` | `String` | `BOOLEAN` — a bare `regexp_matches` |
-//! | `math.round` | `Integer` | `DOUBLE` — `round(DOUBLE)` is a `DOUBLE` |
-//! | `parse.date` | `Date` | `TIMESTAMP` — `strptime` always is |
-//! | `parse.json` | `String` | `JSON` — `DuckDB`'s own type |
-//!
-//! The two guards that existed could not see any of them. `builtin_smoke.rs`
-//! executes each template and asks whether `DuckDB` BOUND it, which every one of
-//! the four passed — they are all valid SQL, they are the WRONG valid SQL.
+//! The other two guards cannot see that kind of disagreement. `builtin_smoke.rs` executes
+//! each template and asks whether `DuckDB` BOUND it, which every one of these
+//! passes — they are all valid SQL, they are the WRONG valid SQL.
 //! This crate's `UNREACHABLE_ON_DATAFUSION` asks whether a template renders at
 //! all. Neither reads `sig.ret`, so neither could compare the halves.
 //!
@@ -55,10 +50,10 @@
 //! - **That the type is the RIGHT one.** It proves `sig.ret` and the template
 //!   agree, not that either is what the language should say; this test would be
 //!   just as green if the pair had settled on the wrong answer together.
-//! - **VALUES.** `parse.json` changed from `json_extract` to
-//!   `json_extract_string`, which alters the string as well as its type
-//!   (`"x"` → `x`); nothing here would have noticed if only the type had moved.
-//!   `builtin_smoke.rs` is where a value is asserted.
+//! - **VALUES.** A template swapped for one that alters the string as well as
+//!   its type — `json_extract` for `json_extract_string`, `"x"` → `x` — would
+//!   go unnoticed here if only the type moved. `builtin_smoke.rs` is where a
+//!   value is asserted.
 //! - **`DataFusion`.** `DuckDB` is the engine every template was measured against
 //!   and the only one that can render all 35. What the other engine does with a
 //!   row is this crate's `UNREACHABLE_ON_DATAFUSION`, and it answers a
@@ -167,9 +162,9 @@ fn every_expr_template_returns_the_type_its_row_declares() {
     );
     // An all-`Op` catalogue would pass the assertion above with an empty loop,
     // so the count has to be checked — but against the catalogue rather than
-    // against a literal. This was `35`, and it went stale the first time a row
-    // was deleted; what the test needs to know is that EVERY `Expr` row reached
-    // a real DuckDB, which is a claim about two numbers agreeing.
+    // against a literal, which goes stale the first time a row is deleted:
+    // what the test needs to know is that EVERY `Expr` row reached a real
+    // DuckDB, which is a claim about two numbers agreeing.
     let expr_rows = stdlib()
         .iter()
         .filter(|e| matches!(e.lowering, LoweringKind::Expr(_)))
@@ -215,10 +210,7 @@ fn every_op_row_returns_rows() {
          produce a value where the plan produces rows: {scalar_returning:?}"
     );
     // Every `seq/` row plus every `io.` constructor that reads data — derived,
-    // because this was the literal `15` written as "12 `seq/` rows and 3 `io/`
-    // constructors" and both halves have since moved: `io.rdf` gained a
-    // signature when the registry's hand-written `io.` half was folded into
-    // `catalogue.bnf`, making it four.
+    // because a literal count goes stale whenever either half moves.
     let seq = op_rows
         .iter()
         .filter(|(n, _)| n.starts_with("seq."))

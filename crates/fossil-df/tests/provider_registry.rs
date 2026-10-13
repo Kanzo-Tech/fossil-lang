@@ -10,19 +10,20 @@
 //! # What each test here is evidence for
 //!
 //! - `catalogue` is the conformance program whose type document is **not**
-//!   `ShEx`, and it exists to prove the shape-document seam is not ShEx-specific.
+//!   `ShEx`; `tests/programs.rs` runs it, and its empty `diagnostic.txt` and
+//!   resolved type binding are what prove the seam is not ShEx-specific.
 //! - Both mismatches need dispatch by NAME to be expressible at all: under
 //!   dispatch by extension `io.shex("x.ttl")` and `io.shacl("x.ttl")` are one
 //!   program, and `type { P } := io.csv(…)` asks a question a row cannot answer.
 //! - The run reads its shape document through the same rows the checker does,
-//!   so a `ShExC` document no longer type-checks and then fails the run.
+//!   so a `ShExC` document cannot type-check and then fail the run.
 
 // The `.fossil` sources below carry `"…{User.id}…"` interpolation holes —
 // LITERAL fossil source, not Rust format-string args. Same allow, same reason,
 // as `fossil-hir`'s `shapes.rs` and the two `fossil-ide` integration tests.
 #![allow(clippy::literal_string_with_formatting_args)]
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use fossil_base::Diagnostic;
 use fossil_graph_schema::Problem;
@@ -30,14 +31,6 @@ use fossil_graph_schema::Problem;
 #[path = "support/native.rs"]
 mod native;
 mod support;
-
-/// `docs/programs/` — the conformance set, on disk.
-fn programs_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../docs/programs")
-        .canonicalize()
-        .expect("docs/programs is on disk")
-}
 
 /// Every diagnostic a check of `path` produces.
 fn diagnostics_of(path: &Path) -> Vec<Diagnostic> {
@@ -100,8 +93,7 @@ fn program_binding(type_line: &str) -> String {
 // ---------------------------------------------------------------- the registry
 
 /// The registry is ONE table and every `io.*` the language has is in it —
-/// including the two that read types, which lived in a second table keyed by a
-/// different criterion.
+/// including the two that read types.
 #[test]
 fn one_table_carries_every_constructor() {
     let listed: Vec<String> = formats().into_iter().map(|p| p.name).collect();
@@ -112,11 +104,10 @@ fn one_table_carries_every_constructor() {
     );
 }
 
-/// `FormatKind` has carried `Schema` since it was written with nothing ever
-/// producing one — the wire contract was shaped for capabilities and the data
-/// behind it was half a table.
+/// `FormatKind` is read off the row's capabilities, so a row that reads types
+/// is listed as `Schema`.
 #[test]
-fn the_wire_contract_finally_reports_a_schema_provider() {
+fn the_wire_contract_reports_a_schema_provider() {
     let listed = formats();
     let kind = |name: &str| {
         listed
@@ -130,47 +121,10 @@ fn the_wire_contract_finally_reports_a_schema_provider() {
     assert_eq!(kind("shacl"), fossil_hir::lineage::FormatKind::Schema);
 }
 
-// ------------------------------------------------------------- the SHACL row
+// ---------------------------------------------- the two capability diagnostics
 
-/// **The criterion for the SHACL row.** `catalogue` is the one conformance
-/// program whose type document is SHACL, and it exists to prove the seam is not
-/// ShEx-specific. What must be gone is the `SHAPE` cause: `Product` bound no
-/// shape because nothing decoded SHACL.
-#[test]
-fn catalogue_resolves_its_shacl_document() {
-    let path = programs_dir().join("catalogue/catalogue.fossil");
-    let diagnostics = diagnostics_of(&path);
-    assert!(
-        !diagnostics.iter().any(|d| is_provider_refusal(&d.problem)
-            || matches!(d.problem, Problem::NotRegistered { .. })),
-        "the SHACL document must resolve; got {diagnostics:?}"
-    );
-}
-
-/// Not vacuous: the shape really carries the two predicates the program writes,
-/// and their short names are what the bare keys resolve against.
-#[test]
-fn the_shacl_document_decodes_to_the_predicates_the_program_writes() {
-    let ttl = std::fs::read_to_string(programs_dir().join("catalogue/catalogue.ttl"))
-        .expect("the document is on disk");
-    let shapes =
-        fossil_hir::shacl::decode_shacl("catalogue.ttl", &ttl).expect("the row decodes it");
-    let product = shapes
-        .lookup("https://shop.example/voc#Product")
-        .expect("`sh:targetClass shop:Product` is the shape's IRI");
-    let names: Vec<&str> = product
-        .properties
-        .iter()
-        .map(|c| fossil_graph_schema::local_name(&c.predicate))
-        .collect();
-    assert_eq!(names, ["label", "price"], "the keys `catalogue` writes");
-}
-
-// -------------------------------------------------- the two new diagnostics
-
-/// **Asking a row for a capability it does not declare names both.** This was
-/// not a wrong answer before, it was no question: the data table and the schema
-/// table had no shared vocabulary in which to ask it.
+/// **Asking a row for a capability it does not declare names both.** One table
+/// of rows that declare capabilities is what makes the question askable.
 #[test]
 fn a_type_binding_on_a_data_provider_names_both() {
     let diagnostics = check_program(&[
@@ -218,9 +172,9 @@ fn a_source_binding_on_a_schema_provider_names_both() {
 }
 
 /// **The row checks its own extension and words its own rejection**, naming the
-/// constructor and the extension. `io.shex("catalogue.ttl")` used to be
-/// byte-identical in behaviour to `io.shacl("catalogue.ttl")`, because the
-/// extension picked the row and the name was decorative.
+/// constructor and the extension. Were the extension to pick the row,
+/// `io.shex("catalogue.ttl")` would be `io.shacl("catalogue.ttl")` and the name
+/// decorative.
 #[test]
 fn a_shape_document_the_named_row_does_not_read_names_both() {
     let diagnostics = check_program(&[
@@ -294,9 +248,8 @@ fn a_derived_binding_is_not_diagnosed_as_a_provider() {
 
 // ------------------------------------------------- `schema =` names a provider
 
-/// **The `schema =` argument carries its own row.** It was the last position
-/// where a document arrived without one, and its decoder came from the
-/// document's extension — the one dispatch left that did not go by name.
+/// **The `schema =` argument carries its own row**, so its decoder does not
+/// come from the document's extension.
 #[test]
 fn a_schema_argument_naming_a_provider_resolves_its_shapes() {
     let diagnostics = check_program(&[
@@ -405,9 +358,9 @@ fn a_binding_diagnostic_is_reported_once_not_once_per_mapping() {
     assert_eq!(hits, 1, "three mappings, one mistake; got {diagnostics:?}");
 }
 
-/// **And never zero.** A file with no mapping used to lose it entirely: `check`
-/// fell back to draining `def_map`, and `lower_to_hir` is not in its subtree. A
-/// program that is only bindings is exactly the program a provider mistake is
+/// **And never zero.** A file with no mapping must not lose it: draining
+/// `def_map` alone would not reach `lower_to_hir`, which is not in its subtree.
+/// A program that is only bindings is exactly the program a provider mistake is
 /// easiest to make in.
 #[test]
 fn a_file_with_no_mapping_still_reports_its_bindings() {
