@@ -1252,9 +1252,7 @@ pub fn read() -> Catalogue {
 
 /// Every generated file: its path, and what it should contain.
 ///
-/// Each is a projection of `catalogue.bnf` and of nothing else. One is
-/// `@fossil-lang/prompt`'s library section, so the names a model is offered
-/// are the names the checker accepts. `fossil-hir`'s stdlib table is why the
+/// Each is a projection of `catalogue.bnf` and of nothing else. `fossil-hir`'s stdlib table is why the
 /// reference page needs no second source: both halves of the catalogue are in
 /// the file now, so `crate::reference` reads the same parse everything else does.
 ///
@@ -1290,10 +1288,6 @@ pub fn generated() -> Vec<(PathBuf, String)> {
         (
             root.join(crate::reference::PARTIAL),
             crate::reference::emit_stdlib_reference(&cat),
-        ),
-        (
-            root.join(crate::reference::PROMPT_LIBRARY),
-            crate::reference::emit_prompt_library(&cat),
         ),
     ]
 }

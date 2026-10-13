@@ -74,7 +74,7 @@ claim: `cargo check --target wasm32-unknown-unknown -p fossil-wasm`.
 
 ## Generated files
 
-Two data files generate seven, and none of the seven may be hand-edited. Each data
+Two data files generate six, and none of the six may be hand-edited. Each data
 file has its own command and its own `--check`, because they answer different
 questions and a single command would make one file's staleness the other's
 failure.
@@ -85,8 +85,7 @@ failure.
                      ├─▶ crates/fossil-profile/src/generated.rs
 catalogue.bnf ──cargo├─▶ crates/fossil-hir/src/stdlib/generated.rs
               xtask  ├─▶ packages/profile/src/catalogue.generated.ts
-            catalogue├─▶ docs/content/generated/stdlib.mdx
-                     └─▶ packages/prompt/src/catalogue.generated.ts
+            catalogue└─▶ docs/content/generated/stdlib.mdx
 
 corpus.bnf ─────cargo──▶ crates/fossil-df/src/corpus/generated.rs
               xtask
