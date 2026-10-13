@@ -35,10 +35,9 @@ use super::diag::ParseDiagnostic;
 /// lookahead-0 — `parse_program` re-disambiguates IDENT into `SourceDef` /
 /// `Mapping` / fallthrough-error on the next iteration.
 ///
-/// It is now a one-element set. `KW_PREFIX` was the other, and with the
-/// vocabulary declaration gone every top-level item
-/// starts with an `IDENT` or a `{` — and the `{` is `MULTI_SOURCE_DEF`, which
-/// the outer loop dispatches without needing an anchor.
+/// It is a one-element set: every top-level item starts with an `IDENT` or a
+/// `{` — and the `{` is `MULTI_SOURCE_DEF`, which the outer loop dispatches
+/// without needing an anchor.
 pub(crate) const TOP_LEVEL_ANCHORS: &[SyntaxKind] = &[SyntaxKind::IDENT];
 
 /// Token kinds that end a property inside a `MAPPING_BODY`: either the
@@ -82,10 +81,9 @@ pub(crate) const MAPPING_BODY_ANCHORS: &[SyntaxKind] =
 /// See `crates/fossil-syntax/src/parser/items.rs::parse_program` for the
 /// canonical example of the safe shape: when the IDENT lookahead doesn't
 /// match `DEFINE` or `SHAPE_SEP`, the fall-through is `p.bump_as_error()`,
-/// NOT `recover_to(p, TOP_LEVEL_ANCHORS)`. The historical bug was the
-/// parser-hang on a bare `#`: the logos lexer dropped `#` silently, the next
-/// non-trivia token was often IDENT, and `IDENT ∈ TOP_LEVEL_ANCHORS` made the
-/// call a no-op.
+/// NOT `recover_to(p, TOP_LEVEL_ANCHORS)`: `IDENT ∈ TOP_LEVEL_ANCHORS`, so
+/// when the token after a dropped byte (a bare `#`) is an IDENT the call is a
+/// no-op and the parser hangs.
 pub(crate) fn recover_to(p: &mut Parser, anchors: &[SyntaxKind]) {
     p.skip_trivia();
     if at_anchor(p, anchors) {

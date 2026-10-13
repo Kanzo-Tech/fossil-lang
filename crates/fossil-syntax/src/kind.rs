@@ -2,10 +2,9 @@
 //! plus the `rowan::Language` impl that wires it into the green/red tree.
 //!
 //! Every variant here is a kind the lexer or the parser actually produces —
-//! which is NOT the same as a terminal of `grammar.bnf`. Not one of them names a
-//! retired spelling any more, and the grammar no longer has a terminal with no
-//! kind here: `BOOL` was the last, and `true` / `false` arrived as `IDENT` until
-//! it existed. The parser is what this enum describes.
+//! which is NOT the same as a terminal of `grammar.bnf`. None of them names a
+//! spelling the grammar does not have, and the grammar has no terminal without
+//! a kind here. The parser is what this enum describes.
 //!
 //! The `repr(u16)` values are an implementation detail of the rowan green
 //! tree and are NOT a compatibility surface: nothing persists a raw value
@@ -53,14 +52,12 @@ syntax_kinds! {
     /// The opening `"` of an interpolated string.
     ///
     /// A string with no interpolation stays one `STRING` token: the carve
-    /// happens only where there is something to carve, so every string that was
-    /// one token before this existed is still one token.
+    /// happens only where there is something to carve.
     STRING_OPEN,
     /// A literal run between two interpolations, or between a delimiter and
     /// one. Carries its source text verbatim, `{{` included.
     STRING_TEXT,
-    /// The opening of a hole — `{`. There is one spelling; `${` went with the
-    /// backtick, and neither is a token.
+    /// The opening of a hole — `{`. There is one spelling.
     INTERP_OPEN,
     /// The closing `"`. The hole's own `}` is an ordinary `RBRACE`.
     STRING_CLOSE,
@@ -76,9 +73,9 @@ syntax_kinds! {
     RPAREN,
     LBRACE,
     RBRACE,
-    // There was a `PIPE` here — `|>`, retired as a second spelling of `a.f()`.
-    // `|` matches no lexer rule now, so the bytes reach the parser as an ERROR
-    // token and are refused by name.
+    // No `PIPE`: `|>` would be a second spelling of `a.f()`. `|` matches no
+    // lexer rule, so the bytes reach the parser as an ERROR token and are
+    // refused by name.
     EQ,
     NEQ,
     LT,
@@ -107,11 +104,9 @@ syntax_kinds! {
 
     // ─── Composite item nodes ─────────────────────────────────────────
     PROGRAM,
-    // There was a `PREFIX_DECL` here. `prefix ex: <http://example.org/>`
-    // introduced the CURIE, and the CURIE is gone from every position it held —
-    // a shape name, a property key, an expression and an interpolation hole are
-    // bare names or full IRIs in strings now. A vocabulary declaration that
-    // nothing spells is a statement about nothing.
+    // No vocabulary declaration: a shape name, a property key, an expression and
+    // an interpolation hole are bare names or full IRIs in strings, so a prefix
+    // nothing spells would be a statement about nothing.
     SOURCE_DEF,
     /// `{ A, B, ... } := io.rdf(uri, schema = shex)` — a destructuring source
     /// definition binding N members (one per declared shape) to a single source.
@@ -160,16 +155,12 @@ syntax_kinds! {
     PROPERTY_LHS,
     /// The mapping header's shape (grammar.bnf, `ShapeExpr`) — `ShapeExpr :=
     /// IDENT`. One `IDENT` token child and nothing else: one of the names a
-    /// `type { … } := …` binding introduced. The `&` intersection went when the
-    /// lowering was found to keep the first shape and drop the rest in silence,
-    /// and the `IRI_EXPR` wrapper went with the CURIE.
+    /// `type { … } := …` binding introduced. There is no `&` intersection: a
+    /// mapping produces one shape.
     SHAPE_EXPR,
 
     // ─── Composite expression nodes ───────────────────────────────────
     EXPR,
-    // There was a `TEMPLATE_EXPR` here — a backtick literal with no hole. The
-    // backtick is not a token and `"…{expr}…"` is the one spelling, so there is
-    // nothing left for a second node to be built from.
     /// A string with at least one hole — `STRING_OPEN (STRING_TEXT |
     /// INTERPOLATION)* STRING_CLOSE`. One spelling, one node.
     INTERP_STRING_EXPR,
@@ -177,16 +168,10 @@ syntax_kinds! {
     /// ordinary expression, parsed by the ordinary expression parser: there is
     /// no format mini-language to keep in step with the checker.
     INTERPOLATION,
-    // There was an `IRI_EXPR` here — the CURIE, the absolute IRI and the
-    // backtick template, the three spellings of "an IRI written in the source".
-    // A constant IRI is a STRING now, and the shape decides that it denotes
-    // rather than reads.
+    /// A one-token primary — a number, a string, `true`/`false`, `null` or a
+    /// name. A constant IRI is a STRING, and the shape decides that it denotes
+    /// rather than reads.
     LITERAL_EXPR,
-    // There was a `FIELD_REF_EXPR` here — `.name`, a column of an anonymous
-    // current row. The row has a name now, so every reference is qualified and a
-    // leading `.` starts nothing.
-    // There was a `PIPELINE_EXPR` here — the node `a |> f()` built. The member
-    // call is the spelling and `|>` is not a token, so the pipeline has no node.
     TERNARY_EXPR,
     BINARY_EXPR,
     UNARY_EXPR,
