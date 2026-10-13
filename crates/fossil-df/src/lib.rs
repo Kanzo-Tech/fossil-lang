@@ -64,7 +64,7 @@ pub mod write;
 pub use descriptor::output_descriptor;
 /// The executor a host drives. Named at the crate root because it is the
 /// crate's answer, not a detail of the module it is written in.
-pub use executor::Executor;
+pub use executor::{CorpusFile, Executor, Output, Ran};
 /// The relation an op index produces — the seam a host (or a test that builds a
 /// [`fossil_mir::MirGraph`] by hand) uses to materialise an intermediate.
 pub use plan::plan_relation;
@@ -156,11 +156,11 @@ pub async fn execute_graph<'db>(
 ) -> datafusion::error::Result<Graph> {
     // The run's anchor, derived from the PROGRAM and not from the caller: a
     // source URI is a path the program wrote, so the directory it resolves
-    // against is the program's own. The executor used to hand DataFusion the
-    // written path verbatim, which made the process's working directory the
-    // anchor — so `io.csv("data/items.csv")` meant a different file depending
-    // on where you invoked from, while `io.shex("shop.shex")` in the same
-    // program was already resolved beside it.
+    // against is the program's own. The written path handed to DataFusion
+    // verbatim would make the process's working directory the anchor — so
+    // `io.csv("data/items.csv")` would mean a different file depending on where
+    // you invoked from, while `io.shex("shop.shex")` in the same program
+    // resolves beside it.
     let program_dir = fossil_base::location::program_dir(file.path(db));
     let anchor = SourceAnchor::new(&program_dir, fossil_base::connections(db));
     let mappings: Vec<MappingLoc<'db>> = def_map(db, file).mappings(db).clone();
@@ -198,8 +198,8 @@ pub async fn execute_graph<'db>(
     // however many mappings write it — the same rule as a vertex type above. Two
     // `Comment` mappings that both write `hasCreator` each contribute rows to
     // ONE `Comment_hasCreator_Person`; grouped here and merged in
-    // `finalize_edge`, they used to be two entries under one name, and the
-    // writer looks a table up by that name, so one mapping's rows were written
+    // `finalize_edge`. Two entries under one name would not do: the writer
+    // looks a table up by that name, so one mapping's rows would be written
     // twice and the other's not at all.
     let mut edge_groups: Vec<(GraphEdge, Vec<PreparedEdge>)> = Vec::new();
     for &mapping in &mappings {
@@ -359,9 +359,8 @@ async fn prepare_vertex<'db>(
 /// [`prepare_vertex`] over an op list that is already lowered and refined.
 ///
 /// The projection reads the relation the `EmitVertex`'s `input` names — NOT
-/// "the mapping's source". Before F5 those coincided (`input` was always 0);
-/// with a pipeline in front of the emit they do not, and it is the index that
-/// is the contract.
+/// "the mapping's source". With a pipeline in front of the emit the two
+/// differ, and it is the index that is the contract.
 async fn prepare_vertex_ops<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
@@ -424,8 +423,8 @@ async fn prepare_vertex_ops<'db>(
 /// properties are the union of what the group writes, in the order they first
 /// appear; a mapping that does not write one contributes a typed null under its
 /// name, and the projections are aligned by name before the `UNION ALL`. The
-/// [`NodeType`] carries the same union, where it used to carry the first
-/// mapping's list and the `UNION` refused two lists of different lengths.
+/// [`NodeType`] carries the same union, not the first mapping's list — the
+/// `UNION` would refuse two lists of different lengths.
 ///
 /// And a subject two mappings both mint is ONE vertex whose value for each
 /// property is the one somebody wrote: `first_value(… IGNORE NULLS)` per
@@ -536,7 +535,7 @@ async fn finalize_vertex(
     let by_subject = vec![col(PAYLOAD_IDENTITY).sort(true, false)];
     let sorted = if dedup {
         // Each merged column under a positional name, renamed after. Aliased
-        // straight to its input's own name, the plan was refused with
+        // straight to its input's own name, the plan is refused with
         // «duplicate unqualified field name `customer`» over the `group-by`
         // program, whose rows already come out of an aggregate keyed on that
         // column.
@@ -627,9 +626,9 @@ async fn finalize_vertex(
 /// **The condition is the column's TYPE, not the declared cardinality**, and
 /// the difference is a whole class of source: a shape says how many values a
 /// predicate MAY carry, not how the source spells them. Reading the cardinality
-/// instead cost every `*` and `+` edge over a CSV — `unnest_columns` on a
+/// instead would cost every `*` and `+` edge over a CSV — `unnest_columns` on a
 /// `Utf8` is a `DataFusion` internal error at run time with no diagnostic in
-/// front of it — and that was 8 of LDBC-SNB's 21 relationships.
+/// front of it — and that is 8 of LDBC-SNB's 21 relationships.
 fn row_per_value(df: DataFrame, column: &str) -> datafusion::error::Result<DataFrame> {
     let list = matches!(
         df.schema().field_with_unqualified_name(column)?.data_type(),
@@ -810,9 +809,9 @@ async fn execute_edges<'db>(
 /// the `no-dangling-endpoint` guard reads every endpoint back and fails on a
 /// `dense_id` no vertex has.
 ///
-/// What it stopped being is silent. It reported nothing at any log level, and
-/// the only trace was an [`EdgeInfo::edge_count`] smaller than the input's row
-/// count — a comparison nobody is obliged to make. [`EdgeTable::dropped`] is
+/// What it is not is silent. Without a count the only trace would be an
+/// [`EdgeInfo::edge_count`] smaller than the input's row count — a comparison
+/// nobody is obliged to make. [`EdgeTable::dropped`] is
 /// `candidates − resolved`: the extra `count()` is one more pass over the edge's
 /// input relation, which the run already scans twice (once per orientation).
 ///
@@ -876,8 +875,8 @@ async fn execute_edge(
     // edges. That corpus already violates `identity-is-the-subject`
     // (`packages/corpus/guards/guards.mjs`), which is the guard that catches it.
     //
-    // **Against `matched` and not against what was written**, because the two
-    // stopped being the same number when the dedup in [`finalize_edge`] landed.
+    // **Against `matched` and not against what was written**, because the
+    // dedup in [`finalize_edge`] makes them different numbers.
     // `dropped` says *an endpoint named a subject no vertex carries*, which is a
     // defect in the program or the data; a row removed as a duplicate is
     // neither, and folding the two together would report a clean six-type
@@ -894,20 +893,19 @@ async fn execute_edge(
 /// Merge every mapping's pairs for one edge table into the table: `UNION ALL`,
 /// then the set, then the order.
 ///
-/// **An edge set is a set**, and until the dedup it was whatever the input
-/// relation's row count happened to be. A mapping whose source is a JOIN
-/// repeats its subject once per matching row, so every OTHER edge the mapping
-/// writes is repeated with it: a six-type program producing `Person` from
-/// `People.join(Interests, …)` wrote `Person_isLocatedIn_Place` **1,256 times
-/// for 50 distinct pairs** — 1,206 duplicates in a `{1,1}` edge. Two mappings
-/// of one type writing the same edge are the same case one level up: their
-/// pairs overlap wherever their rows mint the same subject.
+/// **An edge set is a set**, not whatever the input relation's row count
+/// happens to be. A mapping whose source is a JOIN repeats its subject once per
+/// matching row, so every OTHER edge the mapping writes is repeated with it: a
+/// six-type program producing `Person` from `People.join(Interests, …)` would
+/// write `Person_isLocatedIn_Place` **1,256 times for 50 distinct pairs** —
+/// 1,206 duplicates in a `{1,1}` edge. Two mappings of one type writing the
+/// same edge are the same case one level up: their pairs overlap wherever
+/// their rows mint the same subject.
 ///
-/// Nothing caught it and nothing could: every corpus check then asked whether
-/// the stored relation was self-consistent, and a duplicate is *in* the
-/// relation. `EmitVertex` has carried `dedup: true` for exactly this reason
-/// since the first join landed, and [`Cardinality::Single`]'s own doc — *"a
-/// materializer dedups by key"* — is the sentence this makes true.
+/// A corpus check that asks whether the stored relation is self-consistent
+/// cannot catch it: a duplicate is *in* the relation. `EmitVertex` carries
+/// `dedup: true` for exactly this reason, and [`Cardinality::Single`]'s own doc
+/// — *"a materializer dedups by key"* — is the sentence this makes true.
 ///
 /// **It is unconditional, and the reason is the schema rather than the
 /// cardinality**: an edge table carries `src` and `dst` and nothing else, so two
@@ -975,13 +973,16 @@ fn union<'a>(sets: impl Iterator<Item = &'a [String]>) -> Vec<String> {
 ///   [`register_rdf`] / [`provider_bindings`]). Here we simply scan that
 ///   pre-registered table — RDF stays at the I/O border, the executor never
 ///   parses it.
+///
+/// A session with a source limit ([`session::session_within`]) reads at most
+/// that many rows of each, here at the scan and so before any join.
 pub(crate) async fn read_source(
     ctx: &SessionContext,
     uri: &str,
     format: &SourceFormat,
     binding: &str,
 ) -> datafusion::error::Result<DataFrame> {
-    match format {
+    let read = match format {
         SourceFormat::Csv { delimiter } => {
             let options = csv_options(delimiter.as_deref());
             let schema = csv_schema(ctx, uri, &options).await?;
@@ -1002,6 +1003,10 @@ pub(crate) async fn read_source(
                 ))
             })
         }
+    }?;
+    match session::source_limit(ctx) {
+        Some(limit) => read.limit(0, Some(limit)),
+        None => Ok(read),
     }
 }
 
@@ -1401,8 +1406,8 @@ fn provider_table_name(binding: &str) -> String {
 }
 
 /// Render a MIR [`Expr`] to a `DataFusion` logical [`DfExpr`]. Total over the
-/// MIR expression space since F2 §2 — there is no `unimplemented!()` left to
-/// reach, which is what makes a property that type-checks a property that runs.
+/// MIR expression space — there is no `unimplemented!()` to reach, which is
+/// what makes a property that type-checks a property that runs.
 pub(crate) fn render(e: &Expr<'_>) -> datafusion::error::Result<DfExpr> {
     use fossil_hir::{BinOp, UnOp};
     Ok(match e {
@@ -1527,8 +1532,8 @@ fn render_call(func: &str, args: &[Expr<'_>]) -> datafusion::error::Result<DfExp
 ///
 /// # Why a hand-written reader and not a SQL parser
 ///
-/// Two SQL parsers were available and both were refused, for reasons that are
-/// this crate's and not preferences. `DataFusion`'s own
+/// Two SQL parsers are available and neither is used, for reasons that are this
+/// crate's and not preferences. `DataFusion`'s own
 /// `SessionContext::parse_sql_expr` is behind its `sql` feature, which
 /// `Cargo.toml` turns OFF on purpose — this crate compiles to `wasm32` and the
 /// SQL frontend is bundle weight for a backend that builds plans
@@ -1542,8 +1547,8 @@ fn render_call(func: &str, args: &[Expr<'_>]) -> datafusion::error::Result<DfExp
 /// # The dialect seam, which is real and is NOT hidden
 ///
 /// The templates are `DuckDB`'s, because `DuckDB` is what they were measured
-/// against. [`crate::stdlib::datafusion_name`] has always been the one place the
-/// two vocabularies are reconciled, and it is applied here per function name
+/// against. [`crate::stdlib::datafusion_name`] is the one place the two
+/// vocabularies are reconciled, and it is applied here per function name
 /// rather than to a single builtin.
 ///
 /// What cannot be reconciled stays a NAMED gap — see [`crate::stdlib`]. An

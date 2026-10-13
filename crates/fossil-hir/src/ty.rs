@@ -23,8 +23,8 @@ use smol_str::SmolStr;
 /// Type pretty-printing.
 ///
 /// The single source of truth for rendering Fossil types. It lives here and
-/// not in `fossil-ide::hover`, where it was written, because the checker's
-/// diagnostics render types too and the checker is below the IDE.
+/// not in `fossil-ide::hover`, because the checker's diagnostics render types
+/// too and the checker is below the IDE.
 pub mod display;
 
 /// Interned type handle. Two equal-shaped types share a single `Ty<'db>` id —
@@ -56,13 +56,11 @@ pub enum TyKind<'db> {
     Null,
     /// A relation: the named rows a `from` clause or a pipeline puts in scope.
     ///
-    /// It was not a type at all. `RowScope` lived in `crate::infer`, beside the
-    /// type system, so `seq.where` — a catalogue row on a `Relation` receiver —
-    /// had the signature `p("rows", S::String)` under a comment reading
-    /// «higher-order arguments collapse to scalar placeholders», and the only
-    /// checking a pipeline stage got was a hand-written walk for the column
-    /// NAMES its predicate mentions. `Row.celsius > "abc"` passed clean two
-    /// lines above a call that was refused for the same mismatch.
+    /// It is a type so that `seq.where` — a catalogue row on a `Relation`
+    /// receiver — has a signature that says what it takes, and a pipeline
+    /// stage is TYPED rather than walked for the column NAMES its predicate
+    /// mentions: `Row.celsius > "abc"` is refused like the call two lines below
+    /// it that makes the same mismatch.
     ///
     /// A list of named rows and not one flat record, because a join keeps both
     /// sides addressable — see [`Rows`].
@@ -70,12 +68,11 @@ pub enum TyKind<'db> {
     /// A reference to a node of one of the named shapes — `@shop:Person` in a
     /// shape document, `Person(User.email)` in a program.
     ///
-    /// **It was `Iri`, and being RDF vocabulary is what left it untyped.** An
-    /// IRI is an IRI, so every reference had one type and the check a graph
-    /// language exists to make did not happen: `shop.shex` declares
-    /// `shop:buyer @shop:Person`, a program wrote `buyer = Order(Purchase.id)`,
-    /// and the compiler said `ok — no errors`. Both producers held the answer
-    /// and dropped it — `expected_value_ty` knows the constraint's `targets`,
+    /// **Not `Iri`.** An IRI is an IRI, so as `Iri` every reference would have
+    /// one type and the check a graph language exists to make would not
+    /// happen: `shop.shex` declares `shop:buyer @shop:Person`, and
+    /// `buyer = Order(Purchase.id)` would check clean. Both producers hold the
+    /// answer — `expected_value_ty` knows the constraint's `targets`,
     /// `synth_edge` knows the shape it is minting an identity for.
     ///
     /// That an identity is SPELLED as an IRI is the shape decoder's business
@@ -88,8 +85,8 @@ pub enum TyKind<'db> {
     /// to a union in `GraphQL` and how `sh:or` reads. Canonicalised by
     /// [`Ty::reference`] so two spellings of one set intern to one `Ty`.
     Ref(Vec<SmolStr>),
-    /// Type-check failure taint. Carries [`ErrorGuaranteed`] directly (Phase 2
-    /// promotion of a local taint-wrapper newtype).
+    /// Type-check failure taint. Carries [`ErrorGuaranteed`] directly, with no
+    /// wrapper of its own.
     Error(ErrorGuaranteed),
 }
 
@@ -279,8 +276,8 @@ pub struct RecordField<'db> {
     pub ty: Ty<'db>,
 }
 
-/// Record type — a row schema. Stored as `Vec<RecordField<'db>>` (Phase 1
-/// pattern preserved — `IndexMap` doesn't impl Hash, Salsa needs Hash).
+/// Record type — a row schema. Stored as `Vec<RecordField<'db>>`: `IndexMap`
+/// doesn't impl Hash, and Salsa needs Hash.
 #[salsa::interned(debug)]
 pub struct Record<'db> {
     #[returns(ref)]

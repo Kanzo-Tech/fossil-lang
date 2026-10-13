@@ -4,11 +4,12 @@
  *
  *   import { run } from '@fossil-lang/executor';
  *
- *   const report = await run(program, { host, job });           // under the job's prefix
- *   const { report, files } = await run(program, { files, path }); // in memory, for Node
+ *   const report = await run(program, { host, into: { job } });                   // under the job's prefix
+ *   const { report, files } = await run(program, { host, into: 'memory', limit }); // a sample, in memory
+ *   const { report, files } = await run(program, { files, path });               // bytes in hand, for Node
  *
- * `host` is the `Host` from `@fossil-lang/types`: it vends `read` per connection and `write` on
- * the job. Recording the outcome is the host's.
+ * `host` is the `Host` from `@fossil-lang/types`: it vends `read` per connection and, into a job,
+ * `write` on it. Recording the outcome is the host's.
  */
 
 // The wasm-bindgen glue (`../pkg/fossil_df_wasm.js`) is imported ONLY from leaf
@@ -17,4 +18,4 @@
 // `sideEffects:false` bundler duplicate it, splitting `init()`'s wasm instance
 // from the one the executor uses. This entry only re-exports.
 export { initFossilExecutor, type InitInput } from './load.js';
-export { run, type CorpusFile, type RunOptions } from './run.js';
+export { run, type CorpusFile, type FilesRun, type HostRun, type InMemoryRun, type RunOptions } from './run.js';

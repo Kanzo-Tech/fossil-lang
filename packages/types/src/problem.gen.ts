@@ -86,7 +86,6 @@ export type Code =
   | 'unsupported/expression'
   | 'run/over-budget'
   | 'run/does-not-compile'
-  | 'run/destination-uncovered'
   | 'source/not-found'
   | 'source/not-utf8'
   | 'source/unparseable'
@@ -191,7 +190,6 @@ export const CODES: readonly Code[] = [
   'unsupported/expression',
   'run/over-budget',
   'run/does-not-compile',
-  'run/destination-uncovered',
   'source/not-found',
   'source/not-utf8',
   'source/unparseable',
@@ -784,12 +782,6 @@ export interface ProblemData {
    */
   'run/does-not-compile': Record<string, never>;
   /**
-   * The destination a run writes under is not a prefix any store covers.
-   */
-  'run/destination-uncovered': {
-    destination: string;
-  };
-  /**
    * A CSV, JSON or Parquet source names no file in its store.
    */
   'source/not-found': {
@@ -1028,7 +1020,6 @@ export const TITLES: { readonly [C in Code]: string } = {
   'unsupported/expression': 'An expression fossil cannot lower yet',
   'run/over-budget': 'The run needs more memory than its budget',
   'run/does-not-compile': 'The program does not compile',
-  'run/destination-uncovered': 'No store covers the destination',
   'source/not-found': 'A source names no file',
   'source/not-utf8': 'A source is not UTF-8',
   'source/unparseable': 'A source does not parse',
@@ -1114,7 +1105,6 @@ export type DetailedCode =
   | 'pipeline/join-one-side'
   | 'unsupported/expression'
   | 'run/does-not-compile'
-  | 'run/destination-uncovered'
   | 'source/not-found'
   | 'source/not-utf8'
   | 'source/unparseable'
@@ -1199,7 +1189,6 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'pipeline/join-one-side': (d) => `\`join\` in \`${d.pipeline}\` equates \`${d.left}\` with \`${d.right}\`, and both are columns of the ${d.side} side`,
   'unsupported/expression': (d) => `\`${d.expression}\` is not an expression fossil can lower yet, so this property is not written`,
   'run/does-not-compile': (_) => `the program does not compile; nothing was run`,
-  'run/destination-uncovered': (d) => `no store covers the destination ${d.destination}`,
   'source/not-found': (d) => `the source \`${d.location}\` names no file`,
   'source/not-utf8': (d) => `the source \`${d.location}\` is not UTF-8`,
   'source/unparseable': (d) => `the source \`${d.location}\` does not parse`,

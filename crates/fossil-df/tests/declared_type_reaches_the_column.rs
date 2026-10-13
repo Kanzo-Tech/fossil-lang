@@ -1,16 +1,16 @@
 //! The type `fossil.json` declares for a column is the type the file holds.
 //!
-//! It was the CHECKER's type (`VProp.ty`), stamped beside a Parquet column the
-//! ENGINE encoded, and the two disagreed in two ways: `Integer <: Float` let an
+//! Not the CHECKER's type (`VProp.ty`) stamped beside a Parquet column the
+//! ENGINE encoded: the two disagree in two ways. `Integer <: Float` lets an
 //! `Int64` argument satisfy a `Float` parameter with no widening cast, so a
-//! call returned `sig.ret` to the checker and `Int64` to the file
+//! call returns `sig.ret` to the checker and `Int64` to the file
 //! (`tests/aggregate_result_types.rs` is that table); and the executor
-//! introspects nothing, so an untyped column was declared `string` over a
+//! introspects nothing, so an untyped column would be declared `string` over a
 //! `BIGINT`. `properties` describes the file a reader opens, so the writer
 //! spells the written column's Arrow type (`fossil_df::corpus::manifest::data_type_name`)
-//! and both disagreements stop reaching the artefact.
+//! and neither disagreement reaches the artefact.
 //!
-//! The checker's disagreement with the engine is still real, and still in
+//! The checker's disagreement with the engine is real, and is in
 //! `aggregate_result_types.rs`; it is a question about the language, not about
 //! what a corpus says of its own bytes.
 

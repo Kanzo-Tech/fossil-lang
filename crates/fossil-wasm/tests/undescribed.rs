@@ -1,9 +1,9 @@
 //! A source the host could not describe is a row of `check`, at the call that
 //! reads it, under the code its introspection answered.
 //!
-//! `profile` in `@fossil-lang/profile` returns `{ descriptors, undescribed }`
-//! and `FossilProgram.registerProfile` hands both halves over; this is the
-//! Rust half the second one drives.
+//! `FossilProgram.describe` profiles what the program reads and hands both
+//! halves of the answer — `{ descriptors, undescribed }` — to the workspace;
+//! this is the Rust half it drives.
 
 use fossil_wasm::{Diagnostic, FossilWorkspace};
 use lsp_types::{DiagnosticSeverity, Position};

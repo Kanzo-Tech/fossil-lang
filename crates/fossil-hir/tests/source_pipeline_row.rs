@@ -279,8 +279,8 @@ fn twin_sources() -> Vec<(&'static str, &'static [(&'static str, Primitive)])> {
 /// This is the one place a derived relation introduces a binding its base did
 /// not have. Every other verb carries, restricts or extends the names it was
 /// given, which is why the scope is built by name at all — and why keeping the
-/// left side's would be the ambiguity `select` after a `join` was decided
-/// against on 2026-08-14: `pedidos.nombre` would name rows that came from
+/// left side's would be the ambiguity a qualified `select` after a `join`
+/// exists to avoid: `pedidos.nombre` would name rows that came from
 /// `personas`.
 #[test]
 fn a_union_answers_to_the_pipeline_and_to_neither_side() {

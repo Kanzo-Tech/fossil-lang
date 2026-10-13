@@ -7,7 +7,7 @@ import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { initFossilWasm, openProgram, type FossilProgram } from '../src/index.js';
-import { recordingHost } from './host.js';
+import { describingEngine, recordingHost } from './host.js';
 
 beforeAll(async () => {
   const wasmPath = fileURLToPath(new URL('../pkg/fossil_wasm_bg.wasm', import.meta.url));
@@ -42,14 +42,12 @@ User : Person from users
 
 afterEach(() => vi.unstubAllGlobals());
 
-const DESCRIPTOR = {
-  key: '@lake/users.csv',
-  columns: [
-    { name: 'id', primitive: 'string' as const },
-    { name: 'name', primitive: 'string' as const },
-  ],
-  etag: '',
-};
+/** `users.csv` as DuckDB describes it: both columns text. */
+const USERS = describingEngine([
+  { column_name: 'id', column_type: 'VARCHAR' },
+  { column_name: 'name', column_type: 'VARCHAR' },
+]);
+const TYPES = { depth: 'types' } as const;
 
 describe('openProgram', () => {
   let program: FossilProgram | undefined;
@@ -61,7 +59,7 @@ describe('openProgram', () => {
       expect(asked).toEqual([{ connection: 'vocab' }]);
       expect(fetched).toHaveLength(1);
       expect(fetched[0]).toBe('http://minio.example/vocab/shapes/person.shex');
-      program.registerProfile({ descriptors: [DESCRIPTOR], undescribed: [] });
+      await program.describe({ engine: USERS, options: TYPES });
       const rows = await program.diagnostics();
       // The shape arrived: `name` is checked against its datatype, which only a read shape knows.
       const mismatch = rows.find((r) => r.code === 'type/property-mismatch');
@@ -81,12 +79,17 @@ describe('openProgram', () => {
     const { host } = recordingHost(SHAPE);
     program = await openProgram('prog.fossil', { host });
     try {
-      program.registerProfile({ descriptors: [DESCRIPTOR], undescribed: [] });
       const line = PROGRAM.split('\n').findIndex((l) => l.includes('name = users.name'));
       const character = PROGRAM.split('\n')[line]!.indexOf('users.name') + 'users.'.length + 1;
       // Opened empty: nothing is under any cursor until the text arrives.
       expect(program.hover(line, character)).toBeNull();
       program.update(PROGRAM);
+      // `name` as the shape types it, so the expression types and hover has a type to show.
+      const typed = describingEngine([
+        { column_name: 'id', column_type: 'VARCHAR' },
+        { column_name: 'name', column_type: 'BIGINT' },
+      ]);
+      await program.describe({ engine: typed, options: TYPES });
       expect(program.hover(line, character)).not.toBeNull();
       expect(program.completion(line, character).length).toBeGreaterThan(0);
     } finally {
@@ -137,14 +140,24 @@ describe('openProgram', () => {
     }
   });
 
-  it('refuses a descriptor the compiler cannot read', async () => {
-    const { host } = recordingHost(SHAPE);
-    program = await openProgram('prog.fossil', { host });
+  it('describes what it reads through its own host, and answers the profile a run takes', async () => {
+    const { host, asked } = recordingHost(SHAPE);
+    program = await openProgram('prog.fossil', { host, text: PROGRAM });
     try {
-      const malformed = { key: 'users.csv' } as unknown as typeof DESCRIPTOR;
-      expect(() => program!.registerProfile({ descriptors: [malformed], undescribed: [] })).toThrow(
-        expect.objectContaining({ name: 'FossilError', code: 'api/invalid-argument' }),
-      );
+      const profiled = await program.describe({ engine: USERS, options: TYPES });
+      expect(asked).toContainEqual({ connection: 'lake' });
+      expect(profiled.descriptors).toEqual([
+        {
+          key: '@lake/users.csv',
+          columns: [
+            { name: 'id', primitive: 'string' },
+            { name: 'name', primitive: 'string' },
+          ],
+          etag: '',
+        },
+      ]);
+      expect(profiled.undescribed).toEqual([]);
+      expect(profiled.profile.sources.map((s) => s.descriptor.key)).toEqual(['@lake/users.csv']);
     } finally {
       program.close();
     }
@@ -152,35 +165,23 @@ describe('openProgram', () => {
 });
 
 describe('openProgram, when a source cannot be described', () => {
-  const NOT_FOUND = {
-    code: 'source/not-found',
-    data: { location: 's3://lake/users.csv' },
-    title: 'A source names no file',
-    detail: 'the source `s3://lake/users.csv` names no file',
-    severity: 'error',
-  } as const;
-
   it('answers one warning at the call that reads it, under the code the profile answered', async () => {
     const { host } = recordingHost(SHAPE);
     const program = await openProgram('prog.fossil', { host, text: PROGRAM });
     try {
-      program.registerProfile({
-        descriptors: [],
-        undescribed: [{ source: { key: '@lake/users.csv' }, problem: NOT_FOUND }],
-      });
-      const rows = (await program.diagnostics()).filter((r) => r.code === 'source/not-found');
+      const unreadable = describingEngine([], new Error('CORS / unreachable'));
+      const { undescribed } = await program.describe({ engine: unreadable, options: TYPES });
+      expect(undescribed.map((u) => [u.source.key, u.problem.code])).toEqual([['@lake/users.csv', 'engine/failed']]);
+      const rows = (await program.diagnostics()).filter((r) => r.code === 'engine/failed');
       expect(rows).toHaveLength(1);
-      const [row] = rows;
-      expect(row).toMatchObject({
+      expect(rows[0]).toMatchObject({
         uri: 'prog.fossil',
         severity: 2,
-        title: 'A source names no file',
-        data: { location: 's3://lake/users.csv' },
         range: { start: { line: 1, character: 9 }, end: { line: 1, character: 34 } },
       });
 
-      program.registerProfile({ descriptors: [DESCRIPTOR], undescribed: [] });
-      expect((await program.diagnostics()).some((r) => r.code === 'source/not-found')).toBe(false);
+      await program.describe({ engine: USERS, options: TYPES });
+      expect((await program.diagnostics()).some((r) => r.code === 'engine/failed')).toBe(false);
     } finally {
       program.close();
     }

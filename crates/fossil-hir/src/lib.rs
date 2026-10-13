@@ -80,8 +80,7 @@ pub mod shex;
 pub mod spans;
 /// The stdlib catalog: every function the language declares, its signature and
 /// how it compiles. It lives here because the checker resolves a call against
-/// it, and the checker cannot depend on a crate that depends on the checker —
-/// which is what `fossil-registry` was until it was folded in here.
+/// it, and the checker cannot depend on a crate that depends on the checker.
 pub mod stdlib;
 pub mod ty;
 

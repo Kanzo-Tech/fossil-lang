@@ -169,43 +169,6 @@ importers:
         specifier: ^4.1.11
         version: 4.1.11(@types/node@20.19.41)(@vitest/coverage-v8@4.1.11)(happy-dom@20.14.5)(vite@8.3.1(@types/node@20.19.41)(esbuild@0.28.1)(jiti@2.7.0))
 
-  packages/profile:
-    dependencies:
-      '@fossil-lang/storage':
-        specifier: workspace:*
-        version: link:../storage
-      '@fossil-lang/types':
-        specifier: workspace:*
-        version: link:../types
-      '@fossil-lang/wasm':
-        specifier: workspace:*
-        version: link:../wasm
-    devDependencies:
-      happy-dom:
-        specifier: ^20.8.9
-        version: 20.14.5
-      typescript:
-        specifier: ^5.6.0
-        version: 5.9.3
-      vitest:
-        specifier: ^4.1.11
-        version: 4.1.11(@types/node@20.19.41)(@vitest/coverage-v8@4.1.11)(happy-dom@20.14.5)(vite@8.3.1(@types/node@20.19.41)(esbuild@0.28.1)(jiti@2.7.0))
-
-  packages/prompt:
-    devDependencies:
-      '@fossil-lang/types':
-        specifier: workspace:*
-        version: link:../types
-      '@fossil-lang/wasm':
-        specifier: workspace:*
-        version: link:../wasm
-      typescript:
-        specifier: ^5.6.0
-        version: 5.9.3
-      vitest:
-        specifier: ^4.1.11
-        version: 4.1.11(@types/node@20.19.41)(@vitest/coverage-v8@4.1.11)(happy-dom@20.14.5)(vite@8.3.1(@types/node@20.19.41)(esbuild@0.28.1)(jiti@2.7.0))
-
   packages/storage:
     dependencies:
       '@fossil-lang/types':

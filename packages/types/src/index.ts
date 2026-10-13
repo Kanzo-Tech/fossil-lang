@@ -3,7 +3,7 @@
 export type { Host, HostCall } from './host.js';
 export type { Engine, Table, Vector } from './engine.js';
 export type { Diagnostic } from './diagnostic.js';
-export type { Profiled } from './profiled.js';
+export type { Profiled, UndescribedSource } from './profiled.js';
 export type {
   Access,
   CompletionItem,
@@ -15,12 +15,14 @@ export type {
   Format,
   FormatKind,
   Hover,
+  DeclaredField,
+  DeclaredType,
+  ImportedType,
   Inclusion,
   InferredColumn,
   InferredDescriptor,
   Input,
   Location,
-  MappingVocabulary,
   Position,
   Primitive,
   Profile,
@@ -40,8 +42,8 @@ export type {
   StorageCredential,
   Token,
   TokenKind,
-  TypeVocabulary,
-  VocabularyDocument,
+  Vocabulary,
+  VocabularyImport,
 } from './wire.gen.js';
 export { HOST_MS } from './wire.gen.js';
 export {

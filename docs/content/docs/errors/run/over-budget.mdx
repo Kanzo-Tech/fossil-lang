@@ -18,7 +18,7 @@ held) and `budget`.
 
 ```ts
 try {
-  await exec.run(host, jobId);
+  await run(program, { host, into: { job } });
 } catch (e) {
   if (isFossilError(e, 'run/over-budget')) console.log(e.data.consumer, e.data.requested);
 }
@@ -40,6 +40,8 @@ never holds a partial corpus from it. The measurements and the ceiling are on
 - **Run over less data.** The budget is fixed, and what spends it first is usually the
   deduplication of a large vertex type. Split the input and run each part to its own destination.
 - **Read fewer rows into the graph.** A [`where`](/docs/book/relations) upstream of a mapping, or a
-  narrower source, lowers what every operator above it holds.
+  narrower source, lowers what every operator above it holds. To look at the graph rather than
+  write all of it, `run(program, { host, into: 'memory', limit })` reads at most `limit` rows of
+  each source.
 - **Look at `consumer`.** It is `DataFusion`'s name for the operator that asked — `ExternalSorter`
   is a sort — which tells you which part of the plan to make smaller.

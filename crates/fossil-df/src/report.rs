@@ -3,10 +3,9 @@
 //!
 //! **The manifest is not here.** It is `<location>fossil.json`, written last, and
 //! a host that wants to know what it just produced reads it — or opens the
-//! corpus, which reads it. The report used to carry the whole manifest a second
-//! time, and before that a `RunStatus` that restated seven of its nine fields
-//! and once named a path the write had just deleted. Two descriptions of one
-//! dataset can disagree with the bytes; one cannot.
+//! corpus, which reads it. A report that restated the manifest could name a
+//! path the write had just deleted: two descriptions of one dataset can
+//! disagree with the bytes; one cannot.
 //!
 //! What remains is what the bytes cannot say:
 //!

@@ -32,9 +32,8 @@
 //! the first.
 
 /// What the compiler UNDERSTOOD, which is the `compiled.txt` half of every
-/// artefact below. It was `fossil-engine`'s `src/census.rs` until 2026-08-26;
-/// this file is the only caller it has ever had, and its own docblock had
-/// already named this as where it goes.
+/// artefact below. This file is its only caller, which is why it is a test
+/// module.
 mod census;
 #[path = "support/native.rs"]
 mod native;

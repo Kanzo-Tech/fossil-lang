@@ -93,8 +93,8 @@ pub fn span(index: &LineIndex, range: Range) -> Span {
 ///
 /// A `character` past the end of its line resolves to the token at the line's
 /// end rather than to `None`, because that is what [`offset`]
-/// clamps it to. It used to hand `token_at_offset` an offset outside the CST,
-/// which is a `rowan` panic and so a crash in whatever embeds this crate.
+/// clamps it to: `token_at_offset` panics on an offset outside the CST, and a
+/// panic here is a crash in whatever embeds this crate.
 pub fn token_at_position(
     db: &dyn fossil_base::Db,
     file: SourceFile,
@@ -167,10 +167,8 @@ Users : Person from User
 ";
 
     /// **A column past the end of its line stays on that line.** `(4, 4)` on a
-    /// blank line 4 answers the line's end, not `line_start + 4`.
-    ///
-    /// Before: `Some(127)` for a 124-byte file — an offset outside the text,
-    /// handed to `rowan` by the caller below.
+    /// blank line 4 answers the line's end, not `line_start + 4` — which for
+    /// this 124-byte file would be 127, an offset outside the text.
     #[test]
     fn a_column_past_the_end_of_its_line_clamps_to_it() {
         let (db, file) = db_with_text(PAST_EOL);
@@ -195,10 +193,9 @@ Users : Person from User
         assert!(offset(idx, Position::new(99, 0)).is_none());
     }
 
-    /// **The panic.** `token_at_position` handed `rowan` the unclamped offset
-    /// and `SyntaxNode::token_at_offset` aborted the process.
-    ///
-    /// Before: `Bad offset: range 0..124 offset 127`.
+    /// **No panic.** `SyntaxNode::token_at_offset` aborts the process on an
+    /// offset outside the tree («Bad offset: range 0..124 offset 127»), so the
+    /// offset it is handed must be the clamped one.
     ///
     /// No conforming editor sends this — a cursor cannot be past EOL — but
     /// every harness in this tree computes `(line, character)` by hand, the

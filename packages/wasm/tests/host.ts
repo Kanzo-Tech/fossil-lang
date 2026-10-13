@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 
 import { initFossilStorage } from '@fossil-lang/storage';
-import type { Host, Scope } from '@fossil-lang/types';
+import type { Engine, Host, Scope, Table } from '@fossil-lang/types';
 import { vi } from 'vitest';
 
 await initFossilStorage(
@@ -58,4 +58,38 @@ export function recordingHost(shape: string) {
     }),
   );
   return { host, asked, fetched };
+}
+
+/** Rows as the columns an engine answers in. */
+export function tableOf(rows: readonly Record<string, unknown>[]): Table {
+  const names = [...new Set(rows.flatMap((row) => Object.keys(row)))];
+  return {
+    numRows: rows.length,
+    schema: { fields: names.map((name) => ({ name })) },
+    getChild: (name) =>
+      names.includes(name)
+        ? {
+            length: rows.length,
+            get: (i) => rows[i]?.[name] ?? null,
+            toArray: () => rows.map((row) => row[name]),
+          }
+        : null,
+  };
+}
+
+/** An engine whose `DESCRIBE` of any source answers `columns`, or throws `failure` when given one. */
+export function describingEngine(
+  columns: readonly { column_name: string; column_type: string }[],
+  failure?: Error,
+): Engine {
+  return {
+    query: async (sql) => {
+      if (sql.includes('duckdb_extensions()')) return tableOf([{ loaded: true }]);
+      if (!sql.startsWith('DESCRIBE')) return tableOf([]);
+      if (failure !== undefined) throw failure;
+      return tableOf(columns);
+    },
+    registerFiles: async () => {},
+    dropFiles: async () => {},
+  };
 }

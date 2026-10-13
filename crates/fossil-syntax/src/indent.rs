@@ -151,9 +151,8 @@ pub fn lex_with_indents(input: &str) -> Vec<LexedToken> {
 /// `packages/codemirror-fossil/src/tags.ts`. Only the parser reads this pass,
 /// so carving here leaves that pin untouched.
 ///
-/// There is ONE opener, `{`. It took an `open_marker` parameter while the
-/// backtick spelling's `${` existed; `"…{expr}…"` is the spelling, `${` is not
-/// a token, and the parameter went with the second one.
+/// There is ONE opener, `{`: `"…{expr}…"` is the spelling and `${` is not a
+/// token, so the opener is not a parameter.
 fn carve_interpolations(
     out: &mut Vec<LexedToken>,
     input: &str,

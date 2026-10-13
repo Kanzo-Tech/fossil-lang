@@ -18,11 +18,10 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use fossil_df::Executor;
+use fossil_df::{Executor, Output, Ran};
 use fossil_graph_schema::js::{bug, invalid_argument};
 use fossil_graph_schema::{Failure, Foreign, Problem};
 use fossil_storage::{Access, JsHost, Scope, Storage};
-use futures::TryStreamExt;
 use object_store::memory::InMemory;
 use object_store::{ObjectStore, ObjectStoreExt};
 use url::Url;
@@ -146,15 +145,22 @@ impl FossilExecutor {
             .register_undescribed(key, problem_json)?)
     }
 
-    /// Run with the storage `host` vends: read each source through its
-    /// connection's credential, write under the one prefix `host` vends `write`
-    /// on for `job`, and answer the [`fossil_df::RunReport`].
+    /// Run the program: read through `reads`, write into `into`, and read at
+    /// most `limit` rows from each source scan.
+    ///
+    /// - `reads` is `{ host }` — every source read through the credentials
+    ///   `host` vends — or `{ files }`, each location the program reads mapped
+    ///   to its bytes, for a host with no storage.
+    /// - `into` is `{ job }` — the corpus written under the one prefix `host`
+    ///   vends `write` on for `job`, answering the [`fossil_df::RunReport`] —
+    ///   or `"memory"`, answering `{ report, files: [{ path, bytes }] }` and
+    ///   asking for no `write` credential.
     ///
     /// # Errors
-    /// `storage/ambiguous-prefix` when the host vends more than one prefix to
-    /// write under, the storage failure when it vends none, or the run's own
-    /// failure — `run/over-budget` when it needed more memory than the
-    /// executor's budget, which is raised before anything is written.
+    /// `api/invalid-argument` for a `reads`, `into` or `limit` of the wrong
+    /// shape, or the run's own failure ([`fossil_df::Executor::execute`]) —
+    /// `run/over-budget` when it needed more memory than the executor's budget,
+    /// which is raised before anything is written.
     ///
     /// `signal`, an `AbortSignal`, stops the run: it rejects with the signal's
     /// reason and the run is dropped where it stands. `fossil.json` is written
@@ -166,15 +172,19 @@ impl FossilExecutor {
     #[allow(clippy::await_holding_refcell_ref, clippy::future_not_send)]
     pub async fn run(
         &self,
-        host: JsValue,
-        job: String,
+        #[wasm_bindgen(
+            unchecked_param_type = "{ host: unknown } | { files: Record<string, Uint8Array> }"
+        )]
+        reads: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "{ job: string } | 'memory'")] into: JsValue,
+        limit: Option<f64>,
         signal: Option<js_sys::Object>,
     ) -> Result<JsValue, JsValue> {
         let Some(signal) = signal else {
-            return self.run_until(host, job).await;
+            return self.run_until(reads, into, limit).await;
         };
         let stopped = stopped(&signal)?;
-        let run = std::pin::pin!(self.run_until(host, job));
+        let run = std::pin::pin!(self.run_until(reads, into, limit));
         match futures::future::select(run, stopped).await {
             futures::future::Either::Left((done, _)) => done,
             futures::future::Either::Right(_) => {
@@ -185,108 +195,120 @@ impl FossilExecutor {
     }
 
     #[allow(clippy::await_holding_refcell_ref, clippy::future_not_send)]
-    async fn run_until(&self, host: JsValue, job: String) -> Result<JsValue, JsValue> {
-        let mut storage = Storage::new(Arc::new(JsHost::new(host)));
-        let scope = Scope::Job(job);
-        let dest = match storage.grant(scope.clone(), Access::Write).await {
-            Ok([prefix]) => prefix.clone(),
-            Ok(prefixes) => {
-                return Err(Failure::new(Problem::AmbiguousPrefix {
-                    scope: scope.to_string(),
-                    count: prefixes.len() as u64,
-                })
-                .with_help("a run writes under exactly one prefix")
-                .into());
-            }
-            Err(e) => return Err(Failure::from(e).into()),
-        };
+    async fn run_until(
+        &self,
+        reads: JsValue,
+        into: JsValue,
+        limit: Option<f64>,
+    ) -> Result<JsValue, JsValue> {
+        let output = output(&into)?;
+        let limit = limit.map(rows).transpose()?;
+        let mut storage = read_through(&reads).await?;
         let exec = self.borrow("run")?;
-        let report = exec.execute(&mut storage, &dest).await?;
-        Ok(to_value("the run report", &report)?)
-    }
-
-    /// Run over files held in memory, for a host with no storage: `files`
-    /// maps each location the program reads to its bytes, and the output stays
-    /// in memory under `dest`. Answers `{ files: [{ path, bytes }], report }`.
-    ///
-    /// # Errors
-    /// `api/invalid-argument` when `files` is not an object of `Uint8Array`s
-    /// keyed by URL, or the run's own failure, as [`Self::run`]'s is.
-    #[allow(clippy::await_holding_refcell_ref, clippy::future_not_send)]
-    #[wasm_bindgen(js_name = runInMemory)]
-    pub async fn run_in_memory(&self, files: JsValue, dest: String) -> Result<JsValue, JsValue> {
-        let dest = format!("{}/", dest.trim_end_matches('/'));
-        let mut storage = Storage::new(Arc::new(NoHost));
-        let mut held: HashMap<String, Arc<InMemory>> = HashMap::new();
-        let mut memory = |storage: &mut Storage, root: &str| -> Result<Arc<InMemory>, Failure> {
-            if let Some(store) = held.get(root) {
-                return Ok(Arc::clone(store));
+        match exec.execute(&mut storage, &output, limit).await? {
+            Ran::Storage(report) => Ok(to_value("the run report", &report)?),
+            Ran::Memory { report, files } => {
+                let held = js_sys::Array::new();
+                for file in files {
+                    let entry = js_sys::Object::new();
+                    set(&entry, "path", &JsValue::from_str(&file.path))?;
+                    set(
+                        &entry,
+                        "bytes",
+                        &js_sys::Uint8Array::from(file.bytes.as_ref()),
+                    )?;
+                    held.push(&entry);
+                }
+                let result = js_sys::Object::new();
+                set(&result, "files", &held)?;
+                set(&result, "report", &to_value("the run report", &report)?)?;
+                Ok(result.into())
             }
-            let store = Arc::new(InMemory::new());
-            storage.with_store(root, Arc::clone(&store) as Arc<dyn ObjectStore>)?;
-            held.insert(root.to_string(), Arc::clone(&store));
-            Ok(store)
-        };
-        let shape = |error: Option<JsValue>| {
-            invalid_argument("files", "an object of { [url]: Uint8Array }", error)
-        };
-        let obj: &js_sys::Object = files.dyn_ref().ok_or_else(|| shape(None))?;
-        for entry in js_sys::Object::entries(obj).iter() {
-            let pair: js_sys::Array = entry.into();
-            let location = pair.get(0).as_string().ok_or_else(|| shape(None))?;
-            let bytes: js_sys::Uint8Array = pair.get(1).dyn_into().map_err(|_| shape(None))?;
-            let url = Url::parse(&location).map_err(|e| {
-                invalid_argument("files", "an object keyed by URL", None).caused_by(e)
-            })?;
-            let root = format!("{}://{}/", url.scheme(), url.authority());
-            let store = memory(&mut storage, &root)?;
-            store
-                .put(
-                    &object_store::path::Path::from(url.path().trim_start_matches('/')),
-                    bytes.to_vec().into(),
-                )
-                .await
-                .map_err(|e| unreachable(&location, e))?;
         }
-        let out = Arc::new(InMemory::new());
-        storage
-            .with_store(&dest, Arc::clone(&out) as Arc<dyn ObjectStore>)
-            .map_err(Failure::from)?;
-
-        let exec = self.borrow("runInMemory")?;
-        let report = exec.execute(&mut storage, &dest).await?;
-
-        let key = Url::parse(&dest)
-            .map_err(|e| invalid_argument("dest", "a URL", None).caused_by(e))?
-            .path()
-            .trim_start_matches('/')
-            .to_string();
-        let files = js_sys::Array::new();
-        let listed: Vec<_> = out
-            .list(None)
-            .try_collect()
-            .await
-            .map_err(|e| unreachable(&dest, e))?;
-        for meta in listed {
-            let bytes = out
-                .get(&meta.location)
-                .await
-                .map_err(|e| unreachable(&dest, e))?
-                .bytes()
-                .await
-                .map_err(|e| unreachable(&dest, e))?;
-            let location = meta.location.as_ref();
-            let path = location.strip_prefix(&key).unwrap_or(location);
-            let file = js_sys::Object::new();
-            set(&file, "path", &JsValue::from_str(path))?;
-            set(&file, "bytes", &js_sys::Uint8Array::from(bytes.as_ref()))?;
-            files.push(&file);
-        }
-        let result = js_sys::Object::new();
-        set(&result, "files", &files)?;
-        set(&result, "report", &to_value("the run report", &report)?)?;
-        Ok(result.into())
     }
+}
+
+/// `into` as the [`Output`] it names: `"memory"` or `{ job }`.
+fn output(into: &JsValue) -> Result<Output, Failure> {
+    let shape = || invalid_argument("into", "'memory' or { job: string }", None);
+    if into.as_string().as_deref() == Some("memory") {
+        return Ok(Output::Memory);
+    }
+    if !into.is_object() {
+        return Err(shape());
+    }
+    let job = js_sys::Reflect::get(into, &JsValue::from_str("job"))
+        .ok()
+        .and_then(|job| job.as_string())
+        .ok_or_else(shape)?;
+    Ok(Output::Storage { job })
+}
+
+/// A JS number as a row count: a whole number, not negative.
+// The range is checked before the cast, so it neither truncates nor wraps.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn rows(limit: f64) -> Result<usize, Failure> {
+    if limit.is_finite() && limit.fract() == 0.0 && (0.0..=u32::MAX.into()).contains(&limit) {
+        Ok(limit as usize)
+    } else {
+        Err(invalid_argument("limit", "a whole number of rows", None))
+    }
+}
+
+/// The [`Storage`] `reads` names: the `{ host }`'s, or `{ files }` held in
+/// memory under a host that vends nothing.
+async fn read_through(reads: &JsValue) -> Result<Storage, Failure> {
+    let shape = || {
+        invalid_argument(
+            "reads",
+            "{ host } or { files: { [url]: Uint8Array } }",
+            None,
+        )
+    };
+    if !reads.is_object() {
+        return Err(shape());
+    }
+    let host = js_sys::Reflect::get(reads, &JsValue::from_str("host")).map_err(|_| shape())?;
+    if !host.is_undefined() {
+        return Ok(Storage::new(Arc::new(JsHost::new(host))));
+    }
+    let files = js_sys::Reflect::get(reads, &JsValue::from_str("files")).map_err(|_| shape())?;
+    held(&files).await
+}
+
+/// A storage holding `files` — `{ [url]: Uint8Array }` — in one `InMemory`
+/// per authority, under a host that vends nothing.
+async fn held(files: &JsValue) -> Result<Storage, Failure> {
+    let mut storage = Storage::new(Arc::new(NoHost));
+    let mut stores: HashMap<String, Arc<InMemory>> = HashMap::new();
+    let shape = |error: Option<JsValue>| {
+        invalid_argument("files", "an object of { [url]: Uint8Array }", error)
+    };
+    let obj: &js_sys::Object = files.dyn_ref().ok_or_else(|| shape(None))?;
+    for entry in js_sys::Object::entries(obj).iter() {
+        let pair: js_sys::Array = entry.into();
+        let location = pair.get(0).as_string().ok_or_else(|| shape(None))?;
+        let bytes: js_sys::Uint8Array = pair.get(1).dyn_into().map_err(|_| shape(None))?;
+        let url = Url::parse(&location)
+            .map_err(|e| invalid_argument("files", "an object keyed by URL", None).caused_by(e))?;
+        let root = format!("{}://{}/", url.scheme(), url.authority());
+        let store = if let Some(store) = stores.get(&root) {
+            Arc::clone(store)
+        } else {
+            let store = Arc::new(InMemory::new());
+            storage.with_store(&root, Arc::clone(&store) as Arc<dyn ObjectStore>)?;
+            stores.insert(root, Arc::clone(&store));
+            store
+        };
+        store
+            .put(
+                &object_store::path::Path::from(url.path().trim_start_matches('/')),
+                bytes.to_vec().into(),
+            )
+            .await
+            .map_err(|e| unreachable(&location, e))?;
+    }
+    Ok(storage)
 }
 
 /// A future that resolves when `signal` aborts — at once if it already has.
@@ -331,8 +353,8 @@ fn to_value<T: serde::Serialize + ?Sized>(what: &str, value: &T) -> Result<JsVal
     serde_wasm_bindgen::to_value(value).map_err(|e| bug(format!("serialising {what}"), e))
 }
 
-/// The host of a run with no storage: it has no connections and vends nothing,
-/// so a source that is not in memory is refused by name.
+/// The host of a run over `{ files }`: it has no connections and vends
+/// nothing, so a source that is not in `files` is refused by name.
 #[derive(Debug)]
 struct NoHost;
 
@@ -356,7 +378,7 @@ impl fossil_storage::Host for NoHost {
     > {
         let refused = Foreign::named(
             "Error",
-            format!("a run in memory has no storage to vend {scope} from"),
+            format!("a run over files has no storage to vend {scope} from"),
         );
         Box::pin(async move { Err(refused.into()) })
     }

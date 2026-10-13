@@ -102,31 +102,21 @@ fn lower_mapping<'db>(
     let dm = def_map(db, file);
     let span = mapping_span(db, mapping);
     // `def_map` builds `MappingLoc::new(db, file, i)` in order, so a mapping's
-    // interned index IS its position in that table. The linear search this
-    // replaces was the second quadratic in this function — one full scan per
-    // mapping, for an answer the key already carried.
+    // interned index IS its position in that table — no scan per mapping for
+    // an answer the key already carries.
     let dense_idx = mapping.index(db);
     if dense_idx >= dm.mappings(db).len() {
         return Err(sink.bug(span, "mapping is absent from its own DefMap"));
     }
     let hir = lower_to_hir(db, file);
-    // **This ICE reached users, and it was never about the mapping it named.**
-    // `HirFile::mappings` used to be FILTERED — one entry per mapping whose
-    // header lowered, indexed as if it were one per `MAPPING` node — so a file
-    // with a header `lower_to_hir` declined ran the whole vector short. The
-    // shortest input that produced it is four bytes, `a:b`, which is a mapping
-    // header with no `from`; the fourteen-row `ShExC` drain of
-    // `fossil-wasm/tests/shape_document.rs` produced three, one per line the
-    // parser recovered into a `MAPPING`. On a file with a broken mapping AND a
-    // healthy one it was worse than an ICE and silent: mapping 0 was lowered
-    // against mapping 1's signature, and mapping 1 — the correct one — was the
-    // one that ran off the end and reported the bug.
-    //
-    // The vector is one slot per `MAPPING` node now. `Err` is a header
+    // `HirFile::mappings` is one slot per `MAPPING` node, never one per header
+    // that lowered: a short vector would lower mapping 0 against mapping 1's
+    // signature and blame the healthy mapping that runs off the end — reached
+    // by inputs as short as `a:b`, a header with no `from`. `Err` is a header
     // `lower_to_hir` declined, and it already said so, once, file-level; the
     // taint travels and nothing is reported twice. `None` is the two CST walks
     // disagreeing about how many mappings the file has, which is the only thing
-    // here that was ever a compiler bug.
+    // here that is a compiler bug.
     let m = match hir.mappings(db).get(dense_idx) {
         Some(Ok(m)) => m,
         Some(Err(eg)) => return Err(*eg),
@@ -142,15 +132,14 @@ fn lower_mapping<'db>(
     // A typecheck failure taints (it already emitted the diagnostic). A source
     // that simply declares no schema is NOT a failure — `source_row` is `None`
     // for every program whose source declares no schema — so it yields an empty row
-    // type, and `field_ty` types those columns `String` as before. What it must
-    // never do is invent field names: the old `Record({id, name})` default made
+    // type, and `field_ty` types those columns `String`. What it must never do
+    // is invent field names: a default `Record({id, name})` would make
     // unrelated sources look like they had `id` and `name` columns.
-    // `predicates` is how the IRI gets here. `fossil-mir` used to strip one out
-    // of `PropertyKey::PrefixedName`, which the CURIE had put there; a bare key
-    // severs that supply and the shape document is the only thing that knows.
-    // The checker already resolves the shape, so the table arrives through a
-    // seam this function already reads — as a pair of strings, with no shape
-    // vocabulary and no descriptor, so nothing `0e6898d` cut comes back.
+    // `predicates` is how the IRI gets here: a bare key carries none, and the
+    // shape document is the only thing that knows. The checker already
+    // resolves the shape, so the table arrives through a seam this function
+    // already reads — as a pair of strings, with no shape vocabulary and no
+    // descriptor.
     let checked = typecheck_mapping(db, mapping).checked(db)?;
     let row_type = checked.source_row(db).unwrap_or_else(|| untyped_row(db));
     let predicates = checked.predicates(db).clone();
@@ -175,9 +164,12 @@ fn lower_mapping<'db>(
     let source_idx = source.last;
 
     // `id` = the vertex IRI. No `iri` property (or one that does not lower) is
-    // fatal: the old empty-string default produced vertices whose subject was
+    // fatal: an empty-string default would produce vertices whose subject is
     // `""`, which dedups every row of the mapping into a single blank node.
     let iri_span_line = iri_property_line(db, mapping, body);
+    if let Some(eg) = body.no_subject(db) {
+        return Err(eg);
+    }
     let Some(id) = lower_iri_property(m, body, db, sink, iri_span_line) else {
         return Err(sink.report(
             span,
@@ -214,8 +206,8 @@ fn lower_mapping<'db>(
         let PropertyKey::Name(name) = &prop.key else {
             continue; // `@subject` is the vertex id, not a predicate
         };
-        // The short name IS the column name — it used to be computed here from
-        // the IRI and is now what the author wrote. The IRI is the lookup.
+        // The short name IS the column name — what the author wrote, not
+        // something computed from the IRI. The IRI is the lookup.
         let pred_local = name.clone();
         let predicate = predicates.iter().find(|p| p.name == *name);
         let iri = &predicate.map(|p| p.iri.clone());
@@ -224,10 +216,9 @@ fn lower_mapping<'db>(
         // template with this row's values in its holes, and from here down it IS
         // that interpolation — the same shape a hand-written IRI template has,
         // which is why `apply_output_shape` needs no new case to turn it into an
-        // `Op::EmitEdge`. This is the substitution `subject_skeletons` used to
-        // GUESS at by comparing templates between mappings; one identity per
-        // type — the same `@subject` in every mapping that produces it — turns
-        // the guess into a lookup.
+        // `Op::EmitEdge`. Nothing GUESSES at it by comparing templates between
+        // mappings: one identity per type — the same `@subject` in every
+        // mapping that produces it — makes it a lookup.
         let value = resolve_edges(db, file, &prop.value);
         let prop = &fossil_hir::HirProperty {
             key: prop.key.clone(),
@@ -244,7 +235,7 @@ fn lower_mapping<'db>(
             // The qualified spelling lowers identically: the checker has
             // already established that the binding IS this mapping's source,
             // so only the column reaches MIR. (`orders.user_id` is the form
-            // that survives; the anonymous `.field` row is being deleted.)
+            // that stays; the anonymous bare-name row is ending.)
             HirExpr::ColumnRef { column: field, .. } | HirExpr::FieldRef(field) => {
                 props.push(VProp {
                     name: pred_local,
@@ -258,9 +249,9 @@ fn lower_mapping<'db>(
             // A string literal, a conditional and an interpolation all produce
             // a String column here: the conditional's branches agree by the
             // time the checker is done, and without a source row that agreed
-            // type is String. An interpolation joined this arm when the edge
-            // guess went — whether it is an EDGE is the shape's answer, taken
-            // by `apply_output_shape`, not a fact about its text.
+            // type is String. Whether an interpolation is an EDGE is the
+            // shape's answer, taken by `apply_output_shape`, not a fact about
+            // its text.
             HirExpr::StringLit(_) | HirExpr::Ternary { .. } | HirExpr::Interpolation(_) => props
                 .push(VProp {
                     name: pred_local,
@@ -605,8 +596,8 @@ fn lower_source_chain<'db>(
                 });
             }
             // The binding travels with the column. `select` names a QUALIFIED
-            // column (open question 4, decided 2026-08-14), and after a join
-            // that is the only thing that says which side `id` came from.
+            // column, and after a join that is the only thing that says which
+            // side `id` came from.
             HirSourceOp::Select(cols) => ops.push(Op::Project {
                 input: chain.last,
                 cols: cols
@@ -723,21 +714,19 @@ fn lower_source_chain<'db>(
     // And the finished pipeline is addressed by whatever its verbs left
     // addressable — NOT by its own binding.
     //
-    // This assigned `pipe.name` unconditionally, and that was the second half of
-    // the same mistake: `Adults := User.where(…)` produces rows still qualified
-    // `User` (an `Op::Filter` renames nothing), so a chain ending here answered
-    // to a name no column carried. It is why
-    // `Purchase.join(Adults, on = Purchase.user_id == User.id)` refused `User`
-    // as "neither input (`Purchase`, `Adults`)" — while `/docs/design/algebra`
-    // and `JoinSide`'s own doc comment both describe that program as working.
-    // Only `union` and `group_by` put the pipeline's name on a column, and each
-    // now says so in its own arm.
+    // `Adults := User.where(…)` produces rows still qualified `User` (an
+    // `Op::Filter` renames nothing), so a chain that answered to `pipe.name`
+    // here would answer to a name no column carries, and
+    // `Purchase.join(Adults, on = Purchase.user_id == User.id)` would refuse
+    // `User` as "neither input" — the program `/docs/design/algebra` describes
+    // as working. Only `union` and `group_by` put the pipeline's name on a
+    // column, and each says so in its own arm.
     path.pop();
     Ok(chain)
 }
 
 /// Resolve the `Op::Source` URI + [`SourceFormat`] for a mapping's source
-/// binding (STDL-06).
+/// binding.
 ///
 /// Reads the `(constructor, uri)` pair off the already-loaded [`DefMap`]
 /// (file-keyed — NO new per-mapping fan-out). The format is
@@ -846,8 +835,8 @@ fn native_reader_format(r: fossil_base::NativeReader, delimiter: Option<SmolStr>
     }
 }
 
-/// Resolve the 1-based, MAPPING-RELATIVE source line of the `iri = ...`
-/// property's RHS expression for the SC#4 named assertion (`line=<N>`).
+/// Resolve the 1-based, MAPPING-RELATIVE source line of the `@subject = ...`
+/// property's RHS expression for the named assertion (`line=<N>`).
 ///
 /// # Why mapping-relative
 ///
@@ -858,8 +847,8 @@ fn native_reader_format(r: fossil_base::NativeReader, delimiter: Option<SmolStr>
 /// than the whole-file source. Reading `parse(db, file)` for a file-absolute
 /// line would tie this per-mapping query to the whole-file CST and break
 /// `MAX_PER_MAPPING_FAN_OUT = 1`. The file-absolute conversion (if ever wanted)
-/// is a display concern for the CLI/codegen wrapper, where a whole-file read
-/// already exists. For Phase 4 the mapping-relative line is snapshot-stable and
+/// is a display concern for whatever renders it, where a whole-file read
+/// already exists. The mapping-relative line is snapshot-stable and
 /// sufficient.
 ///
 /// `ExprId(i)` is the i-th lowered property's RHS (the `body`/`spans` indexing
@@ -903,8 +892,8 @@ fn iri_property_line<'db>(
 
 /// Find the `iri = ...` property in a mapping's body and lower its template
 /// value to a concat-chain of [`Expr`]. `span_line` is the resolved
-/// mapping-relative source line (see [`iri_property_line`]) used to populate the
-/// SC#4 `Expr::Assert` wrappers on the template's `${.field}` placeholders.
+/// mapping-relative source line (see [`iri_property_line`]) that populates the
+/// `Expr::Assert` wrappers on the template's per-row holes.
 fn lower_iri_property<'db>(
     m: &HirMapping,
     body: HirBody<'db>,
@@ -1123,33 +1112,26 @@ fn substitute_edges<'db>(
 /// `assert_line` is `Some(N)` when lowering the subject position (the
 /// `@subject` property), `None` for object positions. When `Some`, each per-row
 /// hole — `{User.id}` — is wrapped in
-/// `Expr::Assert { name: "iri_template_unbound", span_line: N, .. }` (SC#4 —
-/// the un-statically-dischargeable NULL-field check).
+/// `Expr::Assert { name: "iri_template_unbound", span_line: N, .. }` — the
+/// NULL-field check no static analysis can discharge.
 ///
-/// # CODEGEN-LOWERING-01
+/// # The binding is kept
 ///
 /// **A qualified column reference keeps its binding.** `User.email` lowers to
 /// `ColRef { source: "User", column: "email" }`, and the backend qualifies the
 /// relation it reads under that same name — which is what makes
 /// `Node.label` and `Other.label` two columns after a self-join instead of one.
 ///
-/// The rule used to be the opposite: emit `source: SmolStr::default()` and let
-/// the backend supply the relation from the source URI. It was written against
-/// a SQL backend that pasted the source verbatim, so `users.id` reached `DuckDB`
-/// for a view aliased `hello` and the binder refused it — and the fix was to
-/// stop emitting the binding rather than to stop pasting it. `fossil-df` does
-/// not paste: it resolves a `ColRef` against a `DFSchema`, so the binding is a
-/// name to RESOLVE, not text to emit, and the crash the old rule prevented
-/// cannot happen. What the old rule cost instead was the only thing that says
-/// which side of a join a column came from — `join_key` could not tell, and
-/// refused every join whose two keys were spelled differently.
+/// Not `source: SmolStr::default()` with the backend supplying the relation
+/// from the source URI: `fossil-df` resolves a `ColRef` against a `DFSchema`,
+/// so the binding is a name to RESOLVE, not text to paste into SQL, and
+/// dropping it loses the only thing that says which side of a join a column
+/// came from — a join whose two keys are spelled differently could not be
+/// planned.
 ///
-/// This is the same discard `HirSourceOp::Select` had (`85bb488`), at the other
-/// site: a `ColumnRef { binding, column }` destructured to check and rebuilt
-/// with the binding dropped.
-///
-/// [`HirExpr::FieldRef`] — the retired bare `.column` — has no binding to carry
-/// and still emits an empty source, which the backend resolves unqualified.
+/// [`HirExpr::FieldRef`] — the bare name of the anonymous row — has no binding
+/// to carry and emits an empty source, which the backend resolves
+/// unqualified.
 fn lower_property_value<'db>(
     db: &'db dyn fossil_base::Db,
     sink: &mut Diagnostics,
@@ -1161,7 +1143,7 @@ fn lower_property_value<'db>(
     // lowering arm» is enforced, by `rustc` and not by anyone remembering.
     #[deny(clippy::wildcard_enum_match_arm)]
     match value {
-        // CODEGEN-LOWERING-01.
+        // The binding is kept — see the doc comment above.
         HirExpr::ColumnRef { binding, column } => Expr::ColRef {
             source: binding.clone(),
             column: column.clone(),
@@ -1340,7 +1322,7 @@ fn call_result_ty<'db>(db: &'db dyn fossil_base::Db, func: &SmolStr) -> Ty<'db> 
 /// `assert_line` is `Some(N)` in the subject position, where a hole that is
 /// NULL at runtime would produce a malformed IRI. v0.1 cannot discharge
 /// non-nullness statically, so every per-row hole is conservatively wrapped in
-/// a named runtime assertion (SC#4); codegen renders it as
+/// a named runtime assertion; codegen renders it as
 /// `CASE WHEN <expr> IS NOT NULL THEN <expr> ELSE error(...) END`.
 fn lower_interpolation<'db>(
     db: &'db dyn fossil_base::Db,
@@ -1369,9 +1351,8 @@ fn lower_interpolation<'db>(
     fold_concat_left(lowered)
 }
 
-/// Whether an expression's value can differ from row to row — the question the
-/// old text scan answered by looking for a leading `.`, which called
-/// `clean.slug(.name)` constant.
+/// Whether an expression's value can differ from row to row — asked of the
+/// tree, not of its text.
 fn is_per_row(e: &HirExpr) -> bool {
     match e {
         HirExpr::FieldRef(_) | HirExpr::ColumnRef { .. } => true,
@@ -1435,7 +1416,7 @@ mod tests {
     use fossil_hir::def_map::def_map;
     use std::sync::Arc;
 
-    /// STDL-06: a mapping reading from an `io.json("...")` / `io.parquet("...")`
+    /// A mapping reading from an `io.json("...")` / `io.parquet("...")`
     /// binding lowers `Op::Source` with the real URI from the binding and the
     /// format selected by the constructor name.
     fn lower_source_for(src: &str) -> (SmolStr, SourceFormat) {
@@ -1489,7 +1470,7 @@ People : Person from Adults
             panic!("index 1 is the `where`, got {:?}", ops[1]);
         };
         assert_eq!(*input, 0, "the filter reads the source");
-        // `Users.edad` reaches MIR QUALIFIED — CODEGEN-LOWERING-01. The
+        // `Users.edad` reaches MIR QUALIFIED. The
         // qualification the surface requires is not spent by the lowering: the
         // backend qualifies the relation it reads under the same binding, and
         // after a join it is the only thing that says which side a column is.
@@ -1511,14 +1492,11 @@ People : Person from Adults
     /// boolean, so the class of plan stays an equi-join and the checker keeps
     /// the property that the condition names keys.
     ///
-    /// The fixture wrote the retired `on = .k` sugar, where the MIR lowering
-    /// SYNTHESISED the equality and put a relation name on each side. The
-    /// author writes the equality now — `on = Orders.persona_id ==
-    /// People.persona_id`, both sides qualified — so there is nothing left to
+    /// The author writes the equality — `on = Orders.persona_id ==
+    /// People.persona_id`, both sides qualified — so there is nothing to
     /// synthesise and the condition lowers like any other expression, KEEPING
-    /// the qualification (CODEGEN-LOWERING-01). It used to spend it, and that
-    /// discard is what made `fossil_df::plan` refuse every join whose two keys
-    /// were spelled differently.
+    /// the qualification: without it `fossil_df::plan` could not plan a join
+    /// whose two keys are spelled differently.
     #[test]
     fn a_join_lowers_to_an_inner_equi_join_on_one_name() {
         let src = "\
@@ -1625,8 +1603,7 @@ Orders : Person from Tri
         assert_eq!(joins.len(), 2, "two joins, got {ops:?}");
 
         // A filter renames nothing, so `Adults` is still addressed as `User` —
-        // the case `JoinSide`'s own doc comment has described as working since
-        // it was written, and which the end-of-chain assignment broke.
+        // the case `JoinSide`'s own doc comment describes.
         let (left, right) = joins[0];
         assert_eq!(left.names(), ["Purchase"]);
         assert_eq!(
@@ -1720,7 +1697,7 @@ People : Person from Rows
     /// **The delimiter survives the lowering, and its absence survives it too.**
     ///
     /// The two assertions are one claim: `Csv { delimiter: None }` is what
-    /// every program written before this parameter existed lowers to, and it is
+    /// every program that names no delimiter lowers to, and it is
     /// what each reader answers for itself. A `Csv` carrying `Some(",")` for a
     /// program that wrote nothing would be this layer inventing a default — and
     /// it would be the wrong one for `read_csv_auto`, which sniffs.
@@ -1801,7 +1778,7 @@ People : Person from Rows
     #[test]
     fn a_per_row_hole_wraps_in_a_named_assertion_when_subject_context() {
         // `assert_line = Some(N)` (the subject position) → the hole is wrapped
-        // in `Assert { name: "iri_template_unbound", span_line: N }` (SC#4).
+        // in `Assert { name: "iri_template_unbound", span_line: N }`.
         // The assertion NAME is a fixed snake_case identifier —
         // never type text.
         let db = test_db();
@@ -1835,8 +1812,7 @@ People : Person from Rows
 
     #[test]
     fn a_constant_hole_takes_no_assertion_and_fuses_with_its_neighbours() {
-        // A hole whose expression is constant — it was the resolved prefix, and
-        // a string literal is the same thing without the CURIE. What MIR owes is
+        // A hole whose expression is constant — a string literal. What MIR owes is
         // the fusion the codegen's snapshots depend on: one literal, not three
         // concatenated.
         let db = test_db();

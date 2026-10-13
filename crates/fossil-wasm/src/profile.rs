@@ -1,6 +1,6 @@
 //! `Profiler` — [`fossil_profile::Profiler`] for a JS host: the plan in wasm,
 //! each query run on the page's DuckDB-WASM by the host, and the answers fed
-//! back. `@fossil-lang/profile` is the loop around it. And `mappingGrammar`:
+//! back. `runProfiler` in `@fossil-lang/wasm` is the loop around it. And `grammarFor`:
 //! what a model may write once the sources are profiled — `fossil_ide::constrain`.
 
 use fossil_graph_schema::js::invalid_argument;
@@ -116,16 +116,16 @@ fn spent() -> JsValue {
     fossil_graph_schema::js::bug("the profiler was used after `finish`", JsValue::UNDEFINED).into()
 }
 
-/// What a model may write over `vocabulary`: the `prelude` the request already says (the shapes
-/// imported, the sources bound) and the `grammar` of the mappings after it, as the EBNF a
-/// constrained decoder takes — every name in it one that exists (`fossil_ide::constrain`).
+/// The grammar of Fossil for the names in `vocabulary`: the `prelude` the request already says (the
+/// types imported and declared, the sources bound) and the `grammar` of the mappings after it, as
+/// the EBNF a constrained decoder takes — every name in it one that exists (`fossil_ide::constrain`).
 ///
 /// # Errors
 ///
-/// `api/invalid-argument` when `vocabulary` is not a `MappingVocabulary`.
-#[wasm_bindgen(js_name = mappingGrammar, unchecked_return_type = "{ prelude: string; grammar: string }")]
-pub fn mapping_grammar(
-    #[wasm_bindgen(unchecked_param_type = "MappingVocabulary")] vocabulary: JsValue,
+/// `api/invalid-argument` when `vocabulary` is not a `Vocabulary`.
+#[wasm_bindgen(js_name = grammarFor, unchecked_return_type = "{ prelude: string; grammar: string }")]
+pub fn grammar_for(
+    #[wasm_bindgen(unchecked_param_type = "Vocabulary")] vocabulary: JsValue,
 ) -> Result<JsValue, JsValue> {
     #[derive(serde::Serialize)]
     struct Constrained {
@@ -133,12 +133,12 @@ pub fn mapping_grammar(
         grammar: String,
     }
     let vocabulary: fossil_ide::constrain::Vocabulary =
-        argument("vocabulary", "a MappingVocabulary", vocabulary)?;
+        argument("vocabulary", "a Vocabulary", vocabulary)?;
     to_value(
         "the grammar",
         &Constrained {
             prelude: fossil_ide::constrain::prelude(&vocabulary),
-            grammar: fossil_ide::constrain::mapping_grammar(&vocabulary).ebnf(),
+            grammar: fossil_ide::constrain::grammar_for(&vocabulary).ebnf(),
         },
     )
 }

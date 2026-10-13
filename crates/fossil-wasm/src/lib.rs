@@ -196,7 +196,7 @@ fn busy(method: &str) -> Failure {
 // The types the signatures above name, from the one place they are declared.
 #[wasm_bindgen(typescript_custom_section)]
 const WIRE_TYPES: &str = "import type { Diagnostic, CompletionItem, Format, Hover, Input, \
-    Location, MappingVocabulary, Profile, ProfileOptions, ProfileQuery, ProfileSource, SemanticToken, Token } \
+    Location, Profile, ProfileOptions, ProfileQuery, ProfileSource, SemanticToken, Token, Vocabulary } \
     from '@fossil-lang/types';\n\
     import type { MissingDocument } from '@fossil-lang/types/internal';";
 
@@ -707,12 +707,6 @@ impl FossilWorkspace {
     /// code-action — they all take `&dyn fossil_base::Db`).
     pub(crate) fn base_db(&self) -> &dyn fossil_base::Db {
         &self.db
-    }
-
-    /// Snapshot of currently-open `SourceFile`s — fed to `goto_definition` /
-    /// `completions` for their workspace-wide name resolution pass.
-    pub(crate) fn open_source_files(&self) -> Vec<SourceFile> {
-        self.files.iter().map(|(_, f)| f).collect()
     }
 
     // ----- Inferred-descriptor registration -----

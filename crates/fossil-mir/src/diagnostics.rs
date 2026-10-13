@@ -5,25 +5,27 @@
 //! «What is wrong with this program» is one question, and each query that can
 //! find a mistake answers only its part of it, in its own output: the parse,
 //! the lowering, a mapping's body, its check, its lowering to MIR, and the
-//! file's identities. Each line below closes a measured hole a host's own loop
-//! left open:
+//! file's identities. Each line below is a hole a host's own per-mapping loop
+//! would leave open:
 //!
-//! - **A file with no mapping reported nothing.** A per-mapping loop never
+//! - **A file with no mapping would report nothing.** A per-mapping loop never
 //!   reaches `parse`, so a file broken badly enough that the parser recovered
-//!   no mapping showed a clean document.
-//! - **A top-level BINDING's diagnostics were lost.** `lower_to_hir` is where
-//!   `check_provider` / `check_schema_arg` run, and it is keyed by the file.
-//! - **Identity was never checked at all.** Two mappings that mint two
+//!   no mapping would show a clean document.
+//! - **A top-level BINDING's diagnostics would be lost.** `lower_to_hir` is
+//!   where `check_provider` / `check_schema_arg` run, and it is keyed by the
+//!   file.
+//! - **Identity would never be checked.** Two mappings that mint two
 //!   `@subject` templates for one type is an ERROR, raised by
 //!   [`fossil_hir::identity::check_identities`], which is file-keyed and which
 //!   a per-mapping loop never reaches.
-//! - **One mistake was printed once per mapping.** A check and a lowering can
-//!   both refuse the same source, at the same span; [`dedup`] keeps the first.
+//! - **One mistake would be printed once per mapping.** A check and a lowering
+//!   can both refuse the same source, at the same span; [`dedup`] keeps the
+//!   first.
 //!
-//! None of those is an editor concern or a command-line concern; all four are
-//! facts about where the compiler's queries put what they find. Three hosts asking one
-//! question got two different answers, and the answer the two editors got was
-//! the wrong one — which is the failure mode `/docs/design/three-hosts` names:
+//! None of those is an editor concern or a host concern; all four are facts
+//! about where the compiler's queries put what they find. Hosts asking one
+//! question in their own loops get different answers — which is the failure
+//! mode `/docs/design/three-hosts` names:
 //! *a verb that exists only behind the binary is not a smaller surface; it is a
 //! surface with no embedding.*
 //!
@@ -36,10 +38,10 @@
 //! already depend on it.
 //!
 //! `fossil-ide` is the crate this would otherwise belong to — rust-analyzer
-//! puts diagnostics in its `ide` façade, and both editor hosts already share
-//! `fossil-ide`. It was ruled out while a native CLI existed, which
-//! could not depend on the editor surface; `fossil-ide` also does not depend on `fossil-mir`, so it could not reach the lowering
-//! without acquiring that edge too.
+//! puts diagnostics in its `ide` façade. But a host that is not an editor must
+//! not have to depend on the editor surface, and `fossil-ide` does not depend
+//! on `fossil-mir`, so it could not reach the lowering without acquiring that
+//! edge too.
 
 use std::collections::HashSet;
 
@@ -66,9 +68,9 @@ pub fn program_diagnostics(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
 
 /// The FILE-keyed queries, read unconditionally.
 ///
-/// Unconditionally, and not `if mappings.is_empty()`, which is where half of
-/// the no-mapping bug lived: a file WITH mappings still has top-level bindings,
-/// and `lower_to_hir` is where their providers are checked.
+/// Unconditionally, and not `if mappings.is_empty()`: a file WITH mappings
+/// still has top-level bindings, and `lower_to_hir` is where their providers
+/// are checked.
 ///
 /// Their spans are file-absolute — the parser and `lower_to_hir` both measure
 /// against the file — which is why nothing is rebased here.

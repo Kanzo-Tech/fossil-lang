@@ -89,7 +89,7 @@ inputs into it. Nothing else is shared state:
   from the database rather than from a map handed beside it — and changing a connection re-runs the
   queries that read them.
 - **The run is given the profile the editor was given.** `run` takes the same answer of the host's
-  profile that `registerProfile` takes, and writes it into the run's database before the check. A
+  profile `describe` answered, and writes it into the run's database before the check. A
   run then refuses exactly what the editor refused, against the same columns.
 - **The executor stays its own wasm module**, so the editor does not load DataFusion. It compiles the
   same queries over the same database type, so the two cannot answer differently about one program

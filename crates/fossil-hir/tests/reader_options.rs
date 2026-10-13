@@ -89,8 +89,7 @@ fn a_well_written_delimiter_is_silent() {
 }
 
 /// **A binding that names no delimiter is silent too.** Absent is a legal
-/// program — that is what `?` says in `catalogue.bnf` — and it is what every
-/// program written before the position existed says.
+/// program — that is what `?` says in `catalogue.bnf`.
 #[test]
 fn no_delimiter_at_all_is_still_a_program() {
     assert_eq!(

@@ -185,15 +185,14 @@ fn scope_diagnostics(db: &dyn fossil_base::Db, file: SourceFile, name: &str) -> 
     out
 }
 
-// ── Literal-subset regression (Phase 2 behaviour preserved) ────────────────
+// ── The literal subset ────────────────────────────────────────────────────
 
 #[test]
 fn literal_subset_regression() {
-    // Property 0 of hello is `@subject = "…{…}…"`. It used to synthesise
-    // `IriTemplate` — «a string with holes» — and what it means is the identity
-    // of the node this mapping produces, so it is a REFERENCE to the shape the
-    // mapping targets. The interpolation is unchanged; the type says what it
-    // is for.
+    // Property 0 of hello is `@subject = "…{…}…"`. What it means is the
+    // identity of the node this mapping produces, so it is a REFERENCE to the
+    // shape the mapping targets, not «a string with holes»: the type says what
+    // the interpolation is for.
     let (db, file) = db_with(HELLO);
     let m = first_mapping(&db, file);
     let entry = ty_origin(&db, m, ExprId(0)).expect("property 0 (the identity) must have a type");
@@ -204,10 +203,10 @@ fn literal_subset_regression() {
 }
 
 #[test]
-fn fieldref_without_schema_synthesises_no_type_phase_2_compat() {
+fn a_reference_without_a_schema_synthesises_no_type() {
     // hello's `users` source has NO descriptor registered → source_row = None →
-    // the `users.name` reference synthesises no entry (preserving Phase 2's None, keeping
-    // the walking-skeleton free of spurious errors).
+    // the `users.name` reference synthesises no entry, keeping the walking
+    // skeleton free of spurious errors.
     let (db, file) = db_with(HELLO);
     let m = first_mapping(&db, file);
     assert!(
@@ -262,9 +261,8 @@ fn fieldref_typo_emits_did_you_mean_against_the_inferred_row() {
         "`naem` is not a field of `users`",
         "the refusal names the column and the relation"
     );
-    // The repair is a FIELD. It used to be a clause of the message, and the two
-    // readers that wanted it (the native CLI, the conformance harness) each
-    // searched the message text for `did you mean` to get it back out.
+    // The repair is a FIELD, not a clause of the message that every reader
+    // would have to search for `did you mean` to get back out.
     assert_eq!(
         d.help.as_deref(),
         Some("did you mean `name`?"),
@@ -282,19 +280,18 @@ fn fieldref_typo_emits_did_you_mean_against_the_inferred_row() {
 /// The fixture WRITES the typo, and it has to: the table is read off the CST
 /// and keyed by name, so a lookup for a name the source does not contain finds
 /// nothing and falls back to the right-hand side. That fallback is the designed
-/// behaviour and it is what the first draft of this test measured by accident.
+/// behaviour, and not what this test measures.
 ///
 /// Sliced out of the source rather than compared to two numbers — the numbers
 /// are what is under test, and `86..96` versus `92..96` is not a difference
 /// anyone reads.
 ///
-/// **Both halves were unreachable before `ref_spans`.** The finest range the
-/// compiler recorded was a whole right-hand side, so the caret covered
-/// `users.name` and `Diagnostic::did_you_mean` — the structured
+/// **Both halves rest on `ref_spans`.** Without a range finer than a whole
+/// right-hand side the caret would cover `users.name`, and a quick-fix over the
+/// wider span — `Diagnostic::did_you_mean`, the structured
 /// `(wrong_span, replacement)` pair `fossil_ide::code_action` builds a
-/// `WorkspaceEdit` from — was never populated by anything but a test. A
-/// quick-fix over the wider span would have deleted `users.` along with the
-/// typo, which is why `refuse_column` offers it only when the span IS the name.
+/// `WorkspaceEdit` from — would delete `users.` along with the typo, which is
+/// why `refuse_column` offers it only when the span IS the name.
 #[test]
 fn the_caret_and_the_quick_fix_cover_the_name_and_nothing_else() {
     const TYPO: &str = "\
@@ -410,7 +407,7 @@ Users : Person from Adults
 
 /// The foreign-row refusals in `diags`, by their text.
 ///
-/// It was `diags.len() == 1`, and that counted every diagnostic the FIXTURE
+/// Not `diags.len() == 1`, which would count every diagnostic the FIXTURE
 /// raises as well — `personas.shex` is not readable by the bare `NativeSystem`
 /// these tests use, so the shape name does not resolve and `lower_to_hir` says
 /// so. Counting the refusal under test is the assertion; counting the fixture's
@@ -463,12 +460,12 @@ fn a_column_ref_naming_a_foreign_row_is_rejected() {
 fn a_column_ref_naming_a_row_the_relation_derives_from_is_accepted() {
     // **The rule `grammar.bnf` states under `SourceDef`**: *«a mapping body
     // writes `User.name` and never `Adults.name`, even when it draws
-    // `from Adults`»*. `Users` draws `from Adults` and writes `User.name`, and
-    // this used to be refused by an equality against the `from` name — the
-    // defect that failed nine of the twenty-three conformance programs.
+    // `from Adults`»*. `Users` draws `from Adults` and writes `User.name`, so
+    // an equality against the `from` name would refuse it — and refuse most of
+    // the conformance programs with it.
     //
     // `DERIVED` registers no descriptor, so the column synthesises no type,
-    // exactly as `fieldref_without_schema_synthesises_no_type_phase_2_compat`
+    // exactly as `a_reference_without_a_schema_synthesises_no_type`
     // describes. What is asserted is that qualifying it raises no error of its
     // own.
     let (db, file) = db_with(DERIVED);
@@ -552,16 +549,10 @@ fn compatible_string_to_integer_fails() {
     );
 }
 
-/// The defect, at the place it bit. A document that mentions `ex:name` and does
-/// not narrow its value used to reach here as `TyKind::Iri` — the narrowest
-/// type in the lattice — via `unwrap_or_else`, so the most ordinary property in
-/// the corpus, `name = .name` against `ex:name .`, was a type error.
-///
-/// This had a second shim, `still_counts`: the same un-narrowed constraint
-/// demanding one-or-more, against an `Optional<String>`, proving the `None` did
-/// not turn the constraint off wholesale. It built the only kind of value that
-/// could fail that check, and `TyKind::Optional` is gone because a test was the
-/// only thing that ever built one.
+/// A document that mentions `ex:name` and does not narrow its value expects
+/// nothing — defaulted to `Iri`, the narrowest type in the lattice, the most
+/// ordinary property in the corpus, `name = users.name` against `ex:name .`,
+/// would be a type error.
 #[test]
 fn an_un_narrowed_constraint_accepts_a_string() {
     const SRC: &str = "\
@@ -593,6 +584,7 @@ Contact : Person from users
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("personas.shex"),
+                file: None,
                 span: None,
             }),
         );
@@ -624,20 +616,16 @@ Contact : Person from users
 /// A refused value names the SLOT in the message and underlines ITSELF in a
 /// label — and nothing anywhere prints a `Span` at the author.
 ///
-/// It went through `check_property` rather than calling `compatible` directly,
+/// It goes through `check_property` rather than calling `compatible` directly,
 /// because half of what is asserted is that the name survives the trip: the
 /// key the body wrote reaches the message, and the lowered right-hand side
 /// reaches the label.
 ///
-/// # What it was, and why the old shape passed every test there was
+/// # Why the assertions are exact
 ///
-/// `expected `Float`, got `String` (expected because of the constraint at Span
-/// { start: 102, end: 120 })` — with `labels` empty, so miette drew the generic
-/// `here` under the value. The debug-printed span was the SOURCE's, because
-/// `BlamePos::ShapeProperty` carried no location and the emitter fell back;
-/// `compatible`'s own docblock called this «the two-span blame pattern». Both
-/// halves were invisible to the suite: the two tests that reached `compatible`
-/// asserted `msg.contains("String")`, which is true of either spelling.
+/// `msg.contains("String")` is true of a message that debug-prints a span as
+/// its second location, with `labels` empty, as much as of the right one. So
+/// the message, the label and the absence of `Span {` are each asserted.
 #[test]
 fn a_refused_value_names_the_slot_and_underlines_itself() {
     const SRC: &str = "\
@@ -668,6 +656,7 @@ Orders : Order from Purchase
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("personas.shex"),
+                file: None,
                 span: None,
             }),
         );
@@ -707,8 +696,7 @@ Orders : Order from Purchase
         d.labels[0].span, d.span,
         "the label underlines the value the diagnostic points at"
     );
-    // The defect this replaces, stated as the thing that must not come back:
-    // a `Span` reaching an author through `{:?}`. Checked over the message AND
+    // What must not happen: a `Span` reaching an author through `{:?}`. Checked over the message AND
     // the labels because either could carry one.
     for text in std::iter::once(d.message().as_str()).chain(texts) {
         assert!(
@@ -722,8 +710,8 @@ Orders : Order from Purchase
 ///
 /// The two halves of one sentence — `` `total` expects Float, and this is
 /// String `` on the program's line, and where `Float` was required on the
-/// document's — and until `PropertyConstraint::span` existed the second half
-/// could not be pointed at, so it travelled as prose or not at all.
+/// document's. `PropertyConstraint::span` is what lets the second half be
+/// pointed at rather than travel as prose.
 ///
 /// The document is named by the PROGRAM's spelling, which is what a renderer
 /// resolves against `CheckOutcome::documents` and what a reader is looking at.
@@ -757,6 +745,7 @@ Orders : Order from Purchase
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("shape.shex"),
+                file: None,
                 span: None,
             }),
         );
@@ -813,8 +802,7 @@ Orders : Order from Purchase
 
 /// A value of the wrong type gets told what to DO about it, both ways.
 ///
-/// `errors/type/property-mismatch`'s hand-written target asked for these and neither
-/// existed, so blessing that program deleted the only description of them:
+/// `errors/type/property-mismatch` reads them as
 /// *«`Purchase.amount` is Float. If `reference` really holds the number,
 /// `parse.float(Purchase.reference)` converts it.»*
 ///
@@ -862,6 +850,7 @@ Orders : Order from Purchase
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("shape.shex"),
+                file: None,
                 span: None,
             }),
         );
@@ -921,6 +910,7 @@ fn a_wrong_type_with_no_repair_says_nothing() {
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("personas.shex"),
+                file: None,
                 span: None,
             }),
         );
@@ -949,34 +939,31 @@ fn a_wrong_type_with_no_repair_says_nothing() {
 
 // ── The five ways a named document fails to produce a shape ────────────────
 
-/// Every one of these was a silent `None` — the same answer as "this program
-/// names no document" — so the commonest mistake, a misspelt shape name,
-/// produced no message at all.
+/// None of them may be a silent `None` — the same answer as "this program
+/// names no document".
 ///
-/// # The message moved, and the assertions moved with it
+/// # Where the message is
 ///
-/// It asserted four renderings emitted per MAPPING. A header names a bare name now, so the
-/// document is read where the NAME is bound (`type { Person as T } :=
-/// io.shex(…)`, `def_map`'s binding by local name) and every one of these failures lands
-/// there first; by the time a mapping asks for its target shape there is no
-/// shape IRI left to fail with, and `resolve_target_shape` answers `None`.
-/// `crate::shapes`'s
+/// A header names a bare name, so the document is read where the NAME is bound
+/// (`type { Person as T } := io.shex(…)`, `def_map`'s binding by local name)
+/// and every one of these failures lands there first; by the time a mapping
+/// asks for its target shape there is no shape IRI left to fail with, and
+/// `resolve_target_shape` answers `None`. `crate::shapes`'s
 /// `a_document_that_cannot_answer_leaves_the_mapping_with_no_shape_clause`
-/// pins that collapse and its tombstone says what it costs.
+/// pins that.
 ///
-/// What survives is the guarantee this test was written for — a named document
-/// that cannot answer says WHICH WAY it failed, and says it in the lowering's
-/// diagnostics — so the expected substrings are `unbound_shape_problem`'s,
-/// which name the document and the reason. The misspelt-shape row is gone with
-/// the CURIE: a bare name that binds nothing is a name nobody declared, which
-/// is a different sentence and the last case below.
+/// The guarantee here — a named document that cannot answer says WHICH WAY it
+/// failed, and says it in the lowering's diagnostics — so the expected
+/// substrings are `unbound_shape_problem`'s, which name the document and the
+/// reason. A bare name that binds nothing is a name nobody declared, which is
+/// a different sentence and the last case below.
 ///
 /// # The name row, spelled out to the last word
 ///
 /// A name the document does not declare is the last cause, and its message is
 /// held whole — the list included — because a substring that stops before the
-/// list is blind to the list being wrong. It replaced the arity row, whose
-/// message printed «there is no 3th shape» once and no keyword assertion saw.
+/// list is blind to the list being wrong — a message can print «there is no
+/// 3th shape» and pass every keyword assertion.
 #[test]
 fn a_named_document_that_cannot_answer_says_which_way_it_failed() {
     use fossil_base::test_support::{PERSON_DOCUMENT, db_with_document};
@@ -1065,6 +1052,7 @@ fn a_disjunction_rejection_attaches_to_the_consuming_mapping() {
         constraints: Vec::new(),
         rejections: vec![disjunction_rejection()],
         document: smol_str::SmolStr::from("personas.shex"),
+        file: None,
         span: None,
     };
     let mut cx = build_checker(&db, first_mapping(&db, file), None, Some(shape));
@@ -1116,31 +1104,19 @@ fn a_disjunction_rejection_attaches_to_the_consuming_mapping() {
     );
 }
 
-/// The rendering the decoder used to own. It walked a cloned `OneOf` AST node
-/// carried through the whole compiler for this one purpose; it now reads the
-/// branch predicates, which is all it ever took out of that node.
+/// The split suggestion reads the branch predicates, which is all it takes out
+/// of a document's disjunction.
 ///
 /// The shape is a BARE NAME and the subject is an interpolated string, because
 /// the arguments are what the caller has: `surface_shape_lowering_errors`
 /// passes the mapping's own header and subject through verbatim.
 ///
-/// # THIS TEST IS RED, AND IT IS THE RENDERER THAT IS WRONG
-///
-/// `render_split_suggestion` (`crate::check`, the `writeln!` in its branch
-/// loop) emits `"    {short} = .{short}"`. A leading `.` is the retired
-/// `FieldRef` and the parser refuses it, so the mapping it emits comes back
-/// with one property where it wrote two — **the compiler emitting source it
-/// cannot read back**, which is exactly what the renderer's own doc comment
-/// promises it does not do, and what
+/// The `from` clause is the binding a body's references are qualified
+/// against, so `email` reads `users.email`: a leading `.` would be refused by
+/// the parser, and the emitted mapping would come back short a property —
+/// **the compiler emitting source it cannot read back**, which
 /// `tests/diagnostic_corpus.rs::the_generated_split_suggestion_compiles` is
 /// there to catch.
-///
-/// The expectation below is the CORRECT output — the `from` clause is the
-/// binding a body's references are qualified against, so `email` reads
-/// `users.email`. Rewriting it to match what the function does would make a
-/// test fixture decide that the defect is the contract, and it is not a fixture
-/// rewrite's call to make. Left failing on purpose; the repair is one line of
-/// non-test code and belongs with whoever owns it.
 // The `{users.id}` here is LITERAL Fossil source — the subject template the
 // suggestion carries through — not a Rust format string.
 #[allow(clippy::literal_string_with_formatting_args)]
@@ -1240,7 +1216,7 @@ fn row_record<'db>(db: &'db dyn fossil_base::Db, fields: &[(&str, Primitive)]) -
     Ty::new(db, TyKind::Record(rec))
 }
 
-// ── F2 §1/§2: calls and comparisons against the catalog and the row ────────
+// ── Calls and comparisons against the catalog and the row ──────────────────
 
 /// The mistake a mapping actually makes: comparing a text column with a number.
 /// With a source row present, the checker has both types and refuses it.
@@ -1442,12 +1418,11 @@ fn diagnostics_of(src: &str) -> Vec<String> {
         .collect()
 }
 
-/// The check the language exists to make, and it did not happen.
+/// The check the language exists to make.
 ///
-/// `ex:buyer @ex:Person` says where the edge lands. While a reference was
-/// `TyKind::Iri` every reference had ONE type, so `buyer = Order(…)` — an edge
-/// to the wrong shape — type-checked clean, measured against
-/// `docs/programs/shop` on 2026-08-21.
+/// `ex:buyer @ex:Person` says where the edge lands. Were every reference ONE
+/// type, `buyer = Order(…)` — an edge to the wrong shape — would type-check
+/// clean against `docs/programs/shop`.
 ///
 /// Both halves are asserted, because a rule that refuses everything would pass
 /// the first: the right edge is accepted and the wrong one is refused, naming
@@ -1498,17 +1473,15 @@ fn a_reference_to_one_shape_satisfies_a_slot_that_accepts_two() {
 
 // ── The condition of a stage ───────────────────────────────────────────────
 
-/// The defect this whole seam was built for, stated as the asymmetry it was.
+/// A stage's condition is TYPED, not walked for the column NAMES it mentions.
 ///
 /// `Row.celsius > "abc"` in a `where` and `parse.float(Row.celsius)` in a body
-/// are the same mismatch on the same column. One was refused and the other
-/// passed clean, because a stage's condition was walked for the column NAMES it
-/// mentions (`infer::check_refs`) and never typed.
+/// are the same mismatch on the same column, and both are refused.
 ///
 /// Both halves, because a rule that refuses everything would pass the first:
 /// the well-typed comparison is accepted, the ill-typed one is refused, and the
-/// unknown COLUMN is still refused — that is the question `check_refs` used to
-/// answer, and `synth` of a `ColumnRef` answers it now.
+/// unknown COLUMN is still refused — `synth` of a `ColumnRef` answers that
+/// question too.
 #[test]
 fn a_stage_condition_is_typed_and_not_only_resolved() {
     use fossil_base::test_support::{NativeSystem, register_inferred};
@@ -1572,9 +1545,8 @@ fn a_stage_condition_is_typed_and_not_only_resolved() {
 /// writing, and `Both.join(Third, on = Left.k == Right.k)` is the same program
 /// with two REAL bindings, both of them on the left.
 ///
-/// The rule was already enforced, by `fossil_df::plan::join_equalities`, at
-/// `fossil run`. Every case below now fails at `fossil check` instead, which is
-/// where the span is.
+/// `fossil_df::plan::join_equalities` enforces the rule at run time. Every
+/// case below fails at check time instead, which is where the span is.
 ///
 /// Seven cases, and the accepted ones are half the point: a rule that refused
 /// everything would pass every assertion that only looks for a refusal.
@@ -1680,8 +1652,7 @@ fn a_join_condition_relates_the_two_sides_and_not_only_its_own() {
 
     // **The third binding, which is the case no layer could see.** `Left` and
     // `Right` are both real, both in scope, and both on the LEFT — so `Third`
-    // joins to everything. The engine's copy of this rule reads a `JoinSide`,
-    // which carries the pipeline's name after a previous join and cannot say
+    // joins to everything. Only the checker can say, in the author's names,
     // which binding went unmentioned.
     let third = diagnostics(&format!(
         "{SOURCES}Both := Left.join(Right, on = Left.k == Right.k)\n\
@@ -1698,15 +1669,10 @@ fn a_join_condition_relates_the_two_sides_and_not_only_its_own() {
     // And the chained join that IS one still passes, or the rule above would be
     // "a join may not follow a join".
     //
-    // **The engine plans this one now, and the checker was right to admit it.**
-    // `fossil run` used to answer «the left side of the join condition qualifies
-    // a column with `Right`, which is neither input (`Both`, `Third`)», because
-    // `fossil_mir::JoinSide` carried ONE name and the lowering filled it with
-    // the pipeline's. That name qualified no column of either side — `Op::Join`
-    // re-qualifies neither — so the refusal demanded the one spelling that could
-    // not resolve. The side is a SET of names now
-    // (`fossil_mir::JoinSide::relations`), the seam is closed, and
-    // `docs/programs/chained-join` is the program that executes it.
+    // The engine plans this one too: a side is a SET of names
+    // (`fossil_mir::JoinSide::relations`), so `Right` qualifies a column of
+    // the left input, and `docs/programs/chained-join` is the program that
+    // executes it.
     let chained = diagnostics(&format!(
         "{SOURCES}Both := Left.join(Right, on = Left.k == Right.k)\n\
          Out := Both.join(Third, on = Right.k == Third.k)\n"
@@ -1752,8 +1718,8 @@ fn a_join_condition_relates_the_two_sides_and_not_only_its_own() {
 ///
 /// The rule lives in `synth_binop`'s `Eq`/`Ne` arm and NOT in `subtypes`, and
 /// that placement is the whole of it. A bottom type that subtyped everything
-/// would make `name = null` check against `xsd:string` — which is
-/// `TyKind::Optional` coming back through the door it left by — and asking
+/// would make `name = null` check against `xsd:string` — an optional type by
+/// another door — and asking
 /// whether a column has a value is not the same question as writing a property
 /// from nothing.
 #[test]
@@ -1778,8 +1744,8 @@ fn null_compares_with_anything_and_assigns_to_nothing() {
             .collect()
     }
 
-    // Against a Date and against a Float — the two the `!= ""` idiom could not
-    // reach, which is why it was only ever a test for STRINGS.
+    // Against a Date and against a Float — the two a `!= ""` comparison
+    // cannot reach, being a test for STRINGS only.
     for condition in [
         "Row.when == null",
         "Row.when != null",
@@ -1852,8 +1818,8 @@ fn two_pipelines_that_name_each_other_are_a_cycle() {
     assert_eq!(codes, ["pipeline/cycle"]);
 }
 
-/// A chain of forty distinct pipelines is no cycle. It was reported as one:
-/// the check was a depth of 32.
+/// A chain of forty distinct pipelines is no cycle: a depth limit would report
+/// it as one.
 #[test]
 fn a_long_chain_of_distinct_pipelines_is_not_a_cycle() {
     let src: String = std::iter::once("P0 := io.csv(\"x.csv\")\n".to_string())

@@ -11,6 +11,10 @@
  *    name a shape document the workspace has not read, so {@link FossilProgram.diagnostics} first
  *    runs `resolveDocuments` over the host's {@link Host} — which reads nothing when nothing is
  *    missing.
+ * 3. **The sources are described when the host says so.** {@link FossilProgram.describe} profiles
+ *    what the program reads on the host's engine and hands the answer to the checker. It is never
+ *    run inside a check: a check runs on every pause in typing, a describe is a credential and a
+ *    query per source, and only the host knows when a source may have changed.
  *
  * One workspace answers all of it, so hover answers from the same revision as the squiggles on
  * screen. The position methods take a SHARED borrow on the Rust side, so they nest inside a live
@@ -29,6 +33,7 @@ import type {
   SemanticToken,
   Token,
 } from '@fossil-lang/types';
+import { profile, type ProfileIO } from './describe.js';
 import { diagnosticOf, until, type DocumentWorkspace, type UnreadDocument } from '@fossil-lang/types/internal';
 
 import { initFossilWasm } from './load.js';
@@ -76,15 +81,16 @@ export interface FossilProgram {
    */
   inputs(): Promise<Input[]>;
   /**
-   * What the host's profile of the sources answered, whole. The compiler never reads a source
-   * itself; push this before the check that should see it.
+   * Profile what the program reads, on `engine`, under the credentials the program's host vends —
+   * {@link inputs}, then `profile` — and give the answer to the checker. Answers the profile, which
+   * is what a run takes as `profiled`.
    *
    * A described source types the program under the key it was written as. A source that could not
    * be described is a warning of {@link diagnostics}' at the call that reads it — `io.csv("…")` —
    * under its problem's code (`source/not-found`, `storage/*`, `engine/failed`), once per key. The
    * latest answer about a key wins, so a source that describes on a later call loses its warning.
    */
-  registerProfile(profiled: Profiled): void;
+  describe(io: Omit<ProfileIO, 'host'>): Promise<Profiled>;
   /** Free the workspace. Every member fails after it. */
   close(): void;
   /** {@link close}, for `using`. */
@@ -150,9 +156,14 @@ export async function openProgram(uri: string, options: OpenProgramOptions): Pro
       await settle();
       return workspace.inputs(handle);
     },
-    registerProfile({ descriptors, undescribed }) {
-      for (const descriptor of descriptors) workspace.registerInferredDescriptor(JSON.stringify(descriptor));
-      for (const { source, problem } of undescribed) workspace.registerUndescribed(source.key, JSON.stringify(problem));
+    async describe(io) {
+      await settle(io.signal);
+      const profiled = await profile(workspace.inputs(handle), { ...io, host });
+      for (const descriptor of profiled.descriptors) workspace.registerInferredDescriptor(JSON.stringify(descriptor));
+      for (const { source, problem } of profiled.undescribed) {
+        workspace.registerUndescribed(source.key, JSON.stringify(problem));
+      }
+      return profiled;
     },
     close,
     [Symbol.dispose]: close,

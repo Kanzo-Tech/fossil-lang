@@ -5,9 +5,8 @@
 //! check that a `.shex` buffer is an INPUT and is not parsed as fossil, the
 //! labels that carry a report's second place — is written once.
 //!
-//!
-//! The worker transport is deleted since; this module is what made the two
-//! agree by construction rather than by vigilance.
+//! Every host renders what this module answers, so two hosts agree by
+//! construction rather than by vigilance.
 //!
 //! # The two questions are separate on purpose
 //!
@@ -32,12 +31,11 @@ use crate::related::related_locations;
 /// question — [`fossil_mir::program_diagnostics`], which the conformance
 /// harness also calls.
 ///
-/// Each host used to run a per-mapping loop of its own instead, and what the
-/// editors did not show for as long as that was true: a file the parser
-/// recovered no mapping from published NO diagnostics at all (the parse errors
-/// were present and unreachable), a top-level binding's provider errors
-/// vanished, two mappings minting two identities for one type was never checked,
-/// and one top-level mistake was published once per mapping.
+/// A host that looped over the mappings instead would miss everything that is
+/// not a mapping's: the parse errors of a file the parser recovered no mapping
+/// from, a top-level binding's provider errors, two mappings minting two
+/// identities for one type — and it would publish one top-level mistake once
+/// per mapping.
 ///
 /// # A file the catalogue reads is not drained as a program
 ///

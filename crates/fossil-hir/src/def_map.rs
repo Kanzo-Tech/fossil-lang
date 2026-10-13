@@ -6,29 +6,21 @@
 //! source` block). Populated by the [`def_map`] Salsa query,
 //! which consumes the CST from [`fossil_syntax::parse`].
 //!
-//! # There was a prefix table here, and its absence is the point
+//! # There is no prefix table, and its absence is the point
 //!
-//! `prefixes: Vec<PrefixEntry>` was the first field of [`DefMap`], and a
-//! `&[PrefixEntry]` slice was threaded through nine functions in
-//! [`crate::lower`] to expand `ex:Person` into `https://example.org/Person`. The
-//! CURIE is gone from every position it held — a shape name, a property key, an
-//! expression and an interpolation hole are all bare names or full IRIs in
-//! strings now — so there is nothing left to expand.
+//! A shape name, a property key, an expression and an interpolation hole are
+//! all bare names or full IRIs in strings, so there is nothing to expand. A
+//! mapping's SHAPE resolves through [`DefMap::lookup_type`]: the header names
+//! one of the bare names a `type { … } := …` binding introduced, and that
+//! binding knows the shape IRI. The resolution is a lookup against a document
+//! the program names, not a text substitution the program spelled out — and
+//! naming one is MANDATORY, because a bare name has nowhere else to come from.
+//! It is why a shape name can be MISSPELT and reported rather than expanded
+//! into an IRI that happens to denote nothing.
 //!
-//! What replaces it for a mapping's SHAPE is [`DefMap::lookup_type`], which was
-//! already here: the header names one of the bare names a `type { … } := …`
-//! binding introduced, and that binding already knew the shape IRI. The
-//! resolution moved from a text substitution the program spelled out to a
-//! lookup against a document the program names — and naming one is MANDATORY,
-//! because a bare name has nowhere else to come from. It is why a shape name can
-//! now be MISSPELT and reported rather than expanded into an IRI that happens to
-//! denote nothing.
-//!
-//! Mapping and source
-//! locations are interned with a `'db` lifetime so downstream queries can be
-//! keyed per-item (rust-analyzer's per-item Salsa fan-out). Even though the
-//! Phase 1 example has only one mapping, the SHAPE of the query graph matters
-//! for Phase 2's stable item tree (CORE-02) and Phase 6's LSP perf benchmark.
+//! Mapping and source locations are interned with a `'db` lifetime so
+//! downstream queries can be keyed per-item (rust-analyzer's per-item Salsa
+//! fan-out): one mapping's edit does not re-run another's queries.
 //!
 //! # Storage choice
 //!
@@ -83,10 +75,9 @@ pub struct SourceLoc<'db> {
 
 /// Why a destructuring member bound no shape.
 ///
-/// Four causes used to collapse into one `None`, and the single diagnostic that
-/// existed blamed the member's NAME for all of them — so an unreadable file
-/// reported "matches no shape in the schema". They are separated here because
-/// the reader cannot act on a message that names the wrong thing.
+/// Four causes, separated because the reader cannot act on a message that
+/// names the wrong thing: collapsed into one `None`, an unreadable file would
+/// report that the member's NAME "matches no shape in the schema".
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum ShapeBindError {
     /// The constructor carries no `schema = …`, so there is no document.
@@ -184,12 +175,10 @@ pub struct SourceEntry<'db> {
     pub schema_arg: Option<SmolStr>,
     /// The PROVIDER that argument names — `io.shex`, `io.shacl`.
     ///
-    /// `schema = "x.shex"` was a bare path, and it was the last position in the
-    /// language where a document was named without a row to read it: the
-    /// document got its decoder from its own extension. `schema =` takes a
-    /// provider call now, so there is one rule — where there is a document,
-    /// there is a row that names it — and `None` here means the program wrote a
-    /// bare string, which `crate::lower::check_provider` reports with a span.
+    /// `schema =` takes a provider call, not a bare path, so there is one rule
+    /// — where there is a document, there is a row that names it — and `None`
+    /// here means the program wrote a bare string, which
+    /// `crate::lower::check_provider` reports with a span.
     pub schema_provider: Option<SmolStr>,
     /// For a destructuring RDF source member (`{ IfcBeam, ... } := io.rdf(...,
     /// schema = io.shex("x.shex"))`), the shape IRI this member's local-name resolves to
@@ -204,12 +193,11 @@ pub struct SourceEntry<'db> {
     /// `io.parquet`), if a call-shaped RHS could be parsed. The
     /// constructor name selects the source FORMAT downstream
     /// (`fossil-mir::lower` maps it to `SourceFormat`). Like [`Self::schema_arg`]
-    /// this is a SIGNATURE-only `SOURCE_DEF`-header datum (Phase 5 STDL-06).
+    /// this is a SIGNATURE-only `SOURCE_DEF`-header datum.
     pub constructor: Option<SmolStr>,
     /// The first POSITIONAL string argument of the constructor — the source
     /// URI (`io.csv("examples/users.csv")` → `examples/users.csv`). Resolved by
-    /// `fossil-mir::lower` into `Op::Source.uri`, replacing the Phase-1
-    /// hardcoded `examples/users.csv`. Signature-only (Phase 5 STDL-06).
+    /// `fossil-mir::lower` into `Op::Source.uri`. Signature-only.
     pub uri: Option<SmolStr>,
     /// The READER OPTION the constructor's row declares — `io.csv("u.csv",
     /// delimiter = "|")` → `|`.
@@ -247,6 +235,11 @@ pub struct SourceEntry<'db> {
     /// already walking these nodes, and structurally stable across body-only
     /// edits — the same argument [`Self::schema_arg`] makes.
     pub span: Span,
+    /// The bound NAME alone — `User` in `User := io.csv("users.csv")`, and each
+    /// member's own name in `{ A, B } := …`. It is where an editor lands on the
+    /// definition: [`Self::span`] is the whole binding, which in a destructuring
+    /// is shared by every member and so cannot tell `A` from `B`.
+    pub name_span: Span,
     /// The call right of `:=` — `io.csv("u.csv")` in `users := io.csv("u.csv")`
     /// — where a problem with the source itself, rather than with its name, is
     /// underlined. The whole binding when the right-hand side did not parse.
@@ -293,6 +286,161 @@ pub struct TypeEntry {
     /// here: two predicates that collide make the shape unwritable, and the
     /// binding is where the reader chose it.
     pub span: Span,
+    /// The name alone, where the program writes it — `City` in
+    /// `type { Place as City } := …`, `Person` in `type Person`.
+    /// [`SourceEntry::name_span`]'s twin.
+    pub name_span: Span,
+}
+
+/// A mapping's name and where it is written — `Users` in
+/// `Users : Person from Adults`.
+///
+/// Beside [`DefMap::mappings`] rather than in it: a mapping is keyed by its
+/// [`MappingLoc`] everywhere a query reads it, and a header that has no name yet
+/// is still a mapping with a body to check. This table holds only the headers
+/// that name one.
+///
+/// It holds no position: an edit to one mapping's body moves every mapping
+/// after it, and a position here would change the def map on that edit and
+/// re-lower every sibling. Where a mapping is written is read off the CST when
+/// it is asked for ([`MappingName::spans`]), as rust-analyzer keeps its item
+/// tree apart from its source map.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
+pub struct MappingName<'db> {
+    /// The name the header writes.
+    pub name: SmolStr,
+    /// The mapping it names.
+    pub loc: MappingLoc<'db>,
+}
+
+impl MappingName<'_> {
+    /// The whole mapping, header and body, file-absolute and trivia-trimmed,
+    /// and its name token alone.
+    #[must_use]
+    pub fn spans(&self, db: &dyn fossil_base::Db) -> Option<(Span, Span)> {
+        let file = self.loc.file(db);
+        let root = fossil_syntax::parse(db, file).root(db).syntax();
+        let item = mapping_nodes(&root).nth(self.loc.index(db))?;
+        let header = item
+            .children()
+            .find(|c| c.kind() == SyntaxKind::MAPPING_HEADER)?;
+        Some((item_span(&item), token_span(&first_ident(&header)?)))
+    }
+}
+
+/// Which table a written name is looked up in.
+///
+/// The grammar decides it by position and never by spelling: a header's shape
+/// and a field's type name a TYPE; a binding's own name, a `from` and the head
+/// of an expression name a VALUE; and a mapping's name is written once, in its
+/// header, and read nowhere else. One name may be a value and a type at once —
+/// `{ Person } := io.rdf(…)` beside `type { Person } := …` — and the position
+/// is what says which is meant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Namespace {
+    /// A `:=` source binding — a read or a derivation.
+    Value,
+    /// A type, imported or declared.
+    Type,
+    /// A mapping header's name.
+    Mapping,
+}
+
+/// A name the program binds at the top level, as [`DefMap::resolve`] answers
+/// it: the one resolver every editor feature asks.
+///
+/// Each variant borrows the row of the table it came from, so a reader that
+/// needs more than the name and its place reads the row; the methods here are
+/// what every kind has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Definition<'db> {
+    /// A `:=` binding.
+    Source(&'db SourceEntry<'db>),
+    /// A type the program imports or declares.
+    Type(&'db TypeEntry),
+    /// A mapping.
+    Mapping(&'db MappingName<'db>),
+}
+
+impl<'db> Definition<'db> {
+    /// The name the program binds.
+    #[must_use]
+    pub const fn name(self) -> &'db SmolStr {
+        match self {
+            Self::Source(e) => &e.name,
+            Self::Type(e) => &e.name,
+            Self::Mapping(e) => &e.name,
+        }
+    }
+
+    /// The table it was found in.
+    #[must_use]
+    pub const fn namespace(self) -> Namespace {
+        match self {
+            Self::Source(_) => Namespace::Value,
+            Self::Type(_) => Namespace::Type,
+            Self::Mapping(_) => Namespace::Mapping,
+        }
+    }
+
+    /// The whole item that binds it, file-absolute.
+    #[must_use]
+    pub fn span(self, db: &dyn fossil_base::Db) -> Span {
+        match self {
+            Self::Source(e) => e.span,
+            Self::Type(e) => e.span,
+            Self::Mapping(e) => e.spans(db).map_or(Span::new(0, 0), |(item, _)| item),
+        }
+    }
+
+    /// The name alone, where the program writes it.
+    #[must_use]
+    pub fn name_span(self, db: &dyn fossil_base::Db) -> Span {
+        match self {
+            Self::Source(e) => e.name_span,
+            Self::Type(e) => e.name_span,
+            Self::Mapping(e) => e.spans(db).map_or(Span::new(0, 0), |(_, name)| name),
+        }
+    }
+
+    /// Where the definition is DECLARED: the program's own name for everything
+    /// the program declares, and the document's declaration for an imported
+    /// type.
+    ///
+    /// An imported type is declared in the document it names, and the
+    /// resolved type knows which file that is
+    /// ([`crate::shapes::ResolvedShape::file`]), so this asks it rather than
+    /// branching on the kind of type. When it cannot be resolved — the
+    /// document is not registered, or does not declare the name — the binding
+    /// that introduced the name is the declaration there is.
+    #[must_use]
+    pub fn declaration(self, db: &'db dyn fossil_base::Db, file: SourceFile) -> Declaration {
+        let local = Declaration {
+            file,
+            span: Some(self.name_span(db)),
+        };
+        let Self::Type(entry) = self else {
+            return local;
+        };
+        crate::shapes::resolve_type(db, file, entry)
+            .and_then(|shape| {
+                Some(Declaration {
+                    file: shape.file?,
+                    span: shape.span,
+                })
+            })
+            .unwrap_or(local)
+    }
+}
+
+/// Where a [`Definition`] is declared.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Declaration {
+    /// The file that holds it — the program, or a document it names.
+    pub file: SourceFile,
+    /// The declaration's span in that file. `None` when the file is known and
+    /// the decoder kept no span for what is in it (`ShExJ`, SHACL).
+    pub span: Option<Span>,
 }
 
 #[salsa::tracked(debug)]
@@ -303,9 +451,59 @@ pub struct DefMap<'db> {
     pub mappings: Vec<MappingLoc<'db>>,
     #[returns(ref)]
     pub types: Vec<TypeEntry>,
+    /// Every mapping whose header names one, in written order. A field of its
+    /// own so the queries that read [`Self::mappings`] do not depend on it.
+    #[returns(ref)]
+    pub mapping_names: Vec<MappingName<'db>>,
 }
 
 impl<'db> DefMap<'db> {
+    /// The definition `name` has in `namespace`, or `None` when the program
+    /// binds no such name there.
+    ///
+    /// The first binding in written order wins, as it does for every lookup
+    /// below: a name bound twice is reported where it is bound, and an editor
+    /// that answered with both would be guessing which the checker read.
+    #[must_use]
+    pub fn resolve(
+        self,
+        db: &'db dyn fossil_base::Db,
+        namespace: Namespace,
+        name: &str,
+    ) -> Option<Definition<'db>> {
+        match namespace {
+            Namespace::Value => self
+                .sources(db)
+                .iter()
+                .find(|e| e.name.as_str() == name)
+                .map(Definition::Source),
+            Namespace::Type => self
+                .types(db)
+                .iter()
+                .find(|e| e.name.as_str() == name)
+                .map(Definition::Type),
+            Namespace::Mapping => self
+                .mapping_names(db)
+                .iter()
+                .find(|e| e.name.as_str() == name)
+                .map(Definition::Mapping),
+        }
+    }
+
+    /// Every top-level definition, in the order the file writes them.
+    #[must_use]
+    pub fn definitions(self, db: &'db dyn fossil_base::Db) -> Vec<Definition<'db>> {
+        let mut all: Vec<Definition<'db>> = self
+            .sources(db)
+            .iter()
+            .map(Definition::Source)
+            .chain(self.types(db).iter().map(Definition::Type))
+            .chain(self.mapping_names(db).iter().map(Definition::Mapping))
+            .collect();
+        all.sort_by_key(|d| (d.span(db).start, d.name_span(db).start));
+        all
+    }
+
     /// Look up the [`SourceLoc`] bound to a source name (e.g. `users`).
     #[must_use]
     pub fn lookup_source(self, db: &'db dyn fossil_base::Db, name: &str) -> Option<SourceLoc<'db>> {
@@ -385,16 +583,15 @@ impl<'db> DefMap<'db> {
     }
 
     /// Look up the constructor call bound to a source name (e.g. `users` →
-    /// `io.csv("examples/users.csv")`). Used by Phase 5 `fossil-mir::lower`
-    /// (STDL-06) to resolve `Op::Source`'s format + URI from the real binding
-    /// instead of the Phase-1 hardcode. Any component is `None` when the
-    /// `SOURCE_DEF` RHS is not a recognisable `io.*("...")` call.
+    /// `io.csv("examples/users.csv")`). `fossil-mir::lower` reads it to resolve
+    /// `Op::Source`'s format + URI from the binding. Any component is `None`
+    /// when the `SOURCE_DEF` RHS is not a recognisable `io.*("...")` call.
     ///
-    /// It gave back a `(constructor, uri)` PAIR and gives back a [`SourceCall`]
-    /// now, for the reason [`Self::lookup_source_schema_binding`] is a pair
-    /// rather than two lookups: the delimiter is meaningless without the
-    /// constructor that declares it, and a caller handed them separately is a
-    /// caller who can read one and forget the other.
+    /// One [`SourceCall`], for the reason
+    /// [`Self::lookup_source_schema_binding`] is a pair rather than two
+    /// lookups: the delimiter is meaningless without the constructor that
+    /// declares it, and a caller handed them separately is a caller who can
+    /// read one and forget the other.
     #[must_use]
     pub fn lookup_source_call(
         self,
@@ -463,6 +660,7 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
     let mut sources: Vec<SourceEntry<'db>> = Vec::new();
     let mut mappings: Vec<MappingLoc<'db>> = Vec::new();
     let mut types: Vec<TypeEntry> = Vec::new();
+    let mut mapping_names: Vec<MappingName<'db>> = Vec::new();
 
     // Per-kind dense indices: `mapping_idx` counts what [`mapping_nodes`]
     // yields, and SOURCE_DEF follows the same scheme.
@@ -490,6 +688,7 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                         uri,
                         delimiter,
                         span: item_span(&item),
+                        name_span: first_ident_span(&item).unwrap_or_else(|| item_span(&item)),
                         call_span: call_span(&item),
                     });
                     source_idx += 1;
@@ -502,6 +701,7 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                 // name as a source. The document is the constructor's first
                 // positional string, exactly as a source's URI is.
                 let members = parse_brace_members(&item);
+                let name_spans = brace_member_name_spans(&item);
                 let (ctor, document) = parse_source_call(&item);
                 let bound = resolve_member_shape_iris(
                     db,
@@ -510,7 +710,9 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                     document.as_deref(),
                     &members,
                 );
-                for ((_, name), (shape_iri, shape_error)) in members.into_iter().zip(bound) {
+                for (((_, name), (shape_iri, shape_error)), name_span) in
+                    members.into_iter().zip(bound).zip(name_spans)
+                {
                     types.push(TypeEntry {
                         name,
                         shape_iri,
@@ -522,6 +724,7 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                         // line's span, because they share the binding — the
                         // same answer the destructuring source gives.
                         span: item_span(&item),
+                        name_span,
                     });
                 }
             }
@@ -536,6 +739,9 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                 let Some(name) = decl.name() else {
                     continue;
                 };
+                let name_span = decl
+                    .name_token()
+                    .map_or_else(|| item_span(&item), |t| token_span(&t));
                 let shape_iri = decl.iri_attr().and_then(|a| a.iri());
                 types.push(TypeEntry {
                     name,
@@ -545,6 +751,7 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                     document: None,
                     constructor: None,
                     span: item_span(&item),
+                    name_span,
                 });
             }
             SyntaxKind::MULTI_SOURCE_DEF => {
@@ -555,6 +762,7 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                 // to its own `Op::Source` and `from <member>` resolves uniformly
                 // via the existing per-source lookups.
                 let members = parse_brace_members(&item);
+                let name_spans = brace_member_name_spans(&item);
                 let schema = parse_schema_arg(&item);
                 let schema_arg = schema.as_ref().and_then(|s| s.document.clone());
                 let schema_provider = schema.as_ref().and_then(|s| s.provider.clone());
@@ -572,7 +780,9 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                     schema_arg.as_deref(),
                     &members,
                 );
-                for ((_, member), (shape_iri, shape_error)) in members.into_iter().zip(shape_iris) {
+                for (((_, member), (shape_iri, shape_error)), name_span) in
+                    members.into_iter().zip(shape_iris).zip(name_spans)
+                {
                     sources.push(SourceEntry {
                         name: member,
                         loc: SourceLoc::new(db, file, source_idx),
@@ -584,24 +794,62 @@ pub fn def_map<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> DefMap<'d
                         uri: uri.clone(),
                         delimiter: delimiter.clone(),
                         // Every member of `{ A, B } := io.rdf(…)` shares the
-                        // binding's span, because they share the binding. A
-                        // per-member range would need the brace list's tokens
-                        // and nothing asks for one.
+                        // binding's span, because they share the binding; the
+                        // member's own name is `name_span`.
                         span: item_span(&item),
+                        name_span,
                         call_span: call_span(&item),
                     });
                     source_idx += 1;
                 }
             }
             SyntaxKind::MAPPING => {
-                mappings.push(MappingLoc::new(db, file, mapping_idx));
+                let loc = MappingLoc::new(db, file, mapping_idx);
+                mappings.push(loc);
+                if let Some(header) =
+                    fossil_syntax::ast::Mapping::cast(item.clone()).and_then(|m| m.header())
+                    && let Some(token) = first_ident(header.syntax())
+                {
+                    mapping_names.push(MappingName {
+                        name: SmolStr::from(token.text()),
+                        loc,
+                    });
+                }
                 mapping_idx += 1;
             }
             _ => {}
         }
     }
 
-    DefMap::new(db, sources, mappings, types)
+    DefMap::new(db, sources, mappings, types, mapping_names)
+}
+
+/// The first `IDENT` directly under `node` — the bound name of a `SOURCE_DEF`
+/// and of a `MAPPING_HEADER`, which both start with it.
+fn first_ident(node: &SyntaxNode) -> Option<fossil_syntax::SyntaxToken> {
+    node.children_with_tokens()
+        .filter_map(fossil_syntax::SyntaxElement::into_token)
+        .find(|t| t.kind() == SyntaxKind::IDENT)
+}
+
+fn first_ident_span(node: &SyntaxNode) -> Option<Span> {
+    first_ident(node).map(|t| token_span(&t))
+}
+
+fn token_span(token: &fossil_syntax::SyntaxToken) -> Span {
+    let r = token.text_range();
+    Span::new(u32::from(r.start()), u32::from(r.end()))
+}
+
+/// The name span of each member [`parse_brace_members`] returns, in the same
+/// order and under the same filter, so the two zip.
+fn brace_member_name_spans(node: &SyntaxNode) -> Vec<Span> {
+    node.children()
+        .filter_map(fossil_syntax::ast::ImportMember::cast)
+        .filter(|m| m.shape_name().is_some())
+        .filter_map(|m| m.name_token())
+        .map(|t| token_span(&t))
+        .collect()
 }
 
 /// Extract the bound name from a `SOURCE_DEF` node (the `users` in
@@ -652,12 +900,7 @@ pub(crate) fn item_span(node: &fossil_syntax::SyntaxNode) -> Span {
 }
 
 fn parse_source_name(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
-    use fossil_syntax::SyntaxKind;
-    let ident = node
-        .children_with_tokens()
-        .filter_map(fossil_syntax::SyntaxElement::into_token)
-        .find(|t| t.kind() == SyntaxKind::IDENT)?;
-    Some(SmolStr::from(ident.text()))
+    first_ident(node).map(|t| SmolStr::from(t.text()))
 }
 
 /// The `schema = <provider call>` argument of a source binding.
@@ -685,14 +928,14 @@ pub(crate) struct SchemaArg {
 /// widen the per-mapping `body()` fan-out, which is what keeps
 /// [`crate::infer::resolve_source_scope`] out of `parse(file)`.
 ///
-/// # It used to take a bare string, and that was the last hole in the rule
+/// # It takes a provider call, not a bare string
 ///
-/// `schema = "x.shex"` named a document and no provider, so the decoder came
-/// from the document's own EXTENSION — the one dispatch left that did not go by
-/// name. The value is a provider call now, read by the same scan as any other
-/// (`io` `.` `shex` `(` `"…"` `)`), so a document is never named without the row
-/// that reads it. A value that is not a call yields `provider: None`, which is
-/// reported with the span below rather than quietly falling back.
+/// A bare `schema = "x.shex"` names a document and no provider, so the decoder
+/// would come from the document's own EXTENSION — a dispatch that does not go
+/// by name. The value is read by the same scan as any other call
+/// (`io` `.` `shex` `(` `"…"` `)`), so a document is never named without the
+/// row that reads it. A value that is not a call yields `provider: None`, which
+/// is reported with the span below rather than quietly falling back.
 ///
 pub(crate) fn parse_schema_arg(node: &SyntaxNode) -> Option<SchemaArg> {
     let value = Call::of_binding(node)?.named("schema")?.value?;
@@ -1088,9 +1331,9 @@ Users : Person from User
     ///
     /// The corpus writes these: `// #region` / `// #endregion` mark the runs
     /// `docs/` transcludes, so the binding a documentation page shows is
-    /// exactly the binding with a comment glued to its range. Measured on
-    /// `compound-key` with its join condition broken — the report underlined
-    /// `// #endregion on` and the blank line after it, as a multi-line block.
+    /// exactly the binding with a comment glued to its range — on
+    /// `compound-key` with its join condition broken, the report would
+    /// underline `// #endregion on` and the blank line after it.
     #[test]
     fn a_trailing_comment_is_trivia_and_stays_out_of_the_span() {
         const COMMENTED: &str = "\
@@ -1123,8 +1366,7 @@ Users : Person from User
     fn def_map_for_hello_fossil_has_one_type_one_source_one_mapping() {
         let (db, file) = db_with_hello();
         let dm = def_map(&db, file);
-        // The prefix table is gone and the TYPE table is what replaced it as
-        // the thing a shape name resolves against.
+        // The TYPE table is the thing a shape name resolves against.
         assert_eq!(dm.types(&db).len(), 1);
         assert_eq!(dm.types(&db)[0].name, "Person");
         assert_eq!(dm.types(&db)[0].document.as_deref(), Some("personas.shex"));
@@ -1372,8 +1614,8 @@ shape https://a.example/Tag
         );
     }
 
-    /// The four causes used to be one `None` behind one message that blamed the
-    /// member's name. A document that is not there is not a misspelt name.
+    /// A document that is not there is not a misspelt name: the cause is
+    /// reported, not the member's name.
     #[test]
     fn a_document_that_cannot_be_read_says_so_instead_of_blaming_the_name() {
         let src = "{ a } := io.rdf(\"g.ttl\", schema = io.shex(\"does_not_exist.shex\"))\n";

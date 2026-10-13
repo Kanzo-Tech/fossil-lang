@@ -155,7 +155,8 @@ crates/
   fossil-graph-schema/     the canonical graph-schema — the shared substrate contract — and the
                            error catalogue: `Problem`, `Failure`, and (feature `js`) the one
                            function every wasm crate throws a failure through
-  fossil-ide/              hover, completion, goto-def + the symbol/prefix/workspace indexes
+  fossil-ide/              hover, completion, goto-def, outline — every one asking `def_map`,
+                           the one name resolver, and the checker; no index of its own
   fossil-wasm/             WASM host shim (the workspace under `openProgram` + the tokenizer)
   fossil-df-wasm/          `fossil_df::Executor` exposed to JS — the only host that writes a
                            corpus, in the browser and in Node. There is no native CLI: it

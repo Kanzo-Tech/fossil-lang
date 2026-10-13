@@ -10,8 +10,8 @@
 //! workspace takes it ([`Executor::register_inferred_descriptor`],
 //! [`Executor::register_undescribed`]), so the run checks the program against
 //! the columns the editor checked it against. [`Executor::execute`] builds a `DataFusion` plan
-//! (`lower_to_mir_pg` → `execute_graph`), writes the corpus under the
-//! destination with [`crate::write()`], and answers the [`RunReport`].
+//! (`lower_to_mir_pg` → `execute_graph`), writes the corpus into its
+//! [`Output`] with [`crate::write()`], and answers what it [`Ran`].
 //!
 //! ## Storage seam
 //! Every byte goes through a [`Storage`](fossil_storage::Storage): the sources `DataFusion` reads, the
@@ -20,6 +20,14 @@
 //! remote source by range requests rather than whole; a host with none holds
 //! the files in memory. Both are `object_store` stores, so the run cannot tell
 //! them apart.
+//!
+//! ## Two axes and a limit
+//! Where a run reads is the [`Storage`](fossil_storage::Storage) it is handed; where it writes is its
+//! [`Output`], one-to-one with the store the corpus goes into — the job's, by
+//! the `write` credential vended on it, or an `InMemory`, for which no write
+//! credential is asked. `limit` caps the rows read from each source scan, at
+//! the scan, so an edge to a vertex outside the sample is dropped and counted
+//! like any other. `/docs/design/three-hosts` argues the shape.
 //!
 //! ## One host
 //! `fossil-df-wasm` is a `wasm-bindgen` shell over this, in the browser and in
@@ -32,17 +40,68 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use bytes::Bytes;
 use datafusion::error::DataFusionError;
 use datafusion::execution::context::SessionContext;
 use fossil_base::{FossilDb, FsError, Provider, SourceFile, System};
 use fossil_graph_schema::{Failure, GraphSchema, Problem, Related};
 use fossil_hir::documents::MissingDocument;
 use fossil_hir::lineage::Input;
-use fossil_storage::Storage;
+use fossil_storage::{Access, Scope, Storage};
+use futures::TryStreamExt;
+use object_store::memory::InMemory;
+use object_store::{ObjectStore, ObjectStoreExt};
 
 use crate::RunReport;
-use crate::corpus::manifest::MANIFEST_FILE;
 use crate::memory::{BUDGET, Budget, Refusal};
+
+/// Where a run writes its corpus — one value per `object_store` store it can
+/// go into.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Output {
+    /// An `object_store` `InMemory` under [`MEMORY`]; the run answers the
+    /// files ([`Ran::Memory`]) and asks the host for no `write` credential.
+    Memory,
+    /// The cloud store the host vends `write` on for `job` — exactly one
+    /// prefix — and the corpus is written under it ([`Ran::Storage`]).
+    Storage {
+        /// The scope the `write` credential is vended on.
+        job: String,
+    },
+}
+
+/// Where an [`Output::Memory`] run writes; its [`RunReport::location`].
+pub const MEMORY: &str = "memory://corpus/";
+
+/// What a run answers, one variant per [`Output`].
+#[derive(Debug)]
+pub enum Ran {
+    /// Written under the job's prefix, which the report names.
+    Storage(RunReport),
+    /// Written into memory, and every file of it.
+    Memory {
+        report: RunReport,
+        files: Vec<CorpusFile>,
+    },
+}
+
+impl Ran {
+    /// The report, whichever store the corpus went into.
+    #[must_use]
+    pub const fn report(&self) -> &RunReport {
+        match self {
+            Self::Storage(report) | Self::Memory { report, .. } => report,
+        }
+    }
+}
+
+/// One file of a corpus written into memory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CorpusFile {
+    /// Relative to the corpus root: `fossil.json`, `vertex/<Type>.parquet`, …
+    pub path: String,
+    pub bytes: Bytes,
+}
 
 /// Minimal [`System`] for the executor host. The executor reads sources through
 /// the object-store / provider seams and documents through the registry, never
@@ -165,28 +224,38 @@ impl Executor {
         crate::output_descriptor(&self.db, self.file)
     }
 
-    /// Run the program on `DataFusion` over `storage` and write the corpus
-    /// under `dest`, a prefix `storage` covers: route each source — through its
-    /// connection's credential, or as a public URL — register the stores,
-    /// execute the graph, and [`crate::write()`] it.
+    /// Run the program on `DataFusion`, reading through `storage`, and write
+    /// the corpus into `output`: route each source — through its connection's
+    /// credential, or as a public URL — register the stores, execute the graph
+    /// with at most `limit` rows read from each source scan, and
+    /// [`crate::write()`] it.
     ///
     /// # Errors
-    /// A [`Failure`] with its code: `run/over-budget` when an operator asked
-    /// for more than the run's [`BUDGET`](crate::memory::BUDGET) had left,
-    /// before anything is written; `run/does-not-compile`, relating the
-    /// program's diagnostics; `run/destination-uncovered`; a `storage/…` code
-    /// for a source that will not route; `source/not-found` for one whose file
-    /// is not in its store; `engine/failed`, with `DataFusion`'s error as the
-    /// cause; or what [`crate::write()`] refused.
-    pub async fn execute(&self, storage: &mut Storage, dest: &str) -> Result<RunReport, Failure> {
+    /// A [`Failure`] with its code: for [`Output::Storage`], what the host
+    /// refused when asked for `write` on the job, or
+    /// `storage/ambiguous-prefix` when it vends more than one prefix;
+    /// `run/over-budget` when an operator asked for more than the run's
+    /// [`BUDGET`](crate::memory::BUDGET) had left, before anything is written;
+    /// `run/does-not-compile`, relating the program's diagnostics; a
+    /// `storage/…` code for a source that will not route; `source/not-found`
+    /// for one whose file is not in its store; `engine/failed`, with
+    /// `DataFusion`'s error as the cause; or what [`crate::write()`] refused.
+    pub async fn execute(
+        &self,
+        storage: &mut Storage,
+        output: &Output,
+        limit: Option<usize>,
+    ) -> Result<Ran, Failure> {
         let (db, file) = (&self.db, self.file);
         let descriptor = self.descriptor()?;
-        if !dest.ends_with('/') || !storage.covers(&format!("{dest}{MANIFEST_FILE}")) {
-            return Err(Problem::DestinationUncovered {
-                destination: dest.to_string(),
+        let (dest, memory) = match output {
+            Output::Storage { job } => (granted(storage, job).await?, None),
+            Output::Memory => {
+                let memory = Arc::new(InMemory::new());
+                storage.with_store(MEMORY, Arc::clone(&memory) as Arc<dyn ObjectStore>)?;
+                (MEMORY.to_string(), Some(memory))
             }
-            .into());
-        }
+        };
 
         for source in fossil_hir::lineage::inputs(db, file)
             .into_iter()
@@ -202,7 +271,7 @@ impl Executor {
         // `budget` is kept to ask what it refused: an operator told no can fail
         // with an error of its own — a sort, that it has no disk to spill to.
         let budget = Arc::new(Budget::new(BUDGET));
-        let ctx = crate::session::session_within(Arc::clone(&budget));
+        let ctx = crate::session::session_within(Arc::clone(&budget), limit);
         for (authority, store) in storage.stores() {
             ctx.register_object_store(authority, store);
         }
@@ -213,12 +282,59 @@ impl Executor {
             .map_err(|e| engine_failure(e, budget.refusal(), db, file))?;
         drop(ctx);
 
-        let written = crate::write(&graph, storage, dest).await?;
-        Ok(RunReport {
-            location: dest.to_string(),
+        let written = crate::write(&graph, storage, &dest).await?;
+        let report = RunReport {
+            location: dest,
             dropped: written.dropped,
+        };
+        Ok(match memory {
+            None => Ran::Storage(report),
+            Some(memory) => Ran::Memory {
+                report,
+                files: held(&memory).await?,
+            },
         })
     }
+}
+
+/// The one prefix `storage`'s host vends `write` on for `job`.
+async fn granted(storage: &mut Storage, job: &str) -> Result<String, Failure> {
+    let scope = Scope::Job(job.to_string());
+    match storage.grant(scope.clone(), Access::Write).await? {
+        [prefix] => Ok(prefix.clone()),
+        prefixes => Err(Failure::new(Problem::AmbiguousPrefix {
+            scope: scope.to_string(),
+            count: prefixes.len() as u64,
+        })
+        .with_help("a run writes under exactly one prefix")),
+    }
+}
+
+/// Every file of the corpus written into `memory`, by its path under
+/// [`MEMORY`] — which is the store's root, so a key is the path.
+async fn held(memory: &InMemory) -> Result<Vec<CorpusFile>, Failure> {
+    let unreadable = |e: object_store::Error| {
+        Failure::new(Problem::Unreachable {
+            location: MEMORY.to_string(),
+        })
+        .caused_by(e)
+    };
+    let listed: Vec<_> = memory.list(None).try_collect().await.map_err(unreadable)?;
+    let mut files = Vec::with_capacity(listed.len());
+    for meta in listed {
+        let bytes = memory
+            .get(&meta.location)
+            .await
+            .map_err(unreadable)?
+            .bytes()
+            .await
+            .map_err(unreadable)?;
+        files.push(CorpusFile {
+            path: meta.location.to_string(),
+            bytes,
+        });
+    }
+    Ok(files)
 }
 
 /// Decode + register every provider (RDF) source through

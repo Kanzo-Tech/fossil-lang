@@ -37,8 +37,9 @@ vends into a store, routed by the longest prefix that covers a path and renewed 
 and the executor registers those stores. The browser reads a cloud source by range requests and
 writes its output through the job's store — measured 2026-09-29 in Chrome against MinIO with
 credentials keasy vended: a ranged GET, a PUT, a three-part multipart upload, and a 403 outside the
-prefix. A host with no storage hands the executor `InMemory` stores, and the run
-cannot tell.
+prefix. A host with no storage hands the executor `InMemory` stores, a run `into: 'memory'` writes
+into one, and the run cannot tell either from a cloud store
+([three hosts](/docs/design/three-hosts#a-run-where-it-reads-where-it-writes-and-how-much)).
 
 ## Why this does not reopen "unifying the two execution engines"
 

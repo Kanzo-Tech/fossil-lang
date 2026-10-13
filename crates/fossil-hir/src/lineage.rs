@@ -34,7 +34,7 @@ pub enum Role {
 /// host's and the executor's.
 ///
 /// The name is `OpenLineage`'s `RunEvent.inputs[]` and PROV's `prov:used`, and not
-/// LSP's `references`, which are the usages of a symbol.
+/// an editor's `references`, which are the usages of a symbol.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Input {
     /// What the program reads it as.
@@ -128,14 +128,11 @@ pub struct Format {
 /// The provider rows a host installs, projected onto the wire as formats. Sorted for
 /// a deterministic order (the registry's own order is priority, not display).
 ///
-/// # `FormatKind` stops being a constant
+/// # `FormatKind` is read off the row
 ///
-/// This function wrote `FormatKind::Data` on every row, and the wire contract
-/// has carried `Schema` and `Both` since it was written with nothing ever
-/// producing either — the shape of the answer was right and the data behind it
-/// was half a table. Since ruling 13 the row declares its capabilities, so the
-/// three cases are read off it: `io.shex` and `io.shacl` come out `Schema`, and
-/// the day one row does both, `Both`.
+/// The row declares its capabilities, so the three cases are read off it:
+/// `io.shex` and `io.shacl` come out `Schema`, and the day one row does both,
+/// `Both`.
 ///
 /// `table` is the host's, not a constant, because the rows that read types are
 /// the host's to install — `crate::providers::PROVIDERS` for a host

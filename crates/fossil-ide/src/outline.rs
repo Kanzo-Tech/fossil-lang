@@ -1,82 +1,70 @@
 //! `textDocument/documentSymbol` — the document outline.
 //!
-//! Produces the hierarchical-capable symbol list a client renders in its
-//! outline / breadcrumb panel: one entry per [`crate::SymbolIndex`] entry. The
-//! list is **flat** (no nesting) — per-mapping property children would be the
-//! refinement.
+//! One entry per top-level definition, in written order, read from
+//! [`fossil_hir::def_map::DefMap::definitions`] — the table every other
+//! feature resolves against, so the outline lists exactly the names
+//! goto-definition can land on. The list is **flat**: a mapping's properties
+//! are not definitions the def map holds, and nesting them is a refinement
+//! nothing has asked for.
 //!
-//! # Source: the [`SymbolIndex`], translated to LSP coordinates
-//!
-//! The heavy lifting (the CST walk that finds named definitions + their byte
-//! ranges) already lives in [`crate::SymbolIndex`]
-//! (FILE-keyed, no per-mapping Salsa key). This module is a
-//! thin adapter: it builds that index, maps each Fossil [`crate::SymbolKind`]
-//! to an LSP [`lsp_types::SymbolKind`], and converts each byte range to a UTF-16
-//! [`lsp_types::Range`] via the [`LineIndex`] (Monaco
-//! counts UTF-16, so a byte range would mis-highlight after a multi-byte char).
+//! Each symbol's `range` is the whole item and its `selection_range` the name,
+//! converted to UTF-16 through the [`crate::position::LineIndex`]: Monaco counts UTF-16, so a
+//! byte range would mis-highlight after a multi-byte character.
 //!
 //! # Kind mapping
 //!
-//! | Fossil           | LSP `SymbolKind` | rationale                          |
-//! |------------------|------------------|------------------------------------|
-//! | `Mapping`        | `CLASS`          | a mapping produces typed subjects   |
-//! | `Shape`          | `INTERFACE`      | a `ShEx` shape is a structural type |
-//! | `Source`         | `VARIABLE`       | a `:=` binds a name to a value      |
+//! | Namespace | LSP `SymbolKind` | rationale                           |
+//! |-----------|------------------|-------------------------------------|
+//! | `Mapping` | `CLASS`          | a mapping produces typed subjects    |
+//! | `Type`    | `INTERFACE`      | a type is a structural contract      |
+//! | `Value`   | `VARIABLE`       | a `:=` binds a name to a value       |
 //!
 //! WASM-clean: returns `lsp_types::DocumentSymbol` directly (`lsp-types` itself
 //! is wasm32-clean), so the wasm workspace consumes it with no translation.
 
-use crate::{SymbolEntry, SymbolIndex, SymbolKind as FossilSymbolKind};
 use fossil_base::SourceFile;
-use lsp_types::{DocumentSymbol, SymbolKind as LspSymbolKind};
+use fossil_hir::def_map::{Namespace, def_map};
+use lsp_types::{DocumentSymbol, SymbolKind};
 
-use crate::position::{LineIndex, line_index, range};
+use crate::position::{line_index, range};
 
-/// Build the document outline for `file`: a flat `Vec<DocumentSymbol>` in source
-/// order, one entry per top-level definition (source / mapping / shape).
+/// Build the document outline for `file`: a flat `Vec<DocumentSymbol>` in
+/// source order, one entry per top-level definition (source / type / mapping).
 ///
-/// Each symbol's `range` and `selection_range` are the same (UTF-16) range of
-/// the defining node — the whole declaration is also the selection target.
 /// Returns an empty `Vec` for a file with no top-level definitions.
 #[must_use]
 pub fn document_symbols(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<DocumentSymbol> {
-    let index = SymbolIndex::build(db, file);
     let li = line_index(db, file);
-    index
-        .entries()
-        .iter()
-        .map(|entry| to_document_symbol(entry, li))
+    def_map(db, file)
+        .definitions(db)
+        .into_iter()
+        .map(|def| {
+            #[allow(deprecated)] // `deprecated` field is required by the lsp-types struct literal
+            DocumentSymbol {
+                name: def.name().to_string(),
+                detail: None,
+                kind: kind_of(def.namespace()),
+                tags: None,
+                deprecated: None,
+                range: range(li, def.span(db)),
+                selection_range: range(li, def.name_span(db)),
+                children: None,
+            }
+        })
         .collect()
 }
 
-/// Convert one [`SymbolEntry`] (Fossil byte range) to an LSP [`DocumentSymbol`]
-/// (UTF-16 range).
-fn to_document_symbol(entry: &SymbolEntry, li: &LineIndex) -> DocumentSymbol {
-    let range = range(li, entry.range.clone());
-    #[allow(deprecated)] // `deprecated` field is required by the lsp-types struct literal
-    DocumentSymbol {
-        name: entry.name.to_string(),
-        detail: None,
-        kind: map_kind(entry.kind),
-        tags: None,
-        deprecated: None,
-        range,
-        selection_range: range,
-        children: None,
-    }
-}
-
-/// Map a Fossil [`FossilSymbolKind`] to its LSP [`LspSymbolKind`] (see the
-/// module table).
-const fn map_kind(kind: FossilSymbolKind) -> LspSymbolKind {
-    match kind {
-        FossilSymbolKind::Mapping => LspSymbolKind::CLASS,
-        FossilSymbolKind::Shape => LspSymbolKind::INTERFACE,
+/// The LSP kind of a definition, by the table it lives in (see the module
+/// table).
+const fn kind_of(namespace: Namespace) -> SymbolKind {
+    match namespace {
+        Namespace::Mapping => SymbolKind::CLASS,
+        Namespace::Type => SymbolKind::INTERFACE,
         // A `:=` binding is a name bound to a value, which is what `VARIABLE`
-        // is for; `OBJECT` and `FILE` were the two alternatives and both say
-        // something about what the right-hand side READS, which the index does
-        // not know — `Adults := User.where(…)` opens no file.
-        FossilSymbolKind::Source => LspSymbolKind::VARIABLE,
+        // is for; `OBJECT` and `FILE` both say something about what the
+        // right-hand side READS, which the outline does not know —
+        // `Adults := User.where(…)` opens no file.
+        Namespace::Value => SymbolKind::VARIABLE,
     }
 }
 
@@ -102,32 +90,45 @@ User : Person from users
     name = users.name
 ";
 
-    /// A NAMESPACE for the `ex` prefix was the third thing asserted here. There
-    /// is no prefix declaration, so there is no namespace to outline.
+    /// The mapping, and the type the program binds — at its binding, not at
+    /// the header that names it.
     #[test]
-    fn outline_has_the_mapping_and_the_shape_it_targets() {
+    fn outline_has_the_mapping_and_the_type_it_binds() {
         let (db, file) = db_file(FIXTURE);
         let syms = document_symbols(&db, file);
         assert!(
             syms.iter()
-                .any(|s| s.kind == LspSymbolKind::CLASS && s.name == "User"),
+                .any(|s| s.kind == SymbolKind::CLASS && s.name == "User"),
             "expected a CLASS for the `User` mapping: {syms:?}"
         );
-        assert!(
-            syms.iter()
-                .any(|s| s.kind == LspSymbolKind::INTERFACE && s.name == "Person"),
-            "expected an INTERFACE for the `Person` shape ref: {syms:?}"
+        let person = syms
+            .iter()
+            .find(|s| s.kind == SymbolKind::INTERFACE && s.name == "Person")
+            .unwrap_or_else(|| panic!("expected an INTERFACE for `Person`: {syms:?}"));
+        assert_eq!(
+            person.selection_range.start.line, 0,
+            "`Person` is declared by the `type` binding on line 0",
         );
     }
 
+    /// The item is the range and the name the selection, inside it — what
+    /// LSP requires of a `DocumentSymbol`.
     #[test]
-    fn ranges_are_nonempty() {
+    fn the_selection_is_the_name_inside_the_item() {
         let (db, file) = db_file(FIXTURE);
+        let text = file.text(&db);
+        let li = line_index(&db, file);
         for s in document_symbols(&db, file) {
             let nonempty = s.range.end.line > s.range.start.line
                 || s.range.end.character > s.range.start.character;
             assert!(nonempty, "empty range for {}", s.name);
-            assert_eq!(s.range, s.selection_range, "v0.1 ranges coincide");
+            assert!(
+                s.range.start <= s.selection_range.start && s.selection_range.end <= s.range.end,
+                "the selection must lie inside the range for {}",
+                s.name,
+            );
+            let name = crate::position::span(li, s.selection_range);
+            assert_eq!(&text[name.start as usize..name.end as usize], s.name);
         }
     }
 

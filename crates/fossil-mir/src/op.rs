@@ -106,7 +106,7 @@ pub enum Op<'db> {
     /// neither input's name is that relation. `Staff.union(Contractor)` yields
     /// rows from both, so addressing them as `Staff.email` would name the row
     /// by whichever side happened to be written first — the ambiguity the
-    /// qualified `select` was decided against on 2026-08-14. Both sides are
+    /// qualified `select` exists to avoid. Both sides are
     /// re-qualified under this name and the body addresses the pipeline.
     Union {
         left: usize,
@@ -117,19 +117,14 @@ pub enum Op<'db> {
     /// `GroupByOp(input, keys, aggs, relation)` — one row per distinct
     /// combination of the key columns, carrying the aggregates of each group.
     ///
-    /// **It was two operators and neither could stand alone.** `GroupBy {
-    /// input, keys }` with nothing aggregated is [`Op::Project`] followed by
-    /// [`Op::Distinct`], which the surface already spells twice over;
-    /// `Aggregate { input, aggs }` with no grouping has no groups. `schema_of`
-    /// had to read the pair to describe either, `DataFusion` takes both halves in
-    /// one `aggregate(group_expr, aggr_expr)` call, and nothing in the
-    /// workspace ever constructed either of them.
+    /// **One operator, because neither half stands alone.** A grouping with
+    /// nothing aggregated is [`Op::Project`] followed by [`Op::Distinct`], which
+    /// the surface already spells twice over; an aggregate with no grouping has
+    /// no groups. `DataFusion` takes both halves in one
+    /// `aggregate(group_expr, aggr_expr)` call.
     ///
-    /// `keys` are QUALIFIED, like [`Op::Project`]'s columns. They were bare
-    /// `SmolStr`s, from before the join stopped flattening its two sides: after
-    /// a join, a bare `id` names whichever side `DataFusion` finds first, and the
-    /// ambiguity is the one the qualified `select` was decided against on
-    /// 2026-08-14.
+    /// `keys` are QUALIFIED, like [`Op::Project`]'s columns: after a join, a
+    /// bare `id` names whichever side `DataFusion` finds first.
     ///
     /// `relation` is what the AGGREGATE columns answer to, for the reason
     /// [`Op::Union`] carries one: a group's total came from no side, so there
@@ -199,10 +194,8 @@ pub enum Op<'db> {
 /// `source` and `column`, the same pair [`Expr::ColRef`] carries and spelled the
 /// same way, because it is the same pair.
 ///
-/// It was a bare [`SmolStr`]. `HirSourceOp::Select` had lost the qualification
-/// before the lowering ever saw it, so there was nothing to carry; open question
-/// 4 of `grammar.bnf, § OPEN` was decided on 2026-08-14 (`select` may follow a
-/// `join` and names a QUALIFIED column) and the binding now reaches here.
+/// Not a bare [`SmolStr`]: `select` may follow a `join` and names a QUALIFIED
+/// column, so the binding reaches here.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct ProjectedColumn {
     /// The relation the column belongs to — `Employee` in
@@ -215,31 +208,29 @@ pub struct ProjectedColumn {
 /// One side of an [`Op::Join`] — the relation it reads and the names that
 /// relation's columns are addressed by.
 ///
-/// It was four flat fields, `left`/`right` beside `left_name`/`right_name`, and
-/// keeping the index next to its own name is the same reason
+/// Keeping the index next to its own name is the same reason
 /// [`ProjectedColumn`] is a struct: nobody recovers the pairing from a call
 /// site.
 ///
-/// # Why `relations` is a set and was a name
+/// # Why `relations` is a set and not a name
 ///
 /// **A side is addressed by every qualifier its columns actually carry, and a
-/// join produces two.** This field was one `SmolStr`, and the lowering filled it
-/// with the pipeline's own name after a join — a name that qualifies NOTHING in
-/// the relation, because [`Op::Join`] is the one composite operator that does
-/// not re-qualify. [`Op::Union`] does (its schema comes back from `DataFusion`
+/// join produces two.** One name, filled with the pipeline's own after a join,
+/// would qualify NOTHING in the relation, because [`Op::Join`] is the one
+/// composite operator that does not re-qualify. [`Op::Union`] does (its schema comes back from `DataFusion`
 /// with no qualifier at all, so there is nothing to keep) and [`Op::GroupBy`]
 /// does it to the aggregates; a join keeps both sides' qualifiers side by side,
 /// which is the whole of why the body may write `Purchase.amount` and
 /// `User.email` after one.
 ///
-/// The one name was therefore not a narrower truth but a false one, and it made
-/// two programs that pass `fossil check` fail to plan:
+/// One name would therefore not be a narrower truth but a false one, and two
+/// programs that pass the checker would fail to plan:
 ///
 /// - `Both := L.join(R, …)` then `Tri := Both.join(T, on = R.k == T.k)` — the
-///   engine refused `R` as "neither input (`Both`, `T`)" while `Both` qualified
-///   no column of either;
+///   engine would refuse `R` as "neither input (`Both`, `T`)" while `Both`
+///   qualifies no column of either;
 /// - `Purchase.join(Adults, on = Purchase.user_id == User.id)`, which the
-///   paragraph below has described as working since it was written.
+///   paragraph below describes.
 ///
 /// The invariant this field states is checkable against the backend by
 /// induction over `fossil_df::plan::build`: a `Source` is qualified by its
@@ -299,8 +290,8 @@ pub enum JoinKind {
 /// One aggregation of an [`Op::GroupBy`] — `agg_fn(column) AS out_field`, the
 /// result typed `ty`.
 ///
-/// `column` is qualified for the same reason [`Op::GroupBy`]'s keys are: it was
-/// a bare `in_field`, and a bare name after a join names a side by accident.
+/// `column` is qualified for the same reason [`Op::GroupBy`]'s keys are: a bare
+/// name after a join names a side by accident.
 /// `ty` is the AGGREGATE's type and not the column's — that is the whole of why
 /// this verb is checker work: `math.sum` takes a `Float` and gives a `Float`,
 /// so summing an `Integer` column produces a `Float` one.
@@ -354,10 +345,8 @@ pub enum SourceFormat {
     /// for a delimiter the program names. `catalogue.bnf` declares the position
     /// and states no default for exactly this reason.
     ///
-    /// It was a unit variant, which is why a pipe-delimited source had to be
-    /// converted to commas before the executor would read it — the surface
-    /// could say `delimiter = "|"` (`grammar.bnf`, `NamedArg`) and the algebra
-    /// had nowhere to put it.
+    /// The surface says `delimiter = "|"` (`grammar.bnf`, `NamedArg`), and
+    /// without a field here the algebra would have nowhere to put it.
     Csv { delimiter: Option<SmolStr> },
     /// `io.json(...)`.
     Json,

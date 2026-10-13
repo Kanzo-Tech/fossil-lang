@@ -59,6 +59,27 @@ export interface CompletionItem {
 export type CompletionKind = 'function' | 'field';
 
 /**
+ * `@iri("<iri>") name: Type`.
+ */
+export interface DeclaredField {
+  iri: string;
+  name: string;
+  /**
+   * The field's type as the program writes it: `String`, `Option<Date>`, `Seq<Ref<Person>>`.
+   */
+  type: string;
+}
+
+/**
+ * A type the program declares, every IRI whole.
+ */
+export interface DeclaredType {
+  fields: DeclaredField[];
+  iri: string;
+  name: string;
+}
+
+/**
  * One diagnostic row in the `WasmWorkspace::diagnostics` return array: the workspace's own shape,
  * not the LSP wire's (`lsp_types::Diagnostic`).
  *
@@ -215,6 +236,24 @@ export interface Hover {
 }
 
 /**
+ * A type taken from a document, by the name the program gives it.
+ */
+export interface ImportedType {
+  /**
+   * The name the program writes.
+   */
+  name: string;
+  /**
+   * The property keys a mapping of it may write.
+   */
+  properties: string[];
+  /**
+   * The document's name for it, when the import renames it with `as`.
+   */
+  shape?: string;
+}
+
+/**
  * Every value of `from` is a value of `to`, which is a candidate key: the shape of an edge.
  */
 export interface Inclusion {
@@ -276,7 +315,7 @@ export interface InferredDescriptor {
  * One input a program reads — `Input` in `@fossil-lang/types`, and the one answer to «what does
  * this program read»: the editor's, the introspecting host's and the executor's.
  *
- * The name is `OpenLineage`'s `RunEvent.inputs[]` and PROV's `prov:used`, and not LSP's
+ * The name is `OpenLineage`'s `RunEvent.inputs[]` and PROV's `prov:used`, and not an editor's
  * `references`, which are the usages of a symbol.
  */
 export interface Input {
@@ -342,24 +381,6 @@ export interface LocationName {
    * The name a statement reads.
    */
   name: string;
-}
-
-/**
- * What a mapping can name: what a host knows before the model writes anything.
- */
-export interface MappingVocabulary {
-  /**
-   * The shape document: its constructor (`shex`, `shacl`) and where it is.
-   */
-  shapes: VocabularyDocument;
-  /**
-   * The sources, each with its columns — a profile's descriptor.
-   */
-  sources: SourceVocabulary[];
-  /**
-   * The types it declares, each with the property keys a mapping of it may write.
-   */
-  types: TypeVocabulary[];
 }
 
 /**
@@ -630,14 +651,34 @@ export interface Token {
  */
 export type TokenKind = 'Whitespace' | 'Newline' | 'Comment' | 'KwFrom' | 'KwAnd' | 'KwOr' | 'KwNot' | 'AtAttr' | 'True' | 'False' | 'Null' | 'Float' | 'Integer' | 'Ident' | 'String' | 'Define' | 'Eq' | 'Neq' | 'Le' | 'Ge' | 'Assign' | 'Dot' | 'Comma' | 'LParen' | 'RParen' | 'LBrace' | 'RBrace' | 'Lt' | 'Gt' | 'Plus' | 'Minus' | 'Star' | 'Slash' | 'Percent' | 'Question' | 'Colon';
 
-export interface TypeVocabulary {
-  name: string;
-  properties: string[];
+/**
+ * What a mapping can name: what a host knows before the model writes anything.
+ */
+export interface Vocabulary {
+  /**
+   * The types the program declares.
+   */
+  declared?: DeclaredType[];
+  /**
+   * The shape documents imported, each with the types taken from it.
+   */
+  imports?: VocabularyImport[];
+  /**
+   * The sources, each with its columns — a profile's descriptor.
+   */
+  sources: SourceVocabulary[];
 }
 
-export interface VocabularyDocument {
+/**
+ * `type { … } := io.<format>("<reference>")`.
+ */
+export interface VocabularyImport {
+  /**
+   * The document's constructor: `shex`, `shacl`.
+   */
   format: string;
   reference: string;
+  types: ImportedType[];
 }
 
 /** `fossil_storage::HOST_MS`. */

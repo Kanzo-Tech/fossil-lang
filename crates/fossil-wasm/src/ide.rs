@@ -49,7 +49,6 @@
 //! `Option<Hover>` because "no type under this cursor" is the ordinary
 //! answer, and the TS wrapper normalises `undefined` to `null` where it lands.
 
-use fossil_base::SourceFile;
 use lsp_types::{CompletionItemKind, Range};
 
 use crate::FossilWorkspace;
@@ -191,8 +190,7 @@ impl FossilWorkspace {
         let Some(file) = self.file_by_handle(handle) else {
             return Vec::new();
         };
-        let files: Vec<SourceFile> = self.open_source_files();
-        fossil_ide::completions(db, &files, file, line, character)
+        fossil_ide::completions(db, file, line, character)
             .into_iter()
             .map(|item| CompletionItem {
                 insert_text: item.insert_text.unwrap_or_else(|| item.label.clone()),
@@ -232,8 +230,8 @@ impl FossilWorkspace {
     /// [`crate::WasmWorkspace::definition`].
     ///
     /// Empty when the handle is unknown, when nothing is under the cursor, and
-    /// when the thing under it has no definition anywhere in the open set —
-    /// three cases a host renders identically.
+    /// when the thing under it is a name the program does not bind — three
+    /// cases a host renders identically.
     #[must_use]
     pub fn definition_rows(
         &self,
@@ -245,8 +243,7 @@ impl FossilWorkspace {
         let Some(file) = self.file_by_handle(handle) else {
             return Vec::new();
         };
-        let files: Vec<SourceFile> = self.open_source_files();
-        fossil_ide::goto_definition(db, &files, file, line, character)
+        fossil_ide::goto_definition(db, file, line, character)
             .into_iter()
             .map(|target| Location {
                 uri: target.file.path(db).clone(),

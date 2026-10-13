@@ -34,9 +34,8 @@ use fossil_mir::{Op, apply_output_shape, lower_to_mir_pg};
 //     disk, so writing the file next to the program is invisible.
 //
 // `fossil_base::test_support` supplies both. It is a dev-dependency on a
-// dev-only feature of a crate this one already depends on: no schema language
-// enters `fossil-mir`, which is the cut `0e6898d` made and this test nearly
-// undid.
+// dev-only feature of a crate this one already depends on, so the test names
+// no schema language.
 
 /// The shape `hello.fossil` targets: one un-narrowed `name` predicate, whose
 /// IRI is the one the vertex prop must carry.
@@ -103,17 +102,14 @@ fn lower_pg_emits_source_vertex_sink() {
 /// A mapping reading `from` a DERIVED binding must taint, not silently read
 /// some other file.
 ///
-/// Lowering used to substitute `examples/users.csv` for a source binding it
-/// could not resolve — so a mapping over a real connection executed against the
-/// walking-skeleton fixture instead, producing a full, plausible, entirely
-/// wrong graph. The substitution is gone: the graph is poisoned and carries no
-/// ops.
+/// A substitute — the walking-skeleton fixture, say — for a source binding the
+/// lowering could not resolve would execute a mapping over a real connection
+/// against the wrong file, producing a full, plausible, entirely wrong graph.
+/// The graph is poisoned instead and carries no ops.
 ///
-/// What moved is WHERE the unresolvable name sits. `x := Source.where(...)`
-/// was the fixture because it parsed as a source definition carrying no `io.*`
-/// constructor; `where` is a pipeline verb the lowering walks now
-/// (`lower_source_chain`), so a derived binding resolves through to its base
-/// and the unresolvable name is that base. The recursion is the part worth
+/// `where` is a pipeline verb the lowering walks (`lower_source_chain`), so a
+/// derived binding resolves through to its base and the unresolvable name is
+/// that base. The recursion is the part worth
 /// pinning: an error under a pipeline has one more frame to be swallowed in
 /// than an error at the top, and `lower_source_chain` propagates it.
 #[test]
@@ -264,7 +260,7 @@ fn apply_output_shape_reclassifies_shape_ref_to_edge() {
     // The schema reclassifies `hasProject` into a typed, multi-valued edge.
     let refined = apply_output_shape(ops, &kb_schema());
 
-    // `label` stays a vertex prop (single-valued); `hasProject` is gone from props.
+    // `label` stays a vertex prop (single-valued); `hasProject` leaves the props.
     let Op::EmitVertex { props, .. } = refined
         .iter()
         .find(|o| matches!(o, Op::EmitVertex { .. }))
@@ -283,7 +279,7 @@ fn apply_output_shape_reclassifies_shape_ref_to_edge() {
         "label is Cardinality::Single → single-valued"
     );
 
-    // `hasProject` is now a typed edge KB→Project, multi-valued (max:-1).
+    // `hasProject` is a typed edge KB→Project, multi-valued (max:-1).
     let edge = refined
         .iter()
         .find_map(|o| match o {

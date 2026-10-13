@@ -69,14 +69,14 @@
 //! WHY THE THRESHOLD IS 16, NOT 4
 //! ─────────────────────────────────────────────────────────────────────────
 //!
-//! The threshold this replaced — "≤ 4 (parse + body_3 + typecheck_3 +
-//! expr_types_3)" — conflated two distinct Salsa events:
+//! A threshold of "≤ 4 (parse + body_3 + typecheck_3 + expr_types_3)" would
+//! conflate two distinct Salsa events:
 //!
 //!   * WillExecute: query body ran (cache miss OR upstream changed).
 //!   * DidValidateMemoizedValue: query output validated unchanged (cache hit
 //!     after upstream change).
 //!
-//! Per Salsa 0.26 semantics, ANY query that takes `parse(file)` as a
+//! Under Salsa's semantics, ANY query that takes `parse(file)` as a
 //! transitive input WILL emit a `WillExecute` event when the file text
 //! changes (because Salsa must re-derive to check whether the structural
 //! output also changed). The invariant is correctly stated
@@ -107,19 +107,17 @@
 //! per-mapping fan-out stays at 1 (verified below).
 //!
 //! ─────────────────────────────────────────────────────────────────────────
-//! THE LSP AUDIT — fan-out unchanged
+//! THE EDITOR'S QUERIES — fan-out unchanged
 //! ─────────────────────────────────────────────────────────────────────────
 //!
-//! The LSP work was audited against the fan-out invariant — the load-bearing
-//! one, because a Salsa graph that re-executes every sibling is what makes an
-//! LSP stop answering inside 100 ms. Findings:
+//! The fan-out invariant is the load-bearing one, because a Salsa graph that
+//! re-executes every sibling is what makes an editor stop answering inside
+//! 100 ms. What holds it:
 //!
 //!   * `resolve_target_shape` returns `Some` in production because it READS the
-//!     shape document the program names. It used to read it through
-//!     `System::read_file`, which registers no Salsa dependency — so editing
-//!     the document re-ran nothing, and in the LSP that is a diagnostic that
-//!     never clears. It now reads the document as an INPUT: `file_at` (the file
-//!     registry) and `fossil_hir::shape_documents::shape_document` (tracked).
+//!     shape document the program names, as an INPUT: `file_at` (the file
+//!     registry) and `fossil_hir::shape_documents::shape_document` (tracked) —
+//!     not through `System::read_file`, which registers no Salsa dependency.
 //!
 //!     That adds two Salsa dependencies to `typecheck_mapping` and NEITHER is
 //!     per-mapping: `shape_document` is keyed by the DOCUMENT's `SourceFile`,
@@ -133,19 +131,15 @@
 //!     returns `Ok(None)` before touching either, and `MAX_REEXECUTIONS` is
 //!     unmoved by it. A future fixture that DOES name one must budget the
 //!     `shape_document` re-execution here, once, and not per mapping.
-//!   * The CLI and `fossil_ide::WorkspaceIndex` touch
-//!     only native CLI / WASM-clean IDE-index code; neither introduces a
-//!     `#[salsa::tracked]` query keyed by `MappingLoc`. The IDE indexes are
-//!     plain structs built from `def_map` (file-keyed) — not per-mapping
-//!     tracked queries.
+//!   * `fossil_ide` resolves names through `def_map` (file-keyed) and
+//!     introduces no `#[salsa::tracked]` query keyed by `MappingLoc`.
 //!
 //! The complete per-mapping (`MappingLoc`-keyed) `#[salsa::tracked]` query
 //! set is therefore `body`, `typecheck_mapping`,
 //! `expr_types`, `spans`. Each is asserted to re-execute ≤
 //! `MAX_PER_MAPPING_FAN_OUT` (= 1) after the single-char body edit by
-//! `keyset_of_reexecuted_queries_matches_expected_four`. No new per-mapping
-//! query needed registration; `MAX_REEXECUTIONS` stays at 16 (breakdown
-//! above). Any future IDE feature that adds a per-mapping tracked
+//! `keyset_of_reexecuted_queries_matches_expected_four`, and
+//! `MAX_REEXECUTIONS` is 16 (breakdown above). Any future IDE feature that adds a per-mapping tracked
 //! query MUST register it in the keyset assertion and cap it at 1 — a NEW
 //! whole-file (FILE-keyed) query re-runs exactly once and is allowed to bump
 //! `MAX_REEXECUTIONS` ONLY with an updated breakdown here.
@@ -490,11 +484,7 @@ fn keyset_of_reexecuted_queries_matches_expected_four() {
 /// Whitespace/CRLF-resilient: line counts ignore empty lines.
 fn diff_is_body_only(baseline: &str, edited: &str) -> bool {
     fn structural_signature(s: &str) -> Vec<(&'static str, usize)> {
-        // There was a `("prefix", s.matches("prefix ").count())` row here. The
-        // vocabulary declaration is gone from the language, so the fixtures
-        // declare none and the row counted 0 against 0 in every tree — a
-        // signature entry that cannot discriminate is not a check. The four
-        // below still move on any header edit.
+        // The four below move on any header edit.
         vec![
             (":=", s.matches(":=").count()),
             (" : ", s.matches(" : ").count()),

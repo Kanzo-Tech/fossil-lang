@@ -4,8 +4,8 @@
 //!   wasm-check   `cargo check --target wasm32-unknown-unknown` for every workspace
 //!                crate in the dependency closure of the WASM cdylib crates. The set
 //!                is DERIVED from the resolved graph — there is no hand-maintained
-//!                list to drift (the old hardcoded `-p …` lists in `ci.yml` and the
-//!                `.cargo` alias had already diverged: 9 crates vs 6).
+//!                list to drift (two hand-written `-p …` lists measured 9 crates
+//!                against 6).
 //!   catalogue    Regenerate every projection of the catalogue: the provider
 //!                statics from `catalogue.bnf`, and the reference page's tables
 //!                from that file plus `fossil_hir::stdlib`'s registry. `--check`

@@ -3,13 +3,13 @@
 //! The columns the writer emits, and what each one IS. `corpus.bnf` carries the
 //! rows and the argument; this is the Rust projection of them.
 //!
-//! **Read a set by the ROLES it means, not by a name you remember.** The two
-//! consumers that used to carry hand-written lists meant different things by
-//! "the writer's columns" and nothing said so — see `corpus.bnf`.
+//! **Read a set by the ROLES it means, not by a name you remember.** Two
+//! readers can mean different things by "the writer's columns", and a
+//! hand-written list says nothing about which — see `corpus.bnf`.
 
 /// What a column IS — never what a reader does with it.
 ///
-/// A reader that used to carry a list now names the roles it means.
+/// A reader names the roles it means, never a list of names.
 /// It is data in `fossil.json` too: a writer column's `role` in its
 /// table's `properties`, spelled as the variant in lowercase.
 #[derive(

@@ -225,11 +225,9 @@ pub fn subject_templates<'db>(
         // The header carries the shape; a header that did not lower has already
         // been diagnosed by `lower_mapping_node` and contributes no identity.
         //
-        // `HirFile::mapping` and not `.mappings(db).get(i)`, and the difference
-        // was a wrong answer rather than a missing one: the vector used to skip
-        // the mappings that declined, so `get(i)` handed mapping `i` the
-        // signature of whichever mapping came after it. It is one slot per
-        // `MAPPING` node now, so `None` here means THIS header declined.
+        // `HirFile::mapping`, which is one slot per `MAPPING` node, so `None`
+        // here means THIS header declined — never the signature of whichever
+        // mapping came after it.
         let Some(m) = hir.mapping(db, i) else {
             continue;
         };
@@ -374,17 +372,16 @@ pub fn check_identities(
 /// What does not survive that erasure is the fixture this check exists for:
 /// `{User.email}` against `{Legacy.account_id}` differ in the column, and
 /// `.../user/{…}` against `.../u/{…}` differ in the literal text. Comparing
-/// SKELETONS instead — every hole replaced by a marker, which is what
-/// `fossil-mir`'s deleted `subject_skeletons` did — would call those two equal,
+/// SKELETONS instead — every hole replaced by a marker — would call those two
+/// equal,
 /// and it is exactly the program `docs/programs/errors/identity/conflicting`
 /// exists to reject.
 fn identity_form(e: &HirExpr) -> String {
     match e {
-        // The binder is erased and the column kept. `FieldRef` is the retired
-        // anonymous row — the leading dot died in favour of the qualified
-        // `User.email` — and it normalises to the same thing, so a file still
-        // carrying the old spelling does not report a disagreement between two
-        // spellings of one reference.
+        // The binder is erased and the column kept. `FieldRef`, the bare name
+        // of the anonymous row, normalises to the same thing, so a file mixing
+        // the two does not report a disagreement between two spellings of one
+        // reference.
         HirExpr::ColumnRef { column, .. } => format!(".{}", fossil_syntax::name::spell(column)),
         HirExpr::FieldRef(name) => format!(".{name}"),
         HirExpr::StringLit(s) => format!("{s:?}"),
@@ -488,8 +485,8 @@ B : Person from more
     /// The fixture one identity per type exists for, in miniature: two
     /// mappings, one type, two different identities.
     /// `docs/programs/errors/identity/conflicting` is
-    /// the same program in the conformance set, and it was ACCEPTED — the rule
-    /// was written down in three places and enforced in none.
+    /// the same program in the conformance set, and a rule written down and
+    /// not enforced would accept it.
     const TWO_IDENTITIES: &str = "\
 type { Person } := io.shex(\"person.shex\")
 User := io.csv(\"u.csv\")

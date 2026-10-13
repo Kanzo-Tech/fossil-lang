@@ -2,15 +2,16 @@
 //! many.**
 //!
 //! `execute_edge` resolves both endpoints with an inner join, so a row naming a
-//! subject no vertex carries never becomes an edge. That is the ruling and it
-//! stands — a corpus cannot hold an edge to a vertex that is not there. What
-//! changed is that it stopped being silent: the join reported nothing, at any
-//! log level, and the only trace left was an `edge_count` smaller than the
-//! source's row count, which nobody has to compare against anything.
+//! subject no vertex carries never becomes an edge — a corpus cannot hold an
+//! edge to a vertex that is not there. It is not silent: without the count the
+//! only trace would be an `edge_count` smaller than the source's row count,
+//! which nobody has to compare against anything. `docs/programs/reviews/` is
+//! the conformance program that drops one, and its `compiled.txt` carries the
+//! count; this file holds what that rendering cannot see — the in-memory
+//! `Edge::dropped`, and that the report lists exactly the one table.
 //!
-//! Measured on `docs/programs/reviews/` before the count existed: three
-//! reviews, two people, `edge_count: 2`, and no output of any kind naming the
-//! third.
+//! That a clean run states `0` rather than omitting it is asserted by
+//! `execute_graph.rs`, over the same program with `orders.csv`.
 //!
 //! # What this cannot prove
 //!
@@ -51,23 +52,6 @@ Order : Order from orders
     total = orders.amount
 ";
 
-/// The same program over `orders.csv`, whose every `user_id` is a real person.
-const CLEAN_PROGRAM: &str = "\
-type { Person, Order } := io.shex(\"graph.shex\")
-
-users := io.csv(\"tests/fixtures/users.csv\")
-orders := io.csv(\"tests/fixtures/orders.csv\")
-
-Person : Person from users
-    @subject = \"https://example.org/person/{users.id}\"
-    name = users.name
-
-Order : Order from orders
-    @subject = \"https://example.org/order/{orders.order_id}\"
-    placedBy = \"https://example.org/person/{orders.user_id}\"
-    total = orders.amount
-";
-
 // The executor's futures are not `Send` and are not meant to be — see the
 // crate-level allow in `src/lib.rs`. A test that awaits one inherits the lint.
 #[allow(clippy::future_not_send)]
@@ -93,7 +77,7 @@ async fn a_dangling_endpoint_is_counted_rather_than_swallowed() {
 
     let edge = &graph.edges[0];
     assert_eq!(edge.label, "placedBy");
-    // Four order rows in, three edges out — the ruling: the inner join stays.
+    // Four order rows in, three edges out: the inner join stays.
     assert_eq!(
         edge.batches
             .iter()
@@ -122,21 +106,4 @@ async fn a_dangling_endpoint_is_counted_rather_than_swallowed() {
         "the drop is keyed by the table name the manifest declares"
     );
     assert_eq!(written.manifest.edge_tables[0].record_count, 3);
-}
-
-/// And zero is a number the report states, not one it omits — a reader that has
-/// to tell «nothing was dropped» from «this writer does not count» has the same
-/// silence back in a different shape.
-#[tokio::test]
-async fn a_clean_run_reports_zero_rather_than_nothing() {
-    let graph = run(CLEAN_PROGRAM).await;
-    assert_eq!(graph.edges[0].dropped, 0);
-    let (written, _) = support::write_in_memory(&graph).await;
-    assert_eq!(
-        written.dropped,
-        vec![fossil_df::EdgeDrops {
-            table: "Order_placedBy_Person".to_string(),
-            dropped: 0,
-        }],
-    );
 }

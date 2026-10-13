@@ -36,40 +36,30 @@
 //! is not constructible from an integration test, so we exercise its inputs and
 //! the lowering it consumes, which is exactly the logic SC#2/SC#4 assert.
 //!
-//! # The harness could not resolve a shape document at all, and said nothing
+//! # Two locks the harness has to open, or a shape document is invisible
 //!
-//! Two independent locks, and each one alone is enough to make a `.shex`
-//! written next to a fixture invisible:
+//! Each one alone is enough to make a `.shex` written next to a fixture
+//! invisible:
 //!
-//! 1. `new_db()` used `NativeSystem`, whose `System::providers` is the trait
-//!    default — the four rows that read DATA and none that reads types, so
-//!    `shape_document` answers `None` for every document.
+//! 1. A `NativeSystem` whose `System::providers` is the trait default — the
+//!    four rows that read DATA and none that reads types — answers `None` from
+//!    `shape_document` for every document.
 //! 2. `fossil_hir::shapes::decoded_document` resolves through
 //!    `fossil_base::file_at`, which reads the SALSA INPUT REGISTRY and never
-//!    the disk — and `run_db_wired_fixture` never called `register_file`.
+//!    the disk — so a document nobody called `register_file` for is not there.
 //!
 //! Both failures render as "this mapping resolved no shape", which is
-//! indistinguishable from a fixture that named no document. So a fixture
-//! rewritten to name one would have gone green while checking nothing: seven
-//! false passes. The fix is `fossil_base::test_support` — a decoder for a line
-//! format with no schema language behind it, plus the host that installs it and
-//! the registration step — and `run_db_wired_fixture` now registers every
-//! `.shex` sitting in the fixture directory under the key the PROGRAM's
-//! relative path resolves to.
+//! indistinguishable from a fixture that named no document: a fixture would go
+//! green while checking nothing. So the harness uses `fossil_base::test_support`
+//! — a decoder for a line format with no schema language behind it, plus the
+//! host that installs it and the registration step — and `run_db_wired_fixture`
+//! registers every `.shex` sitting in the fixture directory under the key the
+//! PROGRAM's relative path resolves to. Every Db-wired fixture names one.
 //!
-//! Every Db-wired fixture names one now, which is the half the guard below
-//! could not prove. They did not before: the corpus was written in the retired
-//! surface — `prefix ex: <…>`, `ex:Person`, `` `${ex:}u/${.id}` ``, `.name` —
-//! and a shape was a CURIE resolved against a vocabulary declaration rather
-//! than a name a `type { … } := …` binding introduced. There was no document to
-//! name.
-//!
-//! They used to be `.shex` files parsed by `ShExDescriptor`. That is the
-//! dependency this crate no longer has, and a fixture is not a reason to keep
-//! one: `fossil-mir`'s edge-reclassification test nearly kept ShEx alive as a
-//! dev-dependency the same way (`0e6898d`). A hand-built document also says
-//! what it is testing on the line where it is tested, instead of in JSON three
-//! directories away.
+//! The fixtures' documents are that line format, not `.shex` files parsed by
+//! `ShExDescriptor`: a hand-built document says what it is testing on the line
+//! where it is tested, instead of in JSON three directories away, and a test of
+//! the checker is not a test of the `ShEx` decoder.
 //!
 //! Every snapshot header records which mode the fixture used so the
 //! test-helper-vs-Db-wired status is auditable in the committed golden files in `tests/snapshots/`.
@@ -78,9 +68,9 @@
 // Db) that read naturally without backticks in this test harness.
 // `literal_string_with_formatting_args`: the Fossil identity template
 // `"https://example.org/u/{users.id}"` is LITERAL Fossil source passed to the
-// suggestion renderer, not a Rust format string — and now that the hole is
-// `{…}` rather than `${…}`, it is a string clippy reads as one (the workspace
-// allows this elsewhere — see check.rs).
+// suggestion renderer, not a Rust format string — and a `{…}` hole is a
+// string clippy reads as one (the workspace allows this elsewhere — see
+// check.rs).
 #![allow(clippy::doc_markdown, clippy::literal_string_with_formatting_args)]
 
 use std::path::Path;
@@ -145,12 +135,11 @@ fn redact_paths(msg: &str) -> String {
 /// `suggestion_source` (if present) is emitted as an indented multi-line block,
 /// preserved verbatim per Minor #6 (NOT truncated at the first newline).
 ///
-/// # The `help:` and the labels are here because they used to be in the message
+/// # The `help:` and the labels are rendered, because they are not in the message
 ///
-/// A did-you-mean was a clause of the sentence (`… — did you mean `name`?`) and
-/// a diagnostic pointed at one place, so a renderer that took the message and
-/// the span took everything. Both moved into fields, and this file's own
-/// `run_db_wired_fixture` says what that costs if the renderer does not follow:
+/// A did-you-mean and a diagnostic's other places are fields, not clauses of
+/// the sentence, so a renderer that takes only the message and the span drops
+/// them — and this file's own `run_db_wired_fixture` says what that costs:
 /// «the suggestions would vanish and the snapshots would record the absence as
 /// the new truth». `did_you_mean_short_name_one_char` and
 /// `did_you_mean_unrelated_no_suggestion` are a PAIR — one suggests and one
@@ -250,7 +239,7 @@ fn run_db_wired_fixture(bucket: &str, name: &str) -> String {
     // Introspection cannot run here — `fossil-hir` is WASM-clean and has no
     // `DuckDB`, and these directories have no CSV to introspect anyway. So the
     // host registers what an introspection WOULD have found, which is exactly
-    // what the browser's `registerProfile` does before a compile.
+    // what a host's `program.describe` does before a compile.
     let uris: Vec<String> = def_map(&db, file)
         .sources(&db)
         .iter()
@@ -347,6 +336,7 @@ fn run_shape_fixture(bucket: &str, document: &Shape, rejections: &[Rejection]) -
         document,
         rejections.to_vec(),
         smol_str::SmolStr::from("person.shex"),
+        None,
     );
     if resolved.constraints.is_empty() {
         let _ = writeln!(
@@ -357,9 +347,8 @@ fn run_shape_fixture(bucket: &str, document: &Shape, rejections: &[Rejection]) -
         let _ = writeln!(out, "resolved constraints:");
         for c in &resolved.constraints {
             // `(any)` is the document declining to narrow the value, and the
-            // checker now reads it that way: no expected type, cardinality
-            // still enforced. It used to become `Iri` — the narrowest type
-            // there is — in `check_property`.
+            // checker reads it that way: no expected type, cardinality still
+            // enforced.
             let ty_text = c
                 .value_ty
                 .map_or_else(|| "(any)".to_string(), |t| render_ty_kind(&db, t.kind(&db)));
@@ -396,18 +385,15 @@ fn run_shape_fixture(bucket: &str, document: &Shape, rejections: &[Rejection]) -
         );
         // The arguments are production's, in production's order: the MAPPING
         // name, the shape, the SOURCE BINDING the mapping reads, the subject
-        // template. The third one is not the first — production passed
-        // `base_name` for both and emitted `Contact1 : Contact from Contact`,
-        // a `from` clause naming the mapping being split. This corpus could not
-        // see it because it never went through the production call;
+        // template. The third one is not the first — passing the mapping name
+        // for both would emit a `from` clause naming the mapping being split.
+        // This corpus does not go through the production call;
         // `check_tests::a_disjunction_rejection_attaches_to_the_consuming_mapping`
         // does, and pins the distinction.
         //
-        // The second argument was `"ex:Contact"` and the fourth
-        // `` "`${ex:}u/${.id}`" ``. A mapping header names a bound SHAPE, not a
-        // CURIE, and an identity is a quoted string with `{expr}` holes — so
-        // both spellings are what the corpus writes now, and the header is the
-        // bare `Contact` a `type { Contact } := …` binding introduces.
+        // A mapping header names a bound SHAPE, not a CURIE, and an identity is
+        // a quoted string with `{expr}` holes, so the header is the bare
+        // `Contact` a `type { Contact } := …` binding introduces.
         let suggestion = render_split_suggestion(
             "Contact",
             "Contact",
@@ -477,9 +463,8 @@ fn backward_check_type_mismatch_two_span() {
 }
 
 /// A predicate the document mentions and does not narrow. It renders `(any)`,
-/// and `(any)` is what the checker now enforces — nothing. This is the fixture
-/// the `TyKind::Iri` default made impossible to write down: under it, this
-/// column expected the narrowest type in the lattice.
+/// and `(any)` is what the checker enforces — nothing, rather than the
+/// narrowest type in the lattice.
 #[test]
 fn backward_check_an_un_narrowed_predicate_expects_nothing() {
     let document = shape(
@@ -517,17 +502,10 @@ fn disjunction_rejection_three_branches() {
 }
 
 // ===== Bucket 4: Implicit Closure Synthesis (diagnostic shape) ==============
-// This block was written when `HirExpr` was a leaf surface with no `Call`, and
-// concluded that implicit closure synthesis was unreachable through a .fossil
-// source + typecheck_mapping. `HirExpr::Call` EXISTS now (`lower.rs`), so the
-// premise is stale and the conclusion is unverified — do not read the next
-// sentence as a measurement. The closure-synthesis algorithm and its rendering
-// are proven in-crate (crates/fossil-hir/src/check_tests.rs). These corpus
-// fixtures lock the reachable
-// surface: did-you-mean firing on a body column reference that WILL live inside
-// a synthesised closure once the surface lambda form lands. (It said `FieldRef`
-// — the leading-dot node. There is no `FieldRef`: every reference is qualified,
-// and this fixture writes `users.aeg`.)
+// This fixture locks did-you-mean firing on a qualified body column
+// reference, `users.aeg` — the reference a synthesised closure would hold once
+// a surface lambda form exists. Whether closure synthesis is reachable through
+// a `.fossil` source is not measured here.
 
 #[test]
 fn implicit_closure_synthesis_field_typo() {
@@ -556,21 +534,18 @@ fn did_you_mean_unrelated_no_suggestion() {
 // ===== SC#4 second-order check: the generated split suggestion compiles ======
 
 /// The suggestion is Fossil source the compiler emits, so the compiler has to
-/// accept it back. It did not, silently, until the property-key lowering learnt
-/// the `<absolute-iri>` form: every generated property line was dropped, and
-/// this test still passed because the `@subject =` line kept the body
-/// non-empty. The `properties().len()` assertion below is what closes that.
+/// accept it back — every line of it. A body that kept only its `@subject =`
+/// line would still be non-empty with every generated property dropped, so the
+/// `properties().len()` assertion below is what closes that.
 ///
-/// The `<absolute-iri>` key is itself gone now — a property key is the bare last
-/// segment of a predicate IRI — and the preamble this test wraps the suggestion
-/// in went with the CURIE: it was `prefix ex: <http://example.org/>`, and what
-/// puts a shape name in scope is a `type { … } := io.shex("…")` binding over a
-/// registered document. The claim is unchanged: whatever the renderer writes,
-/// the parser and the lowering take it back, every line of it.
+/// A property key is the bare last segment of a predicate IRI, and what puts a
+/// shape name in scope is a `type { … } := io.shex("…")` binding over a
+/// registered document, which is the preamble this test wraps the suggestion
+/// in.
 /// A branch whose predicates the decoder could not name gets a line telling the
-/// author to fill it in, and that line is a fossil comment: it was `# TODO:`,
-/// which the lexer refuses, so applying the quick fix left a file that did not
-/// parse.
+/// author to fill it in, and that line is a fossil comment: `# TODO:` is
+/// refused by the lexer, so applying the quick fix would leave a file that does
+/// not parse.
 #[test]
 fn a_split_branch_with_no_predicate_still_parses() {
     let suggestion = render_split_suggestion(
@@ -693,7 +668,7 @@ fn the_generated_split_suggestion_compiles() {
 
 // ===== Guard: the harness can actually resolve a shape document =============
 
-/// Both locks that made a `.shex` next to a fixture invisible, asserted
+/// Both locks that would make a `.shex` next to a fixture invisible, asserted
 /// separately, because either one alone is enough and they fail identically.
 ///
 /// # What this proves
@@ -708,16 +683,14 @@ fn the_generated_split_suggestion_compiles() {
 /// # What it CANNOT prove
 ///
 /// That the checker resolves a document end-to-end. It asserts that the harness
-/// is no longer the reason it cannot. The other half — a fixture that NAMES one
-/// — was outstanding while the corpus was written in the retired surface, where
-/// a shape was a CURIE against a vocabulary declaration and there was nothing to
-/// name; every Db-wired fixture now carries a `person.shex` beside it and a
+/// is not the reason it cannot. The other half — a fixture that NAMES one —
+/// is the corpus: every Db-wired fixture carries a `person.shex` beside it and a
 /// `type { … } := io.shex("…")` line above the mapping, and the snapshots show
 /// what a resolved shape does to the diagnostics: it removes them.
 ///
 /// It also cannot prove the decoder is a real one. It is not: the line format
 /// exists so this crate can test against a resolved shape without naming a
-/// schema language, which is the cut `0e6898d` made.
+/// schema language.
 #[test]
 fn the_harness_installs_a_decoder_and_registers_the_document() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/diagnostics/harness");

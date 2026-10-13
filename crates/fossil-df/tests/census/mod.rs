@@ -1,15 +1,14 @@
 //! What the compiler UNDERSTOOD from a program — the reading, not the verdict.
 //!
 //! A check answers «is anything wrong», and a program can be
-//! entirely right about nothing. It was built for a hole `check` could not see —
-//! a property whose right-hand side the lowering cannot read, dropped in silence
-//! — and that hole is closed: every refusal path in `lower_property` and
+//! entirely right about nothing. Every refusal path in `lower_property` and
 //! `lower_expr` diagnoses before returning `None`, and the drain in
-//! [`fossil_mir::program_diagnostics`] carries it to the editor and the browser.
+//! [`fossil_mir::program_diagnostics`] carries it to the editor and the browser
+//! — so a property whose right-hand side the lowering cannot read is not
+//! dropped in silence.
 //!
-//! What is left is not a capability, it is a **cross-check**: proof, per
-//! program, that written == lowered, which would catch a FUTURE silent arm the
-//! way nothing caught the last one. That is conformance-harness machinery, its
+//! The census is a **cross-check** on that: proof, per program, that written ==
+//! lowered, which catches a silent arm a check cannot see. That is conformance-harness machinery, its
 //! only consumer is [`super`], and it is why this is a test module rather than
 //! a crate.
 //!

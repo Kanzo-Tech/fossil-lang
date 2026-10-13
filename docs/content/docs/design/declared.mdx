@@ -140,6 +140,22 @@ set of those conversions, and the page that lists it is generated from what has 
 **What would reverse it:** an RDF concept Fossil needs that rudof does not model, or a rudof release
 whose types move under us faster than our own table would.
 
+## The editor asks the type where it lives
+
+Hover, completion and go-to-definition answer a declared type as they answer an imported one,
+because none of them asks which kind it is: each reads the mapping's resolved type, and the
+resolved type knows the file it is declared in — the program, or the document — and the span of its
+name and of each field. A declaration's span is a fact of the declaration; whether a diagnostic
+draws a second label at it is the diagnostic's call, and it does not when the declaration is in the
+file it is already underlining (`crates/fossil-hir/src/shapes.rs, label_at`).
+
+*Held by* `crates/fossil-ide/tests/declared.rs`, "the_key_position_offers_a_declared_types_fields",
+"a_keys_hover_shows_the_declared_fields_type", "the_type_name_goes_to_its_declaration",
+"a_key_goes_to_its_field".
+
+**What would reverse it:** an editor question whose answer differs between a declared and an
+imported type. Then the difference is a field of the resolved type, never a branch in the editor.
+
 ## The catalogue keeps only what runs
 
 The same review removes names that exist and run nothing, or say what another name already says.

@@ -1,14 +1,16 @@
 /**
- * @fossil-lang/profile — what the sources a program reads are, read on the host's DuckDB.
+ * What the sources a program reads are, read on the host's DuckDB.
  *
  * Which sources a program reads is fossil's answer (`FossilProgram.inputs`), with every `@conn/path`
- * expanded into a location and the connection it goes through. This package reads each one under
- * the credential the host vends for that connection (`@fossil-lang/storage`), and runs
- * `fossil-profile`'s plan on the host's engine (`runProfiler`, `@fossil-lang/wasm`): the columns and
- * their types, and — unless the host asks for types alone — the counts, candidate keys, inclusions
- * between sources and a sample. The plan is Rust, the same one `fossil-df`'s tests run on native
- * DuckDB, so only the engine differs. The engine is the host's, which is why
- * DuckDB-WASM is not a peer.
+ * expanded into a location and the connection it goes through. Each one is read under the
+ * credential the host vends for that connection (`@fossil-lang/storage`), and `fossil-profile`'s
+ * plan runs on the host's engine ({@link runProfiler}): the columns and their types, and — unless
+ * the host asks for types alone — the counts, candidate keys, inclusions between sources and a
+ * sample. The plan is Rust, the same one `fossil-df`'s tests run on native DuckDB, so only the
+ * engine differs. The engine is the host's, which is why DuckDB-WASM is not a peer.
+ *
+ * `FossilProgram.describe` is this over the program's own inputs; {@link profile} is it over sources
+ * a host names before there is a program — the files an assistant is shown.
  */
 
 import { mount, type Mount } from "@fossil-lang/storage";
@@ -17,17 +19,17 @@ import {
   isFossilError,
   type Engine,
   type Host,
-  type InferredDescriptor,
   type Input,
-  type Problem,
   type Profile,
+  type Profiled,
   type ProfileOptions,
   type ProfileSource,
+  type UndescribedSource,
 } from "@fossil-lang/types";
 import { attachCause } from "@fossil-lang/types/internal";
-import { runProfiler, type ProfileRows } from "@fossil-lang/wasm";
 
 import { NATIVE_ROWS, type NativeRow } from "./catalogue.generated.js";
+import { runProfiler, type ProfileRows } from "./profile.js";
 
 /** A data input a host can DESCRIBE — the rows `catalogue.bnf` gives a `reads native <fn>`. A
  *  materialised row (`io.rdf`) takes its schema from its shape instead. */
@@ -56,20 +58,6 @@ export interface ProfileIO {
   signal?: AbortSignal;
 }
 
-/** A source the profile could not describe, and why. */
-export interface UndescribedSource {
-  source: Input;
-  problem: Problem;
-}
-
-/** What `profile` answers: the profile, and the two halves `FossilProgram.registerProfile` takes. */
-export interface Profiled {
-  profile: Profile;
-  /** Each described source's columns, keyed by what the program wrote, in `inputs` order. */
-  descriptors: InferredDescriptor[];
-  undescribed: UndescribedSource[];
-}
-
 /** An engine's answer as the plan reads it: every cell its text, or `null`. */
 function rowsOf(table: Awaited<ReturnType<Engine["query"]>>): ProfileRows {
   const columns = table.schema.fields.map((f) => table.getChild(f.name));
@@ -88,8 +76,7 @@ function rowsOf(table: Awaited<ReturnType<Engine["query"]>>): ProfileRows {
  * Best-effort: a source the host vends nothing for, or one DuckDB cannot describe, is skipped, never
  * thrown, and answered in `undescribed` with its problem — the editor degrades to no field
  * completion for that source. A source with no connection is read as it is only when it is a public
- * `http(s)` URL. A host hands the result to `FossilProgram.registerProfile`: the descriptors type the
- * program, and each undescribed source is a warning of `diagnostics` at its call.
+ * `http(s)` URL.
  *
  * @throws {FossilError} only what giving the credentials back raised; an abort rejects with the
  *   signal's reason.

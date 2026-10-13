@@ -23,7 +23,7 @@ own errors excluded:
 | `fossil-storage-wasm` and `@fossil-lang/storage` | 10 | 0 |
 | `fossil-wasm` — the workspace behind `@fossil-lang/wasm` | 5 | 0 |
 | `@fossil-lang/executor` | 1 | 0 |
-| `@fossil-lang/profile` (reaches a host only through `onWarn`) | 1 | 0 |
+| `profile` in `@fossil-lang/wasm` (reaches a host only through `onWarn`) | 1 | 0 |
 | `@fossil-lang/corpus` — `CorpusManifestError`, `CorpusReadError`, one `TypeError` | 17 | 17, by class — and then by message |
 | **Total** | **71** | **18** |
 
@@ -332,7 +332,7 @@ codes above (`provider/unknown`, `provider/wrong-capability`, `document/not-regi
 
 | Area | Codes | From |
 | --- | --- | --- |
-| `run` (4) | `over-budget`, `does-not-compile`, `destination-uncovered`, `too-large` | `RunError`, `refuse_if_poisoned`, the destination check, the numbering of `dense_id` |
+| `run` (3) | `over-budget`, `does-not-compile`, `too-large` | `RunError`, `refuse_if_poisoned`, the numbering of `dense_id` |
 | `shape` (+1) | `more-than-one-output` | the executor's descriptor |
 | `document` (+1) | `unread` | the executor's `run`, over the documents it could not read |
 | `source` (2) | `not-found`, `unparseable` | a CSV, JSON or Parquet source that names no file; the RDF sources a run decodes |

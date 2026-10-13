@@ -213,6 +213,46 @@ SAS URL — and there is no glob. No reader of fossil globs: a corpus's manifest
 The asymmetry stays inside `@fossil-lang/storage`; a reader names a location and is told what SQL
 calls it.
 
+## A run: where it reads, where it writes, and how much
+
+`run` is one door with **two independent axes and a limit**, and each is data rather than a second
+function:
+
+```ts
+await run(program, { host, into: { job } });            // read through the host, write the job's corpus
+await run(program, { host, into: 'memory', limit: 200 }); // read through the host, answer a sample
+await run(program, { files, path });                      // bytes in hand, answered in memory
+```
+
+- **Reads** are `host` — `read` vended per connection, `@conn` expanded, a source read by range
+  requests — or `files` and `path`, every document and source as bytes by its location, for a host
+  with no storage.
+- **Writes** are `into`: `{ job }` is the job's cloud store, reached through the `write` credential
+  vended on it, and the run answers its `RunReport`; `'memory'` is an `object_store` `InMemory`, and
+  the run answers `{ report, files }`. The two values are one-to-one with the two stores, and
+  `fossil_df::Output` is the same enum — `Memory` or `Storage { job }`. Into memory, no `write`
+  credential is asked for: a host that may only read can still preview. With `files`, `into` is
+  `'memory'` and `{ job }` is refused as `api/invalid-argument` — in the types and at run time —
+  because there is no host to vend the write. With `host`, `into` has no default. The run chooses
+  its own prefix from `into`, so there is no destination a store fails to cover, and no error code
+  for one.
+- **`limit`** is the most rows read from each source scan, applied at the scan, before any join. So
+  an edge whose endpoint fell outside the sample resolves no vertex and is **dropped and counted in
+  `report.dropped`**, the count every run already answers for an edge that names no vertex — a
+  sampled run says how much of its graph the sample cut, rather than writing a dangling edge.
+  Applied per scan, a source read by two mappings is the same first rows to both, because the
+  session has one partition and a scan reads in file order.
+
+The names are the things themselves. Not `engine`: fossil's `Engine` is the host's DuckDB that runs
+the profile's queries, and a run never touches it. Not *disk*: the destination is S3 or Azure, and
+the only disk is the one the browser does not have.
+
+**What would reverse it.** An axis that stops being independent — a destination that only some reads
+can reach, beyond the one refusal above — makes the pair a list of modes, and then the modes are
+named. A preview that has to differ from a run by more than its destination and its size — a
+different plan, say — would earn a door of its own; [what was discarded](/docs/design/discarded#the-tooling)
+has that door and the flag that was the other way to spell this.
+
 ## An open question this page does not settle
 
 Whether the *server* of a product embedding fossil is a host in its own right, or the browser host

@@ -21,9 +21,7 @@
 //! # Why `Option<ExprTypeEntry<'db>>` and not `Option<(Ty, Provenance)>`
 //!
 //! A tuple would satisfy Salsa — `(Ty<'db>, Provenance)` is a
-//! [`salsa::SalsaValue`] since 0.28, which it was not as a `salsa::Update`
-//! under 0.26, and that bound is why this was a struct. What keeps it one is
-//! the readers: the hover handler in `fossil-ide` and
+//! [`salsa::SalsaValue`]. What keeps it a struct is the readers: the hover handler in `fossil-ide` and
 //! [`crate::check::compatible`] destructure `ExprTypeEntry { ty, provenance, .. }`
 //! by name.
 //!
@@ -214,7 +212,7 @@ Users : Person from User
     }
 
     /// Property 1 of `hello.fossil` is `name = User.name` — the RHS is a
-    /// qualified reference, where it was the leading-dot `.name`. No descriptor
+    /// qualified reference. No descriptor
     /// is registered for `User`'s URI, so there is no source row to resolve the
     /// field against and no type is synthesised.
     #[test]

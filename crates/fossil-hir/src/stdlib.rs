@@ -4,11 +4,10 @@
 //! # Why it lives in `fossil-hir`
 //!
 //! The checker resolves a `HirExpr::Call` against this catalog: arity, argument
-//! types and the result type all come from here. It used to be its own crate,
-//! `fossil-registry`, which depended on `fossil-hir` for `FnSig` — so the
-//! checker could not read it without a cycle, and for as long as that held, a
-//! call could not be typed at all. The catalog is language surface, so it moved
-//! down, not the checker up.
+//! types and the result type all come from here. A crate of its own would
+//! depend on `fossil-hir` for the signature types, and the checker could not
+//! read it without a cycle. The catalog is language surface, so it sits with
+//! the checker.
 //!
 //! # A row is DATA: receiver + name + signature + lowering
 //!
@@ -24,15 +23,10 @@
 //! plus the queries the checker and the IDE ask of the assembled table. A type
 //! cannot live in the file; the rows cannot live anywhere else.
 //!
-//! This paragraph used to read «Nothing here loads a file yet, and that is
-//! deliberate: what this module owes the loader is a shape it can fill.» The
-//! loader arrived and the shape fitted.
-//!
 //! ## The receiver is the field that ends dispatch-by-string
 //!
-//! `RegistryEntry::name` used to be the whole of the key — the string
-//! `"clean.trim"` — and dispatch by RECEIVER TYPE exists to replace exactly
-//! that. A row now says what it hangs off
+//! `RegistryEntry::name` is not the whole of the key: dispatch is by RECEIVER
+//! TYPE, not by the string `"str.trim"`. A row says what it hangs off
 //! (`Receiver`) and what it is called after the dot
 //! (`RegistryEntry::member`), and both are derived in ONE place,
 //! `split_receiver`, from the dotted name. They are not constructor
@@ -55,17 +49,10 @@
 //! SQL expression and `LoweringKind::Op` names an operator of the algebra, a
 //! closed set — [`crate::stdlib::PlanOp`], and the size of it is not written here or anywhere
 //! else: the enum is the one place that cannot be wrong about how many variants
-//! it has. `Udf` is gone — see [`crate::stdlib::LoweringKind::Expr`] for what that cost and
-//! bought.
-//!
-//! ## `WasmClass` is gone as a CONCEPT
-//!
-//! There was a `WasmClass` field, a `derive_wasm_class` that computed it, a
-//! `NativeUdfOnly` variant and a test asserting `PureSql ⟺ non-Udf`. With no
-//! `Udf` variant the bad state is unrepresentable rather than derived and
-//! checked, so all four go, and `fossil-layout/src/udf.rs` with them. **The
-//! language now runs entirely in the browser**, which is a change of product
-//! and not of housekeeping.
+//! it has. There is no third kind naming a native function
+//! (`/docs/design/discarded`): **the language runs entirely in the browser**,
+//! so a row that only a native engine could run is unrepresentable rather than
+//! classified and checked.
 
 use std::sync::LazyLock;
 
@@ -128,9 +115,8 @@ pub struct FunctionRegistry {
 /// exist (`grammar.bnf`, `PostfixExpr`).
 ///
 /// This is the field that turns dispatch from a string match into a type
-/// question. Before it, `where` / `select` / `join` were productions in the
-/// grammar and everything else was looked up by its dotted spelling, so a new
-/// verb meant a new RULE. With a receiver on every row, **a new verb is a ROW.**
+/// question. With verbs as productions of the grammar, a new verb would mean a
+/// new RULE; with a receiver on every row, **a new verb is a ROW.**
 ///
 /// The three variants are the three things the grammar says can stand on the
 /// left, reduced to what the checker can actually dispatch on:
@@ -243,7 +229,7 @@ impl RegistryEntry {
     /// Beside [`LoweringKind`] rather than inside it: the template stays, and
     /// `sum(%0)` IS the SQL a scalar rendering of this row emits, so the four
     /// are still covered by the guards that bind every template against a real
-    /// `DuckDB`. What was missing is only which operator of the algebra a call
+    /// `DuckDB`. What this adds is only which operator of the algebra a call
     /// becomes when it is written inside a `group_by`.
     ///
     /// `stdlib::tests::every_aggregate_names_a_row` is why this cannot drift
@@ -340,9 +326,8 @@ impl ParamSpec {
 
 /// How many arguments one parameter position takes.
 ///
-/// A position was implicitly [`Self::One`] and nothing could say otherwise, so
-/// `seq.select`'s list of columns was unwritable in a signature and lived in a
-/// hand-written arm instead.
+/// Without it a position is implicitly [`Self::One`], and `seq.select`'s list
+/// of columns cannot be written in a signature.
 ///
 /// # The repetition rule, stated precisely
 ///
@@ -364,7 +349,7 @@ impl ParamSpec {
 /// repetitions do not collide: only `keys` is positional.
 ///
 /// [`assert_repetition_is_last_and_positional`] is the check, and
-/// `FunctionRegistry::stdlib_default` now runs it over every row.
+/// `FunctionRegistry::stdlib_default` runs it over every row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Arity {
     /// Exactly one argument. Every scalar row's every position.
@@ -419,10 +404,7 @@ fn assert_optional_positions_are_last(row: &RegistryEntry) {
 /// last of them.** See [`Arity`] for why the rule is about positional arguments
 /// and not about all of them.
 ///
-/// This is the check [`Arity`]'s doc claimed was already here. Writing it turned
-/// up nothing — every row obeys the rule once the rule is stated correctly —
-/// which is the outcome an assertion should have, and is not an argument for
-/// having left the sentence unbacked.
+/// Every row obeys it; the assertion is what keeps [`Arity`]'s doc backed.
 ///
 /// # Panics
 ///
@@ -448,11 +430,8 @@ fn assert_repetition_is_last_and_positional(row: &RegistryEntry) {
 
 /// What a catalogue row's parameter takes, or what it gives back.
 ///
-/// It was [`ScalarTy`] alone, and the `seq/` rows were written
-/// `p("rows", S::String)` under a comment reading «higher-order arguments
-/// collapse to scalar placeholders in v0.1». They did not collapse; there was
-/// nothing to collapse INTO, because a relation was not a type. It is
-/// [`crate::ty::TyKind::Relation`] now, and these two variants are the rest of
+/// Not [`ScalarTy`] alone: a relation is a type,
+/// [`crate::ty::TyKind::Relation`], and these two variants are the rest of
 /// the notation:
 ///
 /// - [`Self::Rows`] is the relation a verb is a verb OF, and every `seq/` row's
@@ -474,16 +453,12 @@ fn assert_repetition_is_last_and_positional(row: &RegistryEntry) {
 /// names a source binding. Both depend on the receiver exactly as `Predicate`
 /// does, so both are variants here for the reason the ones above are.
 ///
-/// They were absent, and the absence is measurable rather than theoretical. A
-/// relation row's signature said only `rows("rows")` — one parameter, the
-/// receiver — so the rest of what a verb takes had to be written down
-/// somewhere else, and the somewhere else was one hand-written arm per verb in
-/// `crate::lower`. Two things followed. `crates/xtask/src/reference.rs` measured
-/// the first: the reference page INVENTED parameters for `seq.sort`,
-/// `seq.distinct` and `seq.group_by` — `by`, `key`, `desc` — because their
-/// signature had none to print and prose filled the hole. The second is that
-/// arity and named-argument resolution, which [`SigSpec`] exists to do once,
-/// were done a third time per arm in three different wordings.
+/// Without them a relation row's signature says only `rows("rows")` — one
+/// parameter, the receiver — so the rest of what a verb takes has to be
+/// written down somewhere else: the reference page `crates/xtask/src/reference.rs`
+/// generates would have no parameters to print, and arity and named-argument
+/// resolution, which [`SigSpec`] exists to do once, would be done again per
+/// verb.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SigTy {
     /// A value of a scalar type.
@@ -622,8 +597,8 @@ impl std::fmt::Display for ScalarTy {
     }
 }
 
-/// How a stdlib row compiles. TWO variants, and the border between them is the
-/// only one that was ever semantic.
+/// How a stdlib row compiles. TWO variants, and the border between them is
+/// semantic.
 ///
 /// # `Expr` — a scalar SQL expression, written as a template
 ///
@@ -631,46 +606,33 @@ impl std::fmt::Display for ScalarTy {
 /// argument. `trim(%0)`, `CAST(%0 AS BIGINT)`, `%0 || %1`.
 ///
 /// **Why indexed holes and not sequential ones.** A `?`-style placeholder that
-/// consumes the next argument cannot express the two shapes the catalogue
-/// actually contains, and both are load-bearing:
+/// consumes the next argument cannot express two shapes a template may need:
 ///
-/// - a hole appearing **twice** — `core.require` is
-///   `CASE WHEN %0 IS NULL THEN error(…) ELSE %0 END`, one argument read in two
-///   positions. Sequential placeholders would demand two arguments for a
-///   one-argument function;
-/// - a hole appearing **zero** times — `anon.redact` is the literal
-///   `'[REDACTED]'` and ignores what it is given. Sequential placeholders
-///   cannot say "ignore".
+/// - a hole appearing **twice** — `CASE WHEN %0 IS NULL THEN … ELSE %0 END`,
+///   one argument read in two positions. Sequential placeholders would demand
+///   two arguments for a one-argument function;
+/// - a hole appearing **zero** times — a constant that ignores what it is
+///   given. Sequential placeholders cannot say "ignore".
 ///
 /// So a template does NOT determine arity, and must not: [`SigSpec`] does, and
 /// the checker reads it. A hole index outside the signature is a catalogue bug
 /// that `crate::stdlib::tests` catches, not a runtime one.
 ///
 /// **The one shape this notation does not have is the variadic**, and that is a
-/// deliberate hole rather than an oversight. `Concat` was the only variadic
-/// form and it belonged to `core.triple`, which was deleted with the other five
-/// RDF term constructors; `BlankNode` was the only template referring to
-/// something that is not an argument at all (`'_:bnode_' || row_id`) and
-/// belonged to `core.blank`, deleted in the same sweep. Two of the four arity
-/// puzzles this notation had to answer answered themselves by being
-/// unreachable, and the remaining two are the two above. A variadic row needs a
-/// notation and there is no row that needs one.
+/// deliberate hole rather than an oversight: a variadic row needs a notation,
+/// and there is no row that needs one. Nor can a template refer to something
+/// that is not an argument at all.
 ///
 /// # `Op` — an operator of the algebra
 ///
 /// [`PlanOp`] cuts at a real seam: it names one of a closed set of operators
-/// that affect the PLAN, not a value. It used to be called `Plan`, after its
-/// effect, rather than after what it names.
+/// that affect the PLAN, not a value.
 ///
-/// # What `Udf` cost, and what deleting it bought
+/// # No third kind
 ///
-/// There was a third kind, `Udf`, naming a native Rust function registered on a
-/// `DuckDB` connection. Eight rows used it. Two are deleted from the language
-/// outright because they cannot be done honestly without Rust — `anon.hmac`
-/// (HMAC needs a key schedule and `DuckDB` has `sha256` and no HMAC) and
-/// `clean.normalize_unicode` (`DuckDB` ships `nfc_normalize`, which is NFC and
-/// nothing else). The other six are templates here, and each one's delta
-/// against its Rust predecessor was measured, not assumed.
+/// A kind naming a native function registered on a `DuckDB` connection would
+/// run on no browser engine (`/docs/design/discarded`). A function that cannot
+/// be written as a template is not in the language.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LoweringKind {
     /// A scalar SQL expression template with `%N` argument holes.
@@ -681,14 +643,12 @@ pub enum LoweringKind {
 
 /// The aggregate a `math/` row becomes inside a `group_by`.
 ///
-/// It lived in `fossil-mir`, as an enum with a `Count` variant nothing
-/// constructed, beside a `math/` half of this catalogue that said nothing about
-/// being aggregates at all — «`math.sum`, `math.avg`, `math.min` and `math.max`
-/// are the four that go inside `aggregate`. Nothing in the rows says so.»
-/// [`RegistryEntry::agg_fn`] is the row saying so, and this is what it answers.
+/// `math.sum`, `math.avg`, `math.min` and `math.max` are the four that go
+/// inside `aggregate`, and [`RegistryEntry::agg_fn`] is the row saying so; this
+/// is what it answers.
 ///
 /// There is no `Count`: no row of the catalogue is a per-group count, and a
-/// variant nothing can build is what `Op::Distinct`'s `by` was.
+/// variant nothing can build is a promise nothing keeps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum AggFn {
     Sum,
@@ -735,8 +695,8 @@ pub enum PlanOp {
 // A source's name, the extensions it accepts and what it does with them are
 // one table, `fossil_base::providers::Provider`, and it cannot live here even
 // if it wanted to: a row that reads TYPES carries a `fn` into a schema
-// language, and `fossil-hir` may not link one (`0e6898d`). It comes from the
-// host, through `System::providers`.
+// language, and the table is the host's. It comes from the host, through
+// `System::providers`.
 //
 // `FunctionRegistry` below is NOT that table and does not merge into it: it
 // carries call SIGNATURES for the checker, and `io.csv` appears in both for the
@@ -812,9 +772,8 @@ impl FunctionRegistry {
 
     /// Is `head` the left half of any catalogued name?
     ///
-    /// What separates `str.slug` from `orders.user_id` used to be an
-    /// open-coded `starts_with(&format!("{head}."))` scan in the lowering. It is
-    /// a question about the catalogue, so it lives here.
+    /// What separates `str.slug` from `orders.user_id`. It is a question about
+    /// the catalogue, so it lives here and not in the lowering.
     #[must_use]
     pub fn is_catalogued_head(&self, head: &str) -> bool {
         let prefix = format!("{head}.");

@@ -44,14 +44,9 @@ use crate::position::{LineIndex, line_index, range, span};
 /// each is matched against the two action triggers by the STRUCTURED fields it
 /// carries — `did_you_mean` and `suggestion_source`. Only diagnostics whose span
 /// intersects `range` are considered, mirroring the LSP "actions for the current
-/// selection" contract.
-///
-/// It said THREE, and named «the `undeclared prefix` message + span» as the
-/// middle one. Prefixes left the language — `grammar.bnf` carries the tombstone
-/// («`prefix` was a keyword and is gone with the CURIE») — and the action went
-/// with them; the two comments below are what is left of it. The stale third
-/// trigger was also the only one that was not a structured field, which is the
-/// other half of why it is gone: it parsed a message.
+/// selection" contract. A trigger is a structured field and never a message
+/// read back: a message is prose, and an action that parsed one would break
+/// the day the wording changed.
 ///
 /// `range` is a UTF-16 LSP range; all produced edits are UTF-16 too.
 #[must_use]
@@ -103,13 +98,6 @@ fn did_you_mean_action(
         true,
     ))
 }
-
-// `auto_import_action` was action 2: an «undeclared prefix» diagnostic yielded a
-// top-of-file `prefix xx: <iri>` insertion, with the canonical IRI for
-// rdf/rdfs/xsd/owl and a `<>` placeholder otherwise. `lower.rs` emits no such
-// diagnostic any more and the line it inserted is not a production, so the
-// action, its `unknown_prefix_name` message parser and the `WELL_KNOWN_PREFIXES`
-// table it read all went together.
 
 /// Action 2: split-mapping. Reads the pre-generated split snippet from
 /// [`fossil_base::Diagnostic::suggestion_source`] (never regenerated) and

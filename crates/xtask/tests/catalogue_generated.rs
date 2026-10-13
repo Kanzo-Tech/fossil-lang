@@ -127,7 +127,7 @@ fn a_new_native_reader_is_a_row_and_nothing_else() {
 
 // ── The round trip ─────────────────────────────────────────────────────────
 //
-// These are what make `fossil-hir` a DEV-dependency rather than a deleted one.
+// These are what make `fossil-hir` a DEV-dependency rather than none at all.
 // `cargo xtask catalogue` generates that crate's stdlib table, so the binary
 // must not link it — a bad emit would stop the tool that fixes it from
 // building. But the emit still has to be PROVEN faithful, and the only way to
@@ -140,7 +140,7 @@ fn a_new_native_reader_is_a_row_and_nothing_else() {
 /// The one guard that would catch the emitter dropping a row, reordering a
 /// parameter, losing an arity or a type, or mangling a template.
 /// `str.strip_html` is what makes the last one concrete: its template carries
-/// double quotes, and the line scanner this replaces would have truncated it
+/// double quotes, and a line scanner splitting on `"` would truncate it
 /// silently rather than failing.
 ///
 /// The comparisons are derived rather than restated. An `Arity` and a `SigTy`
@@ -278,10 +278,9 @@ fn the_receiver_rule_agrees_with_fossil_hir() {
 /// than an oversight — so it is pinned.
 ///
 /// They give back a shape document, which `SigTy` has no spelling for. Writing
-/// `-> Rows` to fill the column would repeat the defect the `add`/`add_verb`
-/// split once had, where three constructors of relations declared `String`.
-/// Every row that reads DATA does carry one, `io.rdf` included — which is what
-/// the fold fixed: it had none, so writing it in a value position went
+/// `-> Rows` to fill the column would be as wrong as a constructor of relations
+/// declaring `String`. Every row that reads DATA does carry one, `io.rdf`
+/// included — without it, writing it in a value position would go
 /// undiagnosed.
 #[test]
 fn exactly_the_data_rows_carry_a_signature() {

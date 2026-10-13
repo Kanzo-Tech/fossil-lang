@@ -1,6 +1,7 @@
 //! Native gate for the executor: a CSV program read through a [`Storage`] of
 //! in-memory stores runs end-to-end on `DataFusion`, writes the `fossil/1`
-//! corpus under its destination, and answers a `RunReport`.
+//! corpus into memory, and answers a `RunReport` and the files. Where it
+//! writes (`Output`) and how much it reads (`limit`) are held here too.
 //! `packages/executor/tests/execute.test.ts` drives the same core through the
 //! `#[wasm_bindgen]` wrapper under Node, which is where wasm-bindgen-futures is
 //! proved.
@@ -12,46 +13,25 @@
 //! name is bound by name against it, and a run that skipped it writes no
 //! type IRI.
 
-#![allow(clippy::literal_string_with_formatting_args)]
+// The executor is single-threaded, so its futures are not `Send` and need not be.
+#![allow(clippy::literal_string_with_formatting_args, clippy::future_not_send)]
 
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use fossil_df::Executor;
 use fossil_df::corpus::manifest::Manifest;
-use fossil_storage::{Access, Host, Scope, Storage, StorageCredential};
-use futures::TryStreamExt;
-use futures::future::BoxFuture;
+use fossil_df::executor::MEMORY;
+use fossil_df::{Executor, Output, Ran, RunReport};
+use fossil_storage::{Access, Host, Scope, Storage};
 use object_store::memory::InMemory;
 use object_store::path::Path;
 use object_store::{ObjectStore, ObjectStoreExt};
 
-const DEST: &str = "s3://jobs/run-1/";
+mod support;
 
-#[derive(Debug)]
-struct NoHost;
-
-impl Host for NoHost {
-    fn connections(
-        &self,
-    ) -> BoxFuture<'static, Result<HashMap<String, String>, fossil_storage::HostError>> {
-        Box::pin(async { Ok(HashMap::new()) })
-    }
-    fn credentials(
-        &self,
-        _: &Scope,
-        _: Access,
-    ) -> BoxFuture<'static, Result<Vec<StorageCredential>, fossil_storage::HostError>> {
-        Box::pin(async {
-            Err(fossil_graph_schema::Foreign::named("Error", "these tests vend nothing").into())
-        })
-    }
-}
-
-/// A storage holding each `(location, fixture)` in memory, and the store the
-/// run writes into.
-async fn storage(sources: &[(&str, &str)]) -> (Storage, Arc<InMemory>) {
-    let mut storage = Storage::new(Arc::new(NoHost));
+/// A storage holding each `(location, fixture)` in memory, under `host`.
+async fn storage_under(host: Arc<dyn Host>, sources: &[(&str, &str)]) -> Storage {
+    let mut storage = Storage::new(host);
     let data = Arc::new(InMemory::new());
     storage
         .with_store(
@@ -68,34 +48,33 @@ async fn storage(sources: &[(&str, &str)]) -> (Storage, Arc<InMemory>) {
             .await
             .expect("stage");
     }
-    let out = Arc::new(InMemory::new());
     storage
-        .with_store(DEST, Arc::clone(&out) as Arc<dyn ObjectStore>)
-        .expect("route");
-    (storage, out)
 }
 
-/// What the run wrote, by path under [`DEST`].
-async fn written(out: &InMemory) -> HashMap<String, Vec<u8>> {
-    let listed: Vec<_> = out.list(None).try_collect().await.expect("list");
-    let mut files = HashMap::new();
-    for meta in listed {
-        let bytes = out
-            .get(&meta.location)
-            .await
-            .expect("get")
-            .bytes()
-            .await
-            .expect("bytes");
-        let path = meta
-            .location
-            .as_ref()
-            .strip_prefix("run-1/")
-            .expect("under DEST")
-            .to_string();
-        files.insert(path, bytes.to_vec());
-    }
-    files
+/// [`storage_under`] a host that vends nothing.
+async fn storage(sources: &[(&str, &str)]) -> Storage {
+    storage_under(Arc::new(support::NoHost), sources).await
+}
+
+/// Run `exec` into memory, reading at most `limit` rows of each source: the
+/// report and every file, by path.
+async fn into_memory(
+    exec: &Executor,
+    storage: &mut Storage,
+    limit: Option<usize>,
+) -> (RunReport, HashMap<String, Vec<u8>>) {
+    let Ran::Memory { report, files } = exec
+        .execute(storage, &Output::Memory, limit)
+        .await
+        .expect("the run")
+    else {
+        panic!("a run into memory answers its files")
+    };
+    let files = files
+        .into_iter()
+        .map(|f| (f.path, f.bytes.to_vec()))
+        .collect();
+    (report, files)
 }
 
 /// The document every program below names.
@@ -131,12 +110,9 @@ fn manifest(files: &HashMap<String, Vec<u8>>) -> Manifest {
 
 #[tokio::test]
 async fn csv_program_runs_through_the_storage_seam() {
-    let (mut storage, out) = storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
-    let report = executor(PROGRAM, BTreeMap::new())
-        .execute(&mut storage, DEST)
-        .await
-        .expect("executor runs the CSV program");
-    let files = written(&out).await;
+    let mut storage = storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
+    let (report, files) =
+        into_memory(&executor(PROGRAM, BTreeMap::new()), &mut storage, None).await;
 
     // One table per vertex type and the manifest over it; nothing else.
     let mut paths: Vec<&str> = files.keys().map(String::as_str).collect();
@@ -144,7 +120,7 @@ async fn csv_program_runs_through_the_storage_seam() {
     assert_eq!(paths, ["fossil.json", "vertex/Person.parquet"]);
     assert!(!files["vertex/Person.parquet"].is_empty());
 
-    assert_eq!(report.location, DEST);
+    assert_eq!(report.location, MEMORY);
     assert!(report.dropped.is_empty(), "no relation, nothing to drop");
 
     // 3 users → 3 vertices.
@@ -202,19 +178,16 @@ fn inputs_list_each_distinct_source_with_its_format() {
 /// manifest is not in it: it is `fossil.json`, beside the tables it names.
 #[tokio::test]
 async fn the_report_names_the_destination_and_the_drops() {
-    let (mut storage, out) = storage(&[
-        ("https://data.example.com/users.csv", "users.csv"),
-        ("https://data.example.com/orders.csv", "orders.csv"),
-    ])
+    let mut storage = two_sources().await;
+    let (report, files) = into_memory(
+        &executor(TWO_SOURCE_PROGRAM, BTreeMap::new()),
+        &mut storage,
+        None,
+    )
     .await;
-    let report = executor(TWO_SOURCE_PROGRAM, BTreeMap::new())
-        .execute(&mut storage, DEST)
-        .await
-        .expect("executor runs the two-source program");
-    let files = written(&out).await;
     let m = manifest(&files);
 
-    assert_eq!(report.location, DEST);
+    assert_eq!(report.location, MEMORY);
     let tables: Vec<&str> = m.edge_tables.iter().map(|e| e.name.as_str()).collect();
     let dropped: Vec<&str> = report.dropped.iter().map(|d| d.table.as_str()).collect();
     assert_eq!(
@@ -245,35 +218,140 @@ Person : Person from users
     name = users.name
 ";
 
-/// A destination no store covers is refused before anything runs: the output
-/// has nowhere to go, and a run that wrote nothing would still report.
+/// Both sources of [`TWO_SOURCE_PROGRAM`], under a host that vends nothing.
+async fn two_sources() -> Storage {
+    storage(&[
+        ("https://data.example.com/users.csv", "users.csv"),
+        ("https://data.example.com/orders.csv", "orders.csv"),
+    ])
+    .await
+}
+
+/// **`limit` caps each source scan, not the graph.** Three users and four
+/// orders, read two rows each: two vertices of each type.
 #[tokio::test]
-async fn a_destination_no_store_covers_is_refused() {
-    let (mut storage, _) = storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
+async fn a_limit_reads_at_most_that_many_rows_of_each_source() {
+    let mut storage = two_sources().await;
+    let (_, files) = into_memory(
+        &executor(TWO_SOURCE_PROGRAM, BTreeMap::new()),
+        &mut storage,
+        Some(2),
+    )
+    .await;
+    let counts: Vec<(String, u64)> = manifest(&files)
+        .vertex_tables
+        .iter()
+        .map(|v| (v.name.clone(), v.record_count))
+        .collect();
+    assert_eq!(
+        counts,
+        [("Person".to_string(), 2), ("Order".to_string(), 2)],
+        "each source read two rows"
+    );
+}
+
+/// **An edge whose endpoint fell outside the sample is dropped and counted.**
+/// The first two orders were placed by users 3 and 1, and the first two users
+/// are 1 and 2: the edge to user 3 resolves no vertex, and the report says so.
+#[tokio::test]
+async fn an_edge_to_a_vertex_outside_the_sample_is_dropped_and_counted() {
+    let mut storage = two_sources().await;
+    let (report, files) = into_memory(
+        &executor(TWO_SOURCE_PROGRAM, BTreeMap::new()),
+        &mut storage,
+        Some(2),
+    )
+    .await;
+    assert_eq!(
+        report.dropped,
+        [fossil_df::EdgeDrops {
+            table: "Order_placedBy_Person".to_string(),
+            dropped: 1,
+        }]
+    );
+    let m = manifest(&files);
+    let edge = m
+        .edge_tables
+        .iter()
+        .find(|e| e.name == "Order_placedBy_Person")
+        .expect("the relation");
+    assert_eq!(edge.record_count, 1, "only the order by user 1 is an edge");
+}
+
+/// **Into memory, a run asks its host for no `write`.** The sources are read
+/// through the storage the host's run is handed; the corpus goes into an
+/// `InMemory`, and a host that may only read can still preview.
+///
+/// What this cannot prove: that a source is read through a credential the host
+/// vends — a store built from one is a store with a network behind it. The
+/// sources are routed by hand, and `packages/executor/tests/run.test.ts` reads
+/// them through vended `read` against a stubbed S3.
+#[tokio::test]
+async fn a_run_into_memory_asks_the_host_for_no_write() {
+    let host = Arc::new(support::Vending::new(1));
+    let mut storage = storage_under(
+        Arc::clone(&host) as Arc<dyn Host>,
+        &[("https://data.example.com/users.csv", "users.csv")],
+    )
+    .await;
+    let (report, files) =
+        into_memory(&executor(PROGRAM, BTreeMap::new()), &mut storage, None).await;
+    assert_eq!(report.location, MEMORY);
+    assert!(files.contains_key("fossil.json"));
+    assert!(
+        host.asked()
+            .iter()
+            .all(|(_, access)| *access != Access::Write),
+        "{:?}",
+        host.asked()
+    );
+}
+
+/// **Into a job, a run asks for `write` on it first, and writes under exactly
+/// one prefix.** A host that vends two is refused before a source is read.
+#[tokio::test]
+async fn a_run_into_a_job_vended_two_prefixes_is_refused() {
+    let host = Arc::new(support::Vending::new(2));
+    let mut storage = storage_under(
+        Arc::clone(&host) as Arc<dyn Host>,
+        &[("https://data.example.com/users.csv", "users.csv")],
+    )
+    .await;
     let refused = executor(PROGRAM, BTreeMap::new())
-        .execute(&mut storage, "s3://elsewhere/run-2/")
+        .execute(
+            &mut storage,
+            &Output::Storage {
+                job: "run-1".to_string(),
+            },
+            None,
+        )
         .await
         .expect_err("refused");
     assert_eq!(
         refused.problem,
-        fossil_graph_schema::Problem::DestinationUncovered {
-            destination: "s3://elsewhere/run-2/".to_string()
+        fossil_graph_schema::Problem::AmbiguousPrefix {
+            scope: "job run-1".to_string(),
+            count: 2,
         }
+    );
+    assert_eq!(
+        host.asked(),
+        [(Scope::Job("run-1".to_string()), Access::Write)]
     );
 }
 
 /// A program that does not compile is refused as `run/does-not-compile`, and
-/// the failure carries the diagnostics — the executor used to answer a sentence
-/// telling the host to see diagnostics it had no way to reach.
+/// the failure carries the diagnostics, not a sentence telling the host to see
+/// diagnostics it has no way to reach.
 #[tokio::test]
 async fn a_program_that_does_not_compile_fails_with_its_diagnostics() {
     let broken = PROGRAM.replace(
         "    @subject = \"https://example.org/person/{users.id}\"\n",
         "",
     );
-    let (mut storage, _) = storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
+    let mut storage = storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
     let refused = executor(&broken, BTreeMap::new())
-        .execute(&mut storage, DEST)
+        .execute(&mut storage, &Output::Memory, None)
         .await
         .expect_err("a program with no subject does not run");
     assert_eq!(
@@ -290,8 +368,8 @@ async fn a_program_that_does_not_compile_fails_with_its_diagnostics() {
 
 /// **A source whose file is not in the store fails as `source/not-found`,
 /// naming the file.** `DataFusion` reads a location that matches nothing as a
-/// relation with no columns, and the run used to fail at the first column the
-/// program read — keasy's unseeded LDBC job answered `engine/failed` with
+/// relation with no columns, so without the check the run would fail at the
+/// first column the program read — `engine/failed` with
 /// `Schema error: No field named "PlaceRow".id`, which reads as a program
 /// mistake. One spelling per object-store format, the CSV one as keasy writes
 /// it: through a connection, with a delimiter.
@@ -312,8 +390,7 @@ async fn a_source_that_names_no_file_fails_as_source_not_found() {
         ),
     ] {
         let program = PROGRAM.replace("io.csv(\"https://data.example.com/users.csv\")", source);
-        let (mut storage, _) =
-            storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
+        let mut storage = storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
         let refused = executor(
             &program,
             BTreeMap::from([(
@@ -321,7 +398,7 @@ async fn a_source_that_names_no_file_fails_as_source_not_found() {
                 "https://data.example.com/ldbc".to_string(),
             )]),
         )
-        .execute(&mut storage, DEST)
+        .execute(&mut storage, &Output::Memory, None)
         .await
         .expect_err("a source with no file does not run");
         assert_eq!(
@@ -355,11 +432,9 @@ async fn at_conn_source_alias_resolves_through_the_ref_map() {
     assert_eq!(listed[0].location, "https://data.example.com/users.csv");
     assert_eq!(listed[0].format.as_deref(), Some("csv"));
 
-    let (mut storage, out) = storage(&[(listed[0].location.as_str(), "users.csv")]).await;
-    exec.execute(&mut storage, DEST)
-        .await
-        .expect("executor runs the @conn-aliased program");
-    let m = manifest(&written(&out).await);
+    let mut storage = storage(&[(listed[0].location.as_str(), "users.csv")]).await;
+    let (_, files) = into_memory(&exec, &mut storage, None).await;
+    let m = manifest(&files);
     let person = m.vertex_tables.iter().find(|v| v.name == "Person");
     assert_eq!(person.map(|v| v.record_count), Some(3));
 }
@@ -419,15 +494,13 @@ Late : Person from users.where(users.id >= 3)
 #[test]
 fn a_union_of_two_mappings_runs_with_no_tokio_runtime() {
     futures::executor::block_on(async {
-        let (mut storage, out) =
-            storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
-        executor(UNION_PROGRAM, BTreeMap::new())
-            .execute(&mut storage, DEST)
-            .await
-            .expect("the union runs on one future");
-        assert_eq!(
-            manifest(&written(&out).await).vertex_tables[0].record_count,
-            3
-        );
+        let mut storage = storage(&[("https://data.example.com/users.csv", "users.csv")]).await;
+        let (_, files) = into_memory(
+            &executor(UNION_PROGRAM, BTreeMap::new()),
+            &mut storage,
+            None,
+        )
+        .await;
+        assert_eq!(manifest(&files).vertex_tables[0].record_count, 3);
     });
 }

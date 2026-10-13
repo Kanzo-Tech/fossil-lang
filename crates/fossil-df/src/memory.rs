@@ -12,29 +12,29 @@
 //!
 //! **Why a bound and not the default.** `DataFusion`'s default pool is
 //! unbounded: it adds every reservation into a `usize` and checks nothing. On
-//! `wasm32` a `usize` is 32 bits, so a run whose reservations summed past
-//! 4 GiB wrapped, and the next `MemoryReservation::split` found less than it
-//! had put in and unwrapped a `None` — `memory_pool/mod.rs:494`, an
-//! `unreachable` trap mid-run, with the run's promise never settled. The shop
-//! program at 200,000 people and 600,000 orders did that. The same run natively
-//! peaked at 5.6 GiB of *accounted* memory and finished in 1.5 s, which is why
-//! only the browser saw it.
+//! `wasm32` a `usize` is 32 bits, so a run whose reservations sum past 4 GiB
+//! wraps, and the next `MemoryReservation::split` finds less than it had put
+//! in and unwraps a `None` — `memory_pool/mod.rs:494`, an `unreachable` trap
+//! mid-run, with the run's promise never settled. The shop program at 200,000
+//! people and 600,000 orders does that under the default. The same run
+//! natively peaks at 5.6 GiB of *accounted* memory and finishes in 1.5 s,
+//! which is why only the browser sees it.
 //!
 //! **Why the accounting was seventy times the data.** An aggregate emits its
 //! groups as one batch and hands it on in `batch_size` slices, and a slice
 //! shares its parent's buffers. `get_record_batch_memory_size` charges a
-//! buffer's whole capacity, so the `ExternalSorter` above the dedup charged
-//! every one of seventy-three slices of `Order` for all 78 MiB of it.
+//! buffer's whole capacity, so the `ExternalSorter` above the dedup would
+//! charge every one of seventy-three slices of `Order` for all 78 MiB of it.
 //! [`Compact`](crate::memory::Compact) puts a
 //! [`CompactExec`](crate::memory::CompactExec) under every operator that holds
 //! its whole input — a sort, and a hash join's build side — and it copies a
 //! batch out of a shared buffer before that operator counts it. The copy is of
 //! what the slice spans, once.
 //!
-//! **The hash join stays.** The deleted native host cleared `prefer_hash_join`
-//! under a budget, because a sort-merge join can spill and a hash join's build
-//! side cannot. With no disk neither can, and a sort-merge join adds two sorts
-//! to hold.
+//! **The hash join stays.** With a disk, clearing `prefer_hash_join` under a
+//! budget would buy something, because a sort-merge join can spill and a hash
+//! join's build side cannot. With no disk neither can, and a sort-merge join
+//! adds two sorts to hold.
 //!
 //! What this cannot prove: the pool bounds what operators *reserve*, not what
 //! the process holds. The source bytes, the collected graph and the encoded
@@ -42,8 +42,8 @@
 //! [`BUDGET`](crate::memory::BUDGET) is half the address space and not all of
 //! it. Measured on the shop program in Node: 900,000 people finish at 2.64 GiB
 //! of linear memory, and 1,000,000 are refused at 2.70 GiB, before the corpus
-//! is written. `packages/corpus/integration/scale.test.ts` runs the scale that
-//! used to trap.
+//! is written — refused, not trapped. `packages/corpus/integration/scale.test.ts`
+//! runs that scale.
 //!
 //! What would reverse it: a `DataFusion` whose sort charges a slice for what it
 //! spans deletes [`CompactExec`](crate::memory::CompactExec); a `wasm64`
@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn a_sort_after_a_dedup_is_charged_for_its_rows_and_not_for_its_slices() {
         const LIMIT: usize = 64 << 20;
-        let rows = dedup_then_sort(&session_within(Arc::new(Budget::new(LIMIT))))
+        let rows = dedup_then_sort(&session_within(Arc::new(Budget::new(LIMIT)), None))
             .expect("fits once compacted");
         assert_eq!(rows, usize::try_from(ROWS).expect("small"));
 

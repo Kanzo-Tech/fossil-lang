@@ -64,25 +64,17 @@
 //!
 //! # Disambiguation rules (grammar.bnf, § DISAMBIGUATION RULES)
 //!
-//! The grammar numbers five, having retired three. What this module and
-//! `super::expr` implement, exercised by `mod disambiguation` at the bottom of
-//! this file:
+//! What this module and `super::expr` implement, numbered as the grammar
+//! numbers them and exercised by `mod disambiguation` at the bottom of this
+//! file. A `{` in a mapping body is one thing, an error; a `.` is only ever
+//! member access, because every reference is qualified (`User.name`); `<` is
+//! only ever a comparison.
 //!
-//! (Rule 1 was `RecordLiteral` vs `AnnotationBlock` — whether the `{` came
-//! straight after `=` or after an expression. Both forms went, and telling
-//! two absent things apart is not a rule. A `{` in a mapping body is now
-//! one thing: an error.)
-//! (Rule 2 was `.IDENT` `FieldRef` vs `expr.IDENT` postfix member access. Every
-//! reference is qualified now, `User.name`, so a leading `.` starts nothing and
-//! there is no fork: `super::expr::parse_primary` refuses it by name.)
 //! 3. `:` in a `MappingHeader` vs `:` in a ternary: one lexeme, one token
 //!    (`SHAPE_SEP`), consumed by [`parse_mapping_header`] in the first case
 //!    and by [`super::expr::parse_expression`]'s ternary handler in the
-//!    second. The node is what tells them apart, not the token. The third
-//!    reading — the CURIE — is gone, and so is the contiguity check that
-//!    existed only to keep `a : b` out of a ternary.
-//! (Rule 4 was `<<` vs `<`, and it is gone with the triple term. With `ABS_IRI`
-//! gone, `<` no longer even opens.)
+//!    second. The node is what tells them apart, not the token, and
+//!    whitespace around the colon means nothing.
 //! 5. `type` at top level: `type {` is a `TypeDef`, `type IDENT` a
 //!    `TypeDecl`, `type :=` a `SourceDef` binding the name `type`, `type :` a
 //!    mapping called `type`. One token of lookahead, in [`parse_program`], and
@@ -158,10 +150,8 @@ pub(crate) fn parse_program(p: &mut Parser) {
                 );
             }
             Some(SyntaxKind::AT_ATTR) => parse_type_decl(p),
-            // `{ A, B, ... } := io.rdf(...)` — a destructuring source def. A
-            // top-level `{` is the only `{` there is now: the selective-import
-            // brace went with `use`, and the record and annotation braces went
-            // with the forms that opened them.
+            // `{ A, B, ... } := io.rdf(...)` — a destructuring source def, and
+            // the only thing a top-level `{` opens.
             Some(SyntaxKind::LBRACE) => parse_multi_source_def(p),
             Some(SyntaxKind::IDENT) => match p.peek_kind(1) {
                 // `IDENT :=` → source binding (SOURCE_DEF).
@@ -170,8 +160,8 @@ pub(crate) fn parse_program(p: &mut Parser) {
                 Some(SyntaxKind::SHAPE_SEP) => parse_mapping(p),
                 // `type { A, B } := …` → a type binding (TYPE_DEF). `type` is a
                 // CONTEXTUAL keyword, not a reserved word: the slot `IDENT {`
-                // was free at top level, and any other identifier followed by
-                // `{` still falls through to the error arm below. So a column
+                // is otherwise free at top level, and any other identifier
+                // followed by `{` falls through to the error arm below. So a column
                 // or binding called `type` keeps working, which matters where
                 // `rdf:type` is the commonest predicate there is.
                 Some(SyntaxKind::LBRACE) if p.current_text() == Some("type") => {
@@ -190,8 +180,8 @@ pub(crate) fn parse_program(p: &mut Parser) {
                 // in `p.pos`. We CANNOT call `recover_to(p, TOP_LEVEL_ANCHORS)`
                 // here because `IDENT` is itself in `TOP_LEVEL_ANCHORS` and
                 // `recover_to` would no-op while the outer `loop` re-enters
-                // this arm forever. That was the parser-hang on a bare `#`: the
-                // bytes logos dropped silently left IDENT as the next token.
+                // this arm forever — a parser hang on a bare `#`, whose bytes
+                // the lossy lex drops, leaving IDENT as the next token.
                 _ => p.bump_as_error(),
             },
             // Always make progress on a token we don't know what to do with
@@ -606,16 +596,12 @@ fn parse_mapping_header(p: &mut Parser) {
 // ShapeExpr: IDENT   (grammar.bnf, ShapeExpr)
 //
 // A NAME — one of those a `type { … } := …` binding introduced — and not an IRI
-// expression any more: a shape is named by the name the program bound to it, so
+// expression: a shape is named by the name the program bound to it, so
 // `Users : Person from Adults`, never `Users : ex:Person from Adults`.
 //
-// One shape, and the node stays for it. The `(SHAPE_AND IRIExpr)*` tail parsed
-// an intersection the HIR then reduced to its first element, silently — so
-// `User : ex:Person & ex:Employee` checked against `ex:Person` alone and nobody
-// was told. The `&` is not a token; the node is where the one shape lives.
-//
-// There is no `in g` either: the named-graph clause parsed into an IN_CLAUSE
-// nothing read, and a `fossil/1` corpus is vertex and edge tables, not quads.
+// One shape, and the node is where it lives: `&` is not a token, so there is no
+// intersection to reduce. There is no `in g` either: a `fossil/1` corpus is
+// vertex and edge tables, not quads.
 
 fn parse_shape_expr(p: &mut Parser) {
     p.skip_trivia();
@@ -672,13 +658,9 @@ fn parse_mapping_body(p: &mut Parser) {
 /// `SubjectAssign := AT_ATTR ASSIGN Expression` — the mapping's identity.
 ///
 /// `@subject = "https://shop.example/user/{User.email}"`, an ASSIGNMENT whose
-/// right-hand side is read by the ordinary expression parser.
-/// The call shape `@subject(iri = …)` that `a0d9bfa` built lived two hours: it
-/// had to be argued each time to be «syntax wearing a sigil» in order to
-/// survive its own attribute law, and no reviewed language admits a per-row
-/// expression in an attribute argument. The assignment needs no such argument,
-/// and the `iri` keyword — which named an argument no production takes — went
-/// with it.
+/// right-hand side is read by the ordinary expression parser. Not a call shape,
+/// `@subject(iri = …)`: no reviewed language admits a per-row expression in an
+/// attribute argument, and the assignment needs no argument name.
 ///
 /// Three obligations the grammar states and this function does not enforce:
 /// the identity is REQUIRED, there is EXACTLY ONE, and it is the FIRST line of
@@ -711,9 +693,8 @@ fn parse_subject_assign(p: &mut Parser) {
 // Property: PropertyLhs ASSIGN Expression
 //
 // There is no `AnnotationBlock?` tail and no record-literal primary, so a `{`
-// anywhere in a property is an error rather than a fork. The old disambiguation
-// rule 1 asked which of the two a `{` opened; with neither of them left the
-// question has one answer, and `parse_mapping_body`'s recovery arm gives it.
+// anywhere in a property is an error rather than a fork, and
+// `parse_mapping_body`'s recovery arm reports it.
 fn parse_property(p: &mut Parser) {
     p.start(SyntaxKind::PROPERTY);
     p.skip_trivia();
@@ -796,8 +777,8 @@ mod disambiguation {
     // ── `{` claims nothing in a property, in either position ──────────
     //
     // In a property a `{` opens nothing at all, in EITHER position. Worth
-    // pinning: a brace with exactly zero readings is what let the rule that
-    // told a record literal from an annotation block be deleted.
+    // pinning: a brace with exactly zero readings needs no rule to tell its
+    // readings apart.
 
     #[test]
     fn brace_after_assign_is_an_error() {
@@ -821,17 +802,15 @@ mod disambiguation {
         );
         assert!(
             descendant_kind_exists(&root, SyntaxKind::ERROR),
-            "`User.name {{ … }}` must be an error: the annotation block is gone",
+            "`User.name {{ … }}` must be an error: nothing opens a brace after a value",
         );
     }
 
-    // ── RULE 2 is gone, and `.` has ONE reading ───────────────────────
+    // ── `.` has ONE reading ───────────────────────────────────────────
     //
-    // The rule asked whether an expression preceded the dot: with one it was
-    // postfix member access, without one it was a `FieldRef` — a column of an
-    // anonymous current row. The row has a name — every reference is
-    // qualified, `User.name` — so a leading `.` starts nothing. What replaces the fork is a refusal that says
-    // what to write, and a member access that is now the only thing a `.` does.
+    // The row has a name — every reference is qualified, `User.name` — so a
+    // leading `.` starts nothing: it is refused with what to write, and member
+    // access is the only thing a `.` does.
 
     #[test]
     fn rule2_dot_after_ident_is_postfix_method_access() {
@@ -846,19 +825,16 @@ mod disambiguation {
 
     // ── The retired spellings, each refused by name ────────────────────
     //
-    // A rejection that is mute is the worst result available here: this tree
-    // has a measured case of the opposite — `lower_property` ending in a bare
-    // `return None` that `body::body` skipped without a word, so a program
-    // half-written in the new spelling compiled and lost its properties. Each
-    // test below asserts BOTH that the message names the replacement AND that
-    // the span underlines the whole retired form.
+    // A rejection that is mute is the worst result available here: a property
+    // the lowering skips without a word compiles a program that has lost it.
+    // Each test below asserts BOTH that the message names the replacement AND
+    // that the span underlines the whole retired form.
 
     // ── The absolute IRI takes its whole line, and here is why ────────
     //
-    // MEASURED, and it is the one consequence of dropping `ABS_IRI` that
-    // `grammar.bnf` does not mention: `//` in an IRI's scheme is the
-    // COMMENT opener, and with no `AbsIri` token nothing claims those bytes
-    // first. So `<http://xmlns.com/foaf/0.1/name> = User.name` lexes as
+    // MEASURED, and `grammar.bnf` does not mention it: `//` in an IRI's
+    // scheme is the COMMENT opener, and with no IRI token nothing claims those
+    // bytes first. So `<http://xmlns.com/foaf/0.1/name> = User.name` lexes as
     // `< http :` and then ONE COMMENT to the line break — the `>`, the `=` and
     // the value are all inside it.
     //
@@ -887,12 +863,9 @@ mod disambiguation {
         );
     }
 
-    /// The contiguity check is GONE (grammar.bnf, § DISAMBIGUATION RULES, rule 3)
-    /// and this is what its
-    /// absence has to be safe against: `a : b` with no spaces around the colon
-    /// used to be the only thing telling a ternary from a `PrefixedName`, and
-    /// it is now an ordinary ternary because there is no prefixed name to tell
-    /// it from.
+    /// Whitespace around the colon means nothing
+    /// (grammar.bnf, § DISAMBIGUATION RULES, rule 3): `a:b` with no spaces is an
+    /// ordinary ternary, because there is no prefixed name to tell it from.
     #[test]
     fn rule3_a_tight_ternary_colon_is_still_a_ternary() {
         let src = "Users : Person from User\n    x = cond ? a:b\n";
@@ -915,10 +888,8 @@ mod disambiguation {
         let ternary =
             find_first_kind(&root, SyntaxKind::TERNARY_EXPR).expect("expected TERNARY_EXPR");
         // The colon in a TERNARY_EXPR is a SHAPE_SEP — the same token the
-        // header takes. The grammar used to declare a `T_COLON` terminal for
-        // this position and nothing ever produced one, so the disambiguator
-        // was always the surrounding node (TERNARY_EXPR existed at all), never
-        // the token. Additionally assert T_QUESTION is one of its token children
+        // header takes, so the disambiguator is the surrounding node
+        // (TERNARY_EXPR exists at all), never the token. Additionally assert T_QUESTION is one of its token children
         // — without `?` there is no ternary, by construction.
         let token_kinds: Vec<SyntaxKind> = ternary
             .children_with_tokens()
@@ -933,8 +904,8 @@ mod disambiguation {
 
     // ── `<` is the only thing `<` can be ──────────────────────────────
     //
-    // `<<` claims nothing since the triple term went, so the only reading left
-    // to pin is that `<` is a comparison operator.
+    // `<<` claims nothing, so the only reading to pin is that `<` is a
+    // comparison operator.
 
     #[test]
     fn rule4_single_lt_is_comparison_operator() {

@@ -4,8 +4,8 @@
 /**
  * What a column IS — never what a reader does with it.
  *
- * A reader that used to carry a list now names the roles it means. It is data in `fossil.json` too:
- * a writer column's `role` in its table's `properties`, spelled as the variant in lowercase.
+ * A reader names the roles it means, never a list of names. It is data in `fossil.json` too: a
+ * writer column's `role` in its table's `properties`, spelled as the variant in lowercase.
  */
 export type ColumnRole = 'address' | 'identity' | 'endpoint';
 

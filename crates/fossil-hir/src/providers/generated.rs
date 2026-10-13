@@ -4,9 +4,8 @@
 //! `catalogue.bnf`, which is what a COMPILING host installs.
 //!
 //! Each `decodes` token below is a Rust path, so the compiler resolves it.
-//! That is what the parity test this replaces said it could not prove: a `fn`
-//! pointer has no name at run time, and a row could declare a capability whose
-//! function nobody had written.
+//! A comparison could not prove that: a `fn` pointer has no name at run time,
+//! and a row could declare a capability whose function nobody had written.
 //!
 //! Edit `catalogue.bnf` and re-run `cargo xtask catalogue`.
 

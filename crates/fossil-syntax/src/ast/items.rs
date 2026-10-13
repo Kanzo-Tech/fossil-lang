@@ -42,11 +42,8 @@ impl ShapeExpr {
     ///
     /// `ShapeExpr := IDENT` (grammar.bnf, ShapeExpr): one of the names a
     /// `type { … } := io.shex(…)` binding introduced. There is exactly one, and
-    /// there was exactly one before: the `&` intersection went when the
-    /// lowering was found to keep the first element and drop the rest without a
-    /// diagnostic. What changed is that the one is a bare name rather than an
-    /// `IRI_EXPR` that could be a CURIE, an absolute IRI or a template — so
-    /// this accessor returns the name, and there is no second node to unwrap.
+    /// it is a bare name — so this accessor returns the name, and there is no
+    /// second node to unwrap.
     #[must_use]
     pub fn name(&self) -> Option<smol_str::SmolStr> {
         self.0
@@ -111,10 +108,13 @@ impl TypeDecl {
     /// contextual `type`.
     #[must_use]
     pub fn name(&self) -> Option<smol_str::SmolStr> {
-        idents(&self.0)
-            .skip_while(|t| t.text() != "type")
-            .nth(1)
-            .map(|t| smol_str::SmolStr::from(t.text()))
+        self.name_token().map(|t| smol_str::SmolStr::from(t.text()))
+    }
+
+    /// The token [`Self::name`] reads, for a caller that needs where it is.
+    #[must_use]
+    pub fn name_token(&self) -> Option<crate::SyntaxToken> {
+        idents(&self.0).skip_while(|t| t.text() != "type").nth(1)
     }
 
     pub fn fields(&self) -> impl Iterator<Item = Field> {

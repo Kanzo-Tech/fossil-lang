@@ -17,10 +17,9 @@
 //! cleaner than nested precedence functions.
 //!
 //! The `BNF` column below is the level the specified table gives each operator,
-//! and this parser implements every one of them. A citation of «L8 unary» or
-//! «L9 postfix» predates the renumbering `|>` left behind
-//! (grammar.bnf, § OPERATOR PRECEDENCE TABLE); the binding POWERS never moved,
-//! only the level names, which is why the lowest few are unused.
+//! and this parser implements every one of them
+//! (grammar.bnf, § OPERATOR PRECEDENCE TABLE). Only the ORDER of the binding
+//! powers means anything, which is why the lowest few are unused.
 //!
 //! Binding-power table (lbp = left binding power; rbp = right binding
 //! power; tighter operators → higher numbers). The `BNF` column is the
@@ -96,8 +95,7 @@ pub(crate) fn parse_expression(p: &mut Parser, min_bp: Bp) {
             p.skip_trivia();
             // Disambiguation rule #3: the `:` here is a `SHAPE_SEP`, the same
             // token a mapping header takes, paired with the just-consumed `?`.
-            // The grammar used to declare a separate `T_COLON` terminal for
-            // this position that the lexer never emitted.
+            // There is no separate `T_COLON` terminal for this position.
             if p.current() == Some(SyntaxKind::SHAPE_SEP) {
                 p.bump();
             } else {
@@ -196,9 +194,8 @@ fn parse_postfix(p: &mut Parser) {
         match p.current() {
             Some(SyntaxKind::DOT) => {
                 // `.IDENT` after a primary is POSTFIX member access — the only
-                // reading the grammar leaves a `.` (its disambiguation rule 2,
-                // which asked whether an expression preceded the dot, went with
-                // the FieldRef that made it a question).
+                // reading the grammar gives a `.`, whether or not anything
+                // could have preceded it.
                 //
                 // The member is an `IDENT` or, for a name the data chose and an
                 // identifier cannot hold, a STRING: `Knows."Person.id"`
@@ -388,10 +385,8 @@ fn parse_primary(p: &mut Parser) {
             p.expect(SyntaxKind::RPAREN);
             p.finish();
         }
-        // `{` used to open a RecordLiteral here — the blank node in value
-        // position. It went with the annotation block it shared a brace with,
-        // so a `{` in an expression falls to the recovery arm like any other
-        // token nothing claims.
+        // A `{` opens nothing in an expression, so it falls to the recovery arm
+        // like any other token nothing claims.
         _ => {
             // Recovery: emit ERROR with the current token (or empty if EOF).
             p.bump_as_error();

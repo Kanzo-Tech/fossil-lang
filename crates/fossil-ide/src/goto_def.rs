@@ -1,79 +1,41 @@
-//! `textDocument/definition` — goto-def across the open-file set **and across
-//! the language boundary into the shape document**.
+//! `textDocument/definition` — where a name a program writes is declared.
 //!
-//! # The boundary this crosses is a LANGUAGE, not a prefix
+//! [`crate::defs::name_at`] says what the name under the cursor names, and the
+//! answer is where that is declared: a top-level name's
+//! [`Definition::declaration`](fossil_hir::def_map::Definition::declaration),
+//! and a property key's field in the type its mapping targets. Both read the
+//! resolved type's own file ([`fossil_hir::shapes::ResolvedShape::file`]), so
+//! a type declared in the program and one imported from a document answer the
+//! same way and this module never asks which it has.
 //!
-//! Goto-def used to be pure name resolution inside the open-file set: a token,
-//! a [`crate::WorkspaceIndex`] lookup, a byte range. That worked because the
-//! two things worth jumping to — a `prefix` declaration and a mapping header —
-//! were both `.fossil`. `prefix` is gone — it is an ordinary identifier now, and
-//! there is no vocabulary declaration left to introduce — and with it the
-//! only reason a Fossil program ever referred to a name in another Fossil file.
+//! The program is one file and the documents it names; there is no import of
+//! another program, so nothing here takes a set of open files.
 //!
-//! What replaced it is bigger. Ruling 3 of 2026-08-11 makes naming a shape
-//! document MANDATORY, and a property key is the **last segment
-//! of a predicate IRI the document declares**. So the two names a body writes
-//! most are both defined in a file that is not a Fossil program:
+//! # Precision
 //!
-//! - a **shape name** in a header — `Users : Person from Adults` — is one of
-//!   the names `type { Person } := io.shex("shop.shex")` introduced, and what
-//!   it denotes is a shape inside `shop.shex`;
-//! - a **property key** — `name = User.name` — denotes a predicate inside that
-//!   same document.
-//!
-//! Neither has a definition anywhere in the `.fossil` file. Answering "no
-//! definition" for the two commonest identifiers in a program is worse than
-//! answering imprecisely, which is what the rest of this module is about.
-//!
-//! # Precision: the decoder's own spans
-//!
-//! The decoded shape carries where the document declares it and each of its
-//! predicates — [`fossil_graph_schema::Shape::span`] and
-//! [`fossil_graph_schema::PropertyConstraint::span`], found by
-//! `fossil_hir::shex::spans` with rudof's own prefix spellings. When there is no span
-//! (`ShExJ`, SHACL), the answer is still the right FILE with a `0..0` range —
-//! the top of the document. That is the honest degraded answer, and it is
-//! deliberately not a `None`: an editor that opens `shop.shex` at line 1 has
-//! taken the user to the definition's file, which is most of the value;
-//! answering nothing takes them nowhere.
-//!
-//! [`NavigationTarget`] carries no precision flag, because no consumer could
-//! act on one — the host translates `{file, range}` into an
-//! `lsp_types::Location` and nothing else. `0..0` IS the flag, and it
-//! is one every consumer already understands.
+//! A declaration carries its span: a name the program binds, a type's name
+//! and each field's, or the decoder's own spans in a document. Where a decoder
+//! has none (`ShExJ`, SHACL), the answer is the right file with a `0..0` range
+//! — the top of the document, which takes the reader to the definition's file
+//! rather than nowhere. `0..0` is the precision flag, and every consumer
+//! already reads it.
 //!
 //! # Domain boundary
 //!
 //! Returns Fossil-domain [`NavigationTarget`]s (`{ file, range: Range<u32> }`),
-//! NEVER `lsp_types::Location` — the byte→UTF-16 range translation happens in
-//! the host via [`crate::position::position`], so this stays
-//! transport-free and WASM-clean. No new Salsa query is added: the
-//! `WorkspaceIndex` is a plain struct built by a CST walk, and the two document
-//! paths read queries that the checker already runs for this file
-//! (`resolve_target_shape`, `typecheck_mapping`), so the per-mapping `body()`
-//! fan-out is unchanged.
-//!
-//! # Nothing here does index arithmetic
-//!
-//! There were three notions of `ExprId` in the tree and one of them was a
-//! position among the CST's `PROPERTY` children used to index the HIR's dense
-//! `properties` vector. This module never needs one: a property key is resolved
-//! by its TEXT against the checker's `predicates` table, so a property that
-//! parses and does not lower shifts nothing. The only index taken is the
-//! mapping's, which is the per-kind dense index `def_map` and `body()` both
-//! contract to, and it is taken by the same filter-then-position
-//! walk they use.
+//! never `lsp_types::Location`: the byte→UTF-16 translation is the host's,
+//! through [`crate::position::position`], so this stays transport-free and
+//! wasm-clean. A property key resolves by its text against the checker's
+//! `predicates` table, so nothing here indexes into a body.
 
 use std::ops::Range;
 
 use fossil_base::SourceFile;
-use fossil_hir::check::typecheck_mapping;
+use fossil_hir::def_map::MappingLoc;
 use fossil_hir::shapes::resolve_target_shape;
-use fossil_syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 
-use crate::WorkspaceIndex;
+use crate::defs::{NameAt, name_at};
 use crate::position::token_at_position;
-use fossil_hir::documents::registry_key;
 
 /// A goto-def navigation target: the owning file + the byte range.
 ///
@@ -81,41 +43,38 @@ use fossil_hir::documents::registry_key;
 /// with the file URI to build a `lsp_types::Location`.
 ///
 /// **`range == 0..0` means "this file, position unknown"** — see the module
-/// docs. It is produced only by the two document-crossing paths, and only when
-/// the decoder kept no span for what was asked.
+/// docs. It is produced only for a declaration in a document whose decoder
+/// kept no span for it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NavigationTarget {
-    /// The file that contains the definition. May be a `.fossil` program or the
-    /// shape document a program names.
+    /// The file that contains the definition. May be the `.fossil` program or
+    /// a shape document it names.
     pub file: SourceFile,
     /// Byte range of the definition site into that file's text.
     pub range: Range<u32>,
 }
 
-/// Resolve the definition(s) of the identifier at an LSP position.
+/// Resolve the definition of the identifier at an LSP position in `file`.
 ///
-/// `files` is the host's open-file set (the LSP `LspState.files` or the
-/// wasm workspace's open files); `file` is the file the cursor is in.
+/// Two kinds of name resolve, as [`crate::defs::name_at`] classifies them:
 ///
-/// Three positions are recognised, and the first two leave the `.fossil` file:
+/// 1. **a name the program binds** — a source, a type, a mapping — wherever
+///    it is written, the binding included: its declaration, which for an
+///    imported type is the shape in the document, and the binding line's name
+///    when that document is not registered;
+/// 2. **a property key** → the field or predicate that declares it, in the
+///    type the mapping targets.
 ///
-/// 1. **a shape name** in a mapping header → the shape inside the document its
-///    `type { … } := io.shex("…")` binding names, or — when the document is not
-///    registered — that binding line;
-/// 2. **a property key** → the predicate inside the same document;
-/// 3. **anything else** → the [`WorkspaceIndex`] over the open files, which is
-///    what resolves a mapping name.
-///
-/// Returns ALL matching definition sites for case 3 (a name may be declared in
-/// more than one open file — the index does not silently drop ambiguity), and
-/// an empty `Vec` when the cursor is not on a resolvable identifier.
+/// At most one target, since one name has one declaration; a `Vec` because
+/// "nothing under the cursor" is an empty answer, as LSP's is. Empty also for
+/// a name the program does not bind — a misspelt type resolves to nothing, not
+/// to the header it is written in.
 ///
 /// `line` / `character` are UTF-16 LSP coordinates (resolved via the
 /// [`crate::position::LineIndex`]); never byte offsets.
 #[must_use]
 pub fn goto_definition(
     db: &dyn fossil_base::Db,
-    files: &[SourceFile],
     file: SourceFile,
     line: u32,
     character: u32,
@@ -123,152 +82,40 @@ pub fn goto_definition(
     let Some(token) = token_at_position(db, file, line, character) else {
         return Vec::new();
     };
-
-    // The two document-crossing positions answer for themselves, empty
-    // included. Falling through to the workspace index would be worse than
-    // nothing for both: it records a mapping header's shape name under the
-    // header's own range, so a cursor on `Person` would "resolve" to the
-    // `Person` it is already sitting on — a jump that goes nowhere and looks
-    // like it worked.
-    if let Some((mapping, wanted)) = document_name_under_cursor(&token) {
-        return document_targets(db, file, &mapping, &wanted);
-    }
-
-    // A mapping name: the token under the cursor IS the name.
-    let ws = WorkspaceIndex::build(db, files);
-    let mut targets = Vec::new();
-    for (decl_file, entry) in ws.resolve(token.text()) {
-        let target = NavigationTarget {
-            file: decl_file,
-            range: entry.range,
-        };
-        // A doubled location is one the LSP would show twice.
-        if !targets.contains(&target) {
-            targets.push(target);
+    let target = match name_at(db, file, &token) {
+        Some(NameAt::Definition(def)) => {
+            let at = def.declaration(db, file);
+            Some(NavigationTarget {
+                file: at.file,
+                range: at.span.map_or(0..0, Into::into),
+            })
         }
-    }
-    targets
-}
-
-/// What the cursor asked the document for, by the name it is on.
-enum Wanted {
-    /// The shape itself — the cursor was on the header's shape name.
-    Shape(String),
-    /// The predicate a bare property key names.
-    Predicate(String),
-}
-
-/// The enclosing `MAPPING` and what the cursor asks its document for, when the
-/// cursor is on one of the two names a document defines.
-///
-/// - `ShapeExpr := IDENT` under a `MAPPING_HEADER` (grammar.bnf, `ShapeExpr`).
-///   The token's own parent is the `SHAPE_EXPR`; climbing further from a
-///   different IDENT would claim the mapping name and the `from` expression,
-///   which are ordinary Fossil-side names.
-/// - `PropertyLhs := IDENT` (grammar.bnf, `PropertyLhs`). `@subject` is
-///   deliberately NOT one: it lexes as `AT_ATTR`, and a shape declares a
-///   node's predicates while in RDF the subject IS the node.
-fn document_name_under_cursor(token: &SyntaxToken) -> Option<(SyntaxNode, Wanted)> {
-    if token.kind() != SyntaxKind::IDENT {
-        return None;
-    }
-    let name = token.text().to_string();
-    let wanted = match token.parent()?.kind() {
-        SyntaxKind::SHAPE_EXPR => Wanted::Shape(name),
-        SyntaxKind::PROPERTY_LHS => Wanted::Predicate(name),
-        _ => return None,
+        Some(NameAt::Key { mapping, name }) => key_target(db, mapping, &name),
+        None => None,
     };
-    let mapping = token
-        .parent_ancestors()
-        .find(|n| n.kind() == SyntaxKind::MAPPING)?;
-    Some((mapping, wanted))
+    target.into_iter().collect()
 }
 
-/// Resolve a name that lives in the shape document, and answer with a place in
-/// that document.
+/// The field or predicate a property key names, in the type the mapping
+/// targets.
 ///
-/// The shape is the mapping's own target, [`resolve_target_shape`] — the
-/// document that declared it, not the first one the file names — and a
-/// property key resolves through the checker's `predicates` table, the same
-/// one hover and `fossil-mir` read, so a key lands where the checker says it
-/// is.
-fn document_targets(
+/// The type is the mapping's own target, [`resolve_target_shape`], and the key
+/// resolves through the type's own short names — the table completion offers
+/// keys from — so a key goes to its declaration whether or not the mapping
+/// checks. `None` when the type does not resolve: the binding line says nothing
+/// about which predicates a document declares, so there is no fallback for a key.
+fn key_target(
     db: &dyn fossil_base::Db,
-    file: SourceFile,
-    mapping_node: &SyntaxNode,
-    wanted: &Wanted,
-) -> Vec<NavigationTarget> {
-    let Some(mapping) = fossil_hir::def_map::mapping_of(db, file, mapping_node) else {
-        return Vec::new();
-    };
-    let Some(shape) = resolve_target_shape(db, mapping) else {
-        // The document is named and not registered — an unsaved buffer the host
-        // has not opened, a path that does not exist, a browser host with no
-        // filesystem — or the header names a shape no binding introduced. The
-        // binding line is a real definition site for the NAME, so a shape lands
-        // there when there is one; a predicate does not, because the binding
-        // says nothing about which predicates the document declares.
-        return match wanted {
-            Wanted::Shape(name) => type_binding_range(db, file, name)
-                .map(|range| NavigationTarget { file, range })
-                .into_iter()
-                .collect(),
-            Wanted::Predicate(_) => Vec::new(),
-        };
-    };
-    let Some(doc_file) = fossil_base::file_at(db, &registry_key(db, file, &shape.document)) else {
-        return Vec::new();
-    };
-    let span = match wanted {
-        Wanted::Shape(_) => shape.span,
-        Wanted::Predicate(key) => {
-            let Some(iri) = typecheck_mapping(db, mapping)
-                .checked(db)
-                .ok()
-                .and_then(|out| {
-                    out.predicates(db)
-                        .iter()
-                        .find(|p| p.name.as_str() == key.as_str())
-                        .map(|p| p.iri.clone())
-                })
-            else {
-                return Vec::new();
-            };
-            shape.constraint_for(&iri).and_then(|c| c.span)
-        }
-    };
-    vec![NavigationTarget {
-        file: doc_file,
+    mapping: MappingLoc<'_>,
+    key: &str,
+) -> Option<NavigationTarget> {
+    let shape = resolve_target_shape(db, mapping)?;
+    let home = shape.file?;
+    let (names, _collisions) = shape.short_names();
+    let iri = names.into_iter().find(|p| p.name.as_str() == key)?.iri;
+    let span = shape.constraint_for(&iri).and_then(|c| c.span);
+    Some(NavigationTarget {
+        file: home,
         range: span.map_or(0..0, Into::into),
-    }]
-}
-
-/// The byte range of the `type { … } := io.shex("…")` binding that introduced
-/// `name` — the fallback when the document it names is not registered.
-fn type_binding_range(
-    db: &dyn fossil_base::Db,
-    file: SourceFile,
-    name: &str,
-) -> Option<Range<u32>> {
-    let cst = fossil_syntax::parse(db, file);
-    cst.root(db)
-        .syntax()
-        .children()
-        .filter(|c| c.kind() == SyntaxKind::TYPE_DEF)
-        .find(|node| brace_members(node).iter().any(|m| m == name))
-        .map(|node| {
-            let r = node.text_range();
-            u32::from(r.start())..u32::from(r.end())
-        })
-}
-
-/// The names a `TYPE_DEF` introduces — `Person`, `Order` in
-/// `type { Person, Order } := io.shex("shop.shex")`, `City` in
-/// `type { Place as City } := …`.
-fn brace_members(node: &SyntaxNode) -> Vec<String> {
-    node.children()
-        .filter_map(fossil_syntax::ast::ImportMember::cast)
-        .filter_map(|m| m.name())
-        .map(|n| n.to_string())
-        .collect()
+    })
 }

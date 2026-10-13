@@ -21,7 +21,7 @@ pub struct MirGraph<'db> {
     /// to resolve — that turns a compile error into wrong output, silently, and
     /// is exactly how a mapping over `@upv/aemet.csv` ended up reading
     /// `examples/users.csv`. It also must not panic: `lower_to_mir_pg` runs on
-    /// every keystroke from the LSP, over half-written programs. So it taints
+    /// every keystroke from the editor, over half-written programs. So it taints
     /// instead, following rustc's `ErrorGuaranteed` discipline — the marker's
     /// presence implies ≥1 `Diagnostic` reported by this lowering or by a query
     /// it read, so the editor shows the error while consumers refuse the graph.

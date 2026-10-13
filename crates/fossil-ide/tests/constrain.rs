@@ -7,7 +7,8 @@ use std::sync::Arc;
 use fossil_base::test_support::NativeSystem;
 use fossil_base::{FossilDb, SourceFile, System};
 use fossil_ide::constrain::{
-    Document, SourceVocabulary, TypeVocabulary, Vocabulary, mapping_grammar, prelude,
+    DeclaredField, DeclaredType, Import, ImportedType, SourceVocabulary, Vocabulary, grammar_for,
+    prelude,
 };
 use fossil_syntax::parse;
 
@@ -26,28 +27,45 @@ fn source(
     }
 }
 
-fn shape(name: &str, properties: &[&str]) -> TypeVocabulary {
-    TypeVocabulary {
+fn shape(name: &str, properties: &[&str]) -> ImportedType {
+    ImportedType {
         name: name.into(),
+        shape: None,
         properties: properties.iter().map(|p| (*p).to_string()).collect(),
+    }
+}
+
+fn shex(reference: &str, types: Vec<ImportedType>) -> Import {
+    Import {
+        format: "shex".into(),
+        reference: reference.into(),
+        types,
+    }
+}
+
+fn field(name: &str, iri: &str, ty: &str) -> DeclaredField {
+    DeclaredField {
+        name: name.into(),
+        iri: iri.into(),
+        ty: ty.into(),
     }
 }
 
 /// `docs/programs/relationship`'s vocabulary: its shapes and its sources' columns.
 fn relationship() -> Vocabulary {
     Vocabulary {
-        shapes: Document {
-            format: "shex".into(),
-            reference: "relationship.shex".into(),
-        },
-        types: vec![
-            shape("Place", &["name"]),
-            shape("Tag", &["name"]),
-            shape(
-                "Person",
-                &["firstName", "isLocatedIn", "knows", "hasInterest"],
-            ),
-        ],
+        imports: vec![shex(
+            "relationship.shex",
+            vec![
+                shape("Place", &["name"]),
+                shape("Tag", &["name"]),
+                shape(
+                    "Person",
+                    &["firstName", "isLocatedIn", "knows", "hasInterest"],
+                ),
+            ],
+        )],
+        declared: vec![],
         sources: vec![
             source("PlaceRow", "data/place.csv", Some("|"), &["id", "name"]),
             source("TagRow", "data/tag.csv", Some("|"), &["id", "name"]),
@@ -75,12 +93,47 @@ fn relationship() -> Vocabulary {
 
 fn hello() -> Vocabulary {
     Vocabulary {
-        shapes: Document {
-            format: "shex".into(),
-            reference: "hello.shex".into(),
-        },
-        types: vec![shape("Person", &["name"])],
+        imports: vec![shex("hello.shex", vec![shape("Person", &["name"])])],
+        declared: vec![],
         sources: vec![source("User", "data/people.csv", None, &["id", "name"])],
+    }
+}
+
+/// `docs/programs/declared`'s: a type declared in the program, beside one imported and renamed.
+fn declared() -> Vocabulary {
+    Vocabulary {
+        imports: vec![shex(
+            "declared.shex",
+            vec![ImportedType {
+                name: "City".into(),
+                shape: Some("Place".into()),
+                properties: vec!["name".into()],
+            }],
+        )],
+        declared: vec![DeclaredType {
+            name: "Person".into(),
+            iri: "https://schema.org/Person".into(),
+            fields: vec![
+                field("name", "https://schema.org/name", "String"),
+                field(
+                    "handle",
+                    "https://shop.example/vocab/name",
+                    "Option<String>",
+                ),
+                field("knows", "https://schema.org/knows", "Seq<Ref<Person>>"),
+                field("livesIn", "https://schema.org/homeLocation", "Ref<City>"),
+            ],
+        }],
+        sources: vec![
+            source("CityRow", "data/city.csv", None, &["id", "name"]),
+            source(
+                "PersonRow",
+                "data/person.csv",
+                None,
+                &["id", "name", "handle", "city"],
+            ),
+            source("KnowsRow", "data/knows.csv", None, &["person", "knows"]),
+        ],
     }
 }
 
@@ -124,8 +177,8 @@ fn program(name: &str) -> String {
 
 #[test]
 fn every_sentence_it_generates_parses() {
-    for vocabulary in [hello(), relationship()] {
-        let grammar = mapping_grammar(&vocabulary);
+    for vocabulary in [hello(), relationship(), declared()] {
+        let grammar = grammar_for(&vocabulary);
         for seed in 0..300 {
             let program = format!("{}\n{}", prelude(&vocabulary), grammar.sample(seed));
             let errors = syntax_errors(&program);
@@ -139,10 +192,14 @@ fn every_sentence_it_generates_parses() {
 
 #[test]
 fn the_conformance_programs_in_its_scope_are_sentences_of_it() {
-    for (name, vocabulary) in [("hello", hello()), ("relationship", relationship())] {
+    for (name, vocabulary) in [
+        ("hello", hello()),
+        ("relationship", relationship()),
+        ("declared", declared()),
+    ] {
         let written = mappings(&program(name));
         assert!(
-            mapping_grammar(&vocabulary).matches(&written),
+            grammar_for(&vocabulary).matches(&written),
             "{name}'s mappings are not a sentence:\n{written}"
         );
     }
@@ -150,7 +207,7 @@ fn the_conformance_programs_in_its_scope_are_sentences_of_it() {
 
 #[test]
 fn a_name_that_does_not_exist_is_not_a_sentence() {
-    let grammar = mapping_grammar(&hello());
+    let grammar = grammar_for(&hello());
     let good = "People : Person from User\n    @subject = \"https://shop.example/person/{User.id}\"\n    name = User.name\n";
     assert!(grammar.matches(good));
     assert!(
@@ -169,7 +226,7 @@ fn a_name_that_does_not_exist_is_not_a_sentence() {
 
 #[test]
 fn it_prints_as_ebnf_with_the_root_first_and_the_names_closed() {
-    let ebnf = mapping_grammar(&hello()).ebnf();
+    let ebnf = grammar_for(&hello()).ebnf();
     assert!(ebnf.starts_with("root ::= "), "{ebnf}");
     assert!(
         ebnf.contains("column ::= \"User.id\" | \"User.name\""),
@@ -179,4 +236,24 @@ fn it_prints_as_ebnf_with_the_root_first_and_the_names_closed() {
         ebnf.contains("\"parse.date\""),
         "the catalogue's parse functions: {ebnf}"
     );
+}
+
+#[test]
+fn the_prelude_declares_what_the_program_declares() {
+    let prelude = prelude(&declared());
+    assert!(
+        prelude.starts_with("type { Place as City } := io.shex(\"declared.shex\")\n"),
+        "{prelude}"
+    );
+    assert!(
+        prelude.contains(
+            "@iri(\"https://schema.org/Person\")\ntype Person\n    @iri(\"https://schema.org/name\") name: String\n"
+        ),
+        "{prelude}"
+    );
+    assert!(
+        prelude.contains("    @iri(\"https://schema.org/homeLocation\") livesIn: Ref<City>\n"),
+        "{prelude}"
+    );
+    assert!(syntax_errors(&prelude).is_empty(), "{prelude}");
 }

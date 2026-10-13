@@ -183,8 +183,9 @@ pub fn semantic_tokens(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<Semant
 
 /// What the file itself declares, read once per walk.
 struct FileNames {
-    /// The names `type { … } := …` and `type Name` introduced — a call to one
-    /// of them is an edge to that type, not a function.
+    /// The names `type { … } := …` and `type Name` introduced — the def map's
+    /// type table, which holds both — so a call to one of them is an edge to
+    /// that type, not a function.
     types: Vec<SmolStr>,
     /// Every string a binding reads as a reference: a source's URI, its
     /// `schema =` document, a `type` binding's document. These are the strings
@@ -204,20 +205,8 @@ impl FileNames {
             .chain(types.iter().map(|t| t.document.clone()))
             .flatten()
             .collect();
-        // A declaration is read off the CST: the def map does not hold one
-        // until the lowering does, and a highlighter needs only its name.
-        let declared = fossil_syntax::parse(db, file)
-            .root(db)
-            .syntax()
-            .children()
-            .filter_map(fossil_syntax::ast::TypeDecl::cast)
-            .filter_map(|d| d.name());
         Self {
-            types: types
-                .iter()
-                .map(|t| t.name.clone())
-                .chain(declared)
-                .collect(),
+            types: types.iter().map(|t| t.name.clone()).collect(),
             references,
         }
     }

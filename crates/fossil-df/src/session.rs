@@ -5,8 +5,7 @@
 //! JS's event loop, and a `DataFusion` operator that spawns a task panics with
 //! «there is no reactor running» — which, under `panic = "abort"`, traps inside
 //! a microtask and leaves the run's promise pending forever. `target_partitions
-//! = 1` keeps the planner from ADDING partitions, and was once thought to be the
-//! whole fix. It is not: a `UNION ALL` of two single-partition scans has two
+//! = 1` keeps the planner from ADDING partitions, and it is not the whole fix: a `UNION ALL` of two single-partition scans has two
 //! partitions by construction, so two mappings of one type put a
 //! `CoalescePartitionsExec` over the union, and that operator spawns one task
 //! per input partition.
@@ -64,9 +63,14 @@ use crate::memory::{Budget, Compact};
 /// as its pool and no disk, and [`OneTask`] and [`Compact`] after every
 /// built-in rule. The caller keeps `budget` to ask it what it refused.
 ///
+/// `limit` is the most rows read from each source scan — a run's `limit`,
+/// carried on the session because the session is what every scan of the run
+/// is planned in. One target partition is what makes it the same rows each
+/// time a source is scanned: the first, in file order.
+///
 /// [`crate::memory`] says why the pool is bounded and the plan compacted.
 #[must_use]
-pub fn session_within(budget: Arc<Budget>) -> SessionContext {
+pub fn session_within(budget: Arc<Budget>, limit: Option<usize>) -> SessionContext {
     let runtime = RuntimeEnvBuilder::new()
         .with_memory_pool(budget)
         .with_disk_manager_builder(
@@ -74,14 +78,29 @@ pub fn session_within(budget: Arc<Budget>) -> SessionContext {
         )
         .build_arc()
         .expect("a runtime with no disk opens nothing");
+    let mut config = SessionConfig::new().with_target_partitions(1);
+    if let Some(limit) = limit {
+        config = config.with_extension(Arc::new(SourceLimit(limit)));
+    }
     let state = SessionStateBuilder::new()
-        .with_config(SessionConfig::new().with_target_partitions(1))
+        .with_config(config)
         .with_runtime_env(runtime)
         .with_default_features()
         .with_physical_optimizer_rule(Arc::new(OneTask))
         .with_physical_optimizer_rule(Arc::new(Compact))
         .build();
     SessionContext::new_with_state(state)
+}
+
+/// The most rows a run reads from each source scan, on the session's config.
+#[derive(Debug)]
+struct SourceLimit(usize);
+
+/// The source limit `ctx` was built with by [`session_within`], if any.
+pub(crate) fn source_limit(ctx: &SessionContext) -> Option<usize> {
+    ctx.copied_config()
+        .get_extension::<SourceLimit>()
+        .map(|limit| limit.0)
 }
 
 /// Rewrites a physical plan so that executing it never spawns a Tokio task.
@@ -246,7 +265,7 @@ mod tests {
 
     #[test]
     fn a_deduplicated_union_plans_with_no_spawning_operator_and_runs_without_a_runtime() {
-        let ctx = session_within(Arc::new(Budget::new(crate::memory::BUDGET)));
+        let ctx = session_within(Arc::new(Budget::new(crate::memory::BUDGET)), None);
         assert_eq!(ctx.copied_config().target_partitions(), 1);
         ctx.register_table("a", table(&[1, 2])).expect("a");
         ctx.register_table("b", table(&[2, 3])).expect("b");

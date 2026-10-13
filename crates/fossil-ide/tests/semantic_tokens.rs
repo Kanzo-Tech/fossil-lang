@@ -1,4 +1,4 @@
-//! Snapshot test for `fossil_ide::semantic_tokens` (LSP-01 / SC#4).
+//! Snapshot test for `fossil_ide::semantic_tokens`.
 //!
 //! The raw LSP output is delta-encoded indices — opaque to review. We decode it
 //! back to absolute `(line, col, len, type)` rows and render each type through

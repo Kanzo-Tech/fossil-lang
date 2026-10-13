@@ -210,12 +210,12 @@ fn a_sample_reads_the_counts_from_the_first_rows_and_says_so() {
 /// **The table is derived from `DuckDB` and not from memory**: the arms are
 /// asserted against the `DESCRIBE` of a value `DuckDB` itself typed, so a
 /// version that renames a type fails here rather than silently widening a
-/// column to `String`. That widening is what this test exists for — the arm
-/// was `"TIMESTAMP" | "DATETIME"`, `read_csv_auto` infers `TIMESTAMP WITH
-/// TIME ZONE` for any ISO-8601 string carrying an offset, and the checker
-/// compares this answer against the shape's declared `Primitive`. So the
-/// gap was not a slow path: it made `xsd:dateTime` a hard type error over
-/// every offset-bearing column, which is how LDBC-SNB dates every row.
+/// column to `String`. That widening is what this test exists for —
+/// `read_csv_auto` infers `TIMESTAMP WITH TIME ZONE` for any ISO-8601 string
+/// carrying an offset, and the checker compares this answer against the
+/// shape's declared `Primitive`. So a missing arm is not a slow path: it makes
+/// `xsd:dateTime` a hard type error over every offset-bearing column, which is
+/// how LDBC-SNB dates every row.
 #[test]
 fn every_duckdb_instant_is_an_instant() {
     let conn = duckdb::Connection::open_in_memory().expect("in-memory duckdb");

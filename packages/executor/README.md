@@ -22,8 +22,33 @@ const host: Host = {
   credentials: async (scope, access) => vend(scope, access),
 };
 
-const report = await run(program, { host, job: jobId });   // { location, dropped }, or throws a FossilError
+const report = await run(program, { host, into: { job: jobId } });   // { location, dropped }, or throws a FossilError
 ```
+
+`run` has two independent axes and a limit:
+
+| | |
+| --- | --- |
+| **reads** | `host` — `read` vended per connection, `@conn` expanded, sources read by range — or `files` + `path`, bytes in hand |
+| **writes** | `into: { job }` — the job's storage, through `write` vended on it, answering the report — or `into: 'memory'`, answering `{ report, files }` and asking for no `write` |
+| **`limit`** | at most this many rows read from each source scan, before any join |
+
+```ts
+await run(program, { host, into: { job } });                          // the job's corpus
+const { report, files } = await run(program, { host, into: 'memory', limit: 200 }); // a preview
+const { report, files } = await run(program, { files, path });        // Node: bytes in, bytes out
+```
+
+With `limit`, an edge whose endpoint fell outside the sample is dropped and counted in
+`report.dropped`, like any edge that names no vertex. With `files`, `into` is `'memory'`; `into:
+{ job }` is refused — a type error, and `api/invalid-argument` at run time — because there is no host
+to vend the write. `/docs/design/three-hosts` argues the shape.
+
+**Breaking:** `run(program, { host, job })` is now `run(program, { host, into: { job } })`. There is
+no alias; a host that passes `job` gets a type error, and at run time `api/invalid-argument` for
+`into`. And
+`run/destination-uncovered` is gone from the error catalogue: a run chooses its destination from
+`into`, so no destination can be uncovered.
 
 `run` boots the module itself the first time — the artefact is large and datafusion-heavy, so it is
 fetched when the user runs a job and not on page-load; the bundler emits the `.wasm` as an asset.
@@ -32,12 +57,13 @@ It reads the documents the program names (every shape, not just the first) with
 Fossil turns each `@conn/path` into a location and the connection it goes through, and every byte
 goes through an `object_store` store built from the credential the host vends for it: DataFusion
 reads each source through `read` on its connection — by range requests, not whole — and the output
-is written at `<prefix><path>` through `write` on `{ job }`, in parts when a file is large. The host
+is written at `<prefix><path>` through `write` on `{ job }`, in parts when a file is large — or, into
+memory, into an `InMemory` the run answers. The host
 never signs a URL.
 
-Pass `profiled` — what `profile` in `@fossil-lang/profile` answered, the value the editor's
-`registerProfile` took — and the run checks the program against the same columns the editor did:
-`run(program, { host, job, profiled })`. Without it every source is an open row.
+Pass `profiled` — what the editor's `program.describe()` answered — and the run checks the program
+against the same columns the editor did:
+`run(program, { host, into: { job }, profiled })`. Without it every source is an open row.
 
 `report` is `{ location, dropped }`: where the corpus went and, per edge table, how many input rows
 named a vertex that does not exist. What was written is `<location>fossil.json`.

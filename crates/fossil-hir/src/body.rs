@@ -53,31 +53,24 @@ pub struct ExprId(pub u32);
 
 /// Per-mapping body content.
 ///
-/// Owns the flat `Vec<HirProperty>` that `HirMapping.properties`
-/// once carried (the field is REMOVED from `HirMapping`: the signature
-/// table carries names and structural counts and never body content, so a body
-/// edit cannot invalidate it). [`Self::expr_count`] is the `ExprId` arena's
+/// Owns the flat `Vec<HirProperty>` — not a field of `HirMapping`: the
+/// signature table carries names and structural counts and never body content,
+/// so a body edit cannot invalidate it. [`Self::expr_count`] is the `ExprId` arena's
 /// bookkeeping.
 ///
 /// # `ExprId` is assigned HERE, and nowhere else
 ///
-/// [`Self::expr_spans`] is the reason. There were THREE notions of `ExprId` in
-/// the tree and they disagreed the moment one property failed to lower:
-///
-/// 1. this query — a DENSE index over the properties that lowered;
-/// 2. `crate::spans::spans` — the property's POSITION among the CST's
-///    `PROPERTY` children, from an `.enumerate()`, with a comment claiming it
-///    matched this one;
-/// 3. `fossil_ide::hover` — the CST position again, used both as the `ExprId`
-///    and to index this `properties` vector.
+/// [`Self::expr_spans`] is the reason. This query's numbering is a DENSE index
+/// over the properties that lowered; a property's POSITION among the CST's
+/// `PROPERTY` children is another numbering, and the two disagree the moment
+/// one property fails to lower.
 ///
 /// A property that parses and does not lower — a CURIE key, `iri =`, an
-/// absolute-IRI key: every retired spelling in the corpus is exactly one of
-/// these — makes the CST longer than the HIR, and everything after it shifts.
-/// The consequences were silent in all three directions: the checker numbers
-/// with (1) and looks the span up in (2), so a type error UNDERLINES THE WRONG
-/// PROPERTY; hover reads the short name and the predicate IRI of a different
-/// property than the one under the cursor.
+/// absolute-IRI key: every retired spelling is exactly one of these — makes the
+/// CST longer than the HIR, and everything after it shifts. Mixed, the two
+/// numberings fail silently: a type error UNDERLINES THE WRONG PROPERTY, and
+/// hover reads the short name and the predicate IRI of a different property
+/// than the one under the cursor.
 ///
 /// So the arena publishes its own spans, in lockstep with `properties`, from
 /// the `prop_node` it already has in hand. `spans()` is an accessor over this
@@ -145,6 +138,11 @@ pub struct HirBody<'db> {
     /// identity's three obligations. Mapping-relative.
     #[returns(ref)]
     pub diagnostics: Vec<fossil_base::Diagnostic>,
+    /// The body has no `@subject`, and [`Self::diagnostics`] already says so: a
+    /// lowering that needs the identity propagates this rather than saying it
+    /// again.
+    #[returns(copy)]
+    pub no_subject: Option<fossil_base::ErrorGuaranteed>,
 }
 
 /// One reference, and where its NAME is written.
@@ -256,6 +254,7 @@ pub fn body<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> HirB
     // rather than about a token, and the message wants the mapping's name.
     let mut subjects: Vec<(usize, fossil_graph_schema::Span)> = Vec::new();
     let mut sink = fossil_base::Diagnostics::new();
+    let mut no_subject = None;
     if let Some(node) = mapping_cst.syntax() {
         let name = mapping_name(&node);
         if let Some(body_node) = node
@@ -280,7 +279,7 @@ pub fn body<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> HirB
                     expr_count = expr_count.saturating_add(1);
                 }
             }
-            check_identity(&mut sink, &name, &subjects, &body_node);
+            no_subject = check_identity(&mut sink, &name, &subjects, &body_node);
         }
     }
     HirBody::new(
@@ -290,6 +289,7 @@ pub fn body<'db>(db: &'db dyn fossil_base::Db, mapping: MappingLoc<'db>) -> HirB
         expr_count,
         ref_spans,
         sink.into_vec(),
+        no_subject,
     )
 }
 
@@ -402,18 +402,33 @@ fn mapping_name(mapping_node: &SyntaxNode) -> String {
 
 /// `MappingBody := SubjectAssign Property+` — required, exactly one, first.
 ///
-/// All three used to be unchecked, and the first one was the expensive silence:
-/// a mapping with no identity lowered to vertices whose subject was the empty
-/// string, which dedups every row of the mapping into one blank node. That was
-/// caught downstream in `fossil-mir` as an internal error — the compiler's
-/// spelling for something the author wrote and can fix.
+/// The first is the expensive silence: a mapping with no identity would lower
+/// to vertices whose subject is the empty string, which dedups every row of the
+/// mapping into one blank node — and `fossil-mir` would catch it as an internal
+/// error, the compiler's spelling for something the author wrote and can
+/// fix.
 fn check_identity(
     sink: &mut fossil_base::Diagnostics,
     name: &str,
     subjects: &[(usize, fossil_graph_schema::Span)],
     body_node: &SyntaxNode,
-) {
+) -> Option<fossil_base::ErrorGuaranteed> {
     use fossil_graph_schema::Problem;
+    let Some(&(index, first_span)) = subjects.first() else {
+        let r = body_node.text_range();
+        return Some(
+            sink.raise(
+                fossil_base::Diagnostic::new(
+                    fossil_graph_schema::Severity::Error,
+                    Problem::MissingSubject {
+                        mapping: name.to_string(),
+                    },
+                    fossil_graph_schema::Span::new(r.start().into(), r.end().into()),
+                )
+                .with_help("the first line of a mapping body is `@subject = <expr>`"),
+            ),
+        );
+    };
     let mut emit = |span: fossil_graph_schema::Span, problem: Problem, help: &str| {
         sink.push(
             fossil_base::Diagnostic::new(fossil_graph_schema::Severity::Error, problem, span)
@@ -421,15 +436,6 @@ fn check_identity(
         );
     };
     let mapping = || name.to_string();
-    let Some(&(index, first_span)) = subjects.first() else {
-        let r = body_node.text_range();
-        emit(
-            fossil_graph_schema::Span::new(r.start().into(), r.end().into()),
-            Problem::MissingSubject { mapping: mapping() },
-            "the first line of a mapping body is `@subject = <expr>`",
-        );
-        return;
-    };
     if let Some(&(_, second_span)) = subjects.get(1) {
         emit(
             second_span,
@@ -448,6 +454,7 @@ fn check_identity(
             "the identity comes before what it identifies",
         );
     }
+    None
 }
 
 #[cfg(test)]
@@ -493,9 +500,8 @@ User : Person from users
     /// properties where 1 is expected. That's the silent corruption the
     /// filter-before-nth ordering prevents.
     ///
-    /// The two non-mapping children were `prefix ex: <…>` + the source; the
-    /// `type { … } := …` binding is what stands in front of the mappings now,
-    /// and it has to, or this asserts nothing about filtering. `@subject` is
+    /// The `type { … } := …` binding stands in front of the mappings, and it
+    /// has to, or this asserts nothing about filtering. `@subject` is
     /// one of the counted properties — the identity is a property with a
     /// language-owned key, so `Mapping_C`'s single property IS its identity.
     #[test]

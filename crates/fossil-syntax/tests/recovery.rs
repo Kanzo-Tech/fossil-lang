@@ -1,28 +1,24 @@
 //! Unlexable bytes — the parser TERMINATES, and it REPORTS.
 //!
-//! Two bugs met on the same input, and both are fixed:
+//! Two failures this input invites, and what prevents each:
 //!
-//! 1. **The hang.** `parse_program`'s fall-through called
+//! 1. **The hang.** A fall-through in `parse_program` that called
 //!    `recover_to(p, TOP_LEVEL_ANCHORS)` — and `IDENT ∈ TOP_LEVEL_ANCHORS` —
-//!    so the call no-op'd while the outer `loop` re-entered the same arm
-//!    with the same `p.pos` forever. The parser spun at 100% CPU and never
-//!    returned. `parser/items.rs::parse_program` uses `p.bump_as_error()`
-//!    instead, which always advances `p.pos`.
+//!    would no-op while the outer `loop` re-entered the same arm with the
+//!    same `p.pos` forever. `parser/items.rs::parse_program` uses
+//!    `p.bump_as_error()`, which always advances `p.pos`.
 //!
-//! 2. **The silence.** `raw_lex` dropped logos's `Err` variants, so an input
-//!    of ONLY unlexable bytes — `"#"`, `"$$"` — lexed to an EMPTY token
-//!    stream: `parse_program` broke on `None` immediately, the CST came back
-//!    empty, and the LSP's Problems panel showed nothing for a file the user
-//!    could see was wrong. `lexer::raw_lex_lossless` keeps the range and
+//! 2. **The silence.** A lex that drops logos's `Err` variants turns an input
+//!    of ONLY unlexable bytes — `"#"`, `"$$"` — into an EMPTY token stream:
+//!    an empty CST, and nothing shown for a file the user can see is wrong.
+//!    `lexer::raw_lex_lossless` keeps the range and
 //!    `indent::lex_with_indents` emits it as a `SyntaxKind::ERROR` token
 //!    carrying the byte, which `bump_as_error` reports as
 //!    `unexpected character `#` — no token starts with it`.
 //!
-//! These tests would NEVER TERMINATE before the first fix, and asserted
-//! nothing about diagnostics before the second. They run in sub-millisecond
-//! range; we assert a generous <100ms wall-clock bound so a future regression
-//! that re-introduces the loop will surface as a timeout-style failure
-//! (rather than the user noticing the test suite never ends).
+//! They run in sub-millisecond range; we assert a generous <100ms wall-clock
+//! bound so a reintroduced loop surfaces as a timeout-style failure (rather
+//! than the user noticing the test suite never ends).
 //!
 //! ## Wall-clock bound rationale
 //!
@@ -32,7 +28,7 @@
 //! doesn't finish in 2s we `panic!("parser hung — regression")` from
 //! the test thread (the worker is leaked, which is acceptable for a
 //! once-per-CI-run regression — the process exits after the test
-//! suite). Post-fix the parses take micro-seconds; 2s is ~10000× the
+//! suite). The parses take micro-seconds; 2s is ~10000× the
 //! happy-path budget and absorbs any CI noise.
 
 use std::sync::Arc;
@@ -75,19 +71,18 @@ fn parse_with_timeout(input: &'static str, timeout: Duration) -> (Duration, Vec<
 }
 
 /// Happy-path budget: parse-on-bare-`#` finishes well under 100ms.
-/// We pick 100ms as a regression-style soft cap that is huge vs the actual
-/// post-fix cost (~micro-seconds) but still catches a pathological slowdown.
+/// We pick 100ms as a soft cap that is huge vs the actual cost
+/// (~micro-seconds) but still catches a pathological slowdown.
 const HAPPY_PATH_BUDGET: Duration = Duration::from_millis(100);
 
 /// Hung-process detection: 2s is ~20× the happy-path soft cap and ~10⁴×
-/// the actual post-fix wall-clock. Any future regression that re-introduces
-/// the no-progress loop trips this gate within seconds.
+/// the actual wall-clock. A no-progress loop trips this gate within
+/// seconds.
 const HANG_DETECTION_BUDGET: Duration = Duration::from_secs(2);
 
 #[test]
 fn parse_reports_the_bare_unlexable_byte() {
-    // The minimal repro: a single `#`. Once 100% CPU forever, then a clean
-    // return with nothing to show for it. Now exactly one diagnostic, and it
+    // The minimal case: a single `#`. Exactly one diagnostic, and it
     // says which character — the byte is the only content the file has, so a
     // generic "unexpected token" would name nothing at all.
     let (elapsed, diags) = parse_with_timeout("#", HANG_DETECTION_BUDGET);
@@ -109,8 +104,8 @@ fn parse_reports_the_bare_unlexable_byte() {
 #[test]
 fn parse_terminates_on_unlexable_then_valid_item() {
     // The realistic shape — a stray `#` followed by an otherwise
-    // well-formed top-level item (the mid-edit Monaco scenario:
-    // user just typed `#` and the LSP receives didChange). The
+    // well-formed top-level item (the mid-edit scenario: the user just
+    // typed `#` and the editor pushes the text). The
     // valid binding after the `#` MUST still parse cleanly — sanity
     // that the recovery advances past the bad token AND resumes normal
     // parsing. We do not assert the exact green-tree shape here; the
@@ -176,16 +171,9 @@ fn parse_reports_an_unlexable_byte_between_two_good_items() {
     // A `#` on its own line between two well-formed items. This exercises the
     // outer `_ => bump_as_error()` arm rather than the IDENT-lookahead arm.
     //
-    // It is the case the old test explicitly gave up on: the byte was dropped,
-    // the stream was two clean items, and the file looked perfect to every tool
-    // while the user was staring at the `#`. Exactly one diagnostic, and the two
-    // items around it still parse.
-    //
-    // The two items used to be `prefix` declarations, which is what this file
-    // reached for whenever it wanted something short and certainly valid. They
-    // are source bindings now — a `prefix` line is itself a diagnostic, and
-    // asserting «only the `#` is reported» around two of them would have been
-    // asserting the opposite of what the test says.
+    // Dropped, the byte would leave a stream of two clean items, and the file
+    // would look perfect to every tool while the user was staring at the `#`.
+    // Exactly one diagnostic, and the two items around it still parse.
     let input = "a := io.csv(\"a.csv\")\n#\nb := io.csv(\"b.csv\")\n";
     let (elapsed, diags) = parse_with_timeout(input, HANG_DETECTION_BUDGET);
     assert_eq!(

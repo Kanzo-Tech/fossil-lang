@@ -11,8 +11,7 @@
 //!
 //! The expression encoding remains intentionally minimal:
 //! - [`HirExpr::Interpolation`] carries a string's literal runs and its holes,
-//!   each hole an ordinary expression. It replaced a raw `Template` that kept
-//!   backtick text verbatim for codegen to re-scan; there is no backtick.
+//!   each hole an ordinary expression, so nothing downstream re-scans text.
 //! - [`HirExpr::FieldRef`] is just the name of a column of the one row in scope.
 //! - [`HirExpr::StringLit`] holds the literal text without surrounding quotes.
 
@@ -31,15 +30,15 @@ pub struct HirFile<'db> {
     /// `MappingLoc` with its signature by that index, so the slot for a header
     /// this could not read is `Err` and never absent.
     ///
-    /// **It used to be filtered**, and the pairing was correct only while every
-    /// mapping lowered. One that did not shifted every LATER mapping's
-    /// signature onto its predecessor: measured on a two-mapping file whose
-    /// first header has no `from`, `lower_to_mir_pg` for mapping 0 received
-    /// mapping 1's `HirMapping` — a valid `Good : Person from Users` lowered
-    /// under the broken mapping's body — and mapping 1, the healthy one, ran
-    /// off the end of the vector and raised
-    /// `internal compiler error: mapping has no HIR at its DefMap index`.
-    /// The ICE never fired on the mapping that was wrong.
+    /// **It is not filtered**: filtered, the pairing is correct only while
+    /// every mapping lowers. One that does not shifts every LATER mapping's
+    /// signature onto its predecessor: on a two-mapping file whose first header
+    /// has no `from`, `lower_to_mir_pg` for mapping 0 would receive mapping 1's
+    /// `HirMapping` — a valid `Good : Person from Users` lowered under the
+    /// broken mapping's body — and mapping 1, the healthy one, would run off
+    /// the end of the vector and raise
+    /// `internal compiler error: mapping has no HIR at its DefMap index`, on
+    /// the mapping that was not wrong.
     ///
     /// The `Err` carries [`fossil_base::ErrorGuaranteed`], which is to say the
     /// diagnostic is already published — `lower_mapping_node` emits exactly one
@@ -119,10 +118,6 @@ pub struct HirSourcePipe {
     /// wrong column is a fact about the pipeline, and a per-expression span
     /// belongs in the `Spans<'db>` side table keyed by `(MappingLoc, ExprId)`,
     /// never in a field of the HIR node itself.
-    ///
-    /// It was a `(u32, u32)`, and both of its readers opened with
-    /// `Span::new(pipe.span.0, pipe.span.1)` — a second spelling of
-    /// [`fossil_graph_schema::Span`] with a conversion at every use.
     pub span: Span,
 }
 
@@ -135,14 +130,11 @@ pub enum HirSourceOp {
     /// `select(User.id, User.name)` — restricts the row to the named columns,
     /// each under the binding that owns it.
     ///
-    /// The qualification used to be read and then DROPPED — the payload was the
-    /// column half alone — so a name was looked for in the rows in order and
-    /// taken from the first that had it, and after a join `select(id)` meant
-    /// «the left side's id» for a reason the author never wrote. Open question 4
-    /// of `grammar.bnf, § OPEN` was decided on 2026-08-14 the way the surface
-    /// already read: `select` MAY follow a `join`, and it names a QUALIFIED
-    /// column. So the binding travels with the column and the ambiguity has
-    /// nowhere left to live.
+    /// `select` MAY follow a `join`, and it names a QUALIFIED column, so the
+    /// binding travels with the column. With the column half alone a name
+    /// would be looked for in the rows in order and taken from the first that
+    /// had it, and after a join `select(id)` would mean «the left side's id»
+    /// for a reason the author never wrote.
     Select(Vec<SelectedColumn>),
     /// `join(User, on = Purchase.user_id == User.id)` — an inner join whose
     /// condition is a PREDICATE over qualified columns, not a shared key name:
@@ -233,16 +225,12 @@ pub enum PropertyKey {
     /// that's not a field») with JSON-LD's solution, which reserves `@`+ALPHA
     /// because a user's keys are arbitrary and you cannot appropriate `id`.
     ///
-    /// It replaces `PropertyKey::Iri`, and with it went the `iri` keyword and
-    /// the `@subject(iri = …)` call shape that `a0d9bfa` built and that lived
-    /// two hours: an identity is ASSIGNED, and a call shape would have made the
-    /// language's own slot look like a function it does not have.
+    /// An identity is ASSIGNED: a call shape, `@subject(iri = …)`, would make
+    /// the language's own slot look like a function it does not have.
     Subject,
     /// `name = User.name` — a bare name.
     ///
-    /// **The IRI is not here, and that is the change.** The key used to carry
-    /// the fully-resolved predicate IRI, expanded from a CURIE against the
-    /// file's prefix table; a bare name has no prefix to expand and the
+    /// **The IRI is not here.** A bare name has no prefix to expand, and the
     /// document is the only thing that knows the IRI. The name is the LAST
     /// SEGMENT of a predicate IRI the shape declares, and
     /// resolving it back is [`crate::check`]'s job, because that is where the
@@ -254,15 +242,10 @@ pub enum PropertyKey {
 
 /// Every BINARY operator the language has — comparison, connective, arithmetic.
 ///
-/// It lived in `fossil-mir` until F2 §2, where the HIR needed it: an operator
-/// the parser reads and the checker types cannot be defined downstream of both.
-/// `fossil-mir` and the backends name this one.
-///
-/// It was called `CmpOp`, and that name was a lie: it has held `And` and `Or` —
-/// which compare nothing — since it was written, and the arithmetic levels made
-/// it worse rather than different. `CmpOp::Mul` was the clearest form of it. The
-/// rename waited because it is the one change that cannot be merged through a
-/// conflict, and two of its files were under concurrent edit when it landed.
+/// It is the HIR's because an operator the parser reads and the checker types
+/// cannot be defined downstream of both. `fossil-mir` and the backends name
+/// this one. Not `CmpOp`: it holds `And`, `Or` and arithmetic, which compare
+/// nothing.
 ///
 /// # The five arithmetic operators, and where their meaning is fixed
 ///
@@ -305,10 +288,8 @@ pub enum UnOp {
 /// An `f64` by its IEEE-754 bits, so a float literal can live in a type that is
 /// `Eq + Hash` for Salsa interning.
 ///
-/// That requirement is why [`HirExpr`] carried integers and refused floats: the
-/// old doc-comment on `IntLit` said a float «needs a representation decision the
-/// type system has not made». This is the decision, and it is the smallest one
-/// available — the bits are the literal, exactly, with no re-parse downstream
+/// That requirement is what a float literal needs a representation decided
+/// for, and this is the smallest decision available — the bits are the literal, exactly, with no re-parse downstream
 /// and no precision lost between the lexer and the Parquet column.
 ///
 /// Equality is BITWISE and therefore total, which is what `Eq` demands and what
@@ -346,23 +327,17 @@ pub enum InterpolationPart {
 pub enum HirExpr {
     /// An interpolated string — its literal runs and its holes, in order.
     ///
-    /// One surface spelling reaches here, `"…{u.id}…"`. The backtick
-    /// `` `…${.id}…` `` is retired and is not a token, so nothing builds an
-    /// interpolation from one. A hole holds an ordinary [`HirExpr`], parsed by
-    /// the parser, so nothing downstream has to know a string is made of text.
-    ///
-    /// It replaced a raw `Template(SmolStr)` that carried the token verbatim
-    /// and was scanned again at MIR-lowering time. That is why two walkers used
-    /// to be blind to the columns a subject IRI reads: there was no node to
-    /// walk. Now there is.
+    /// One surface spelling reaches here, `"…{u.id}…"`. A hole holds an
+    /// ordinary [`HirExpr`], parsed by the parser, so nothing downstream has to
+    /// know a string is made of text — and a walker that wants the columns a
+    /// subject IRI reads has a node to walk rather than text to re-scan.
     Interpolation(Vec<InterpolationPart>),
     /// A bare `id` → field name `"id"`: a column of the one row in scope.
     ///
     /// The anonymous row, and it is ending: every reference becomes qualified,
-    /// and this variant goes with the last fixture that spells one. The
-    /// leading-dot spelling `.id` that used to build it is already gone — the
-    /// parser refuses a leading `.` — and what still reaches here is a bare
-    /// identifier. See [`Self::ColumnRef`].
+    /// and this variant goes with the last fixture that spells one. The parser
+    /// refuses a leading `.`, so what reaches here is a bare identifier. See
+    /// [`Self::ColumnRef`].
     FieldRef(SmolStr),
     /// `orders.user_id` → the `user_id` column of the row `orders` names.
     ///
@@ -415,12 +390,10 @@ pub enum HirExpr {
     /// is the ordinary call (grammar.bnf, `PostfixOp`); what makes this a distinct
     /// HIR form is the LOWERING, which knows the type and uses THE template of
     /// that type — unique because a type has exactly ONE identity, declared once
-    /// by the program as its `@subject`. That is what retired
-    /// `subject_skeletons`, where an
-    /// edge was GUESSED by comparing IRI-template skeletons between mappings
-    /// with a `\u{1}` marker standing in for every per-row hole, so
-    /// `str.slug(User.name)` counted as a constant and could match where it must
-    /// not.
+    /// by the program as its `@subject`. Nothing GUESSES an edge by comparing
+    /// IRI-template skeletons between mappings, where a marker standing in for
+    /// every per-row hole would count `str.slug(User.name)` as a constant and
+    /// match where it must not.
     ///
     /// # Binding is POSITIONAL, and the argument is the hole's finished value
     ///
@@ -430,9 +403,7 @@ pub enum HirExpr {
     /// that decides it: the hole's spelling stays private. Binding by name would
     /// make the identifier inside `{…}` — `{User.email}` — part of the type's
     /// public API, so renaming a column in the mapping that DEFINES an identity
-    /// would break every mapping that references it. (It also said the language
-    /// then had one binding rule, because the type import bound by position; the
-    /// import binds by name now, and grammar.bnf's edge comment records it.)
+    /// would break every mapping that references it.
     ///
     /// Arity is checked against the template's hole count
     /// ([`crate::identity::subject_templates`]) and a mismatch is a diagnostic
@@ -444,8 +415,8 @@ pub enum HirExpr {
     FloatLit(FloatBits),
     /// `true` / `false` — a boolean literal.
     ///
-    /// It needed a `BOOL` token before it could exist. As an `IDENT`, `true` was
-    /// a [`Self::FieldRef`] and `verified = true` reported "unknown column
+    /// It has a `BOOL` token of its own: as an `IDENT`, `true` would be a
+    /// [`Self::FieldRef`] and `verified = true` would report "unknown column
     /// `true`" — a literal sent to look for a binding it can never have.
     BoolLit(bool),
     /// `.age >= 18`, `gross - discount` — a comparison, a boolean connective or
@@ -498,10 +469,8 @@ pub enum HirExpr {
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the locked query surface
 pub fn lower_to_hir<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> HirFile<'db> {
     let cst = fossil_syntax::parse(db, file);
-    // The `DefMap` is threaded in for the SHAPE, and that is the whole of the
-    // change: a header names one of the bare names a `type { … } := …` binding
-    // introduced, and the binding is what knows the IRI. It used to be threaded
-    // in for the prefix table, which every function below carried a slice of.
+    // The `DefMap` is threaded in for the SHAPE: a header names one of the bare names a `type { … } := …` binding
+    // introduced, and the binding is what knows the IRI.
     let dm = def_map(db, file);
     let type_names = bound_type_names(db, dm);
 
@@ -519,12 +488,11 @@ pub fn lower_to_hir<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> HirF
                     // `Orders : Order from Purchase.join(User, on = …)`.
                     // `MappingHeader := IDENT SHAPE_SEP ShapeExpr 'from'
                     // Expression` (grammar.bnf), so a `from` clause derives a
-                    // relation INLINE exactly as a `SourceDef` does — and until
-                    // now the derivation was dropped on the floor:
-                    // `source_binding_of` kept the first IDENT (`Purchase`) and
-                    // the `join` was never lowered at all, so `User.email` in
-                    // the body had no row to resolve against and MIR emitted
-                    // one `Op::Source` where a join belonged.
+                    // relation INLINE exactly as a `SourceDef` does. Keeping
+                    // only the first IDENT (`Purchase`) would leave the `join`
+                    // unlowered, `User.email` in the body with no row to
+                    // resolve against, and one `Op::Source` in MIR where a join
+                    // belongs.
                     //
                     // The relation is anonymous, and there is already a name
                     // free for it: the mapping's own. So the pipe
@@ -649,7 +617,7 @@ fn check_provider(
 /// to honour it.**
 ///
 /// Three ways to write one nobody can act on, and each gets a message rather
-/// than the silence it used to get:
+/// than silence:
 ///
 /// 1. **The row declares no such position.** `io.json("x", delimiter = "|")` —
 ///    only `io.csv`'s row has a `delimiter`, so on any other row the argument
@@ -743,8 +711,8 @@ fn check_reader_option(
 /// Without this the checks below would tell every such host that `io.shex` "is
 /// not a provider", which is false twice over: it is a provider of the LANGUAGE,
 /// and the host not having installed a row for it is the host's answer, not the
-/// program's mistake. On a host that installs one — the engine, the LSP, the
-/// editor — the same name really is unknown and the message stands.
+/// program's mistake. On a host that installs one — the engine, the editor —
+/// the same name really is unknown and the message stands.
 fn answers_about(
     table: &[&'static fossil_base::Provider],
     wanted: fossil_base::Capability,
@@ -760,15 +728,13 @@ fn answers_about(
 /// { Product }     := io.rdf("g.ttl", schema = io.shacl("s.ttl"))
 /// ```
 ///
-/// It used to be a bare path, and it was the last place in the language where a
-/// document arrived without a row to read it — so the decoder came from the
-/// document's own EXTENSION, the one dispatch that did not go by name. With this
-/// there is a single rule: **where there is a document, there is a row that
-/// names it.**
+/// Not a bare path: a document that arrives without a row to read it would
+/// take its decoder from its own EXTENSION, a dispatch that does not go by
+/// name. There is a single rule: **where there is a document, there is a row
+/// that names it.**
 ///
-/// The alternative was killing `schema =` and taking every document from a
-/// `type { … }` binding. They are not the same document: `schema =` shapes the
-/// INPUT rows and `type { … }` is the OUTPUT contract, and nothing says a
+/// It is not the same document as a `type { … }` binding's: `schema =` shapes
+/// the INPUT rows and `type { … }` is the OUTPUT contract, and nothing says a
 /// program's two ends read one file.
 ///
 /// The span is the ARGUMENT's, not the binding's — `crate::def_map::SchemaArg`
@@ -866,9 +832,8 @@ fn check_schema_arg(
 /// Nothing structural: `io.csv(…)` is also a call whose callee is a member
 /// access, and its head is also a bare name. What separates them is that `io` is
 /// a CATALOGUED head and `User` is not — a question about the catalogue, asked
-/// of the catalogue ([`FunctionRegistry::is_catalogued_head`]). This is the
-/// receiver doing the work the string-matching used to do badly: before it, the
-/// two were told apart by which `SyntaxKind` the parser happened to build.
+/// of the catalogue ([`FunctionRegistry::is_catalogued_head`]), never of which
+/// `SyntaxKind` the parser happened to build.
 fn lower_source_pipe(
     db: &dyn fossil_base::Db,
     sink: &mut Diagnostics,
@@ -1061,13 +1026,12 @@ fn named_arg_name(node: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
 
 /// Match a stage's written arguments against the parameters its row declares.
 ///
-/// **This is the function the three hand-written arms turned into.** `where`,
-/// `select` and `join` each counted their own arguments, each phrased the
-/// failure differently, and every other verb had nowhere to count from because
-/// its row declared no parameters to count. Arity, named-argument resolution
-/// and the refusal of a name no parameter answers to now happen once here, for
-/// every `Receiver::Relation` row, out of [`SigSpec`] — which is what a
-/// signature was already for on the scalar side.
+/// Arity, named-argument resolution and the refusal of a name no parameter
+/// answers to happen once here, for every `Receiver::Relation` row, out of
+/// [`SigSpec`] — which is what a signature is for on the scalar side too. A
+/// verb that counted its own arguments would phrase the failure its own way,
+/// and a verb whose row declared no parameters would have nothing to count
+/// from.
 fn bind_stage_args<'a>(
     sink: &mut Diagnostics,
     row: &'a crate::stdlib::RegistryEntry,
@@ -1399,15 +1363,13 @@ fn describe_arity(params: &[ParamSpec]) -> String {
 /// An example call rendered from the row's own signature.
 ///
 /// It names the binding the program actually wrote rather than a made-up
-/// `User`, which the hardcoded examples could not do — and those examples were
-/// the last thing in these messages not derived from the row.
+/// `User`, and it is derived from the row like the rest of the message.
 ///
 /// The binding is the pipeline's BASE — `pedidos` in `pedidos.select(…)` — and
-/// not the first entry of `types`, which is what this reached for first. Those
-/// are the shape types a `type { Persona } := io.shex(…)` binding introduces,
-/// so the example came out `select(Persona.id, Persona.name)`: a name that is
-/// in scope, is not a relation, and would be refused if a reader copied it.
-/// Worse than the hardcoded `User`, which at least announced itself.
+/// not the first entry of `types`. Those are the shape types a
+/// `type { Persona } := io.shex(…)` binding introduces, so the example would
+/// come out `select(Persona.id, Persona.name)`: a name that is in scope, is not
+/// a relation, and would be refused if a reader copied it.
 fn example_call(row: &crate::stdlib::RegistryEntry, base: &SmolStr) -> String {
     let b = base.as_str();
     let args: Vec<String> = row.sig.params[1..]
@@ -1444,20 +1406,16 @@ fn example_call(row: &crate::stdlib::RegistryEntry, base: &SmolStr) -> String {
 /// `verb` is the member the call names; `stage` is the call node, which is where
 /// the `ARG_LIST` hangs.
 ///
-/// # Why there is no `match verb.as_str()` here any more
+/// # Why there is no `match verb.as_str()` here
 ///
-/// There was, with one arm per implemented verb and a catch-all, and the
-/// catch-all told a user writing `Employee.sort(…)` that `sort` *"is not a
-/// relation verb fossil lowers"* — which is false: `sort` is catalogued, and
-/// what it lacks is a lowering. The message even read its count from the
-/// registry and its list of implemented verbs from a string literal, so half of
-/// it was derived and half was prose that could go stale on its own.
-///
-/// Dispatching on the TEXT was the cause. A fourteenth [`PlanOp`] compiled
-/// clean, and the arms held what the rows failed to declare. Now the row is
-/// looked up, [`bind_stage_args`] fills its declared parameters, and what is
-/// left below is CONSTRUCTION, exhaustive over `PlanOp`, with the unlowered
-/// verbs named rather than swept into a wildcard. Adding a variant is a compile error here and nowhere else.
+/// Dispatching on the TEXT, with one arm per implemented verb and a catch-all,
+/// would let a new [`PlanOp`] compile clean, let the arms hold what the rows
+/// fail to declare, and tell a user writing `Employee.sort(…)` that `sort` *"is
+/// not a relation verb fossil lowers"* — false: `sort` is catalogued, and what
+/// it lacks is a lowering. So the row is looked up, [`bind_stage_args`] fills
+/// its declared parameters, and what is left below is CONSTRUCTION, exhaustive
+/// over `PlanOp`, with the unlowered verbs named rather than swept into a
+/// wildcard. Adding a variant is a compile error here and nowhere else.
 fn lower_source_stage(
     db: &dyn fossil_base::Db,
     sink: &mut Diagnostics,
@@ -1544,10 +1502,9 @@ fn lower_source_stage(
 
 /// Every relation verb the catalogue declares, and the ones with a lowering.
 ///
-/// Both read the registry. A list of verbs inside a format string is the same
-/// second copy the arms were, and it is the copy that goes stale: the message
-/// this replaced named `where`, `select` and `join` in prose beside a count it
-/// read from the table.
+/// Both read the registry. A list of verbs inside a format string is a second
+/// copy, and it is the copy that goes stale beside a count read from the
+/// table.
 fn relation_verbs() -> Vec<String> {
     verb_names(|_| true)
 }
@@ -1736,15 +1693,15 @@ fn decline_mapping(
 /// Lower a `MAPPING`'s header into its [`HirMapping`] signature.
 ///
 /// `db` is threaded in for one reason: a header this cannot read makes the
-/// WHOLE MAPPING disappear from the HIR, and it used to do that without a word.
-/// Every `Err` below is [`decline_mapping`], which reports before it returns.
+/// WHOLE MAPPING disappear from the HIR, and that must not happen without a
+/// word. Every `Err` below is [`decline_mapping`], which reports before it
+/// returns.
 ///
-/// **It used to be `Option`, and the `None`s were silent** on the claim that
-/// the parser had already spoken. Measured on `A : B from\n`, it has not: the
-/// parser accepts a `from` with nothing after it, `source_binding_of` answered
-/// `None`, the mapping vanished from the HIR, and the only thing anyone was
-/// told about the file came from the unbound shape name. The slot that vanished
-/// with it is the other half — see [`HirFile::mappings`].
+/// **Not a silent `Option`** on the claim that the parser has already spoken.
+/// On `A : B from\n` it has not: the parser accepts a `from` with nothing after
+/// it, `source_binding_of` answers `None`, and the only thing anyone would be
+/// told about the file would come from the unbound shape name. The slot is the
+/// other half — see [`HirFile::mappings`].
 ///
 /// `dm` is threaded in for the shape. `ShapeExpr := IDENT` (grammar.bnf,
 /// `ShapeExpr`) — one of the names a `type { … } := io.shex(…)` binding
@@ -1763,8 +1720,8 @@ fn lower_mapping_node<'db>(
         .find(|c| c.kind() == SyntaxKind::MAPPING_HEADER)
         .ok_or_else(|| decline_mapping(sink, node, "there is no header here"))?;
     // Properties are NOT collected here — the body() Salsa
-    // query owns them. The MAPPING_BODY's presence is no longer required for
-    // a successful header lowering; an empty-bodied mapping is still a valid
+    // query owns them. The MAPPING_BODY's presence is not required for a
+    // successful header lowering; an empty-bodied mapping is still a valid
     // HirMapping signature.
 
     // The header's shape and source are wrapped in composite sub-nodes:
@@ -1779,8 +1736,8 @@ fn lower_mapping_node<'db>(
     //       LITERAL_EXPR
     //         IDENT "Adults"                -- the from-source expression
     //
-    // Phase 1's flat "first four IDENTs" shortcut no longer matches; walk the
-    // sub-nodes by kind to extract each header field cleanly.
+    // Walk the sub-nodes by kind to extract each header field cleanly: the
+    // header is not a flat run of IDENTs.
     let name = header
         .children_with_tokens()
         .filter_map(fossil_syntax::SyntaxElement::into_token)
@@ -1789,13 +1746,10 @@ fn lower_mapping_node<'db>(
         .ok_or_else(|| decline_mapping(sink, node, "it names nothing"))?;
 
     // ShapeExpr → its one IDENT: the shape's NAME (grammar.bnf, ShapeExpr).
-    // There is no `IRI_EXPR` under it any more and no prefix to expand — the
-    // name is one of those a `type { … } := io.shex(…)` binding introduced, and
-    // that binding already resolved it against the document, positionally.
-    //
-    // `.find(…)` used to mean "the first of however many the intersection had",
-    // and the rest were dropped here without a word — `A & B` checked against
-    // `A` alone. The `&` left the grammar rather than the drop being made loud.
+    // There is no prefix to expand — the name is one of those a
+    // `type { … } := io.shex(…)` binding introduced, and that binding already
+    // resolved it against the document. A header names exactly one shape, so
+    // `.find(…)` has one to find.
     let shape_expr = header
         .children()
         .find(|c| c.kind() == SyntaxKind::SHAPE_EXPR)
@@ -1808,8 +1762,8 @@ fn lower_mapping_node<'db>(
     else {
         // No name at all — the parser has already refused whatever was there
         // (a CURIE, a `<…>`, or nothing). Returning `Err` here would delete the
-        // mapping's SIGNATURE and say nothing new about it, which is the failure
-        // this whole step exists to remove, so the mapping survives with no
+        // mapping's SIGNATURE and say nothing new about it, so the mapping
+        // survives with no
         // shape and `shapes::resolve_target_shape` reads the empty IRI as «no
         // shape clause». The parser's diagnostic is the one that names the form.
         return Ok(HirMapping {
@@ -1823,15 +1777,14 @@ fn lower_mapping_node<'db>(
     // The one resolution: a bare name against the file's type bindings.
     //
     // A name NOBODY bound is reported and the mapping still lowers, carrying an
-    // empty shape IRI. That split is deliberate and it is the correction this
-    // commit makes: the old code returned `None` on an unresolvable shape, so a
-    // header one `prefix` line away from right produced NO HirMapping — its
-    // properties never lowered, `body()` never ran on them, and every `ExprId`
-    // after it shifted. A mapping that cannot name its shape is still a mapping
-    // whose body the author wants checked.
+    // empty shape IRI. That split is deliberate: with no HirMapping, a header
+    // one typo away from right would lose its properties, `body()` would never
+    // run on them, and every `ExprId` after it would shift. A mapping that
+    // cannot name its shape is still a mapping whose body the author wants
+    // checked.
     // The name is written and resolves to no shape, and there are TWO reasons
-    // for that. `lookup_type` answers `None` to both, which is what made the
-    // second one silent.
+    // for that. `lookup_type` answers `None` to both, so the cause is asked
+    // for separately (`unbound_shape_problem`).
     let shape_iri = dm.lookup_type(db, shape_name.as_str()).unwrap_or_else(|| {
         // `diagnose_item`, not `diagnose`: this is reached from `lower_to_hir`,
         // which walks the WHOLE-FILE CST, so `shape_expr`'s range is already a
@@ -1863,16 +1816,14 @@ fn lower_mapping_node<'db>(
 ///    declaration with no `@iri`. `TypeEntry::shape_error` records which, as a
 ///    [`ShapeBindError`](crate::def_map::ShapeBindError).
 ///
-/// Case 2 had no reader in the workspace: `DefMap::lookup_type_error`'s only
-/// callers were its own unit tests, so the cause was computed, stored and
-/// dropped. What the author got instead was case 1's message, and that message
-/// then listed the declared names — INCLUDING the one it had just said was not
-/// declared. So a missing shape document read as a misspelt name, and the
-/// evidence contradicted itself in the same sentence.
+/// Case 2 answered with case 1's message would list the declared names —
+/// INCLUDING the one it had just said was not declared. A missing shape
+/// document would read as a misspelt name, and the evidence would contradict
+/// itself in the same sentence.
 ///
 /// This is the mirror of [`crate::infer`]'s treatment of a source binding that
-/// bound no shape (`lookup_source_shape_error`), which has always reported by
-/// cause. The two sides of the same table now behave the same way.
+/// bound no shape (`lookup_source_shape_error`), which reports by cause too:
+/// the two sides of the same table behave the same way.
 pub(crate) fn unbound_shape_problem(
     db: &dyn fossil_base::Db,
     dm: crate::def_map::DefMap<'_>,
@@ -1908,13 +1859,9 @@ pub(crate) fn unbound_shape_problem(
     // Case 1: the name is not in the table at all. Only now is it honest to
     // list what the table does hold.
     //
-    // **The did-you-mean is inherited, and its candidates changed with it.** It
-    // was `check::surface_target_shape_error`'s `Undeclared` arm, suggesting
-    // over the shape IRIs a DOCUMENT declares; that arm is deleted because a
-    // header can no longer reach the document — it names a bare local name, and
-    // a name nobody bound stops here. So the candidates are the local names the
-    // program binds, which is what a header can misspell. Same threshold, same
-    // function, one layer up.
+    // The did-you-mean candidates are the local names the program binds, not
+    // the shape IRIs a DOCUMENT declares: a header names a bare local name and
+    // cannot reach the document, so what it can misspell is a binding.
     let declared: Vec<&str> = dm.types(db).iter().map(|t| t.name.as_str()).collect();
     let known = crate::didyoumean::did_you_mean(shape_name.as_str(), declared.iter().copied())
         .map_or_else(
@@ -1963,21 +1910,10 @@ fn source_binding_of(header: &fossil_syntax::SyntaxNode) -> Option<SmolStr> {
 /// lowering rules live here next to their natural
 /// home (`HirProperty` / `HirExpr`).
 ///
-/// `db` is threaded through so that a property this cannot read says so. That
-/// claim used to be made about the property KEY and was false — the key's
-/// prefix lookup was a bare `?`, so `name = .name` with no `prefix ex:` line
-/// dropped the property in silence while the doc comment here said it did not.
-/// Now every `None` in this function has emitted a diagnostic first.
+/// `db` is threaded through so that a property this cannot read says so:
+/// every `None` in this function has emitted a diagnostic first.
 ///
-/// A `prefixes: &[PrefixEntry]` slice used to come in beside `db`, for the
-/// VALUE position — `${ex:}` in an interpolation was the last place a CURIE was
-/// written. A hole takes an expression and nothing else, so it is not written
-/// anywhere now, and the parameter is gone from this function and from the
-/// eight below it.
-///
-/// `types` came in as it left, and it is not the same kind of parameter. The
-/// prefix table was carried through nine functions to be looked up in none of
-/// them; this one decides a FORM. `Person(User.email)` and `str.slug(x)` are
+/// `types` is threaded through because it decides a FORM. `Person(User.email)` and `str.slug(x)` are
 /// the same CST — a name applied to arguments — and the only thing that tells
 /// an edge constructor from a stdlib call is whether the name is one a
 /// `type { … } := …` binding introduced. The lowering is where
@@ -2002,10 +1938,7 @@ fn lower_property(
     use fossil_syntax::SyntaxKind;
 
     // `PropertyLhs` is a bare name: the last segment of a
-    // predicate IRI the shape document declares. This comment named `KW_IRI`
-    // twice — the `iri =` keyword, deleted from the lexer when the identity
-    // became `@subject = <expr>` — and `IRIExpr`, which grammar.bnf declares
-    // absent along with `PrefixedName` and `LocalName`.
+    // predicate IRI the shape document declares.
     let Some(lhs_node) = node
         .children()
         .find(|c| c.kind() == SyntaxKind::PROPERTY_LHS)
@@ -2032,10 +1965,10 @@ fn lower_property(
         .collect();
 
     // `PropertyLhs := IDENT` and `SubjectAssign := AT_ATTR ASSIGN Expression`.
-    // Two arms, and the three retired spellings that used to reach here — the
-    // CURIE, the absolute IRI and the `iri` keyword — do not: the PARSER refuses
-    // them now, by name and with a span over the whole form, so a key it could
-    // not read never arrives with tokens in it. What is left below is the case
+    // Two arms. The retired spellings — the CURIE, the absolute IRI and the
+    // `iri` keyword — do not reach here: the PARSER refuses them by name and
+    // with a span over the whole form, so a key it could not read never arrives
+    // with tokens in it. What is left below is the case
     // the parser cannot classify, which is why the fallback still says what a
     // property name IS rather than only that this is not one.
     let key = match lhs_toks.as_slice() {
@@ -2096,29 +2029,23 @@ fn lower_property(
 /// Lower an `EXPR` composite node.
 ///
 /// The parser wraps every right-hand side in an `EXPR` with a single child, and
-/// we dispatch on that inner kind — [`lower_expr_inner`] has the arms. The three
-/// kinds this used to name first, `TEMPLATE_EXPR`, `IRI_EXPR` and
-/// `FIELD_REF_EXPR`, are gone with the spellings that built them: there is no
-/// backtick, no `<https://…>`, no CURIE and no leading dot.
+/// we dispatch on that inner kind — [`lower_expr_inner`] has the arms.
 ///
 /// # The fallback arm is a diagnostic, not a `None`
 ///
 /// The parser builds seven kinds of node in a value position and this function
-/// reads all seven. Everything else used to reach `_ => None`, and a `None` here means
-/// `lower_property` drops the whole property, which `body()` skips without a
-/// word — so `slug = str.slug(User.name)` type-checked clean, ran, reported
-/// *wrote 1 vertex type*, and emitted a corpus with no `slug` column at all.
-/// Measured on 2026-08-06; three programs, two of them silently lossy.
+/// reads all seven. A silent `None` here would mean `lower_property` drops the
+/// whole property, which `body()` skips without a word — a program that
+/// type-checks clean, runs, and emits a corpus with a column missing
+/// (`/docs/design/expressions`).
 ///
 /// That is the worst failure mode available to a tool whose stated principle is
-/// "if it compiles, it runs", and it happened in the type system's own blind
+/// "if it compiles, it runs", and it lives in the type system's own blind
 /// spot: the checker raises nothing because the HIR never saw the expression.
-/// The arm now says so. The property is still dropped — closing that needs an
-/// HIR form for every expression the grammar admits, which is the standing rule
-/// in both directions: a token that does not reach the HIR is a promise the
-/// language does not keep, so what the HIR does not need leaves the grammar —
-/// but a dropped property is now a red build instead of a quiet hole in the
-/// data.
+/// So the arm says so. The property is still dropped — every expression the
+/// grammar admits has an HIR form, so what reaches the arm is the parser's own
+/// `ERROR` node — but a dropped property is a red build instead of a quiet
+/// hole in the data.
 fn lower_expr(
     db: &dyn fossil_base::Db,
     sink: &mut Diagnostics,
@@ -2175,13 +2102,10 @@ fn lower_expr_inner(
     match inner.kind() {
         SyntaxKind::POSTFIX_EXPR => lower_postfix(db, sink, &inner, types),
         SyntaxKind::BINARY_EXPR => lower_binary(db, sink, &inner, types),
-        // Grouping is not a form. `(.a and .b)` means what `.a and .b` means,
-        // so the parens are tokens and the one child node is the whole of it.
-        //
-        // This arm is not a deletion's leftover — it is a hole being closed.
-        // `PAREN_EXPR` was parsed and then refused by the fallback below, which
-        // meant a language that lowers `and` and `or` could not parenthesise
-        // them. A recovery-path `(` with nothing inside leaves no child, and
+        // Grouping is not a form. `(Row.a and Row.b)` means what
+        // `Row.a and Row.b` means, so the parens are tokens and the one child
+        // node is the whole of it — and a language that lowers `and` and `or`
+        // can parenthesise them. A recovery-path `(` with nothing inside leaves no child, and
         // `None` there is right: its diagnostic was already emitted by the
         // parser.
         SyntaxKind::PAREN_EXPR => inner
@@ -2215,9 +2139,8 @@ fn lower_expr_inner(
             }
             Some(HirExpr::Interpolation(parts))
         }
-        // `HirExpr::FieldRef` itself does NOT go with it: the `idents.len() == 1`
-        // case below still builds one for a bare identifier. It is the CST node
-        // that is gone, not the HIR form.
+        // `HirExpr::FieldRef` has no CST node of its own: the
+        // `idents.len() == 1` case below builds one for a bare identifier.
         SyntaxKind::LITERAL_EXPR => {
             // A `STRING` literal, a number, or a bare name.
             let toks: Vec<_> = inner
@@ -2293,12 +2216,9 @@ fn lower_expr_inner(
                 // that is not `false`.
                 return Some(HirExpr::BoolLit(b.text() == "true"));
             }
-            // `IDENT` — a bare name. There is no `(SHAPE_SEP IDENT)?` tail:
-            // the CURIE it read is gone — a `:` that is not a mapping header or
-            // a ternary is an error — and the parser
-            // refuses the spelling before this arm ever sees it, so the
-            // two-IDENT branch that expanded a prefix here went with
-            // `lookup_prefix`.
+            // `IDENT` — a bare name. There is no `(SHAPE_SEP IDENT)?` tail: a
+            // `:` that is not a mapping header or a ternary is an error, and
+            // the parser refuses the spelling before this arm ever sees it.
             let idents: Vec<_> = toks
                 .iter()
                 .filter(|t| t.kind() == SyntaxKind::IDENT)
@@ -2312,9 +2232,8 @@ fn lower_expr_inner(
             } else {
                 // Every literal shape this arm knows is handled above. Anything
                 // left is a literal the lowering does not read, and a literal it
-                // does not read is exactly the silent drop this phase exists to
-                // remove: `n = 42` produced no property AND no diagnostic
-                // until 2026-08-07.
+                // does not read must not be a silent drop: no property AND no
+                // diagnostic.
                 let range = inner.text_range();
                 let span = Span::new(range.start().into(), range.end().into());
                 let text = inner.text().to_string();
@@ -2431,9 +2350,8 @@ fn lower_ternary(
 /// Lower a `BINARY_EXPR` — a comparison (`.age >= 18`), a boolean connective
 /// (`a and b`) or arithmetic (`gross - discount`).
 ///
-/// All three are one node and one arm. Arithmetic used to stop here with a
-/// diagnostic saying MIR had no operator to carry `+` into; it has five now, and
-/// the operator token is the only thing this function reads.
+/// All three are one node and one arm, and the operator token is the only thing
+/// this function reads.
 ///
 /// **Associativity is the parser's and is not re-decided here.** `gross -
 /// discount + shipping` arrives already shaped as `(gross - discount) +
@@ -3059,8 +2977,9 @@ prop https://example.org/name - 1 1
         );
     }
 
-    /// `1_000` is an Integer as grammar.bnf spells one, and it was refused as
-    /// `syntax/number-out-of-range` because the underscore reached `i64`'s parser.
+    /// `1_000` is an Integer as grammar.bnf spells one: the underscore must not
+    /// reach `i64`'s parser, which would refuse it as
+    /// `syntax/number-out-of-range`.
     #[test]
     fn an_integer_with_underscores_is_its_digits() {
         let (db, file) = lower_src(
@@ -3099,13 +3018,11 @@ prop https://example.org/name - 1 1
         );
     }
 
-    /// The spelling that replaced the backtick: a plain string, interpolated
-    /// with `{expr}`, resolved at compile time.
+    /// A plain string, interpolated with `{expr}`, resolved at compile time.
     ///
     /// The IRI is written in full — no `base`, no CURIE with holes — and the
     /// hole is a QUALIFIED reference, which is only expressible because the
-    /// hole is parsed by the expression parser. The old `${…}` scan understood
-    /// exactly two shapes and echoed anything else back as text.
+    /// hole is parsed by the expression parser.
     #[test]
     fn a_quoted_string_interpolates_and_its_hole_is_an_expression() {
         let (db, file) = lower_src(
@@ -3161,16 +3078,12 @@ prop https://example.org/name - 1 1
 
     /// There is ONE subject spelling, and the call shape is not it.
     ///
-    /// This test used to prove that `iri = …` and `@subject(iri = …)` lowered
-    /// identically, so that a fixture rewrite would change spelling without
-    /// changing meaning. Both are gone: the identity is an
-    /// ASSIGNMENT, and `a0d9bfa`'s call shape lived two hours. What is worth
-    /// pinning now is that the retired form is an ERROR rather than a property
-    /// that quietly vanishes — `@subject(...)` parses its `(` as the start of
+    /// The identity is an ASSIGNMENT. What is worth pinning is that the call
+    /// shape is an ERROR rather than a property that quietly vanishes — `@subject(...)` parses its `(` as the start of
     /// nothing, and a mapping whose identity did not lower is reported by
     /// `check_identity`.
     #[test]
-    fn the_call_shaped_subject_is_gone_and_says_so() {
+    fn the_call_shaped_subject_is_refused_and_says_so() {
         const HEAD: &str = "type { Person } := io.shex(\"personas.shex\")\n\nusers := io.csv(\"u.csv\")\n\nUser : Person from users\n";
         let (db, file) = lower_src(&format!(
             "{HEAD}    @subject(iri = \"https://example.org/u/{{users.id}}\")\n"
@@ -3224,7 +3137,7 @@ prop https://example.org/name - 1 1
         );
     }
 
-    /// The sigil now parses, so an unknown one must be an ERROR and not a
+    /// The sigil parses, so an unknown one must be an ERROR and not a
     /// property that quietly disappears — the failure this file's fallback arm
     /// exists to prevent.
     #[test]
@@ -3248,9 +3161,9 @@ prop https://example.org/name - 1 1
 
     /// The hello program with its shape document registered beside it.
     ///
-    /// A bare `NativeSystem` cannot answer `io.shex` at all, so `Person` bound
-    /// nothing and `shape_iri` came back empty — which is the whole of what
-    /// `lower_hello_produces_one_mapping_header` asserts on. The registry key is
+    /// A bare `NativeSystem` cannot answer `io.shex` at all, so `Person` would
+    /// bind nothing and `shape_iri` would come back empty — which is the whole
+    /// of what `lower_hello_produces_one_mapping_header` asserts on. The registry key is
     /// the document joined onto the PROGRAM's directory, so a program in
     /// `examples/` names `personas.shex` and the document is registered at
     /// `examples/personas.shex`.
@@ -3263,15 +3176,12 @@ prop https://example.org/name - 1 1
         )
     }
 
-    /// The call that used to be a hole is now a `Call` in the HIR.
+    /// A call is a `Call` in the HIR.
     ///
-    /// Until 2026-08-07 this exact program was the regression fixture for a
-    /// measured data-loss bug: `slug = str.slug(User.name)` was dropped from
-    /// `HirBody` in silence, `fossil check` said *ok*, `fossil run` said *wrote
-    /// 1 vertex type*, and the column was absent from the corpus. Then the drop
-    /// was made loud. This is the same program with the hole closed: the
-    /// property survives lowering, carrying the function's name and its
-    /// argument, and no diagnostic is raised at all.
+    /// Dropped from `HirBody`, `slug = str.slug(User.name)` would check *ok*,
+    /// run, and leave the column absent from the corpus. The property survives
+    /// lowering, carrying the function's name and its argument, and no
+    /// diagnostic is raised at all.
     #[test]
     fn a_call_lowers_to_a_call_and_raises_nothing() {
         const CALLS_A_BUILTIN: &str = "\
@@ -3309,8 +3219,8 @@ User : Person from users
         };
         assert_eq!(func.as_str(), "str.slug");
         assert_eq!(args.len(), 1);
-        // The argument was `.name`, and the leading dot is gone: an argument is
-        // an ordinary expression, so it is qualified like every other reference.
+        // An argument is an ordinary expression, so it is qualified like every
+        // other reference.
         assert_eq!(
             args[0],
             HirExpr::ColumnRef {
@@ -3322,11 +3232,10 @@ User : Person from users
 
     /// A comparison lowers, with its integer literal.
     ///
-    /// The literal is half the point: until 2026-08-07 `n = 42` was dropped
-    /// **with no diagnostic at all** — the 2026-08-06 fix made unknown node
-    /// KINDS loud, and a `LITERAL_EXPR` holding an integer is a known kind
-    /// whose arm returned `None`. A second silent hole in the same blind spot,
-    /// found by needing a right-hand side for this test.
+    /// The literal is half the point: a `LITERAL_EXPR` holding an integer is a
+    /// known kind, so the loud fallback for unknown KINDS does not cover it —
+    /// an arm that returned `None` for it would drop `n = 42` **with no
+    /// diagnostic at all**.
     #[test]
     fn a_comparison_lowers_with_its_integer_literal() {
         const COMPARES: &str = "\
@@ -3372,11 +3281,9 @@ User : Person from users
 
     /// Grouping is not a form, and the parentheses leave no trace.
     ///
-    /// `PAREN_EXPR` had no arm in the lowering, so a parenthesised expression
-    /// was refused by the fallback diagnostic — in a language that already
-    /// lowers `and` and `or`, which are exactly what you reach for parentheses
-    /// to group. This is the hole closed: the tree is the tree the same source
-    /// without parens would have produced.
+    /// `and` and `or` are exactly what you reach for parentheses to group, so
+    /// a parenthesised expression must not reach the fallback diagnostic: the
+    /// tree is the tree the same source without parens would have produced.
     #[test]
     fn parentheses_group_and_then_disappear() {
         const GROUPED: &str = "\
@@ -3423,10 +3330,8 @@ User : Person from users
     /// The loud-drop guarantee, on the only thing that still reaches the
     /// fallback arm.
     ///
-    /// The fixture was `doble = .id * 2` and BOTH halves of why it was
-    /// unlowerable have gone: arithmetic has a `BinOp` (`*` is `BinOp::Mul`)
-    /// and lowers like every other binary operator, and the leading `.` is not
-    /// a form the parser reads. Every `*_EXPR` kind now has an arm, so nothing
+    /// The leading `.` is not a form the parser reads. Every `*_EXPR` kind has
+    /// an arm, so nothing
     /// a well-formed parse produces can fall through — what reaches `other =>`
     /// is the parser's `ERROR` node, and the guarantee pinned here is that the
     /// drop is loud.
@@ -3471,13 +3376,10 @@ User : Person from users
         assert_eq!(props.len(), 1, "the unlowerable property is still dropped");
     }
 
-    /// And the other half of that fixture landed instead of dropping:
-    /// `.id * 2` was the unlowerable form, and `users.id * 2` is arithmetic the
-    /// lowering reads. This is the assertion the test above used to carry, kept
-    /// because deleting it would leave `BinOp::Mul` with no lowering test at
-    /// all.
+    /// `users.id * 2` is arithmetic the lowering reads — and this is
+    /// `BinOp::Mul`'s lowering test.
     #[test]
-    fn arithmetic_lowers_and_is_no_longer_a_hole() {
+    fn arithmetic_lowers_without_a_word() {
         const ARITHMETIC: &str = "\
 type { Person } := io.shex(\"personas.shex\")
 
@@ -3568,12 +3470,9 @@ User : Person from users
     /// A misspelt shape name in a header gets a did-you-mean over the names the
     /// program bound.
     ///
-    /// **This is the assertion that moved.** It was
-    /// `check::surface_target_shape_error`'s `Undeclared` arm, suggesting over
-    /// the shape IRIs the document declares, and it is deleted with that
-    /// variant: a header names a bare LOCAL name, so `def_map`'s type table is
-    /// the last thing it is resolved against and nothing downstream ever sees
-    /// the misspelling. The candidates are the local names, which is the only
+    /// A header names a bare LOCAL name, so `def_map`'s type table is the last
+    /// thing it is resolved against and nothing downstream ever sees the
+    /// misspelling. The candidates are the local names, which is the only
     /// list a header can misspell — and, unlike an IRI, one an author can act on
     /// without opening the document.
     ///
@@ -3618,16 +3517,14 @@ User : Persn from users
         assert_eq!(m.source_binding.as_str(), "users");
     }
 
-    /// **A mapping that does not lower took its neighbour's signature.**
+    /// **A mapping that does not lower must not take its neighbour's
+    /// signature.**
     ///
     /// `HirFile::mappings` is paired with `DefMap::mappings` by position at
-    /// eight call sites, and it used to be built with a filter. `Broken` has no
-    /// `from`, so it produced no entry, so `hir.mappings[0]` was `Good` — and
-    /// `fossil_mir::lower_to_mir_pg` lowered `Broken`'s body against `Good`'s
-    /// header while `Good`, the mapping that is correct, ran off the end of the
-    /// vector and raised `internal compiler error: mapping has no HIR at its
-    /// DefMap index`. Neither half of that is visible in a one-mapping fixture,
-    /// which is why nothing caught it: the shift is zero there.
+    /// eight call sites. Built with a filter, `Broken` (no `from`) would produce
+    /// no entry, so `hir.mappings[0]` would be `Good` — `Broken`'s body lowered
+    /// against `Good`'s header while `Good` ran off the end of the vector. A
+    /// one-mapping fixture cannot see it: the shift is zero there.
     ///
     /// Both assertions matter. The length is the invariant — one slot per
     /// `MAPPING` node — and the name is what the length alone would not catch:
@@ -3680,9 +3577,9 @@ Good : Person from Users
         );
     }
 
-    /// Body content (the property list) now lives behind the
-    /// `body(db, MappingLoc)` Salsa query. Phase 1's `mappings[0].properties`
-    /// access is replaced by `body(db, def_map.mappings()[0]).properties(db)`.
+    /// Body content (the property list) lives behind the
+    /// `body(db, MappingLoc)` Salsa query, reached as
+    /// `body(db, def_map.mappings()[0]).properties(db)`.
     #[test]
     fn lower_hello_body_has_two_properties() {
         let (db, file) = db_with_hello();
@@ -3701,17 +3598,12 @@ Good : Person from Users
         let body = crate::body::body(&db, mloc);
         let p0 = &body.properties(&db)[0];
         assert!(matches!(p0.key, PropertyKey::Subject));
-        // The subject is parts now, not text, so this asserts on the tree
-        // rather than on a substring of the token.
+        // The subject is parts, not text, so this asserts on the tree rather
+        // than on a substring of the token.
         //
-        // A first assertion here required `parts.first()` to be a
-        // `Hole(PrefixedName)` — the `${ex:}` prefix-with-no-local-part, which
-        // only the interpolation body ever admitted. There is no such hole and
-        // no such variant.
-        //
-        // The hole was `${.id}` and is `{users.id}`, so what it holds is a
-        // QUALIFIED reference: a hole takes an ordinary expression, and every
-        // reference names the row it reads.
+        // The hole is `{users.id}`, so what it holds is a QUALIFIED reference:
+        // a hole takes an ordinary expression, and every reference names the
+        // row it reads.
         match &p0.value {
             HirExpr::Interpolation(parts) => {
                 assert!(
@@ -3728,11 +3620,6 @@ Good : Person from Users
     }
 
     /// The key is a BARE NAME and the value is a QUALIFIED reference.
-    ///
-    /// It was `lower_hello_property_one_is_prefixed_name_field_ref`, and both
-    /// halves of that name are retired spellings: the key was `ex:name`, a
-    /// CURIE expanded against a prefix table, and the value was `.name`, a
-    /// column of a row with no name.
     #[test]
     fn lower_hello_property_one_is_a_bare_key_over_a_qualified_value() {
         let (db, file) = db_with_hello();
@@ -3763,12 +3650,6 @@ Good : Person from Users
         assert_eq!(a, b);
     }
 
-    // The `IRI_EXPR` prefixed-name arm had two tests here, with a fixture each:
-    // `link = ex:Foo` had to lower to a `PrefixedName` instead of being dropped,
-    // and `link = nope:Foo` had to say the prefix was undeclared. Both were
-    // about a CURIE on the right-hand side. There is no CURIE and no prefix
-    // table, so neither has a form to be about.
-
     fn db_with(src: &str) -> (fossil_base::FossilDb, fossil_base::SourceFile) {
         let system: Arc<dyn fossil_base::System> =
             Arc::new(fossil_base::test_support::NativeSystem::default());
@@ -3782,8 +3663,7 @@ Good : Person from Users
     ///
     /// The spine is a `POSTFIX_EXPR` chain that nests to the LEFT, so this is
     /// also the test that it is walked the right way round: `join` then `where`,
-    /// not the reverse. It was `a |> f() |> g()` and the shape of the tree is
-    /// the only thing about it that changed.
+    /// not the reverse.
     #[test]
     fn a_source_pipeline_lowers_to_its_verbs_in_written_order() {
         const PIPES: &str = "\

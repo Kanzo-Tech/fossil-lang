@@ -84,6 +84,76 @@ impl fossil_storage::Host for NoHost {
     }
 }
 
+/// A [`fossil_storage::Host`] that records every credential it is asked for
+/// and vends `write` on a job only: `prefixes` S3 prefixes, `s3://lake/<job>/<n>/`.
+/// A read is refused, so a test routes its sources by hand.
+///
+/// Building a store from a vended credential sends nothing; only a request
+/// through it would, and a test that writes through one is a test with a
+/// network.
+#[derive(Debug)]
+pub(crate) struct Vending {
+    pub(crate) prefixes: usize,
+    pub(crate) asked: std::sync::Mutex<Vec<(fossil_storage::Scope, fossil_storage::Access)>>,
+}
+
+impl Vending {
+    pub(crate) const fn new(prefixes: usize) -> Self {
+        Self {
+            prefixes,
+            asked: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Every `(scope, access)` asked for, in order.
+    pub(crate) fn asked(&self) -> Vec<(fossil_storage::Scope, fossil_storage::Access)> {
+        self.asked.lock().expect("lock").clone()
+    }
+}
+
+impl fossil_storage::Host for Vending {
+    fn connections(
+        &self,
+    ) -> futures::future::BoxFuture<
+        'static,
+        Result<std::collections::HashMap<String, String>, fossil_storage::HostError>,
+    > {
+        Box::pin(async { Ok(std::collections::HashMap::new()) })
+    }
+    fn credentials(
+        &self,
+        scope: &fossil_storage::Scope,
+        access: fossil_storage::Access,
+    ) -> futures::future::BoxFuture<
+        'static,
+        Result<Vec<fossil_storage::StorageCredential>, fossil_storage::HostError>,
+    > {
+        self.asked
+            .lock()
+            .expect("lock")
+            .push((scope.clone(), access));
+        let fossil_storage::Scope::Job(job) = scope else {
+            return Box::pin(async {
+                Err(fossil_graph_schema::Foreign::named("Error", "this host vends no read").into())
+            });
+        };
+        let vended = (0..self.prefixes)
+            .map(|n| fossil_storage::StorageCredential {
+                prefix: format!("s3://lake/{job}/{n}/"),
+                config: [
+                    ("s3.access-key-id", "K"),
+                    ("s3.secret-access-key", "S"),
+                    ("client.region", "us-east-1"),
+                ]
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v.into()))
+                .collect(),
+            })
+            .collect();
+        Box::pin(async move { Ok(vended) })
+    }
+}
+
 /// Where [`write_in_memory`] writes.
 pub(crate) const MEMORY_DEST: &str = "mem://out/corpus/";
 

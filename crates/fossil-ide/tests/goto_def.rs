@@ -1,5 +1,5 @@
-//! goto-def integration test — the three positions, and the one that leaves the
-//! language.
+//! goto-def integration test — every name a program binds, and the two that
+//! leave the language.
 //!
 //! There is no import production, so no name a program writes resolves into
 //! another `.fossil`: the second file is the `.shex`, where a shape name and a
@@ -75,7 +75,7 @@ fn a_shape_name_resolves_into_the_document() {
     let mut db = host_db();
     let f = program(&mut db, SRC);
 
-    let hits = goto_definition(&db, &[f], f, 4, 9);
+    let hits = goto_definition(&db, f, 4, 9);
     assert_eq!(hits.len(), 1, "one shape, one place to go; got {hits:?}");
     let target = &hits[0];
     assert_ne!(
@@ -111,7 +111,7 @@ Orders : Order from Purchase
     let f = program(&mut db, TWO);
 
     // Line 4 is `Orders : Order from Purchase`; `Order` starts at column 9.
-    let hits = goto_definition(&db, &[f], f, 4, 10);
+    let hits = goto_definition(&db, f, 4, 10);
     let (_, slice) = hit(&db, hits.first().expect("Order resolves"));
     assert_eq!(slice, "shop:Order");
 }
@@ -124,7 +124,7 @@ fn a_property_key_resolves_to_its_predicate_in_the_document() {
     let mut db = host_db();
     let f = program(&mut db, SRC);
 
-    let hits = goto_definition(&db, &[f], f, 7, 5);
+    let hits = goto_definition(&db, f, 7, 5);
     assert_eq!(hits.len(), 1, "one predicate; got {hits:?}");
     let target = &hits[0];
     assert_ne!(
@@ -147,7 +147,7 @@ fn each_property_key_resolves_to_its_own_predicate() {
     let f = program(&mut db, SRC);
 
     // Line 6 is `    email = User.email`.
-    let hits = goto_definition(&db, &[f], f, 6, 5);
+    let hits = goto_definition(&db, f, 6, 5);
     let (_, slice) = hit(&db, hits.first().expect("email resolves"));
     assert_eq!(slice, "shop:email");
 }
@@ -160,51 +160,47 @@ fn the_identity_line_resolves_to_nothing() {
     let mut db = host_db();
     let f = program(&mut db, SRC);
     // Line 5 is `    @subject = "…"`; column 5 is inside `@subject`.
-    assert!(goto_definition(&db, &[f], f, 5, 5).is_empty());
+    assert!(goto_definition(&db, f, 5, 5).is_empty());
 }
 
-/// 3. A MAPPING NAME still resolves inside the program, through the workspace
-///    index — the one position that never left the language.
+/// 3. A MAPPING NAME resolves inside the program, to its own name in its
+///    header.
 #[test]
 fn a_mapping_name_resolves_in_the_program() {
     let mut db = host_db();
     let f = program(&mut db, SRC);
 
     // Line 4, column 1 is inside `Users`.
-    let hits = goto_definition(&db, &[f], f, 4, 1);
-    let target = hits
-        .iter()
-        .find(|t| t.file == f)
-        .expect("Users resolves to its own mapping header");
-    assert!(
-        target.range.start < target.range.end,
-        "a mapping range must be non-empty"
-    );
+    let hits = goto_definition(&db, f, 4, 1);
+    assert_eq!(hits.len(), 1, "one mapping; got {hits:?}");
+    assert_eq!(hits[0].file, f);
+    assert_eq!(hit(&db, &hits[0]).1, "Users");
 }
 
 /// When the document the program names is NOT registered — a host with no
 /// filesystem, an unsaved buffer, a path that does not exist — a shape name
-/// falls back to the `type { … }` binding that introduced it. That is a real
-/// definition site for the NAME, and it is the honest answer when the document
-/// cannot be opened.
+/// lands on its name in the `type { … }` binding that introduced it. That is a
+/// real definition site for the NAME, and it is the honest answer when the
+/// document cannot be opened.
 #[test]
 fn an_unregistered_document_falls_back_to_the_type_binding() {
     let db = host_db();
     // Interned WITHOUT `register_missing_documents`: nothing is at the key.
     let f = SourceFile::new(&db, SRC.to_string(), "unregistered.fossil".to_string());
 
-    let hits = goto_definition(&db, &[f], f, 4, 9);
+    let hits = goto_definition(&db, f, 4, 9);
     let target = hits.first().expect("the binding is still a definition");
     assert_eq!(target.file, f, "the fallback stays in the program");
-    let (_, slice) = hit(&db, target);
+    let (text, slice) = hit(&db, target);
+    assert_eq!(slice, "Person");
     assert!(
-        slice.starts_with("type {") && slice.contains("shop.shex"),
-        "the fallback must be the type binding line; got {slice:?}"
+        text[..target.range.start as usize].ends_with("type { "),
+        "the fallback must be the name in the type binding, not the header's",
     );
 
     // A property key has no such fallback: the binding says nothing about which
     // predicates the document declares.
-    assert!(goto_definition(&db, &[f], f, 7, 5).is_empty());
+    assert!(goto_definition(&db, f, 7, 5).is_empty());
 }
 
 /// A header naming a shape no `type { … }` binding introduced has nowhere to go.
@@ -224,7 +220,7 @@ Users : Persn from User
     let mut db = host_db();
     let f = program(&mut db, UNBOUND);
     assert!(
-        goto_definition(&db, &[f], f, 4, 9).is_empty(),
+        goto_definition(&db, f, 4, 9).is_empty(),
         "a misspelt shape name must not resolve to the header it is written in"
     );
 }
@@ -235,19 +231,15 @@ fn goto_def_on_whitespace_is_empty() {
     let mut db = host_db();
     let f = program(&mut db, SRC);
     // Line 4, column 5 is the space between `Users` and `:`.
-    let hits = goto_definition(&db, &[f], f, 4, 5);
+    let hits = goto_definition(&db, f, 4, 5);
     assert!(
         hits.iter().all(|t| t.range.start <= t.range.end),
         "goto-def on a separator must not produce a malformed target; got {hits:?}",
     );
 }
 
-/// 4. A SOURCE NAME resolves to its `:=` binding — at the binding itself, at a
-///    `from`, and inside another binding's right-hand side.
-///
-/// Measured before `SymbolIndex` grew a `SOURCE_DEF` arm: **0 targets at all
-/// four positions below.** The index walked only `MAPPING` nodes, so no `:=`
-/// binding was in it and the workspace lookup had nothing to match.
+/// 4. A SOURCE NAME resolves to its `:=` binding's name — at the binding
+///    itself, at a `from`, and inside another binding's right-hand side.
 #[test]
 fn a_source_name_resolves_to_its_binding() {
     const WITH_DERIVED: &str = "\
@@ -262,40 +254,67 @@ Users : Person from Adults
 ";
     let mut db = host_db();
     let f = program(&mut db, WITH_DERIVED);
+    let user = WITH_DERIVED.find("User :=").unwrap();
+    let adults = WITH_DERIVED.find("Adults :=").unwrap();
+    let lands_on = |hits: &[NavigationTarget], at: usize, name: &str| {
+        assert_eq!(hits.len(), 1, "one binding; got {hits:?}");
+        assert_eq!(hits[0].range.start as usize, at);
+        assert_eq!(hit(&db, &hits[0]).1, name);
+    };
 
     // Line 2 col 1 — the read binding's own name.
-    let at_binding = goto_definition(&db, &[f], f, 2, 1);
-    assert_eq!(at_binding.len(), 1, "one binding; got {at_binding:?}");
-    let (_, slice) = hit(&db, &at_binding[0]);
-    assert!(
-        slice.starts_with("User :="),
-        "the range must cover the binding, from its name; got {slice:?}",
-    );
-
-    // Line 4 col 1 — a DERIVED binding is the same node kind, so it is indexed
-    // too. A fix that special-cased `io.` readers would pass the case above and
-    // fail this one.
-    let derived = goto_definition(&db, &[f], f, 4, 1);
-    assert_eq!(derived.len(), 1, "one binding; got {derived:?}");
-    assert!(hit(&db, &derived[0]).1.starts_with("Adults :="));
-
-    // Line 6 col 21 — the `from` of a mapping header. `shape_name_under_cursor`
-    // claims only a `SHAPE_EXPR` parent, so this falls through to the index.
-    let at_from = goto_definition(&db, &[f], f, 6, 21);
-    assert_eq!(at_from.len(), 1, "`from Adults` resolves; got {at_from:?}");
-    assert!(hit(&db, &at_from[0]).1.starts_with("Adults :="));
-
+    lands_on(&goto_definition(&db, f, 2, 1), user, "User");
+    // Line 4 col 1 — a DERIVED binding is the same node kind, so it resolves
+    // the same way.
+    lands_on(&goto_definition(&db, f, 4, 1), adults, "Adults");
+    // Line 6 col 21 — the `from` of a mapping header.
+    lands_on(&goto_definition(&db, f, 6, 21), adults, "Adults");
     // Line 4 col 11 — `User` inside the derived relation's right-hand side.
-    let in_rhs = goto_definition(&db, &[f], f, 4, 11);
-    assert_eq!(
-        in_rhs.len(),
-        1,
-        "`User` in the RHS resolves; got {in_rhs:?}"
-    );
-    assert!(hit(&db, &in_rhs[0]).1.starts_with("User :="));
+    lands_on(&goto_definition(&db, f, 4, 11), user, "User");
 
-    // The shape name still leaves the language — the new arm must not have
-    // shadowed the document path.
-    let shape = goto_definition(&db, &[f], f, 6, 9);
+    // The shape name still leaves the language.
+    let shape = goto_definition(&db, f, 6, 9);
     assert_eq!(hit(&db, &shape[0]).1, "shop:Person");
+}
+
+/// `{ A, B } := io.rdf(…)` binds two names in one item, and each lands on its
+/// own — a jump to `B` that landed on `A`, or on the brace, would pass a test
+/// that only checked the line.
+#[test]
+fn each_name_of_a_destructuring_binding_lands_on_itself() {
+    const SRC: &str = "{ Person, Org } := io.rdf(\"g.ttl\")\nAdults := Org.where(Org.size)\n";
+    let db = host_db();
+    let f = SourceFile::new(&db, SRC.to_string(), "d.fossil".to_string());
+    // Line 1 col 11 is inside `Org` in `Org.where`.
+    let hits = goto_definition(&db, f, 1, 11);
+    assert_eq!(hits.len(), 1, "{hits:?}");
+    assert_eq!(hits[0].range.start as usize, SRC.find("Org").unwrap());
+    assert_eq!(hit(&db, &hits[0]).1, "Org");
+}
+
+/// A member after a `.` is a column, not a top-level name, even when a binding
+/// is spelled the same: `User.email` does not jump to `email := …`. A resolver
+/// that matched by text alone would answer it.
+#[test]
+fn a_member_does_not_resolve_to_a_binding_of_the_same_name() {
+    const SRC: &str = "\
+type { Person } := io.shex(\"shop.shex\")
+email := io.csv(\"emails.csv\")
+User := io.csv(\"users.csv\")
+Users : Person from User
+    @subject = \"https://shop.example/user/{User.email}\"
+    email = User.email
+";
+    let mut db = host_db();
+    let f = program(&mut db, SRC);
+    // Line 5 is `    email = User.email`; column 18 is inside the member `email`.
+    assert!(goto_definition(&db, f, 5, 18).is_empty());
+    // The key on the same line is the shape's predicate, not the binding.
+    let key = goto_definition(&db, f, 5, 5);
+    assert_eq!(key.len(), 1, "{key:?}");
+    assert_ne!(key[0].file, f, "the key goes to the shape document");
+    // …while the binding itself does resolve, so the silence above is the
+    // position's and not the name's.
+    let binding = goto_definition(&db, f, 1, 1);
+    assert_eq!(hit(&db, &binding[0]).1, "email");
 }

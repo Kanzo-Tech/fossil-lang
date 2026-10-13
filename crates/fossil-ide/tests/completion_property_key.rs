@@ -1,53 +1,24 @@
 //! Where a property KEY can go, and what it is spelled.
 //!
-//! The shape-property source is the one that offers a mapping's output
-//! contract, and it had two independent defects; the stdlib source had a third
-//! in the same position. All three are measured here against
+//! The shape-property source offers a mapping's output contract, and two things
+//! decide whether what it offers can be written. Both are measured here against
 //! `tests/fixtures/shop.shex` — `shop:Person` declaring `shop:email` and
 //! `shop:name` — with the same host `fossil-wasm` installs.
 //!
-//! **The label.** It offered `constraint.predicate`, the raw predicate IRI. A
-//! property key is never the IRI: it is
-//! [`fossil_graph_schema::local_name`] of it, the last segment. Accepting
-//! `https://shop.example/voc#email` writes a line the parser refuses
-//! (`PropertyLhs := IDENT`).
+//! **The label.** A property key is never the predicate IRI: it is
+//! [`fossil_graph_schema::local_name`] of it, the last segment, because
+//! `PropertyLhs := IDENT` and `https://shop.example/voc#email` is not one.
 //!
-//! **The position.** It fired wherever the cursor was inside a mapping whose
-//! shape resolved — the header, the right-hand side of `=`, and after a member
-//! access. Measured before, against the `shop` corpus program
-//! (`docs/programs/shop`, whose `Person` has a third predicate `shop:phone`):
+//! **The position.** A key goes at the start of a body line and nowhere else —
+//! not the header, not the right of `=`, not after a member access. The stdlib
+//! source is cut at the same position from the other side: no catalogued row is
+//! an `IDENT`, so a key position offers the shape's keys and nothing else,
+//! while every other position keeps the list it has.
 //!
-//! | position                       | total | FUNCTION | FIELD              |
-//! |--------------------------------|-------|----------|--------------------|
-//! | key position (end of `email`)  | 53    | 50       | 3 raw IRIs         |
-//! | after `User.`                  | 15    | 12       | the SAME 3 raw IRIs|
-//! | top level, outside the mapping | 50    | 50       | 0                  |
-//!
-//! and against this file's two-predicate fixture: 52 / 50 / 2 at the key
-//! position, at the header, on the right of `=` and on a blank body line, and
-//! 14 / 12 / 2 after `User.`.
-//!
-//! **The stdlib source's turn**, measured against the same two-predicate
-//! fixture. It offered the catalogue whole wherever there was no dot to the
-//! left of the cursor, and a key position is one of those:
-//!
-//! | position                          | total before | total after | FUNCTION before → after |
-//! |-----------------------------------|--------------|-------------|-------------------------|
-//! | key position (`email`, cols 6, 9) | 52           | **2**       | 50 → **0**              |
-//! | the same, under an `@subject`     | 52           | **2**       | 50 → **0**              |
-//! | start of file                     | 50           | 50          | 50 → 50                 |
-//! | top level, outside the mapping    | 50           | 50          | 50 → 50                 |
-//! | the mapping header                | 50           | 50          | 50 → 50                 |
-//! | right of `=` (`User`)             | 50           | 50          | 50 → 50                 |
-//! | after `User.`                     | 12           | 12          | 12 → 12                 |
-//! | the column before the key         | 50           | 50          | 50 → 50                 |
-//! | a still-blank body line           | 50           | 50          | 50 → 50                 |
-//! | inside / just past `@subject`     | 50           | 50          | 50 → 50                 |
-//!
-//! [`the_catalogue_is_not_offered_in_key_position`] holds the first row and
-//! [`every_position_that_is_not_a_key_keeps_its_catalogue`] holds the rest,
-//! because the repair is a cut and a cut that took a position with it would be
-//! the same defect pointing the other way.
+//! [`the_catalogue_is_not_offered_in_key_position`] holds the cut and
+//! [`every_position_that_is_not_a_key_keeps_its_catalogue`] holds what it must
+//! not reach, because a cut that took a position with it would be the same
+//! defect pointing the other way.
 //!
 //! # What these tests do NOT prove
 //!
@@ -94,7 +65,7 @@ fn labels(items: &[lsp_types::CompletionItem], kind: CompletionItemKind) -> Vec<
 }
 
 fn fields(db: &FossilDb, f: SourceFile, line: u32, character: u32) -> Vec<String> {
-    fossil_ide::completions(db, &[f], f, line, character)
+    fossil_ide::completions(db, f, line, character)
         .iter()
         .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
         .map(|i| i.label.clone())
@@ -116,17 +87,12 @@ Users : Person from User
 /// which is what an editor leaves after `Enter` on an indented line.
 ///
 /// The indent is written `\x20` because it is load-bearing and trailing
-/// whitespace does not survive being looked at: with the four spaces gone,
-/// `(4, 4)` is a column past the end of an empty line, which used to reach
-/// `token_at_position` as an offset past the CST's range and panic inside
-/// `rowan` («Bad offset: range 0..124 offset 127»).
-///
-/// `fossil_ide::offset` clamps a column to its line now, so the stripped fixture
-/// no longer aborts; `crate::position`'s own
-/// `token_at_position_past_the_end_of_a_line_does_not_panic` is the guard, and
-/// keeps this one. The indent still matters for what this file measures — four
-/// spaces are what an editor leaves after `Enter`, and the parser attaches them
-/// to the previous property's expression.
+/// whitespace does not survive being looked at: four spaces are what an editor
+/// leaves after `Enter`, and they are what puts the cursor at the body's
+/// indentation. Without them `(4, 4)` is a column past the end of an empty
+/// line, which `fossil_ide::offset` clamps to the line —
+/// `crate::position`'s `token_at_position_past_the_end_of_a_line_does_not_panic`
+/// is that guard.
 const BLANK: &str = "\
 type { Person, Order } := io.shex(\"shop.shex\")
 User := io.csv(\"users.csv\")
@@ -155,8 +121,6 @@ Users : Person from User
 
 /// **The label.** In key position the shape's predicates are offered under the
 /// name a program WRITES — the last segment — and the IRI is not a label.
-///
-/// Before: `["https://shop.example/voc#email", "https://shop.example/voc#name"]`.
 #[test]
 fn the_key_position_offers_the_name_a_program_writes() {
     let mut db = host();
@@ -173,8 +137,6 @@ fn the_key_position_offers_the_name_a_program_writes() {
 
 /// **The position.** After a member access the receiver's members are the
 /// answer, and a property key is not one of them.
-///
-/// Before: the same 2 raw IRIs, beside the 13 relation verbs.
 #[test]
 fn a_member_access_offers_no_property_key() {
     let mut db = host();
@@ -186,7 +148,7 @@ fn a_member_access_offers_no_property_key() {
     );
     assert_eq!(
         labels(
-            &fossil_ide::completions(&db, &[f], f, 3, 17),
+            &fossil_ide::completions(&db, f, 3, 17),
             CompletionItemKind::FUNCTION
         )
         .len(),
@@ -220,9 +182,7 @@ fn a_mapping_header_offers_no_property_key() {
     );
 }
 
-/// **The position.** Outside every mapping there is no shape to draw from —
-/// this one was already right, and is pinned so the widening it forbids stays
-/// forbidden.
+/// **The position.** Outside every mapping there is no shape to draw from.
 #[test]
 fn outside_any_mapping_offers_no_property_key() {
     let mut db = host();
@@ -251,8 +211,6 @@ fn a_mapping_whose_shape_does_not_resolve_offers_no_property_key() {
 /// `Property := PropertyLhs ASSIGN Expression`. A key cannot be written where
 /// it stands, so the gate is the TOKEN — `PropertyLhs := IDENT` — and not the
 /// parent node on its own.
-///
-/// Before: the same 2 raw IRIs, at both columns.
 #[test]
 fn the_identity_line_is_not_a_key_position() {
     let mut db = host();
@@ -271,25 +229,45 @@ fn the_identity_line_is_not_a_key_position() {
     assert_eq!(fields(&db, f, 4, 9), vec!["email", "name"]);
 }
 
-/// **The boundary, pinned rather than hoped.** A body line with nothing on it
-/// yet is a position where a key COULD go, and it is not resolved: the parser
-/// attaches a fresh line's indent to the PREVIOUS property's expression, so the
-/// CST cannot tell it from a value continued onto a second line. Offering
-/// nothing is the answer until it can.
-///
-/// The first keystroke closes it — one character makes a `PROPERTY_LHS`, which
-/// [`the_key_position_offers_the_name_a_program_writes`] measures.
-///
-/// Before: 2 raw IRIs here too.
+/// **A fresh body line is a key position.** Nothing is typed on it yet, so
+/// there is no `PROPERTY_LHS` to stand on, and the parser attaches its indent
+/// to the previous property's value; what makes it a key position is that the
+/// indent is all that stands before the cursor, inside the mapping, at the
+/// column its keys are written at. The next token typed there starts a
+/// `Property`.
 #[test]
-fn a_blank_body_line_is_not_a_position_this_resolves() {
+fn a_blank_body_line_is_a_key_position() {
     let mut db = host();
     let f = program(&mut db, BLANK);
-    assert!(
-        fields(&db, f, 4, 4).is_empty(),
-        "a fresh body line is indistinguishable from a continued value; got {:?}",
-        fields(&db, f, 4, 4),
-    );
+    assert_eq!(fields(&db, f, 4, 4), vec!["email", "name"]);
+}
+
+/// The column before an existing key's first character is the same position:
+/// the start of a body line.
+#[test]
+fn the_column_before_a_key_is_a_key_position() {
+    let mut db = host();
+    let f = program(&mut db, SHOP);
+    assert_eq!(fields(&db, f, 3, 4), vec!["email", "name"]);
+}
+
+/// An indent that is not the body's is not the start of a key: a token there
+/// would not be a statement of this body. Two columns into the four-space
+/// indent, and a blank line indented past it, both answer no key.
+#[test]
+fn an_indent_that_is_not_the_bodys_is_not_a_key_position() {
+    const DEEP: &str = "\
+type { Person, Order } := io.shex(\"shop.shex\")
+User := io.csv(\"users.csv\")
+Users : Person from User
+    email = User.email
+\x20\x20\x20\x20\x20\x20\x20\x20
+";
+    let mut db = host();
+    let shop = program(&mut db, SHOP);
+    assert!(fields(&db, shop, 3, 2).is_empty(), "mid-indent");
+    let deep = program(&mut db, DEEP);
+    assert!(fields(&db, deep, 4, 8).is_empty(), "deeper than the body");
 }
 
 /// The predicate IRI stays REACHABLE — as the item's detail, the way the
@@ -299,7 +277,7 @@ fn a_blank_body_line_is_not_a_position_this_resolves() {
 fn the_detail_keeps_the_predicate_iri_and_leaks_no_type_state() {
     let mut db = host();
     let f = program(&mut db, SHOP);
-    let items = fossil_ide::completions(&db, &[f], f, 3, 9);
+    let items = fossil_ide::completions(&db, f, 3, 9);
     let email = items
         .iter()
         .find(|i| i.label == "email")
@@ -315,22 +293,15 @@ fn the_detail_keeps_the_predicate_iri_and_leaks_no_type_state() {
     );
 }
 
-/// **The third defect, closed.** The stdlib source was position-blind: it
-/// offered the whole catalogue, dotted, wherever there was no dot to the left
-/// of the cursor — and a key position is one of those. `str.trim` is no more
-/// writable as a `PropertyLhs` than `https://shop.example/voc#email` was, so
-/// the two sources were making the same mistake for the same reason.
-///
-/// Before: 51 FUNCTION items at both columns of the key, `str.trim` among them,
-/// beside the 2 FIELD ones. After: the shape's predicates are the whole list.
+/// **The cut.** The catalogue is dotted and a key is a bare name, so in key
+/// position the shape's predicates are the whole list — at the start of the
+/// line, mid-name, and past the name's last keystroke.
 #[test]
 fn the_catalogue_is_not_offered_in_key_position() {
     let mut db = host();
     let f = program(&mut db, SHOP);
-    // The boundary past the last keystroke of the name, and the cursor
-    // mid-name an editor re-requesting on every keystroke actually sends.
-    for character in [6, 9] {
-        let items = fossil_ide::completions(&db, &[f], f, 3, character);
+    for character in [4, 6, 9] {
+        let items = fossil_ide::completions(&db, f, 3, character);
         let fns = labels(&items, CompletionItemKind::FUNCTION);
         assert!(
             fns.is_empty(),
@@ -345,32 +316,17 @@ fn the_catalogue_is_not_offered_in_key_position() {
     }
 }
 
-/// **The narrowing is a narrowing.** `5be2de6`'s defect was the catalogue after
-/// any dot; this file's is the catalogue in key position. Both repairs are cuts,
-/// and a cut that took a position with it would be the same class of mistake
-/// pointing the other way — so every position that is NOT a key keeps the count
-/// it had, measured against the same fixture.
-///
-/// The last two rows are the two positions a key COULD occupy and the CST
-/// declines to resolve, which
-/// [`a_blank_body_line_is_not_a_position_this_resolves`] pins from the shape
-/// side. They read as [`Scope::Catalogue`] — the cursor's token is whitespace,
-/// with no dot to its left — so the catalogue is what they still offer. Closing
-/// them is a parser question, and the first keystroke closes both.
-///
-/// [`Scope::Catalogue`]: fossil_ide
+/// **The narrowing is a narrowing.** The catalogue is cut after a dot and in
+/// key position, and a cut that took another position with it would be the
+/// same class of mistake pointing the other way — so every position that is
+/// NOT a key keeps the whole catalogue, or the receiver's members after a dot.
 #[test]
 fn every_position_that_is_not_a_key_keeps_its_catalogue() {
     let mut db = host();
     let shop = program(&mut db, SHOP);
-    let blank = program(&mut db, BLANK);
-    // **Derived, not written down.** These were the literals `50` and `12` —
-    // the catalogue's size and the relation's member count at the time the
-    // table above was measured — and they went stale the moment a namespace was
-    // deleted. What the test is about is that a non-key position offers the
-    // catalogue WHOLE, which is a claim about a number matching, not about a
-    // number being 50. The doc table above keeps its figures because it records
-    // a measurement taken on a particular day; these have to track the tree.
+    // Derived, not written down: what the test is about is that a non-key
+    // position offers the catalogue WHOLE, a claim about a number matching the
+    // catalogue's and not about a number.
     let whole = fossil_hir::stdlib::stdlib().iter().count();
     let verbs = fossil_hir::stdlib::stdlib()
         .members_of(fossil_hir::stdlib::Receiver::Relation)
@@ -393,17 +349,9 @@ fn every_position_that_is_not_a_key_keeps_its_catalogue() {
             verbs,
             "`User.` — the relation verbs, untouched",
         ),
-        (
-            shop,
-            3,
-            4,
-            whole,
-            "the column before the key's first character",
-        ),
-        (blank, 4, 4, whole, "a still-blank body line"),
     ];
     for (f, line, character, expected, what) in cases {
-        let items = fossil_ide::completions(&db, &[*f], *f, *line, *character);
+        let items = fossil_ide::completions(&db, *f, *line, *character);
         assert_eq!(
             labels(&items, CompletionItemKind::FUNCTION).len(),
             *expected,

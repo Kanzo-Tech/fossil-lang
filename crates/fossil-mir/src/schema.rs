@@ -33,10 +33,10 @@ use crate::op::Op;
 /// - `Extend` → input schema ∪ `{field}` (field appended if not already present)
 /// - `Rename` → input schema with `old` → `new`
 /// - `Filter` / `Distinct` → input schema unchanged
-/// - `Join` → left schema ++ right schema, whole. A shared name used to be a
-///   compile error, and is not any more: the join no longer flattens two rows
-///   into one, every reference is written qualified, so two sources with a
-///   column of the same name are legal. This concatenation can therefore
+/// - `Join` → left schema ++ right schema, whole. A shared name is not a
+///   compile error: the join does not flatten two rows into one, every
+///   reference is written qualified, so two sources with a column of the same
+///   name are legal. This concatenation can therefore
 ///   produce a duplicate name, and nothing here breaks the tie — these are bare
 ///   names, and the qualifier that does break the tie lives on the `ColRef`
 ///   that reads them, not in this list.
@@ -47,8 +47,8 @@ use crate::op::Op;
 ///
 /// An out-of-range `idx` (or an input index that points past the slice)
 /// yields an empty schema rather than panicking: a caller may hold a
-/// half-built or hand-constructed graph, and a panic there would take the LSP
-/// with it.
+/// half-built or hand-constructed graph, and a panic there would take the
+/// editor with it.
 #[must_use]
 pub fn schema_of(db: &dyn fossil_base::Db, ops: &[Op<'_>], idx: usize) -> Vec<SmolStr> {
     let Some(op) = ops.get(idx) else {
@@ -81,12 +81,9 @@ pub fn schema_of(db: &dyn fossil_base::Db, ops: &[Op<'_>], idx: usize) -> Vec<Sm
         | Op::EmitVertex { input, .. }
         | Op::EmitEdge { input, .. }
         | Op::Sink { input, .. } => schema_of(db, ops, *input),
-        // `fila(izq) ++ fila(der)`, whole. This dropped the right side's copy of
-        // the key between 2026-08-07 and 2026-08-19, because the executor did:
-        // the join was `USING (k)`, so a schema that kept the second `k`
-        // described a column nobody would find. The executor no longer
-        // identifies anything — a join relates two qualified relations and both
-        // keep every column — so neither does this.
+        // `fila(izq) ++ fila(der)`, whole. The executor identifies no column
+        // of one side with one of the other — a join relates two qualified
+        // relations and both keep every column — so neither does this.
         Op::Join { left, right, .. } => {
             let mut schema = schema_of(db, ops, left.input);
             schema.extend(schema_of(db, ops, right.input));
