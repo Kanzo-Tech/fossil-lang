@@ -6,16 +6,16 @@
 //! invented: it reports `nmae` after the model wrote it. A decoder constrained by a grammar can —
 //! `WebLLM`'s (`xgrammar`) takes an EBNF string — so the grammar for one request is the mapping
 //! productions of `grammar.bnf`, in one canonical layout, with every reference a closed list: the
-//! sources of the request, each one's columns, the shapes' types, each type's properties and the
-//! catalogue's `parse.*` functions. A name not on a list cannot be decoded.
+//! sources of the request, each one's columns, the types — declared or imported — each type's
+//! fields and the catalogue's `parse.*` functions. A name not on a list cannot be decoded.
 //!
 //! What the grammar is NOT is a second definition of the language. It is a sub-language of it, and
 //! the tests hold it there from both sides: every sentence sampled from it parses with the parser
 //! every program goes through, and the conformance programs inside its scope are sentences of it.
 //! Types, cardinality and identity are the checker's; a context-free grammar cannot say them.
 //!
-//! The prelude — the shapes imported, the sources bound — is not the model's to write: it is the
-//! request, and [`prelude`] writes it. The model writes what follows.
+//! The prelude — the types imported and declared, the sources bound — is not the model's to
+//! write: it is the request, and [`prelude`] writes it. The model writes what follows.
 
 use std::fmt::Write as _;
 
@@ -23,29 +23,56 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// What a mapping can name: what a host knows before the model writes anything.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "MappingVocabulary")]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 pub struct Vocabulary {
-    /// The shape document: its constructor (`shex`, `shacl`) and where it is.
-    pub shapes: Document,
-    /// The types it declares, each with the property keys a mapping of it may write.
-    pub types: Vec<TypeVocabulary>,
+    /// The shape documents imported, each with the types taken from it.
+    #[serde(default)]
+    pub imports: Vec<Import>,
+    /// The types the program declares.
+    #[serde(default)]
+    pub declared: Vec<DeclaredType>,
     /// The sources, each with its columns — a profile's descriptor.
     pub sources: Vec<SourceVocabulary>,
 }
 
+/// `type { … } := io.<format>("<reference>")`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "VocabularyDocument")]
-pub struct Document {
+#[schemars(rename = "VocabularyImport")]
+pub struct Import {
+    /// The document's constructor: `shex`, `shacl`.
     pub format: String,
     pub reference: String,
+    pub types: Vec<ImportedType>,
 }
 
+/// A type taken from a document, by the name the program gives it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[schemars(rename = "TypeVocabulary")]
-pub struct TypeVocabulary {
+pub struct ImportedType {
+    /// The name the program writes.
     pub name: String,
+    /// The document's name for it, when the import renames it with `as`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shape: Option<String>,
+    /// The property keys a mapping of it may write.
     pub properties: Vec<String>,
+}
+
+/// A type the program declares, every IRI whole.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DeclaredType {
+    pub name: String,
+    pub iri: String,
+    pub fields: Vec<DeclaredField>,
+}
+
+/// `@iri("<iri>") name: Type`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DeclaredField {
+    pub name: String,
+    pub iri: String,
+    /// The field's type as the program writes it: `String`, `Option<Date>`, `Seq<Ref<Person>>`.
+    #[serde(rename = "type")]
+    pub ty: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -58,6 +85,26 @@ pub struct SourceVocabulary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delimiter: Option<String>,
     pub columns: Vec<String>,
+}
+
+impl Vocabulary {
+    /// Every type a mapping can produce, with the keys a mapping of it may write: the imported in
+    /// import order, then the declared.
+    fn types(&self) -> Vec<(&str, Vec<&str>)> {
+        let imported = self.imports.iter().flat_map(|i| &i.types).map(|t| {
+            (
+                t.name.as_str(),
+                t.properties.iter().map(String::as_str).collect(),
+            )
+        });
+        let declared = self.declared.iter().map(|t| {
+            (
+                t.name.as_str(),
+                t.fields.iter().map(|f| f.name.as_str()).collect(),
+            )
+        });
+        imported.chain(declared).collect()
+    }
 }
 
 /// One expression of the grammar. A small EBNF: enough for the mapping productions, and printed in
@@ -138,17 +185,43 @@ fn column(source: &str, column: &str) -> String {
     }
 }
 
-/// What the request already says: the shapes imported and the sources bound. The model's mappings
-/// follow it.
+/// What the request already says: the types imported and declared, and the sources bound. The
+/// model's mappings follow it.
 #[must_use]
 pub fn prelude(vocabulary: &Vocabulary) -> String {
-    let types: Vec<&str> = vocabulary.types.iter().map(|t| t.name.as_str()).collect();
-    let mut out = format!(
-        "type {{ {} }} := io.{}(\"{}\")\n",
-        types.join(", "),
-        vocabulary.shapes.format,
-        escaped(&vocabulary.shapes.reference)
-    );
+    let mut out = String::new();
+    for import in &vocabulary.imports {
+        let names: Vec<String> = import
+            .types
+            .iter()
+            .map(|t| match &t.shape {
+                Some(shape) if *shape != t.name => format!("{shape} as {}", t.name),
+                _ => t.name.clone(),
+            })
+            .collect();
+        let _ = writeln!(
+            out,
+            "type {{ {} }} := io.{}(\"{}\")",
+            names.join(", "),
+            import.format,
+            escaped(&import.reference)
+        );
+    }
+    for t in &vocabulary.declared {
+        let _ = write!(out, "\n@iri(\"{}\")\ntype {}\n", escaped(&t.iri), t.name);
+        for f in &t.fields {
+            let _ = writeln!(
+                out,
+                "    @iri(\"{}\") {}: {}",
+                escaped(&f.iri),
+                f.name,
+                f.ty
+            );
+        }
+    }
+    if !vocabulary.declared.is_empty() {
+        out.push('\n');
+    }
     for source in &vocabulary.sources {
         let delimiter = source
             .delimiter
@@ -185,11 +258,12 @@ fn parse_functions() -> (Vec<String>, Vec<String>) {
     (plain, formatted)
 }
 
-/// The grammar of the mappings a program over `vocabulary` can have: one or more, a blank line
-/// between two, each `Name : Type from Source` with its `where`, its joins, `@subject` and the
-/// type's properties, four spaces in, one `=` with a space either side.
+/// The grammar of Fossil for these names: the mappings a program over `vocabulary` can have — one
+/// or more, a blank line between two, each `Name : Type from Source` with its `where`, its joins,
+/// `@subject` and the type's fields, four spaces in, one `=` with a space either side.
 #[must_use]
-pub fn mapping_grammar(vocabulary: &Vocabulary) -> Grammar {
+pub fn grammar_for(vocabulary: &Vocabulary) -> Grammar {
+    let every = vocabulary.types();
     let columns: Vec<Expr> = vocabulary
         .sources
         .iter()
@@ -207,7 +281,7 @@ pub fn mapping_grammar(vocabulary: &Vocabulary) -> Grammar {
         })
         .collect();
     let sources = alt(vocabulary.sources.iter().map(|s| text(&s.name)));
-    let types = alt(vocabulary.types.iter().map(|t| text(&t.name)));
+    let types = alt(every.iter().map(|(name, _)| text(name)));
     let (plain, formatted) = parse_functions();
     let string_char = alt([
         class(
@@ -230,19 +304,16 @@ pub fn mapping_grammar(vocabulary: &Vocabulary) -> Grammar {
         ),
         (
             "map".to_string(),
-            alt(vocabulary
-                .types
-                .iter()
-                .map(|t| rule(&format!("map_{}", t.name)))),
+            alt(every.iter().map(|(name, _)| rule(&format!("map_{name}")))),
         ),
     ];
-    for t in &vocabulary.types {
-        let keys = alt(t.properties.iter().map(|p| text(p)));
+    for (name, keys) in &every {
+        let keys = alt(keys.iter().map(|k| text(k)));
         rules.push((
-            format!("map_{}", t.name),
+            format!("map_{name}"),
             seq([
                 rule("name"),
-                text(&format!(" : {} from ", t.name)),
+                text(&format!(" : {name} from ")),
                 rule("from"),
                 text("\n"),
                 rule("subject"),

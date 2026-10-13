@@ -9,8 +9,8 @@
  * - {@link formats} and {@link formatFor} — the formats this build reads, and which reads a file.
  * - {@link runProfiler} — `fossil-profile`'s plan over some sources, each query run on the host's
  *   engine: what `@fossil-lang/profile` describes a program's sources with.
- * - {@link mappingGrammar} — what a model may write over profiled sources: the grammar a
- *   constrained decoder holds it to, every name in it one that exists.
+ * - {@link grammarFor} — the grammar of Fossil for a request's names: what a constrained decoder
+ *   holds a model to, every name in it one that exists.
  * - {@link initFossilWasm} — Node only: hand over the `.wasm` bytes. Every door boots itself.
  *
  *   const program = await openProgram('job.fossil', { host, text });
@@ -18,7 +18,7 @@
  */
 
 // The wasm-bindgen glue (`../pkg/fossil_wasm.js`) is imported ONLY from leaf modules — `load.ts`,
-// `program.ts`, `format.ts`, `profile.ts` and `mapping.ts` — never here in the entry: importing the stateful glue from the
+// `program.ts`, `format.ts`, `profile.ts` and `grammar.ts` — never here in the entry: importing the stateful glue from the
 // package entry lets a `sideEffects:false` bundler duplicate it, splitting `init()`'s wasm instance
 // from the one the functions use (the crash the codemirror tokenizer hit on the main thread).
 export { initFossilWasm, type InitInput } from './load.js';
@@ -26,4 +26,4 @@ export { formatFor, formats } from './format.js';
 export { inputs, openProgram } from './program.js';
 export type { FossilProgram, OpenProgramOptions } from './program.js';
 export { runProfiler, type ProfileRows } from './profile.js';
-export { mappingGrammar, type MappingGrammar } from './mapping.js';
+export { grammarFor, type Grammar } from './grammar.js';

@@ -15,12 +15,14 @@ export type {
   Format,
   FormatKind,
   Hover,
+  DeclaredField,
+  DeclaredType,
+  ImportedType,
   Inclusion,
   InferredColumn,
   InferredDescriptor,
   Input,
   Location,
-  MappingVocabulary,
   Position,
   Primitive,
   Profile,
@@ -40,8 +42,8 @@ export type {
   StorageCredential,
   Token,
   TokenKind,
-  TypeVocabulary,
-  VocabularyDocument,
+  Vocabulary,
+  VocabularyImport,
 } from './wire.gen.js';
 export { HOST_MS } from './wire.gen.js';
 export {
