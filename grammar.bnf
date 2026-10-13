@@ -211,9 +211,8 @@ AT_ATTR        := '@' IDENT
    (`@abcdefghi` passes it), is the checker's: BCP 47 §2.2.9, as RDF 1.1
    Concepts §3.3 requires of a literal's tag.
 
-   AHEAD OF THE PARSER and of the conformance set: the lexer has no such token
-   and no program in `docs/programs/` spells one. `/docs/design/labels` is the
-   argument, and says what it costs. *)
+   `docs/programs/labels` spells it, and `/docs/design/labels` is the
+   argument and says what it costs. *)
 LANG_STRING    := STRING LANGTAG
 LANGTAG        := '@' LETTER+ ('-' (LETTER | DIGIT)+)*
 
@@ -230,7 +229,7 @@ TopLevel            := SourceDef
                      | TypeDecl
                      | Mapping
 
-(* `TypeDecl` starts with `AT_ATTR` (its `@iri`), and LL(1) survives it:
+(* `TypeDecl` starts with `AT_ATTR` (its attributes), and LL(1) survives it:
    `AT_ATTR` has exactly one derivation at top level. `SubjectAssign` and a
    `Field`'s `IriAttr`, the other things that lex as one, sit inside a body
    reachable only through an `INDENT`. That is disambiguation rule 6 — one
@@ -353,11 +352,9 @@ Field               := DeclAttrs IDENT SHAPE_SEP TypeExpr NEWLINE
    space its fields without a production saying so.
 
    `@iri` is still exactly one per type and per field, and `@annotation` any
-   number. Both are the checker's to count, as `@iri`'s absence already is:
-   the grammar admits attributes, and their arity is a fact of the name.
-
-   AHEAD OF THE PARSER: it accepts one `IriAttr` on the field's own line,
-   and no `@annotation` at all. *)
+   number. The parser counts them as it reads the run — a missing `@iri` is
+   `syntax/missing-iri`, a second `syntax/duplicate-iri` — and the grammar
+   admits attributes, because their arity is a fact of the name. *)
 DeclAttrs           := DeclAttr+ (NEWLINE DeclAttr+)* NEWLINE?
 DeclAttr            := IriAttr | AnnotationAttr
 IriAttr             := AT_ATTR LPAREN STRING RPAREN
@@ -387,7 +384,7 @@ AnnotationObject    := STRING | LANG_STRING
 (* The type of a field, in the names the checker already prints: a primitive
    (`String`, `Integer`, `Float`, `Bool`, `Date`, `DateTime`, `Time`, `GYear`,
    `AnyUri`, and `LangString` — `rdf:langString`, a string and its language
-   tag, which the checker does not have yet), and three constructors — `Option<T>` zero or one, `Seq<T>` zero or
+   tag), and three constructors — `Option<T>` zero or one, `Seq<T>` zero or
    more, `Ref<T>` a reference to a node of the declared or imported type `T`,
    which is an edge. A bare `T` is exactly one. Which names are valid in which
    position is the checker's: `Ref<String>` parses and is refused.

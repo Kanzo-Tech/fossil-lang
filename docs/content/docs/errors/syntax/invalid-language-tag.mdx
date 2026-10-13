@@ -1,0 +1,37 @@
+---
+title: Not a language tag
+description: "`syntax/invalid-language-tag` — a language tag written in the program that is not well-formed BCP 47."
+---
+
+A language-tagged string's tag is held to BCP 47 wherever the program writes it as a constant — an
+annotation's object, a literal, the tag given to `str.lang`:
+
+```fossil
+@iri("https://schema.org/Person")
+@annotation("http://www.w3.org/2000/01/rdf-schema#label", "Nobel laureate"@abcdefghi)
+type Laureate
+    @iri("https://schema.org/name")  name: Seq<LangString>
+```
+
+```text
+syntax/invalid-language-tag
+  × `abcdefghi` is not a well-formed BCP 47 language tag
+  help: a language tag is BCP 47: a language, then optional script, region and variants joined by `-` — `en`, `en-US`, `zh-Hant`, `de-CH-1996`
+```
+
+## Why fossil refuses it
+
+RDF 1.1 Concepts §3.3 gives every language-tagged string a non-empty tag that is well-formed
+according to BCP 47, and the corpus writes the tag as it was written. The lexer's rule for a tag is
+Turtle's and SPARQL's `LANGTAG`, which `abcdefghi` passes; well-formedness — RFC 5646 §2.2.9, a
+language of at most eight letters, then subtags of at most eight — is the checker's
+([Annotations and language-tagged strings](/docs/design/labels)). Well-formed is not registered:
+`english-language` is well-formed and names no language, and is not refused.
+
+A tag read from the data is not a constant and is checked by the run instead:
+[`write/invalid-language-tag`](/docs/errors/write/invalid-language-tag).
+
+## How to repair it
+
+- **Write the tag BCP 47 spells**: `"Nobel laureate"@en`, `"birth date"@en-GB`.
+- **Use `-`, not `_`**: `en_US` is a locale, `en-US` the tag.

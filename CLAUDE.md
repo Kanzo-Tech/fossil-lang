@@ -146,9 +146,10 @@ crates/
   fossil-profile/          what a source is — columns and types, counts, candidate keys, the
                            inclusions between sources, a sample — planned as queries and read
                            from their answers, running NOTHING (sans-IO, `run(sources, options,
-                           exec)`). The browser runs the plan on DuckDB-WASM and `fossil-df`'s
-                           tests on native `duckdb`; it links no engine, so it is in the wasm
-                           closure. There is no native language server: it was deleted on
+                           exec)`). Each query is an `Ask`: the browser runs its SQL on DuckDB-WASM,
+                           `fossil-df`'s tests on native `duckdb`, and the writer renders it on
+                           DataFusion to count what it wrote; it links no engine, so it is in the
+                           wasm closure. There is no native language server: it was deleted on
                            2026-10-12 (`/docs/design/discarded`). `Options::TYPES` is one
                            `DESCRIBE` a source, what the editor asks for. `generated.rs` is
                            `catalogue.bnf`'s reader and type table
@@ -174,9 +175,10 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts); `runProfiler`
                            is the loop over its `Profiler`
   corpus/                  the reader, and it is TypeScript and nothing else: `fossil.json`
-                           through `JSON.parse`: `open` attaches one view per table on the host's
-                           DuckDB, the manifest as two relations and the corpus as RDF as a
-                           third, `triples`, and answers its `close`. `src/index.ts` is the surface. It links no engine
+                           through `JSON.parse`: `attach` attaches one view per table on the host's
+                           DuckDB — from a job, a URL or the files a run answered in memory — every
+                           fact of the manifest as a relation and the corpus as RDF, `triples`,
+                           and answers its `detach`. `src/index.ts` is the surface. It links no engine
                            and loads no WASM. Beside `src/` sits the contract it fulfils — `guards/`,
                            `conformance/` and `integration/` — outside `files`, so npm never
                            sees it. `tests/manifest.test.ts` holds `src/manifest.ts` against
@@ -188,7 +190,8 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            is not a graph: the thing that draws one is `@kanzo-tech/graph`, the
                            one view layer, in kanzo-ui
   executor/                the datafusion-wasm executor — the one writer of a corpus. A run
-                           answers `{ location, dropped }`; what it wrote is `<location>fossil.json`
+                           answers `{ location, dropped }`; what it wrote is `<location>fossil.json`.
+                           In a browser it runs in a worker the executor owns (`src/protocol.ts`)
   types/                   Host — `connections()` + `credentials(scope, access)`, each handed
                            `{ signal }` — the one host contract, and StorageCredential (Iceberg
                            REST's, verbatim); the Engine. And two runtime halves: `FossilError`

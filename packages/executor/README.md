@@ -50,6 +50,13 @@ no alias; a host that passes `job` gets a type error, and at run time `api/inval
 `run/destination-uncovered` is gone from the error catalogue: a run chooses its destination from
 `into`, so no destination can be uncovered.
 
+**In a browser the run is in a worker the executor owns**, so the page keeps painting and its Stop
+can be pressed: wherever `globalThis.Worker` is a constructor, `run` starts `dist/worker.js` (a
+module worker the bundler emits from `new URL('./worker.js', import.meta.url)`), posts it the module
+compiled once on the page, and answers its host calls with the `host`; the signal terminates the
+worker. In Node it runs in this thread. A host's CSP must allow the worker (`worker-src 'self'`, or
+wherever the bundle serves its assets). `/docs/design/off-the-page` argues it.
+
 `run` boots the module itself the first time — the artefact is large and datafusion-heavy, so it is
 fetched when the user runs a job and not on page-load; the bundler emits the `.wasm` as an asset.
 It reads the documents the program names (every shape, not just the first) with

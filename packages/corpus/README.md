@@ -24,18 +24,24 @@ import { attach } from '@fossil-lang/corpus';
 
 await using corpus = await attach(job, { engine, host });     // a job's corpus, under the credential host vends
 const other = await attach('demo', { engine, url });          // a corpus at a URL
+const preview = await attach('preview', { engine, files });   // what run(…, { into: 'memory' }) answered
 
 // everything else is SQL, over the catalog named by the first argument:
 //   "<name>"."Person"            a view per table
-//   "<name>".fossil_tables       table_name, kind, iri, path, record_count, first_id, source, destination, derived_from
-//   "<name>".fossil_columns      table_name, column_name, ordinal_position, data_type, role, iri, datatype, is_nullable
+//   "<name>".fossil_tables       table_name, kind, label, iri, path, record_count, first_id, source, source_key,
+//                                destination, destination_key, candidate_keys, derived_from
+//   "<name>".fossil_columns      table_name, column_name, ordinal_position, data_type, role, iri, term_type, datatype, is_nullable
+//   "<name>".fossil_annotations  table_name, column_name, predicate, o_type, o_value, o_datatype, o_lang
+//   "<name>".fossil_stats        table_name, column_name, null_count, distinct_count, min_value, max_value, top_values
+//   "<name>".fossil_inclusions   table_name, column_name, referenced_table_name, referenced_column_name
 //   "<name>".triples             s_type, s_value, p, o_type, o_value, o_datatype, o_lang — the corpus as RDF
 
 await other.detach();             // `await using` detaches `corpus` when the block ends
 ```
 
 `attach` reads `fossil.json` through the engine, refuses any `format` but `fossil/1` before it reads a
-byte of Parquet, creates one view per table, the manifest as two relations and the corpus as triples, and
+byte of Parquet, creates one view per table, every fact of the manifest as a relation — `fossil_tables`,
+`fossil_columns`, `fossil_annotations`, `fossil_stats`, `fossil_inclusions` — and the corpus as triples, and
 answers an `Attachment` — `name`, `detach()` and `[Symbol.asyncDispose]` — that detaches them. Two
 attachments of one name share the catalog; the last to detach takes it.
 

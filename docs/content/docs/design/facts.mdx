@@ -1,8 +1,6 @@
 ---
 title: The corpus's own facts
 description: "Every fact fossil.json holds reaches a reader as a relation — the edge's label, its endpoint keys, a column's term type, the annotations — and the writer counts what it wrote: per column nulls, distinct values, the least and greatest value and the commonest ones, per table its candidate keys, and the inclusions between them, the same profile fossil-profile computes for a source, stored in fossil.json and read as fossil_stats."
-direction:
-  summary: "A reader of a corpus guesses nothing the writer knew: every fact of fossil.json is a column of a catalog view, and the counts a reader would take with SUMMARIZE are taken once, by the writer, over every row it wrote."
 ---
 
 A corpus is read by things that were not there when it was written — kanzo-ui's Ask, which turns a
@@ -179,9 +177,9 @@ that does not fit is `run/over-budget` like any operator, before anything is com
 refused**, and no corpus is written without its stats. The counts
 of a table are one aggregate over it; the commonest values are one `GROUP BY` per column, and only for
 a column whose `distinct_count` is below its non-null count, since a column with no repeat has none;
-an inclusion is one anti-join per pruned pair. **None of it is measured yet**, and it lands with a
-measurement on `docs/programs/shop` and Vermont in the table the budget already has — the profile's
-time and its peak beside the write's.
+an inclusion is one anti-join per pruned pair. **None of it is measured yet**: the figures it owes
+are `docs/programs/shop` and Vermont in the table the budget already has — the profile's time and
+its peak beside the write's.
 
 **What would reverse it:** that measurement. **No threshold is set before it**: whether the
 inclusions move to a query a reader runs on demand — they are the only quadratic part, so they are

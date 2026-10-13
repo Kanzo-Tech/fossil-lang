@@ -1,8 +1,6 @@
 ---
 title: Annotations and language-tagged strings
 description: "What a type, a field or a relation is called, in which language, carried the standard way — a ShEx annotation, a predicate and an RDF object — from a shape document or a declaration to fossil.json; and rdf:langString as a value in the data, from R2RML's rr:language and RML's languageMap to a language column in the corpus."
-direction:
-  summary: "A type, a field and a relation carry their annotations, and a string value its language tag, from the program or the shape document through to the corpus and its RDF meaning, each in the standard's own form: ShEx's Annotation, rdf:langString with a BCP 47 tag."
 ---
 
 Two things are missing between a shape and a reader, and they are the same thing at two levels. A
@@ -13,10 +11,11 @@ a laureate's name as it is written in Polish — has no place for its language a
 
 Both are solved problems in RDF, and this page takes the solutions as they are. **A label is a ShEx
 annotation, a predicate and an RDF object** — `// rdfs:label "birth date"@en` in ShExC. **A string in
-a language is an `rdf:langString`**, a lexical form and a BCP 47 tag. Nothing here is built; the
-grammar is written, ahead of the parser as [the grammar](/docs/book/grammar) always is —
-`grammar.bnf, DeclAttrs`, `grammar.bnf, AnnotationAttr` and `grammar.bnf, LANG_STRING` — and this
-page is why it is shaped as it is and what it costs.
+a language is an `rdf:langString`**, a lexical form and a BCP 47 tag. The grammar is
+`grammar.bnf, DeclAttrs`, `grammar.bnf, AnnotationAttr` and `grammar.bnf, LANG_STRING`; the
+conformance program is `docs/programs/labels`, run end to end by
+`crates/fossil-df/tests/labels_and_facts.rs`; and this page is why it is shaped as it is and what it
+costs.
 
 ## What an annotation is
 
@@ -284,13 +283,15 @@ case-insensitive and RDF 1.1 lets a syntax lower-case them, so a reader compares
 
 ### What the checker and the writer refuse
 
-| What | Where | Code (proposed) |
+| What | Where | Code |
 | --- | --- | --- |
-| A constant tag that is not well-formed BCP 47 (RFC 5646 §2.2.9) — `"x"@abcdefghi`, a nine-letter language | checker, with `oxilangtag`, already in the lock through `oxrdf` | `syntax/invalid-language-tag` |
-| A constant tag outside the shape's `sh:languageIn` or ShEx language set | checker | `type/language-not-allowed` |
+| A constant tag that is not well-formed BCP 47 (RFC 5646 §2.2.9) — `"x"@abcdefghi`, a nine-letter language | checker, with `oxilangtag`, already in the lock through `oxrdf` | [`syntax/invalid-language-tag`](/docs/errors/syntax/invalid-language-tag) |
+| A constant tag outside the shape's `sh:languageIn` or ShEx language set | checker | [`type/language-not-allowed`](/docs/errors/type/language-not-allowed) |
 | A `LangString` field assigned a `String`, or `str.lang` given a non-string | checker | [`type/property-mismatch`](/docs/errors/type/property-mismatch), `type/argument-mismatch` |
-| `"x".lang("en")` | checker | `type/needless-lang` |
-| A per-row tag that is not well-formed, or outside the shape's languages | the writer, as it writes the property table | `write/invalid-language-tag`, `write/language-not-allowed` |
+| `"x".lang("en")` | checker | [`type/needless-lang`](/docs/errors/type/needless-lang) |
+| A predicate or an `@iri` written as a prefixed name — `"rdfs:label"` | checker | [`syntax/prefixed-iri`](/docs/errors/syntax/prefixed-iri) |
+| A second `@iri` stacked on one type or field | parser | [`syntax/duplicate-iri`](/docs/errors/syntax/duplicate-iri) |
+| A per-row tag that is not well-formed, or outside the shape's languages | the writer, as it writes the property table | [`write/invalid-language-tag`](/docs/errors/write/invalid-language-tag), [`write/language-not-allowed`](/docs/errors/write/language-not-allowed) |
 
 A per-row tag is data, so only the run sees it. It refuses the run rather than following RML's
 fallback (no valid tag, no language): the fallback writes an untagged string into a column whose

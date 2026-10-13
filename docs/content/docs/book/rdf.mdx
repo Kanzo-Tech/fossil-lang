@@ -23,6 +23,11 @@ A field's type is one of the primitives the checker knows
 | `Time` | `xsd:time` | — |
 | `GYear` | `xsd:gYear` | — |
 | `AnyUri` | `xsd:anyURI` | — |
+| `LangString` | `rdf:langString`, a string and its BCP 47 tag | a ShEx value set of languages (`[@en @es~]`) |
+
+A `LangString` value is given its tag by `str.lang` — `Row.name.lang(Row.lang)`, or a constant
+`"Marie Curie"@en` — and a field of it is always a property table with a `lang` column, whatever its
+count ([Annotations and language-tagged strings](/docs/design/labels)).
 
 Reading is wider than writing, and the difference loses something. An `xsd:decimal` in a shape is read
 as `Float` and written back as `xsd:double`: the precision a decimal promises is not kept. Any other
@@ -50,6 +55,11 @@ The decoder rejects, shape by shape, and says which (`crates/fossil-graph-schema
 - a reference to a shape the document does not declare;
 - a document that does not parse.
 
+**Annotations** are read: a ShEx shape's and triple constraint's `// predicate object`, and a SHACL
+shape's non-validating triples — `sh:name` and `sh:description` as `rdfs:label` and `rdfs:comment`,
+and any predicate outside SHACL's namespace as itself. They reach the corpus's `fossil.json` and make
+no triple. A program writes its own with `@annotation`.
+
 **Closure** (`CLOSED`, `sh:closed`, `EXTRA`) is not read: a property the shape does not declare is
 already an error, so closure could only select what already happens. **SHACL's path** cannot say *one*
 as against *one or more*, so a SHACL document loses that distinction where a ShEx one keeps it.
@@ -58,7 +68,6 @@ as against *one or more*, so a SHACL document loses that distinction where a ShE
 
 | RDF | In Fossil |
 | --- | --- |
-| Language-tagged strings (`rdf:langString`) | None: a corpus has no column for a literal's language |
 | `xsd:decimal` with its precision | Read as `Float`, written as `xsd:double`; `parse.float` is the one way to read one from text |
 | Blank nodes | None: every node has an IRI |
 | Named graphs and quads | None: a `fossil/1` corpus is vertex and edge tables |

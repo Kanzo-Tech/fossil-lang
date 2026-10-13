@@ -1,0 +1,29 @@
+---
+title: A value's language tag is not well-formed
+description: "`write/invalid-language-tag` — a language tag read from the data that is not well-formed BCP 47, so no corpus is written."
+---
+
+A language-tagged value whose tag comes from a column — `str.lang(Row.name, Row.lang)` — is checked
+as the run writes its property table. One tag that is not well-formed BCP 47 refuses the run:
+
+```text
+write/invalid-language-tag
+  × `name` has a value tagged `abcdefghi`, which is not a well-formed BCP 47 language tag
+```
+
+`data.property` is the field, `data.tag` the first tag that failed, as the data wrote it.
+
+## Why fossil refuses it
+
+RDF 1.1 Concepts §3.3 gives every language-tagged string a well-formed tag, and the corpus's
+`declared-term` guard holds every value to the term its column declares. RML's precedence — a
+language map that yields no valid tag falls back to no language — would write an untagged string
+into a column whose datatype is `rdf:langString`. So the run is refused, before `fossil.json`, and
+there is no corpus ([Annotations and language-tagged strings](/docs/design/labels)). A constant tag
+is the checker's: [`syntax/invalid-language-tag`](/docs/errors/syntax/invalid-language-tag).
+
+## How to repair it
+
+- **Fix the tag in the source**, or map it in the program — `str.lang(Row.name, str.lower(Row.lang))`,
+  say, for a column that wrote `EN_us`.
+- **Filter the rows** whose tag is missing with a `where` before the mapping.

@@ -243,9 +243,9 @@ await run(program, { files, path });                      // bytes in hand, answ
   Applied per scan, a source read by two mappings is the same first rows to both, because the
   session has one partition and a scan reads in file order.
 
-**Where the run's thread is belongs to the executor, and that is not built yet.** In a browser `run`
-is to run in a worker it starts, the host's calls crossing back to the page as messages, and in Node
-in-process, with the same signature; [A run off the page](/docs/design/off-the-page) declares it.
+**Where the run's thread is belongs to the executor.** In a browser `run` runs in a worker it
+starts, the host's calls crossing back to the page as messages, and in Node in-process, with the
+same signature; [A run off the page](/docs/design/off-the-page) is the argument.
 
 The names are the things themselves. Not `engine`: fossil's `Engine` is the host's DuckDB that runs
 the profile's queries, and a run never touches it. Not *disk*: the destination is S3 or Azure, and

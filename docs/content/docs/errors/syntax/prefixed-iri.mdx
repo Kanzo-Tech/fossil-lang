@@ -1,0 +1,39 @@
+---
+title: A prefixed name where an IRI belongs
+description: "`syntax/prefixed-iri` — an IRI written as `rdfs:label`, with a prefix nothing declares."
+---
+
+An IRI in a program is written whole. A string whose scheme is a prefix of the W3C's RDFa Core
+Initial Context — `rdfs:`, `skos:`, `schema:`, `xsd:` and the rest — is refused, naming the IRI it
+abbreviates:
+
+```fossil
+@iri("https://schema.org/Person")
+@annotation("rdfs:label", "Nobel laureate"@en)
+type Laureate
+    @iri("https://schema.org/name")  name: Seq<LangString>
+```
+
+```text
+syntax/prefixed-iri
+  × `rdfs:label` is a prefixed name, and an IRI is written whole: `http://www.w3.org/2000/01/rdf-schema#label`
+  help: there are no prefixes, so a name nobody wrote never becomes an IRI: write it whole, `"http://www.w3.org/2000/01/rdf-schema#label"`
+```
+
+The same check holds an `@iri`: `@iri("schema:name")` is refused the same way.
+
+## Why fossil refuses it
+
+Fossil has no prefix declaration, so `"rdfs:label"` would not fail on its own: it is a well-formed
+absolute IRI whose scheme is `rdfs`, and nothing would say it was a mistake. Expanding it through
+the RDFa context instead would be a rule about strings that look like something else, and the
+context maps `schema:` to `http://schema.org/` while every program here writes
+`https://schema.org/` — the expansion would mint an IRI nobody meant
+([Annotations and language-tagged strings](/docs/design/labels)). So the program says what it means,
+whole.
+
+## How to repair it
+
+- **Write the IRI the message names**, in full: `@annotation("http://www.w3.org/2000/01/rdf-schema#label", …)`.
+- For schema.org, check which scheme the vocabulary you mean uses — the programs here use
+  `https://schema.org/`, the context's expansion `http://`.

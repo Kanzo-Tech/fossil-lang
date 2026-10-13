@@ -98,12 +98,12 @@ graph LR
   X["<b>no home</b> · 1 crate<br/>xtask"]
 
   E -->|11| L
-  M -->|5| L
+  M -->|6| L
   M -->|2| C
   C -->|2| L
 ```
 
-**20 cross-group edges**, and no pair runs both ways. Every number above
+**21 cross-group edges**, and no pair runs both ways. Every number above
 is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
 likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
 reads the manifests and fails the build on any figure in this diagram that stops holding.
@@ -111,7 +111,9 @@ reads the manifests and fails the build on any figure in this diagram that stops
 No edge runs from the editor to the engine, and the editor links no database: the browser runs
 `fossil-profile`'s plan on DuckDB-WASM, because without the columns a `DESCRIBE` finds the editor is
 silent on every diagnostic whose evidence is a source's schema. The plan itself is a language crate
-that links no engine ([Profile](/docs/design/profile)).
+that links no engine ([Profile](/docs/design/profile)) — and the engine's sixth edge into the
+language is that same plan: the writer counts what it wrote with it, rendered on DataFusion
+([the corpus's own facts](/docs/design/facts)).
 
 The arrow between engine and corpus runs one way:
 

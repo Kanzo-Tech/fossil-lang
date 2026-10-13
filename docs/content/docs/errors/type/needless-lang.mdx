@@ -1,0 +1,30 @@
+---
+title: A language-tagged literal written as a call
+description: "`type/needless-lang` — `\"x\".lang(\"en\")`, a constant string given a constant tag, which is the literal `\"x\"@en`."
+---
+
+`str.lang` gives a value its language tag. Given a constant string and a constant tag, it is the
+literal written a second way, and is refused naming the literal:
+
+```fossil
+Prizes : Prize from PrizeRow
+    @subject   = "https://nobel.example/prize/{PrizeRow.id}"
+    motivation = "in recognition of the extraordinary services".lang("en")
+```
+
+```text
+type/needless-lang
+  × `"in recognition of the extraordinary services".lang("en")` is the literal `"in recognition of the extraordinary services"@en`, and a constant is written as one
+```
+
+## Why fossil refuses it
+
+Each term has one spelling. A language-tagged constant is `"…"@en` — Turtle's, SPARQL's and ShExC's
+spelling of the same RDF literal — and `str.lang` is for a value that comes from a row, with a
+constant tag (R2RML's `rr:language`) or a column one (RML's `rml:languageMap`). The rule is the one
+[`syntax/needless-quotes`](/docs/errors/syntax/needless-quotes) already applies to a quoted member
+([Annotations and language-tagged strings](/docs/design/labels)).
+
+## How to repair it
+
+- **Write the literal**: `motivation = "in recognition of the extraordinary services"@en`.

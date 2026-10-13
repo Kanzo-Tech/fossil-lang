@@ -1,0 +1,27 @@
+---
+title: A value in a language the shape does not admit
+description: "`write/language-not-allowed` — a language tag read from the data outside the languages the property's shape admits, so no corpus is written."
+---
+
+A shape can say which languages a language-tagged property admits — SHACL's `sh:languageIn`, a ShEx
+language value set. A tag read from the data outside them refuses the run:
+
+```text
+write/language-not-allowed
+  × `name` admits `en`, `es`, and a value is tagged `pl`
+```
+
+`data.languages` are the ranges the shape admits; a range matches by RFC 4647's basic filtering, so
+`en` admits `en-GB`.
+
+## Why fossil refuses it
+
+A tag from a column is data, so only the run sees it. A corpus whose values break the shape it
+declares is a corpus a SHACL engine would reject, and a dropped row would be a value lost with no
+count anywhere ([Annotations and language-tagged strings](/docs/design/labels)). A constant tag is the
+checker's: [`type/language-not-allowed`](/docs/errors/type/language-not-allowed).
+
+## How to repair it
+
+- **Filter the rows** to the languages the shape admits, with a `where` before the mapping.
+- If the shape is wrong, widen `sh:languageIn` in the shape document.
