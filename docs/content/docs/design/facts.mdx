@@ -90,16 +90,16 @@ row the corpus holds — and with two counts it does not take today:
 | nulls | `stats.null_count` on the column | rows with no value |
 | distinct values | `stats.distinct_count` | distinct non-null values, exact |
 | least and greatest value | `stats.min_value`, `stats.max_value` | **new to the profiler.** Absent for a column with no value |
-| commonest values | `stats.top_values`, `[{ value, count }]` | **new to the profiler.** The *k* most frequent non-null values that occur at least twice, most frequent first and ties by value, so the same corpus writes the same list. Absent when no value repeats — a key has none |
+| commonest values | `stats.top_values`, `[{ value, count }]` | **new to the profiler.** The ten most frequent non-null values that occur at least twice, most frequent first and ties by value, so the same corpus writes the same list. Absent when no value repeats — a key has none |
 | candidate keys | `candidate_keys` on the table | the profiler's rule, verbatim: a column of a keyable type, never null and never repeated, in a table with rows |
 | inclusions | `inclusions` at the top of `fossil.json` | every value of one column is a value of another table's candidate key: the shape of an edge the program did not declare |
 
 **Every value is text, and it is the text `triples` writes for it**: the natural lexical form of the
 column's type, R2RML §10.2 ([Its RDF meaning, as triples](/docs/format/reading/rdf)). One spelling of
 a value across the corpus's relations, and the one a reader casts back with the column's `data_type`.
-**A value longer than a bound** — proposed 64 bytes, an [open question](#open-questions) — is
-left out: `min_value` or `max_value` is then absent, and a column with such a value among its *k*
-commonest has no `top_values`. A truncated value would be a value the column does not hold, which a
+**A value longer than 64 bytes** is left out, never cut: `min_value` or `max_value` is then absent,
+and a column with such a value among its ten commonest has no `top_values`. Ten is more than the six
+Ask shows; 64 bytes holds a date, a number, a code or a short name, and not a description. A truncated value would be a value the column does not hold, which a
 reader would filter by and match nothing; Delta Lake truncates its string bounds because it only
 prunes with them, and a reader here shows them to a person and to a model.
 
@@ -137,8 +137,8 @@ is somewhere a model cannot read. A corpus's rows are a `SELECT … LIMIT 5` awa
 (The numbers are illustrative, not measured.) **It lives in `fossil.json`, not in a file beside it**,
 because `attach` reads `fossil.json` first and builds every catalog view from it before a byte of
 Parquet: a `stats.parquet` would be a second read at every attach for facts that are as small as the
-schema they describe. The size is bounded by the columns and *k*, not the rows — at most *k* values
-of at most the bound per column. That is Delta Lake's choice, per-file `stats` in the log a reader
+schema they describe. The size is bounded by the columns, not the rows — at most ten values of
+at most 64 bytes per column. That is Delta Lake's choice, per-file `stats` in the log a reader
 reads first, and not Iceberg's, whose distinct-value sketches live in Puffin files because a sketch
 is large. Parquet already carries `null_count`, `min_value` and `max_value` per row group in each
 footer; they stay, for the engine's pruning, and they are not the reader's answer — one footer per
@@ -175,16 +175,17 @@ wasm closure already, and it becomes a dependency of `fossil-df` rather than a d
 
 **Under the run's budget.** Every query reserves against the same 2 GiB pool as the run
 ([Three hosts](/docs/design/three-hosts#what-the-wasm-writer-holds-and-how-it-says-no)), so a profile
-that does not fit is `run/over-budget` like any operator, before anything is committed. The counts
+that does not fit is `run/over-budget` like any operator, before anything is committed: **the run is
+refused**, and no corpus is written without its stats. The counts
 of a table are one aggregate over it; the commonest values are one `GROUP BY` per column, and only for
 a column whose `distinct_count` is below its non-null count, since a column with no repeat has none;
 an inclusion is one anti-join per pruned pair. **None of it is measured yet**, and it lands with a
 measurement on `docs/programs/shop` and Vermont in the table the budget already has — the profile's
 time and its peak beside the write's.
 
-**What would reverse it:** that measurement. If the profile costs more than a share of the run the
-user sets — an [open question](#open-questions) — the inclusions go first, to a query a reader runs
-on demand, because they are the only quadratic part; if exact distinct counts push a corpus that
+**What would reverse it:** that measurement. **No threshold is set before it**: whether the
+inclusions move to a query a reader runs on demand — they are the only quadratic part, so they are
+what would move first — is decided on the shop and Vermont figures, not on a share chosen in advance; if exact distinct counts push a corpus that
 fits over the budget, `distinct_count` becomes a sketch and `candidate_keys` the one exact count kept.
 
 ## What a reader stops guessing
@@ -214,7 +215,7 @@ fits over the budget, `distinct_count` becomes a sketch and `candidate_keys` the
 
 ## The migration
 
-**fossil, 0.3.0-alpha.32.** The views and the profile in one release with the writer that writes
+**fossil, 0.3.0-alpha.32**, which ships all four designs of this batch together. The views and the profile in one release with the writer that writes
 `stats`, so no reader of `fossil_stats` ever meets a corpus that has none — except one written before
 it, and there every row of `fossil_stats` is null and `candidate_keys` empty, which a reader handles
 as it handles any unknown, by asking the engine. The format stays `fossil/1`
@@ -227,13 +228,8 @@ directly — Ask and the graph do, through kanzo-ui. Its assistant's source prof
 **kanzo-ui**, after fossil: the reader changes in the table above, and the regex, the threshold and the
 `SUMMARIZE` at attach go.
 
-## Open questions
+## Decided
 
-1. ***k* and the bound on a value.** Proposed: ten commonest values, 64 bytes a value. Ask shows six
-   today. Settled by the user, or by the size of a real `fossil.json` with them.
-2. **The share of a run the profile may cost** before the inclusions leave the writer. Settled by the
-   user, against the measurement this page owes.
-3. **Rendering the plan twice or enabling DataFusion's `sql`.** Decided above as data rendered per
-   engine, because the `sql` frontend is off the wasm build on purpose; its size has not been
-   measured. Settled by that measurement, if the user wants it taken
-   ([discarded](/docs/design/discarded) carries the alternative).
+The user settled what this page left open: ten commonest values of at most 64 bytes each, longer
+values left out; the plan described as data and rendered to DuckDB SQL and to DataFusion plans; a run
+whose profile exceeds the budget refused; and no cost threshold until shop and Vermont are measured.

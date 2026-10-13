@@ -138,7 +138,7 @@ no WASM behind it, as its package says.
 
 ## The migration
 
-**fossil, 0.3.0-alpha.32.** Both doors in one release. *Breaking:* an `Engine` must have
+**fossil, 0.3.0-alpha.32**, with the other three designs of this batch. Both doors in one release. *Breaking:* an `Engine` must have
 `registerFileBuffer` (kanzo-ui's has); a browser host's CSP must allow the executor's worker
 (`worker-src 'self'`, or wherever the bundle serves its assets).
 
@@ -148,11 +148,8 @@ preview attaches with `attach(name, { engine, files })`. What keasy's tests asse
 protocol — a host refusal keeping `store/refused` through the worker, an abort reaching the run — moves
 into fossil's tests of `run`, where the protocol now lives.
 
-## Open questions
+## Decided
 
-1. **The platform test.** `globalThis.Worker` as a constructor decides it, so Deno and Bun, which have
-   one, run in a worker too. Settled the other way by a server-side host on either runtime that wants
-   a stack trace more than a free thread.
-2. **Whether alpha.32 carries all four designs of this batch** — annotations and language tags, the
-   views and the corpus's stats, the worker and `attach` from memory — or ships them as they land.
-   Settled by the user.
+The user settled what this page left open: the run is in a worker wherever `globalThis.Worker` is a
+constructor, Deno and Bun included; and 0.3.0-alpha.32 ships all four designs of this batch together —
+annotations and language tags, the views and the corpus's stats, the worker and `attach` from memory.

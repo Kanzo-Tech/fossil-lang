@@ -116,7 +116,7 @@ an empty list), so a decoder written as a `TryFrom` over `SchemaIR` loses them u
 in. The reading stays on the AST.
 
 **SHACL.** `crates/fossil-hir/src/shacl.rs, decode_shacl` reads a shape's triples into the same pair:
-on a property shape, `sh:name` and `sh:description`, SHACL's own two; on any shape, every triple whose
+on a property shape, `sh:name` and `sh:description`, SHACL's own two, as `rdfs:label` and `rdfs:comment`; on any shape, every triple whose
 predicate is outside SHACL's namespace and is not `rdf:type` — `rdfs:label`, `rdfs:comment`,
 `skos:prefLabel` — because §2.3.2 says a processor ignores them and ShEx admits any predicate.
 
@@ -127,8 +127,9 @@ annotation, its object — language tag and all — unchanged. So a reader asks 
 never carries a preference list between two words for one thing, and the three sources of a label
 meet in the decoder, once, rather than in every reader. On a property shape that writes both, both are
 kept, `sh:name`'s first: SHACL §2.3.2.1 says a tool SHOULD prefer the locally specified label, and
-first is the one a reader that takes one per language takes. `sh:description` is carried as itself
-until the [open question](#open-questions) on it is settled.
+first is the one a reader that takes one per language takes. **`sh:description` is read as
+`rdfs:comment`** by the same argument, ISSUE-112's twin: one predicate for a description whichever
+document wrote it, `sh:description`'s first where a shape writes both.
 
 The cost is the distinction the Shapes WG drew. Its
 [ISSUE-112](https://www.w3.org/2014/data-shapes/track/issues/112), raised 2015-11-05, was that SHACL's
@@ -151,7 +152,7 @@ document wrote it, and the normalisation moves into the reader that wants one wo
 `fossil.json` gains `annotations` on a vertex table (the type's), an edge table (the relation's, from
 the `Ref` field that declares it), and a column's `properties` entry (the field's) — and so on a
 property table's value column, which already carries the field's `iri`. Each entry is ShExJ's
-Annotation, verbatim:
+Annotation, with one word changed:
 
 ```jsonc
 "annotations": [
@@ -161,9 +162,13 @@ Annotation, verbatim:
 ```
 
 `object` is ShExJ's `objectValue`: an IRI is a bare string, a literal is `ObjectLiteral`,
-`{ value, language?, type? }`, where `type` is the datatype IRI — ShExJ's word, which is not the
-column's `type` beside it, and is the first [open question](#open-questions). A program's annotations
-only ever produce the two literal forms; a document's may carry the others, and they pass through.
+`{ value, language?, datatype? }`. ShExJ calls the datatype IRI `type`; `fossil.json` calls it
+`datatype`, the word a column already uses for the same IRI, so one document has one word for one
+thing and `type` keeps meaning the column's storage type. A program's annotations only ever produce
+the two literal forms; a document's may carry the others, and they pass through.
+
+**What would reverse it:** a consumer that reads `annotations` as ShExJ unchanged — then the word is
+ShExJ's and the column's `datatype` is the one that moves.
 
 **It is `fossil/1`, changed in place.** The field is optional and absent when there is nothing to say,
 and the reader that reads it ships in the same release as the writer that writes it — the rule
@@ -187,9 +192,9 @@ the data's.
 Fossil writes no ShEx today. When a declared type is converted onto rudof's types — the
 [declared-types direction](/docs/design/declared) — an annotation is `shex_ast`'s `Annotation`, and
 `shex_ast`'s compact printer already prints one as `//` after its triple constraint or its shape
-(`ShExCompactPrinter::pp_annotation`). The round trip is then `@annotation` → `fossil.json`'s ShExJ →
-`// predicate object`, with no field renamed on the way; that ShExJ is what the corpus stores is the
-reason it is stored verbatim.
+(`ShExCompactPrinter::pp_annotation`). The round trip is then `@annotation` → `fossil.json`'s
+annotation → `// predicate object`, with one key renamed on the way, a literal's `datatype` back to
+ShExJ's `type`.
 
 ## Language-tagged strings in the data
 
@@ -426,7 +431,7 @@ under `en`, from `property/Laureate_name.parquet` filtered on `lang`.
 | --- | --- |
 | `fossil-syntax` | `LANG_STRING` in the lexer, the `@` read as the literal's suffix when it touches the quote; `DeclAttrs` — several attributes, stacked or inline — and `@annotation` in the parser; a CST node for each |
 | `fossil-graph-schema` | `Primitive::LangString` and `rdf:langString` in its XSD table both ways; `annotations` on `Shape` and `PropertyConstraint`, and `languages` on `PropertyConstraint`; the wire types `@fossil-lang/types` generates from them |
-| `fossil-hir` | `shex.rs` carries a shape's and a triple constraint's annotations, `rdf:langString` and language value sets; `shacl.rs` reads `sh:name` as an `rdfs:label` annotation, carries `sh:description` and the non-SHACL predicates, `sh:datatype rdf:langString` and `sh:languageIn`; `declared.rs` lowers `@annotation`; the checker types `LangString`, checks a constant tag with `oxilangtag` (a direct dependency then, through `cargo deny` and the wasm gate), refuses a CURIE predicate and `"x".lang("en")`; `fossil-ide` shows a field's annotations on hover |
+| `fossil-hir` | `shex.rs` carries a shape's and a triple constraint's annotations, `rdf:langString` and language value sets; `shacl.rs` reads `sh:name` as an `rdfs:label` annotation and `sh:description` as an `rdfs:comment` one, carries the non-SHACL predicates, `sh:datatype rdf:langString` and `sh:languageIn`; `declared.rs` lowers `@annotation`; the checker types `LangString`, checks a constant tag with `oxilangtag` (a direct dependency then, through `cargo deny` and the wasm gate), refuses a CURIE predicate and `"x".lang("en")`; `fossil-ide` shows a field's annotations on hover |
 | `catalogue.bnf` | one row, `str.lang`, lowered to a two-field struct the writer splits; `LangString` in the type table both profiling hosts read |
 | `fossil-mir` | a `LangString` property lowers to a property table whatever its cardinality; the value is the struct, projected into two columns |
 | `fossil-df` | the writer's third property column and its per-row tag check; `annotations` on `VertexTable`, `EdgeTable` and `Property` in `manifest.rs`; `fossil.schema.json` and `corpus.bnf`'s `language` role regenerated |
@@ -436,7 +441,7 @@ under `en`, from `property/Laureate_name.parquet` filtered on `lang`.
 
 ## The migration
 
-**fossil, 0.3.0-alpha.32.** Everything in the table above, in one release: the grammar, the checker,
+**fossil, 0.3.0-alpha.32**, with the other three designs of this batch. Everything in the table above, in one release: the grammar, the checker,
 the decoders, the writer's `annotations` and language column, and the reader and guards that read
 them. `fossil/1` is still the format string, and a corpus with no annotation and no `LangString`
 property is unchanged.
@@ -446,15 +451,3 @@ no annotations has an empty `fossil_annotations`. What it gains is a column head
 language — Ask's and the graph's — from `fossil_annotations`, once kanzo-ui reads it, and a
 multilingual name filtered on `lang`. A program that used `core.lang` already failed to check, since
 the row went with [the review of the catalogue](/docs/design/declared).
-
-## Open questions
-
-These are the user's to settle, and each names what settles it.
-
-1. **`type` or `datatype` in the stored object.** ShExJ says `type`; the manifest says `datatype` for a
-   column's datatype IRI. Verbatim ShExJ is decided above because a ShExJ reader then reads it
-   unchanged; settled the other way by a reader of `fossil.json` that confuses the two.
-2. **`sh:description` as `rdfs:comment`.** The same argument that reads `sh:name` as `rdfs:label`
-   reads SHACL's other non-validating property, ISSUE-112's twin, as `rdfs:comment` — one predicate
-   for a description whichever document wrote it. It is not decided because it was not asked: settled
-   by the user's ruling on the pair.
