@@ -14,7 +14,7 @@
 //!   program's directory is loaded into an in-memory store under [`AUTHORITY`],
 //!   the program is compiled AT its URL there, so every relative source and
 //!   document resolves beside it as it would for any reader of that file, and the
-//!   corpus is written into a second in-memory store. The executor reads no file
+//!   corpus is written into memory (`Output::Memory`). The executor reads no file
 //!   and introspects nothing; what the checker sees and what the run sees differ
 //!   exactly as the browser's two workspaces do.
 
@@ -36,9 +36,8 @@ use std::sync::Arc;
 use fossil_base::test_support::NativeSystem;
 use fossil_base::{Diagnostic, FossilDb, SourceFile, System, file_at};
 use fossil_df::corpus::manifest::Manifest;
-use fossil_df::{Executor, RunReport};
+use fossil_df::{Executor, Output, Ran, RunReport};
 use fossil_hir::documents::{documents_named, register_missing_documents, registry_key};
-use futures::TryStreamExt;
 use miette::{GraphicalReportHandler, GraphicalTheme, LabeledSpan, NamedSource, SourceSpan};
 use object_store::memory::InMemory;
 use object_store::{ObjectStore, ObjectStoreExt};
@@ -241,10 +240,7 @@ pub(crate) fn render_diagnostics(
 /// resolves it but the in-memory store routed at it.
 pub(crate) const AUTHORITY: &str = "https://programs.test/";
 
-/// Where a run writes.
-pub(crate) const DEST: &str = "mem://out/corpus/";
-
-/// What a run answered and every file it wrote, by path under [`DEST`].
+/// What a run answered and every file it wrote, by path under its root.
 #[derive(Debug)]
 pub(crate) struct Corpus {
     pub(crate) report: RunReport,
@@ -338,11 +334,6 @@ async fn run_dir_async(
     storage
         .with_store(AUTHORITY, Arc::clone(&served) as Arc<dyn ObjectStore>)
         .expect("route the program's directory");
-    let out = Arc::new(InMemory::new());
-    storage
-        .with_store("mem://out/", Arc::clone(&out) as Arc<dyn ObjectStore>)
-        .expect("route the destination");
-
     let mut exec = Executor::at(&text, &format!("{AUTHORITY}{program}"));
     exec.set_connections(
         connections
@@ -362,28 +353,17 @@ async fn run_dir_async(
         }
     }
 
-    let report = exec
-        .execute(&mut storage, DEST)
+    let Ran::Memory { report, files } = exec
+        .execute(&mut storage, &Output::Memory, None)
         .await
-        .map_err(|e| e.to_string())?;
-    let mut files = BTreeMap::new();
-    let listed: Vec<_> = out.list(None).try_collect().await.expect("list");
-    for meta in listed {
-        let bytes = out
-            .get(&meta.location)
-            .await
-            .expect("get")
-            .bytes()
-            .await
-            .expect("bytes");
-        let rel = meta
-            .location
-            .as_ref()
-            .strip_prefix("corpus/")
-            .expect("under the destination")
-            .to_string();
-        files.insert(rel, bytes.to_vec());
-    }
+        .map_err(|e| e.to_string())?
+    else {
+        unreachable!("a run into memory answers its files")
+    };
+    let files = files
+        .into_iter()
+        .map(|file| (file.path, file.bytes.to_vec()))
+        .collect();
     Ok(Corpus { report, files })
 }
 

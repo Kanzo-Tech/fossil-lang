@@ -35,7 +35,6 @@
     clippy::future_not_send
 )]
 
-use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -43,11 +42,9 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use duckdb::Connection;
-use fossil_df::Executor;
 use fossil_df::corpus::manifest::{Manifest, ROW_GROUP_ROWS};
-use fossil_storage::{Access, Host, Scope, Storage, StorageCredential};
+use fossil_storage::Storage;
 use futures::TryStreamExt;
-use futures::future::BoxFuture;
 use futures::stream::BoxStream;
 use object_store::memory::InMemory;
 use object_store::path::Path;
@@ -55,6 +52,8 @@ use object_store::{
     CopyOptions, GetOptions, GetResult, ListResult, MultipartUpload, ObjectMeta, ObjectStore,
     ObjectStoreExt, PutMultipartOptions, PutOptions, PutPayload, PutResult,
 };
+
+mod support;
 
 const DEST: &str = "s3://jobs/run-1/";
 const SHEX: &str = include_str!("fixtures/executor.shex");
@@ -83,26 +82,6 @@ Person : Person from users
     @subject = \"https://example.org/person/{users.id}\"
     name = users.name
 ";
-
-#[derive(Debug)]
-struct NoHost;
-
-impl Host for NoHost {
-    fn connections(
-        &self,
-    ) -> BoxFuture<'static, Result<HashMap<String, String>, fossil_storage::HostError>> {
-        Box::pin(async { Ok(HashMap::new()) })
-    }
-    fn credentials(
-        &self,
-        _: &Scope,
-        _: Access,
-    ) -> BoxFuture<'static, Result<Vec<StorageCredential>, fossil_storage::HostError>> {
-        Box::pin(async {
-            Err(fossil_graph_schema::Foreign::named("Error", "these tests vend nothing").into())
-        })
-    }
-}
 
 /// An in-memory store that records the order of every put, and refuses the
 /// put numbered `fail_at` (from zero) and every one after it.
@@ -199,17 +178,22 @@ fn sources(users: u32, orders: u32) -> Vec<(&'static str, Vec<u8>)> {
     ]
 }
 
-/// Run `program` over `files`, into a [`Recording`] store that fails at put
-/// number `fail_at`. Answers the run's result and the store.
+/// Execute `program` over `files` and [`fossil_df::write`] its graph into a
+/// [`Recording`] store at [`DEST`] that fails at put number `fail_at`. Answers
+/// the write's result and the store.
+///
+/// The writer is called directly: a run chooses its own store
+/// (`fossil_df::Output`), and these promises are the writer's, so the store
+/// that records and refuses is handed to it here.
 async fn run(
     program: &str,
     files: Vec<(&'static str, Vec<u8>)>,
     fail_at: usize,
 ) -> (
-    Result<fossil_df::RunReport, fossil_graph_schema::Failure>,
+    Result<fossil_df::Written, fossil_graph_schema::Failure>,
     Arc<Recording>,
 ) {
-    let mut storage = Storage::new(Arc::new(NoHost));
+    let mut storage = Storage::new(Arc::new(support::NoHost));
     let data = Arc::new(InMemory::new());
     storage
         .with_store(
@@ -230,11 +214,21 @@ async fn run(
     storage
         .with_store(DEST, Arc::clone(&out) as Arc<dyn ObjectStore>)
         .expect("route");
-    let mut exec = Executor::new(program);
-    for missing in exec.missing_documents() {
-        exec.register_document(&missing.key, SHEX);
+    let (db, file) = support::db_with_shapes(program, "write.fossil", &[("executor.shex", SHEX)]);
+    let descriptor = fossil_df::output_descriptor(&db, file).expect("the descriptor");
+    let ctx = fossil_df::session::session_within(
+        Arc::new(fossil_df::memory::Budget::new(fossil_df::memory::BUDGET)),
+        None,
+    );
+    for (authority, store) in storage.stores() {
+        ctx.register_object_store(authority, store);
     }
-    let result = exec.execute(&mut storage, DEST).await;
+    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor)
+        .await
+        .expect("the graph");
+    let result = fossil_df::write(&graph, &storage, DEST)
+        .await
+        .map_err(fossil_graph_schema::Failure::from);
     (result, out)
 }
 
@@ -305,7 +299,7 @@ fn tree(root: &std::path::Path) -> Vec<String> {
 #[tokio::test]
 async fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
     let (result, out) = run(PROGRAM, sources(400, 1_200), usize::MAX).await;
-    let report = result.expect("the run");
+    let written = result.expect("the write");
     let root = materialise(&out, "promises").await;
     let m = manifest(&root);
     let conn = Connection::open_in_memory().expect("duckdb");
@@ -325,7 +319,7 @@ async fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
         named,
         "the destination holds what fossil.json names and nothing else"
     );
-    assert_eq!(report.dropped.len(), m.edge_tables.len());
+    assert_eq!(written.dropped.len(), m.edge_tables.len());
 
     // 2. `dense_id` is global, gapless, and each table is sorted by it.
     let all = m
@@ -572,7 +566,7 @@ async fn the_corpus_keeps_the_promises_it_makes_to_a_stranger() {
 async fn a_table_past_one_row_group_is_cut_at_122_880_rows() {
     let rows = ROW_GROUP_ROWS as u32 + 7_000;
     let (result, out) = run(PEOPLE_ONLY, sources(rows, 0), usize::MAX).await;
-    result.expect("the run");
+    result.expect("the write");
     let root = materialise(&out, "row_groups").await;
     let conn = Connection::open_in_memory().expect("duckdb");
     let p = format!("'{}'", root.join("vertex/Person.parquet").display());

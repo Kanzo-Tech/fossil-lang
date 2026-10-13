@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn a_sort_after_a_dedup_is_charged_for_its_rows_and_not_for_its_slices() {
         const LIMIT: usize = 64 << 20;
-        let rows = dedup_then_sort(&session_within(Arc::new(Budget::new(LIMIT))))
+        let rows = dedup_then_sort(&session_within(Arc::new(Budget::new(LIMIT)), None))
             .expect("fits once compacted");
         assert_eq!(rows, usize::try_from(ROWS).expect("small"));
 

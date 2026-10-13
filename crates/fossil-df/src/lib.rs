@@ -64,7 +64,7 @@ pub mod write;
 pub use descriptor::output_descriptor;
 /// The executor a host drives. Named at the crate root because it is the
 /// crate's answer, not a detail of the module it is written in.
-pub use executor::Executor;
+pub use executor::{CorpusFile, Executor, Output, Ran};
 /// The relation an op index produces — the seam a host (or a test that builds a
 /// [`fossil_mir::MirGraph`] by hand) uses to materialise an intermediate.
 pub use plan::plan_relation;
@@ -973,13 +973,16 @@ fn union<'a>(sets: impl Iterator<Item = &'a [String]>) -> Vec<String> {
 ///   [`register_rdf`] / [`provider_bindings`]). Here we simply scan that
 ///   pre-registered table — RDF stays at the I/O border, the executor never
 ///   parses it.
+///
+/// A session with a source limit ([`session::session_within`]) reads at most
+/// that many rows of each, here at the scan and so before any join.
 pub(crate) async fn read_source(
     ctx: &SessionContext,
     uri: &str,
     format: &SourceFormat,
     binding: &str,
 ) -> datafusion::error::Result<DataFrame> {
-    match format {
+    let read = match format {
         SourceFormat::Csv { delimiter } => {
             let options = csv_options(delimiter.as_deref());
             let schema = csv_schema(ctx, uri, &options).await?;
@@ -1000,6 +1003,10 @@ pub(crate) async fn read_source(
                 ))
             })
         }
+    }?;
+    match session::source_limit(ctx) {
+        Some(limit) => read.limit(0, Some(limit)),
+        None => Ok(read),
     }
 }
 
