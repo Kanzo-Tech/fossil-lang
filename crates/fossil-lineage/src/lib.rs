@@ -68,7 +68,7 @@ pub struct Input {
 /// row the host installs — a destructured `{ A, B } := io.rdf(…)` is two — then
 /// each distinct shape document it names.
 ///
-/// The database's connections ([`fossil_base::connections`]) expand `@conn`
+/// The database's connections ([`fossil_base::connections()`]) expand `@conn`
 /// aliases in the location only; the key is what the program wrote, so the
 /// descriptor a host registers under it survives a connection being repointed.
 #[must_use]

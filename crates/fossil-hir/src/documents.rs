@@ -109,7 +109,7 @@ pub struct MissingDocument {
 /// Every document `file` names that is not registered yet, with the key it
 /// goes under and the location it is fetched from.
 ///
-/// The database's connections ([`fossil_base::connections`]) expand `@conn`
+/// The database's connections ([`fossil_base::connections()`]) expand `@conn`
 /// aliases in the location only. The program's directory comes from `file`, so
 /// the key and the location cannot be anchored against two different places.
 #[must_use]
