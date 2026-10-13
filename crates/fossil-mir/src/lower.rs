@@ -390,9 +390,8 @@ fn mapping_span<'db>(
 /// (it has no schema knowledge — `iri`-templates aside, an `hasProject = .x`
 /// `FieldRef` value looks like a column). The schema is what knows that
 /// `ex:hasProject` **references another node type** (→ a typed edge) and that its
-/// cardinality is **multi-valued**. This is the same edge-vs-property decision
-/// `fossil-sinks`'s `vertex_edge_decomp` makes for the SQL writer, taken against
-/// the one shared model.
+/// cardinality is **multi-valued**. The edge-vs-property decision is taken here,
+/// once, against the one shared model.
 ///
 /// Takes the **schema**, not the document that produced it: a caller holding a
 /// `ShEx` or SHACL descriptor calls `to_graph_schema()` itself. MIR is a property

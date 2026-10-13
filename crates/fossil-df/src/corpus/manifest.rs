@@ -4,9 +4,9 @@
 //! `vertex/`, one per relation under `edge/`, one per multi-valued property
 //! under `property/`, and `fossil.json` at the root,
 //! written **last** — its presence is the commit. The structs below are the
-//! format. `fossil-df` builds a [`Manifest`] and serialises it; nothing in the
+//! format. The writer, [`crate::write()`], builds a [`Manifest`] and serialises it; nothing in the
 //! workspace parses one back, and a reader in another language checks itself
-//! against `fossil.schema.json` beside this crate, which
+//! against `fossil.schema.json` beside this file, which
 //! `crates/xtask/tests/wire.rs` derives from these structs.
 //!
 //! The vocabulary is SQL/PGQ's rather than `GraphAr`'s: a vertex table and an
@@ -21,11 +21,11 @@
 //! a `format` it does not know before it reads a byte of Parquet, and ignores
 //! any field it does not know.
 
-use arrow_schema::DataType;
+use datafusion::arrow::datatypes::DataType;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::generated::ColumnRole;
+use super::generated::ColumnRole;
 
 /// The format a corpus is written in.
 pub const FOSSIL_FORMAT: &str = "fossil/1";
@@ -322,7 +322,7 @@ pub fn data_type_name(dt: &DataType) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow_schema::Field;
+    use datafusion::arrow::datatypes::Field;
     use std::sync::Arc;
 
     fn column(name: &str, data_type: &str, nullable: bool) -> Property {
@@ -488,10 +488,10 @@ mod tests {
     /// language matches the file it can read rather than a Rust variant name.
     #[test]
     fn a_role_is_spelled_as_corpus_bnf_writes_it() {
-        for column in crate::generated::PAYLOAD_COLUMNS
+        for column in super::generated::PAYLOAD_COLUMNS
             .iter()
-            .chain(crate::generated::EDGE_COLUMNS)
-            .chain(crate::generated::PROPERTY_COLUMNS)
+            .chain(super::generated::EDGE_COLUMNS)
+            .chain(super::generated::PROPERTY_COLUMNS)
         {
             let wire = serde_json::to_value(column.role).unwrap();
             assert_eq!(
@@ -509,10 +509,10 @@ mod tests {
             .iter()
             .map(data_type_name)
             .collect();
-        for column in crate::generated::PAYLOAD_COLUMNS
+        for column in super::generated::PAYLOAD_COLUMNS
             .iter()
-            .chain(crate::generated::EDGE_COLUMNS)
-            .chain(crate::generated::PROPERTY_COLUMNS)
+            .chain(super::generated::EDGE_COLUMNS)
+            .chain(super::generated::PROPERTY_COLUMNS)
         {
             assert!(
                 spelled.iter().any(|s| s == column.data_type),

@@ -74,7 +74,7 @@ pub fn documents_named(db: &dyn Db, file: SourceFile) -> Vec<SmolStr> {
 }
 
 /// The key a document is registered and looked up under: the reference the
-/// program wrote, put through [`fossil_location::SourceAnchor`] — the one
+/// program wrote, put through [`fossil_base::location::SourceAnchor`] — the one
 /// resolution rule.
 ///
 /// It is a KEY and not a location. The LSP's file paths are `file://` URIs, so
@@ -89,8 +89,8 @@ pub fn documents_named(db: &dyn Db, file: SourceFile) -> Vec<SmolStr> {
 /// that is the whole of what a hand-rolled `parent().join()` got wrong.
 #[must_use]
 pub fn registry_key(db: &dyn Db, file: SourceFile, document: &str) -> String {
-    let dir = fossil_location::program_dir(file.path(db));
-    fossil_location::SourceAnchor::beside(&dir).location(document)
+    let dir = fossil_base::location::program_dir(file.path(db));
+    fossil_base::location::SourceAnchor::beside(&dir).location(document)
 }
 
 /// A document a program names that the database does not hold yet.
@@ -114,8 +114,8 @@ pub struct MissingDocument {
 /// the key and the location cannot be anchored against two different places.
 #[must_use]
 pub fn missing_documents(db: &dyn Db, file: SourceFile) -> Vec<MissingDocument> {
-    let dir = fossil_location::program_dir(file.path(db));
-    let anchor = fossil_location::SourceAnchor::new(&dir, fossil_base::connections(db));
+    let dir = fossil_base::location::program_dir(file.path(db));
+    let anchor = fossil_base::location::SourceAnchor::new(&dir, fossil_base::connections(db));
     documents_named(db, file)
         .into_iter()
         .filter_map(|document| {

@@ -20,7 +20,7 @@
 //!
 //! What would put the manifest back: a consumer that needs the counts without
 //! reading the store — then the report gains `manifest`, of the type
-//! `fossil_sinks::manifest::Manifest`, and still no second shape.
+//! `crate::corpus::manifest::Manifest`, and still no second shape.
 
 use serde::{Deserialize, Serialize};
 

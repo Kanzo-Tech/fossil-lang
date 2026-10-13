@@ -88,7 +88,7 @@ catalogue.bnf ──cargo├─▶ crates/fossil-hir/src/stdlib/generated.rs
             catalogue├─▶ docs/content/generated/stdlib.mdx
                      └─▶ packages/prompt/src/catalogue.generated.ts
 
-corpus.bnf ─────cargo──▶ crates/fossil-sinks/src/generated.rs
+corpus.bnf ─────cargo──▶ crates/fossil-df/src/corpus/generated.rs
               xtask
               corpus
 ```

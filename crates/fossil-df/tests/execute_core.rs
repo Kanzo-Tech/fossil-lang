@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use fossil_df::Executor;
-use fossil_sinks::manifest::Manifest;
+use fossil_df::corpus::manifest::Manifest;
 use fossil_storage::{Access, Host, Scope, Storage, StorageCredential};
 use futures::TryStreamExt;
 use futures::future::BoxFuture;
@@ -189,7 +189,7 @@ fn inputs_list_each_distinct_source_with_its_format() {
     let srcs: Vec<_> = executor(TWO_SOURCE_PROGRAM, BTreeMap::new())
         .inputs()
         .into_iter()
-        .filter(|s| s.role == fossil_lineage::Role::Data)
+        .filter(|s| s.role == fossil_hir::lineage::Role::Data)
         .collect();
     let uris: Vec<&str> = srcs.iter().map(|s| s.location.as_str()).collect();
     assert!(uris.contains(&"https://data.example.com/users.csv"));
@@ -349,7 +349,7 @@ async fn at_conn_source_alias_resolves_through_the_ref_map() {
     let listed: Vec<_> = exec
         .inputs()
         .into_iter()
-        .filter(|i| i.role == fossil_lineage::Role::Data)
+        .filter(|i| i.role == fossil_hir::lineage::Role::Data)
         .collect();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].location, "https://data.example.com/users.csv");

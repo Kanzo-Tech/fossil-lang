@@ -9,7 +9,7 @@
 //! pivot spells it as a list, which no R2RML term map reads. Both are now the
 //! same table — `src`, the value — and the vertex row carries neither.
 
-use fossil_sinks::manifest::{Manifest, PropertyTable};
+use fossil_df::corpus::manifest::{Manifest, PropertyTable};
 
 #[path = "support/native.rs"]
 mod native;

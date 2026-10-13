@@ -37,23 +37,15 @@
 //! 2. anything with a scheme (`s3://`, `az://`, `https://`) — already a location.
 //! 3. an absolute path — already a location.
 //!
-//! # Why it is its own crate
+//! # Why it is here
 //!
-//! Because no two of its readers share anything else: the checker (`fossil-hir`,
-//! resolving a shape document), the executor that registers those documents and
-//! reads the sources (`fossil-df`), and the browser host (`fossil-wasm`). Anywhere
-//! higher and one of them would have to keep a copy.
-//!
-//! It was a module of `fossil-base`, and that was the mistake this crate
-//! undoes. rust-analyzer's `base-db` states the invariant plainly — it *"doesn't
-//! know about file system and file paths"* — and it holds because its VFS is a
-//! separate crate and the operating-system implementation a third. A substrate
-//! that decides what a written path means is deciding something about a
-//! program. This crate decides it; `fossil-base` no longer can.
-//!
-//! It depends on nothing, so each of the five takes it directly and none of
-//! them pays for a substrate edge to reach it — `fossil-base` has no dependency
-//! on it at all.
+//! Where a written reference points is the file abstraction, and the file
+//! abstraction is the substrate's — ty keeps its own in `ruff_db`, beside the
+//! inputs. The checker resolving a shape document, the lineage report, the
+//! executor reading sources and the editor's highlighting all read a reference
+//! through this one rule. It takes the connection map as an argument, not the
+//! database: a caller reads [`crate::connections()`], which is what registers
+//! the dependency, and hands the map in.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

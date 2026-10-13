@@ -8,9 +8,11 @@
 //! files, sources, connections and the provider catalogue. `System` keeps only what no
 //! answer depends on (`/docs/design/incremental`).
 //!
+//! [`location`] is the rule turning a written reference into a location a
+//! reader can open, because that is the file abstraction.
+//!
 //! **What is deliberately not here**, because a substrate decides nothing about
-//! a program: the rule turning a written reference into a location, which is
-//! `fossil-location`; and the query that decodes a shape document, which is
+//! a program: the query that decodes a shape document, which is
 //! `fossil_hir::shape_documents` — `providers` still declares the ROW a decoder
 //! fills, because a row is a table entry and not a decision.
 
@@ -19,6 +21,7 @@ pub mod db;
 pub mod diagnostic;
 pub mod error;
 pub mod files;
+pub mod location;
 pub mod providers;
 pub mod sources;
 pub mod system;

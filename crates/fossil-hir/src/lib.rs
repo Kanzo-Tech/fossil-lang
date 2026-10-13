@@ -58,6 +58,7 @@ pub mod documents;
 /// they cannot hold.
 pub mod identity;
 pub mod infer;
+pub mod lineage;
 pub mod lower;
 pub mod provenance;
 /// What the compiler says when a program names a provider it cannot use. Three

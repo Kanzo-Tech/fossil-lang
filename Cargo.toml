@@ -83,15 +83,6 @@ oxrdf = { version = "0.3", features = ["rdf-12"] }
 # === Did-you-mean diagnostics ===
 strsim = "0.11"
 
-# === Sinks ===
-# `arrow-schema` sub-crate ONLY for fossil-sinks (DataType names; pulls no mio/arrow-ipc,
-# either of which would break the wasm32 gate). The `arrow` umbrella stays
-# for native byte-level test deps.
-# Pinned to 58 — the latest published arrow line (59 is not on crates.io as of
-# 2026-05; the prior `= "59"` placeholders were aspirational and never resolved). 58.3.0
-# is what Cargo.lock already resolves transitively via duckdb's parquet.
-arrow-schema = "58"
-arrow = "58"
 # `bytes` is what `object_store` puts and gets — the currency of every file
 # `fossil-df` writes and `fossil-storage` moves. Not a new crate in the tree:
 # `object_store` and `datafusion`'s `parquet` already depend on it, so this line names a

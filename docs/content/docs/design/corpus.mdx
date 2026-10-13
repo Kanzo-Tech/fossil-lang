@@ -23,7 +23,7 @@ beyond the engine the reader already has, no process to keep alive, no writer ve
 written **after** every Parquet
 file, so its presence is the commit: a directory without it is a write that did not finish, and a
 reader that finds it can trust every path it names. The shape is
-`crates/fossil-sinks/src/manifest.rs, Manifest`, and [/docs/format](/docs/format) specifies it for a
+`crates/fossil-df/src/corpus/manifest.rs, Manifest`, and [/docs/format](/docs/format) specifies it for a
 reader who has none of this repository.
 
 **Nothing is computed from a path, and no path is listed.** A reader composes no URL; it takes each
@@ -89,7 +89,7 @@ vertex tables and edge tables, a `key`, a `source` and a `destination` that each
 vertex table, a `label` per relation — because that is the vocabulary of the engine a reader
 actually opens a corpus with. Everything a `CREATE PROPERTY GRAPH` over the views needs is in the
 manifest. Its version string is `fossil/1`, one constant,
-`crates/fossil-sinks/src/manifest.rs, FOSSIL_FORMAT`, and a reader rejects any other before it reads a
+`crates/fossil-df/src/corpus/manifest.rs, FOSSIL_FORMAT`, and a reader rejects any other before it reads a
 byte of Parquet.
 
 **Declared is all it is.** Nothing in fossil issues a graph query: the door attaches views and every

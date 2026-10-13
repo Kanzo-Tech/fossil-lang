@@ -123,7 +123,7 @@ async fn the_write_emits_one_manifest_over_one_table_per_type_and_relation() {
     );
 
     // The document on disk IS the value the write answered.
-    let on_disk: fossil_sinks::manifest::Manifest =
+    let on_disk: fossil_df::corpus::manifest::Manifest =
         serde_json::from_slice(&files["fossil.json"]).expect("fossil.json parses");
     assert_eq!(on_disk, written.manifest);
     let text = String::from_utf8(files["fossil.json"].clone()).expect("UTF-8");

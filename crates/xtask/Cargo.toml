@@ -30,9 +30,7 @@ fossil-hir = { path = "../fossil-hir" }
 # `tests/wire.rs` derives the schemas and the TypeScript of the types that cross
 # to a reader or to JS, from the crates that declare them.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
-fossil-sinks = { path = "../fossil-sinks" }
 fossil-wasm = { path = "../fossil-wasm" }
-fossil-lineage = { path = "../fossil-lineage" }
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 fossil-profile = { path = "../fossil-profile" }
 fossil-ide = { path = "../fossil-ide" }

@@ -13,7 +13,7 @@
 //!   - a typed edge `KB --hasProject--> Project` (a `ShEx` shape-ref);
 //!   - multi-valued: the two `hasProject` objects unroll (UNNEST) into two edges.
 
-use fossil_sinks::manifest::{EdgeTable, Manifest, VertexTable};
+use fossil_df::corpus::manifest::{EdgeTable, Manifest, VertexTable};
 
 #[path = "support/native.rs"]
 mod native;

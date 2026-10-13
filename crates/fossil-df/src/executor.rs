@@ -38,11 +38,11 @@ use fossil_base::{FossilDb, FsError, Provider, SourceFile, System};
 use fossil_descriptors_output::OutputDescriptorKind;
 use fossil_graph_schema::{Failure, Problem, Related};
 use fossil_hir::documents::MissingDocument;
-use fossil_lineage::Input;
-use fossil_sinks::manifest::MANIFEST_FILE;
+use fossil_hir::lineage::Input;
 use fossil_storage::Storage;
 
 use crate::RunReport;
+use crate::corpus::manifest::MANIFEST_FILE;
 use crate::memory::{BUDGET, Budget, Refusal};
 
 /// Minimal [`System`] for the executor host. The executor reads sources through
@@ -130,11 +130,11 @@ impl Executor {
         fossil_base::register_document(&mut self.db, key, text);
     }
 
-    /// What the program reads — [`fossil_lineage::inputs`], the same list every
+    /// What the program reads — [`fossil_hir::lineage::inputs`], the same list every
     /// host introspects; its data inputs are what [`Self::execute`] reads.
     #[must_use]
     pub fn inputs(&self) -> Vec<Input> {
-        fossil_lineage::inputs(&self.db, self.file)
+        fossil_hir::lineage::inputs(&self.db, self.file)
     }
 
     /// Record the columns the host's profile found for a source, as the JSON of
@@ -189,9 +189,9 @@ impl Executor {
             .into());
         }
 
-        for source in fossil_lineage::inputs(db, file)
+        for source in fossil_hir::lineage::inputs(db, file)
             .into_iter()
-            .filter(|i| i.role == fossil_lineage::Role::Data)
+            .filter(|i| i.role == fossil_hir::lineage::Role::Data)
         {
             storage
                 .route(&source.location, source.connection.as_deref())

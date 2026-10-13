@@ -178,7 +178,7 @@ missing, not the export.
 spells it — `Diagnostic`, `Hover`, `CompletionItem`, `Location`, `DiagnosticRelatedInformation`,
 `definition`, `completion` — so a host that knows the protocol reads the type without the docs. What
 a program reads is `inputs`, each an `Input` with a `role`, as OpenLineage names a run's `inputs`
-and PROV a generation's `used`; a written reference resolved is a `location`, the word `fossil-location`
+and PROV a generation's `used`; a written reference resolved is a `location`, the word `fossil_base::location`
 and `RunReport.location` share; a descriptor's freshness is an `etag`, RFC 9110's. `job` stays: it names the host's unit of work, and fossil only scopes a credential by it — it is
 OpenLineage's `run.runId`, not OpenLineage's `job`, which names the recurring process a run belongs
 to. What would reverse a name: a reference system that renamed its own, or a fossil concept the

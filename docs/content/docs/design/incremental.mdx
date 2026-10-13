@@ -105,18 +105,23 @@ ty, rust-analyzer and Cairo put the Salsa substrate in one small crate at the bo
 its inputs, the file abstraction — the parser in a crate of its own, the semantic analysis in one or
 a few, the editor functions in one with no protocol in it, and each transport in a thin crate over
 those. fossil's crates are cut that way, and a crate that is none of those folds into the one whose
-subject it is:
+subject it is. Three are modules of that crate:
+
+| module | because |
+| --- | --- |
+| `fossil_base::location` | where a written reference points is the file abstraction, which ty keeps in `ruff_db` beside the inputs |
+| `fossil_hir::lineage` | what a program reads is a question about its def map, asked by every host |
+| `fossil_df::corpus` | the corpus format is the writer's: nothing else builds a manifest |
+
+Two are still crates of their own:
 
 | crate | folds into | because |
 | --- | --- | --- |
-| `fossil-location` | `fossil-base` | where a written reference points is the file abstraction, which ty keeps in `ruff_db` beside the inputs |
-| `fossil-lineage` | `fossil-hir` | what a program reads is a question about its def map, asked by every host |
-| `fossil-sinks` | `fossil-df` | the corpus format is the writer's: nothing else builds a manifest |
 | `fossil-shex`, `fossil-descriptors-output` | `fossil-hir` | a shape document becomes a declared type by a `TryFrom` over rudof's own representation ([types declared in the program](/docs/design/declared)) |
 | `fossil-descriptors-input`, `fossil-graph-schema` | `fossil-base`, `fossil-hir` | the errors are the substrate's, a primitive is the type system's, and a source's columns are an input |
 
-**What would reverse it:** a crate whose consumers are not the crate it folds into — a second
-reader of the corpus format in Rust, say, which would want `fossil-sinks` without DataFusion.
+**What would reverse it:** a module whose consumers are not the crate it sits in — a second reader
+of the corpus format in Rust, say, which would want `fossil_df::corpus` without DataFusion.
 
 ## Held by
 

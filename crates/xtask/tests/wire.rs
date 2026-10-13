@@ -34,13 +34,13 @@ fn the_error_catalogue() {
 /// `fossil.json`: `fossil.schema.json`, and the reader's declarations of it.
 #[test]
 fn the_manifest() {
-    use fossil_sinks::manifest::Manifest;
+    use fossil_df::corpus::manifest::Manifest;
     let text = Manifest::json_schema();
-    expect_file![at("crates/fossil-sinks/fossil.schema.json")].assert_eq(&text);
+    expect_file![at("crates/fossil-df/src/corpus/fossil.schema.json")].assert_eq(&text);
     let schema: Value = serde_json::from_str(&text).expect("the schema is JSON");
     expect_file![at("packages/corpus/src/manifest.gen.ts")].assert_eq(&format!(
         "{}{}",
-        ts::header("`fossil_sinks::manifest::Manifest`"),
+        ts::header("`fossil_df::corpus::manifest::Manifest`"),
         ts::declarations(&schema)
     ));
 }
@@ -60,8 +60,8 @@ fn the_wire() {
     generator.subschema_for::<fossil_wasm::Location>();
     generator.subschema_for::<fossil_wasm::SemanticToken>();
     generator.subschema_for::<fossil_hir::documents::MissingDocument>();
-    generator.subschema_for::<fossil_lineage::Input>();
-    generator.subschema_for::<fossil_lineage::Format>();
+    generator.subschema_for::<fossil_hir::lineage::Input>();
+    generator.subschema_for::<fossil_hir::lineage::Format>();
     generator.subschema_for::<fossil_descriptors_input::InferredDescriptor>();
     generator.subschema_for::<fossil_profile::Source>();
     generator.subschema_for::<fossil_profile::Options>();

@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use fossil_base::Db;
-use fossil_lineage::Input;
+use fossil_hir::lineage::Input;
 use fossil_profile::{Options, Rows, Source};
 
 /// One query's answer on `conn`, every cell as text: the profiler's queries

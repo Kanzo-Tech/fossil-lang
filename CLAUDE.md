@@ -115,16 +115,15 @@ API changes.
 
 ```
 crates/
-  fossil-base/             Salsa Db trait + System abstraction (thin Db, fat System)
-  fossil-location/         the ONE rule turning a written reference into something a reader can
-                           open — `@conn`, scheme, absolute, else the program's directory; never
-                           the cwd. It was a module of `fossil-base` and is not one now: a
-                           substrate «doesn't know about file paths». It depends on NOTHING and
-                           `fossil-base` does not depend on IT — each of its readers
-                           (`fossil-hir`, `-ide`, `-df`, `-lineage`) takes it direct
+  fossil-base/             the Salsa substrate: the `Db` trait and `FossilDb`, every input a
+                           host writes (files, sources, connections, the provider rows), the
+                           `Diagnostics` sink, and `location` — the ONE rule turning a written
+                           reference into something a reader can open: `@conn`, scheme,
+                           absolute, else the program's directory; never the cwd
   fossil-syntax/           lossless CST + parser
   fossil-hir/              types + name resolution + bidirectional checker + the stdlib
-                           catalog. `stdlib.rs` owns the TYPES a row is written in; the ROWS
+                           catalog, and `lineage`: what a program reads, through the
+                           connections. `stdlib.rs` owns the TYPES a row is written in; the ROWS
                            are `catalogue.bnf` and `stdlib/generated.rs` is what
                            `cargo xtask catalogue` makes of them. Adding a function is a
                            line in the `.bnf` and touches no Rust
@@ -137,16 +136,13 @@ crates/
                            of DataFusion and of every byte fossil reads or writes. `js`: a JS
                            `Host` as its `Host`. The one renderer of a `CREATE SECRET`
   fossil-storage-wasm/     that, exposed to JS for `@fossil-lang/storage`
-  fossil-lineage/          source lineage + provider introspection, projected onto the wire
-  fossil-sinks/            the `fossil/1` format: `fossil.json`'s structs (serde + schemars;
-                           `fossil.schema.json` beside them is what a reader in another
-                           language checks against), `FOSSIL_FORMAT`, and `generated.rs` —
-                           the writer's column table from `corpus.bnf`. It byte-writes
-                           nothing: `arrow-schema` for the types, `serde_json` to emit
   fossil-df/               DataFusion backend for the property-graph MIR, the one corpus
                            writer (`write`: a Parquet per table, `fossil.json`
                            last), and `Executor` — the whole run a host drives, under the
-                           2 GiB pool in `memory.rs` that refuses as `run/over-budget`
+                           2 GiB pool in `memory.rs` that refuses as `run/over-budget`.
+                           `corpus` is the `fossil/1` format: `fossil.json`'s structs, with
+                           `fossil.schema.json` beside them for a reader in another language,
+                           and `generated.rs`, the writer's column table from `corpus.bnf`
   fossil-profile/          what a source is — columns and types, counts, candidate keys, the
                            inclusions between sources, a sample — planned as queries and read
                            from their answers, running NOTHING (sans-IO, `run(sources, options,
@@ -183,7 +179,7 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            and loads no WASM. Beside `src/` sits the contract it fulfils — `guards/`,
                            `conformance/` and `integration/` — outside `files`, so npm never
                            sees it. `tests/manifest.test.ts` holds `src/manifest.ts` against
-                           `fossil-sinks/fossil.schema.json`; `integration/round-trip.test.ts`
+                           `fossil-df/src/corpus/fossil.schema.json`; `integration/round-trip.test.ts`
                            runs a program through the executor and reads the corpus back over
                            HTTP. `test` stays `tests/` alone because the release gate runs it
                            without `duckdb`; the contract is `test:contract` (`corpus.yml`) and
@@ -237,8 +233,8 @@ catalogue.bnf              which names exist — the `io.` rows, the stdlib rows
                            states a row twice
 corpus.bnf                 what a corpus is made of — the vertex and edge columns the writer
                            emits and the ROLE of each. The source of one generated file,
-                           `fossil-sinks/src/generated.rs`. File names are NOT here: they are
-                           `fossil.json`'s `path`, and `fossil-sinks::manifest` owns them
+                           `fossil-df/src/corpus/generated.rs`. File names are NOT here: they
+                           are `fossil.json`'s `path`, and `fossil_df::corpus::manifest` owns them
 tests/wasm_parity/         the manual DuckDB-WASM cross-engine parity harness
 ```
 

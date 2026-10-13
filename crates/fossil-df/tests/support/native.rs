@@ -36,9 +36,9 @@ use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
 use fossil_base::{Diagnostic, FossilDb, SourceFile, System, file_at};
+use fossil_df::corpus::manifest::Manifest;
 use fossil_df::{Executor, RunReport};
 use fossil_hir::documents::{documents_named, register_missing_documents, registry_key};
-use fossil_sinks::manifest::Manifest;
 use futures::TryStreamExt;
 use miette::{GraphicalReportHandler, GraphicalTheme, LabeledSpan, NamedSource, SourceSpan};
 use object_store::memory::InMemory;
@@ -64,7 +64,7 @@ pub(crate) fn open_db(path: &Path) -> (FossilDb, SourceFile) {
     let file = SourceFile::new(&db, text, path.to_string_lossy().into_owned());
     // A source that cannot be described is skipped, not fatal: the compile then
     // has no forward-propagated type for it, which is what the checker reports.
-    let inputs = fossil_lineage::inputs(&db, file);
+    let inputs = fossil_hir::lineage::inputs(&db, file);
     profile::profile_and_register(&mut db, &inputs);
     register_shape_documents(&mut db, file);
     (db, file)

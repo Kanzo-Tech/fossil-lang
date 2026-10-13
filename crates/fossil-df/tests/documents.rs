@@ -136,7 +136,7 @@ fn intern(db: &mut FossilDb, dir: &Path) -> SourceFile {
         PROGRAM.to_string(),
         dir.join("prog.fossil").to_string_lossy().into_owned(),
     );
-    let inputs = fossil_lineage::inputs(db, file);
+    let inputs = fossil_hir::lineage::inputs(db, file);
     native::profile::profile_and_register(db, &inputs);
     file
 }

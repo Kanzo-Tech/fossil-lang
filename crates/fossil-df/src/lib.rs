@@ -35,6 +35,7 @@
 // boxing it would put `Box<Failure>` in every signature a host reads.
 #![allow(clippy::result_large_err)]
 
+pub mod corpus;
 /// The output descriptor a program names, decoded from the document the
 /// checker read — the one resolution every host runs with.
 pub mod descriptor;
@@ -90,14 +91,15 @@ use datafusion::prelude::{
     CsvReadOptions, DataFrame, JsonReadOptions, ParquetReadOptions, SessionContext, col, lit,
 };
 use fossil_base::SourceFile;
+use fossil_base::location::SourceAnchor;
 use fossil_graph_schema::{
     Cardinality, EdgeType as GraphEdge, GraphSchema, NodeType, Primitive, Property as NodeProp,
 };
 use fossil_hir::shapes::inner_primitive;
 use fossil_hir::{MappingLoc, def_map::def_map};
-use fossil_location::SourceAnchor;
 use fossil_mir::{Expr, Op, SourceFormat, VProp, apply_output_shape, lower_to_mir_pg};
-use fossil_sinks::generated::{ENDPOINT_SRC, PAYLOAD_ADDRESS, PAYLOAD_IDENTITY};
+
+use crate::corpus::generated::{ENDPOINT_SRC, PAYLOAD_ADDRESS, PAYLOAD_IDENTITY};
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
 /// single source of all type/predicate/cardinality metadata) plus the relation
@@ -163,7 +165,7 @@ pub async fn execute_graph<'db>(
     // anchor — so `io.csv("data/items.csv")` meant a different file depending
     // on where you invoked from, while `io.shex("shop.shex")` in the same
     // program was already resolved beside it.
-    let program_dir = fossil_location::program_dir(file.path(db));
+    let program_dir = fossil_base::location::program_dir(file.path(db));
     let anchor = SourceAnchor::new(&program_dir, fossil_base::connections(db));
     let mappings: Vec<MappingLoc<'db>> = def_map(db, file).mappings(db).clone();
 
@@ -288,7 +290,7 @@ pub async fn execute_vertex<'db>(
     mapping: MappingLoc<'db>,
     descriptor: &OutputDescriptorKind,
 ) -> datafusion::error::Result<(VertexTable, NodeType)> {
-    let program_dir = fossil_location::program_dir(mapping.file(db).path(db));
+    let program_dir = fossil_base::location::program_dir(mapping.file(db).path(db));
     let anchor = SourceAnchor::new(&program_dir, fossil_base::connections(db));
     let prepared = prepare_vertex(ctx, db, mapping, descriptor, anchor).await?;
     finalize_vertex(ctx, vec![prepared], 0).await
@@ -818,9 +820,8 @@ async fn execute_edges<'db>(
 /// `candidates − resolved`: the extra `count()` is one more pass over the edge's
 /// input relation, which the run already scans twice (once per orientation).
 ///
-/// This used to say it mirrored `fossil-sinks`'s `writer.rs`. There is no
-/// second writer to mirror any more — `fossil-sinks/src/` is the manifest model
-/// and nothing else, so THIS is where an edge becomes CSR/CSC. Both ends are
+/// There is one writer, and [`crate::corpus`] is the manifest model and nothing
+/// else, so THIS is where an edge becomes CSR/CSC. Both ends are
 /// already the global `dense_id`, and `crate::write()` writes the pair as it is.
 async fn execute_edge(
     ctx: &SessionContext,
@@ -1296,7 +1297,7 @@ pub fn provider_bindings(
     file: SourceFile,
     descriptor: &OutputDescriptorKind,
 ) -> Vec<ProviderBinding> {
-    let program_dir = fossil_location::program_dir(file.path(db));
+    let program_dir = fossil_base::location::program_dir(file.path(db));
     let anchor = SourceAnchor::new(&program_dir, fossil_base::connections(db));
     let mappings = def_map(db, file).mappings(db).clone();
     let schema = descriptor.to_graph_schema();

@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 
 use fossil_hir::documents::MissingDocument;
-use fossil_lineage::{Input, Role};
+use fossil_hir::lineage::{Input, Role};
 use fossil_wasm::FossilWorkspace;
 
 const PROGRAM: &str = "\

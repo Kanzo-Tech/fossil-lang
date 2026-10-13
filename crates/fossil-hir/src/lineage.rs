@@ -7,16 +7,12 @@
 //! source headers → inputs — is identical and pure (no I/O, no `DuckDB`),
 //! so it is WASM-clean.
 //!
-//! [`formats`] is a projection of [`fossil_base::providers`] and
-//! [`inputs`] walks the def map, so its content is the language's. What
-//! keeps it out of `fossil-hir` is the other end: these are the shapes a HOST
-//! reads — serde JSON natively, `serde-wasm-bindgen` values in the
-//! browser — and `fossil-hir` answers to the compiler, not to a host.
-//!
-//! The four types below used to live in `fossil-run-status`, which this crate
-//! imported to name its own output: the projection sat here, the data in the
-//! registry, and the result type in a third crate that nothing but this one
-//! produced. A contract belongs to whoever fills it.
+//! [`formats`] is a projection of [`fossil_base::providers`] and [`inputs`]
+//! walks the def map, so its content is the language's and it is asked of the
+//! compiler's own queries. The types below are the shapes a HOST reads — serde
+//! JSON natively, `serde-wasm-bindgen` values in the browser — and they are
+//! declared beside the two functions that fill them: a contract belongs to
+//! whoever fills it.
 
 use fossil_base::{Db, SourceFile};
 use schemars::JsonSchema;
@@ -46,7 +42,7 @@ pub struct Input {
     /// The reference as the program wrote it — what an inferred descriptor is
     /// keyed by, and what survives a connection being repointed.
     pub key: String,
-    /// `key` through [`fossil_location::SourceAnchor`]: what a host signs and reads.
+    /// `key` through [`fossil_base::location::SourceAnchor`]: what a host signs and reads.
     pub location: String,
     /// The connection the location lies under, when it was written `@name/…`
     /// and the connections have that name.
@@ -73,8 +69,8 @@ pub struct Input {
 /// descriptor a host registers under it survives a connection being repointed.
 #[must_use]
 pub fn inputs(db: &dyn Db, file: SourceFile) -> Vec<Input> {
-    let dir = fossil_location::program_dir(file.path(db));
-    let anchor = fossil_location::SourceAnchor::new(&dir, fossil_base::connections(db));
+    let dir = fossil_base::location::program_dir(file.path(db));
+    let anchor = fossil_base::location::SourceAnchor::new(&dir, fossil_base::connections(db));
     let read = |role, key: &str| Input {
         role,
         key: key.to_string(),
@@ -84,7 +80,7 @@ pub fn inputs(db: &dyn Db, file: SourceFile) -> Vec<Input> {
         format: None,
         option: None,
     };
-    let data = fossil_hir::def_map::def_map(db, file)
+    let data = crate::def_map::def_map(db, file)
         .sources(db)
         .iter()
         .filter_map(|s| {
@@ -98,7 +94,7 @@ pub fn inputs(db: &dyn Db, file: SourceFile) -> Vec<Input> {
             })
         })
         .collect::<Vec<_>>();
-    let schemas = fossil_hir::documents::documents_named(db, file);
+    let schemas = crate::documents::documents_named(db, file);
     data.into_iter()
         .chain(schemas.iter().map(|d| read(Role::Schema, d)))
         .collect()

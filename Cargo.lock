@@ -1725,12 +1725,9 @@ dependencies = [
  "fossil-descriptors-output",
  "fossil-graph-schema",
  "fossil-hir",
- "fossil-lineage",
- "fossil-location",
  "fossil-mir",
  "fossil-profile",
  "fossil-shex",
- "fossil-sinks",
  "fossil-storage",
  "fossil-syntax",
  "futures",
@@ -1795,7 +1792,6 @@ dependencies = [
  "fossil-base",
  "fossil-descriptors-input",
  "fossil-graph-schema",
- "fossil-location",
  "fossil-syntax",
  "indexmap",
  "rowan",
@@ -1817,7 +1813,6 @@ dependencies = [
  "fossil-descriptors-output",
  "fossil-graph-schema",
  "fossil-hir",
- "fossil-location",
  "fossil-mir",
  "fossil-syntax",
  "line-index",
@@ -1830,21 +1825,6 @@ dependencies = [
  "smol_str",
  "url",
 ]
-
-[[package]]
-name = "fossil-lineage"
-version = "0.1.0"
-dependencies = [
- "fossil-base",
- "fossil-hir",
- "fossil-location",
- "schemars",
- "serde",
-]
-
-[[package]]
-name = "fossil-location"
-version = "0.1.0"
 
 [[package]]
 name = "fossil-mir"
@@ -1880,16 +1860,6 @@ dependencies = [
  "prefixmap",
  "rudof_iri",
  "shex_ast",
-]
-
-[[package]]
-name = "fossil-sinks"
-version = "0.1.0"
-dependencies = [
- "arrow-schema",
- "schemars",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -1960,7 +1930,6 @@ dependencies = [
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-ide",
- "fossil-lineage",
  "fossil-mir",
  "fossil-profile",
  "fossil-syntax",
@@ -5746,9 +5715,7 @@ dependencies = [
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-ide",
- "fossil-lineage",
  "fossil-profile",
- "fossil-sinks",
  "fossil-storage",
  "fossil-wasm",
  "schemars",

@@ -393,7 +393,7 @@ impl WasmWorkspace {
         Ok(())
     }
 
-    /// What the file at `handle` reads — see [`fossil_lineage::inputs`].
+    /// What the file at `handle` reads — see [`fossil_hir::lineage::inputs`].
     ///
     /// # Errors
     ///
@@ -686,9 +686,9 @@ impl FossilWorkspace {
     /// Pure-Rust mirror of [`WasmWorkspace::inputs`]; `None` for an unknown
     /// handle.
     #[must_use]
-    pub fn inputs_native(&self, handle: FileHandle) -> Option<Vec<fossil_lineage::Input>> {
+    pub fn inputs_native(&self, handle: FileHandle) -> Option<Vec<fossil_hir::lineage::Input>> {
         let file = self.files.get(handle)?;
-        Some(fossil_lineage::inputs(&self.db, file))
+        Some(fossil_hir::lineage::inputs(&self.db, file))
     }
 
     // ----- Accessors for the editor surface in [`ide`] (pub(crate)) -----
@@ -786,7 +786,7 @@ impl Default for FossilWorkspace {
 pub fn formats() -> Result<JsValue, JsValue> {
     to_value(
         "the formats",
-        &fossil_lineage::formats(fossil_descriptors_output::PROVIDERS),
+        &fossil_hir::lineage::formats(fossil_descriptors_output::PROVIDERS),
     )
 }
 

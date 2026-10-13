@@ -68,8 +68,8 @@ const fn is_provider_refusal(p: &Problem) -> bool {
 }
 
 /// The registry as a host lists it to a connector UI.
-fn formats() -> Vec<fossil_lineage::Format> {
-    fossil_lineage::formats(fossil_descriptors_output::PROVIDERS)
+fn formats() -> Vec<fossil_hir::lineage::Format> {
+    fossil_hir::lineage::formats(fossil_descriptors_output::PROVIDERS)
 }
 
 /// A real `ShExC` document declaring `ex:Person` with one `ex:name`.
@@ -125,9 +125,9 @@ fn the_wire_contract_finally_reports_a_schema_provider() {
             .unwrap_or_else(|| panic!("{name}"))
             .kind
     };
-    assert_eq!(kind("csv"), fossil_lineage::FormatKind::Data);
-    assert_eq!(kind("shex"), fossil_lineage::FormatKind::Schema);
-    assert_eq!(kind("shacl"), fossil_lineage::FormatKind::Schema);
+    assert_eq!(kind("csv"), fossil_hir::lineage::FormatKind::Data);
+    assert_eq!(kind("shex"), fossil_hir::lineage::FormatKind::Schema);
+    assert_eq!(kind("shacl"), fossil_hir::lineage::FormatKind::Schema);
 }
 
 // ------------------------------------------------------------- the SHACL row

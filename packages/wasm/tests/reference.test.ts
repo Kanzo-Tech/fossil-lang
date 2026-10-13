@@ -1,6 +1,6 @@
 /**
  * `referenceTo` (`@fossil-lang/types`) against the expansion it inverts: the Rust in
- * `fossil-location`, reached through `inputs`. A reference written for a location
+ * `fossil_base::location`, reached through `inputs`. A reference written for a location
  * must come back out of the compiler as that location.
  */
 import { describe, it, expect, beforeAll } from 'vitest';

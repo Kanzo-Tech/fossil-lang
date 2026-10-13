@@ -28,17 +28,17 @@ use datafusion::parquet::errors::ParquetError;
 use datafusion::parquet::file::properties::WriterProperties;
 use datafusion::parquet::schema::types::ColumnPath;
 use fossil_graph_schema::{Cardinality, Failure, NodeType, Problem, Term};
-use fossil_sinks::generated::{
+use fossil_storage::{Storage, StorageError};
+
+use crate::corpus::generated::{
     ColumnRole, EDGE_COLUMNS, ENDPOINT_DST, ENDPOINT_SRC, PAYLOAD_ADDRESS, PAYLOAD_COLUMNS,
     PAYLOAD_IDENTITY, PROPERTY_COLUMNS, WriterColumn,
 };
-use fossil_sinks::manifest::{
+use crate::corpus::manifest::{
     EdgeTable as EdgeEntry, Endpoint, Format, MANIFEST_FILE, Manifest, Property,
     PropertyTable as PropertyEntry, ROW_GROUP_ROWS, RR_IRI, RR_LITERAL, VertexTable as VertexEntry,
     data_type_name, edge_path, edge_table_name, property_path, property_table_name, vertex_path,
 };
-use fossil_storage::{Storage, StorageError};
-
 use crate::report::EdgeDrops;
 use crate::{EdgeTable, Graph};
 

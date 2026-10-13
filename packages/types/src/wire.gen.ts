@@ -299,7 +299,7 @@ export interface Input {
    */
   key: string;
   /**
-   * `key` through `fossil_location::SourceAnchor`: what a host signs and reads.
+   * `key` through `fossil_base::location::SourceAnchor`: what a host signs and reads.
    */
   location: string;
   /**

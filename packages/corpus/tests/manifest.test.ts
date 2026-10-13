@@ -9,11 +9,11 @@ import { parseManifest } from '../src/manifest.js';
 /**
  * `fossil.json`: what the reader refuses, and the one shape the writer and the reader agree on.
  *
- * The shape is the writer's: `crates/fossil-sinks/fossil.schema.json`, derived from
- * `fossil_sinks::manifest::Manifest`, and every fixture validates against it.
+ * The shape is the writer's: `crates/fossil-df/src/corpus/fossil.schema.json`, derived from
+ * `fossil_df::corpus::manifest::Manifest`, and every fixture validates against it.
  */
 const SCHEMA = JSON.parse(
-  readFileSync(fileURLToPath(new URL('../../../crates/fossil-sinks/fossil.schema.json', import.meta.url)), 'utf8'),
+  readFileSync(fileURLToPath(new URL('../../../crates/fossil-df/src/corpus/fossil.schema.json', import.meta.url)), 'utf8'),
 ) as object;
 const validate = new Ajv({ strict: true, allErrors: true, allowUnionTypes: true })
   .addFormat('uint64', { type: 'number', validate: (n: number) => Number.isSafeInteger(n) && n >= 0 })
