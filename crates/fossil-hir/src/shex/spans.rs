@@ -34,7 +34,7 @@
 //!
 //! SHACL gets none either, and that one is a DECISION rather than an omission:
 //! Turtle gives no textual scope to search inside, so the equivalent lookup
-//! would have to parse. `fossil_descriptors_output::shacl`'s «Positions»
+//! would have to parse. `crate::shacl`'s «Positions»
 //! section carries the measurement and the upstream change that reverses it.
 
 use std::ops::Range;

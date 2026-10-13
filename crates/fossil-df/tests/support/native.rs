@@ -5,7 +5,7 @@
 //! Two halves, and they are two hosts on purpose:
 //!
 //! - **check** — a [`System`] over the real filesystem, with the whole provider
-//!   registry (`fossil_descriptors_output::PROVIDERS`), the sources
+//!   registry (`fossil_hir::providers::PROVIDERS`), the sources
 //!   `profile::profile_and_register` describes before the compile,
 //!   and every shape document the program names registered from disk. It is the
 //!   editor's view of a program: forward-propagated source types, every
@@ -49,7 +49,7 @@ use object_store::{ObjectStore, ObjectStoreExt};
 /// The host every check here runs on: every row of the provider registry, the
 /// types-reading ones included.
 pub(crate) fn check_host() -> NativeSystem {
-    NativeSystem::with_providers(fossil_descriptors_output::PROVIDERS)
+    NativeSystem::with_providers(fossil_hir::providers::PROVIDERS)
 }
 
 /// A database over a fresh [`check_host`] holding the program at `path`: its

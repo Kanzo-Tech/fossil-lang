@@ -23,7 +23,7 @@
 //! `catalogue.bnf` draws the DATA/BEHAVIOUR line itself: a row's data lives in
 //! the file, and the function that turns bytes into rows or into types is
 //! supplied by the crate that can link it. So a row that `decodes` is emitted
-//! into `fossil-descriptors-output`, which links the shape-language parsers, and
+//! into `fossil_hir::providers`, beside the shape-language decoders, and
 //! every other row into `fossil-base`, which the compiler always has. That is
 //! also why `DATA` — the default of `System::providers` — is exactly the
 //! `fossil-base` half: a host that links no schema language still gets every row
@@ -860,7 +860,7 @@ pub fn emit_base(rows: &[Row]) -> String {
     let mut out = header(
         "//! The rows whose behaviour the compiler can always link: every row that\n\
          //! reads DATA. A row that decodes a shape language is emitted into\n\
-         //! `fossil-descriptors-output` instead — see `xtask::catalogue`.",
+         //! `fossil_hir::providers` instead — see `xtask::catalogue`.",
     );
     out.push_str("use super::{Provider, RowReader};\n\n");
 
@@ -934,7 +934,7 @@ pub fn emit_base(rows: &[Row]) -> String {
          /// This is [`crate::system::System::providers`]'s default, and it is a real\n\
          /// answer rather than a stub — a host that decodes no shape document still has\n\
          /// to recognise `io.csv`. A host that compiles programs installs a superset\n\
-         /// (`fossil_descriptors_output::PROVIDERS`), and the rows it adds are exactly\n\
+         /// (`fossil_hir::providers::PROVIDERS`), and the rows it adds are exactly\n\
          /// the ones `catalogue.bnf` gives a `decodes`.\n",
     );
     let refs: Vec<String> = data
@@ -1138,7 +1138,7 @@ pub fn emit_ts_profile(cat: &Catalogue) -> String {
     out
 }
 
-/// The `fossil-descriptors-output` half: the rows that decode a shape language,
+/// The `fossil_hir::providers` half: the rows that decode a shape language,
 /// and the assembled table.
 #[must_use]
 pub fn emit_descriptors(rows: &[Row]) -> String {
@@ -1272,7 +1272,7 @@ pub fn generated() -> Vec<(PathBuf, String)> {
             rustfmt(&emit_base(rows)),
         ),
         (
-            root.join("crates/fossil-descriptors-output/src/generated.rs"),
+            root.join("crates/fossil-hir/src/providers/generated.rs"),
             rustfmt(&emit_descriptors(rows)),
         ),
         (

@@ -36,7 +36,7 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
 
     // The seam fossil exposes: enumerate the provider sources (MIR-derived) so
     // the host knows what to read + how to pivot it.
-    let accept_all = fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT;
+    let accept_all = fossil_graph_schema::GraphSchema::default();
     let bindings = fossil_df::provider_bindings(&db, file, &accept_all);
     assert_eq!(bindings.len(), 1, "one io.rdf source");
     let b = &bindings[0];
@@ -145,17 +145,14 @@ const KB_SHEX: &str = r#"{ "@context": "http://www.w3.org/ns/shex.jsonld", "type
 
 #[tokio::test]
 async fn io_rdf_shex_descriptor_yields_typed_multivalued_edges() {
-    use fossil_descriptors_output::OutputDescriptorKind;
-    use fossil_shex::ShExDescriptor;
+    use fossil_hir::shex::ShExDescriptor;
 
     let (db, file) =
         support::db_with_shapes(KB_PROGRAM, "kb.fossil", &[("kb-graph.shex", KB_GRAPH_SHEX)]);
 
-    let descriptor = OutputDescriptorKind::Lowered(
-        ShExDescriptor::from_reader(KB_SHEX.as_bytes())
-            .expect("parse ShEx")
-            .to_graph_schema(),
-    );
+    let descriptor = ShExDescriptor::from_reader(KB_SHEX.as_bytes())
+        .expect("parse ShEx")
+        .to_graph_schema();
 
     let ctx = SessionContext::new();
     support::register_provider_sources(&ctx, &db, file, &descriptor);

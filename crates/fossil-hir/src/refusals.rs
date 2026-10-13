@@ -128,31 +128,9 @@ fn join_or(items: &[String]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fossil_base::providers::{CSV, DATA, JSON, PARQUET, RDF};
-    use fossil_graph_schema::{OutputShapes, Rejection};
+    use fossil_base::providers::{CSV, DATA};
 
-    #[allow(clippy::unnecessary_wraps)]
-    fn decode_nothing(_uri: &str, _text: &str) -> Result<OutputShapes, Rejection> {
-        Ok(OutputShapes::new(Vec::new(), Vec::new()))
-    }
-
-    static SHEX: Provider = Provider {
-        name: "shex",
-        extensions: &["shex", "shexj", "shexc"],
-        reads_rows: None,
-        reads_types: Some(decode_nothing),
-    };
-
-    static SHACL: Provider = Provider {
-        name: "shacl",
-        extensions: &["ttl", "shacl"],
-        reads_rows: None,
-        reads_types: Some(decode_nothing),
-    };
-
-    /// The table a COMPILING host installs — the shape of
-    /// `fossil_descriptors_output::PROVIDERS`, which this crate may not name.
-    static TABLE: &[&Provider] = &[&CSV, &JSON, &PARQUET, &RDF, &SHEX, &SHACL];
+    use crate::providers::{PROVIDERS as TABLE, SHACL, SHEX};
 
     /// The help says what the row does, and then who could.
     #[test]

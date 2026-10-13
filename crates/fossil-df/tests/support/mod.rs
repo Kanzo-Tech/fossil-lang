@@ -4,7 +4,7 @@
 #![allow(clippy::redundant_pub_crate)]
 
 //! The host half these integration tests owe the checker: a filesystem, every
-//! provider row `fossil-descriptors-output` publishes, and the shape documents a
+//! provider row `fossil_hir::providers` publishes, and the shape documents a
 //! program names, put into the database before any query goes looking for them.
 
 // The module is shared by eight test binaries and no binary uses all of it.
@@ -33,7 +33,7 @@ pub(crate) fn db_with_shapes(
     documents: &[(&str, &str)],
 ) -> (FossilDb, SourceFile) {
     let system: Arc<dyn System> = Arc::new(NativeSystem::with_providers(
-        fossil_descriptors_output::PROVIDERS,
+        fossil_hir::providers::PROVIDERS,
     ));
     let mut db = FossilDb::new(system);
     let file = SourceFile::new(&db, program.to_string(), program_path.to_string());
@@ -133,7 +133,7 @@ pub(crate) fn register_provider_sources(
     ctx: &datafusion::prelude::SessionContext,
     db: &FossilDb,
     file: SourceFile,
-    descriptor: &fossil_df::OutputDescriptorKind,
+    descriptor: &fossil_graph_schema::GraphSchema,
 ) {
     for binding in fossil_df::provider_bindings(db, file, descriptor) {
         let turtle = std::fs::read_to_string(&binding.uri)

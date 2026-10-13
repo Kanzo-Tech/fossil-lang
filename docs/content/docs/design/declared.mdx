@@ -133,8 +133,8 @@ onto the types of [rudof](https://rudof-project.github.io/), which is already wh
 from, instead of tables and `match`es of our own (`crates/fossil-graph-schema/src/lib.rs, Primitive`
 holds them: the XSD table both ways, and the names a declared field's type is read in). A ShEx
 document then becomes declared types by a `TryFrom` over `shex_ast`'s compiled schema, `SchemaIR`
-([One database, end to end](/docs/design/incremental) has the crate it folds into), where
-`fossil-shex` resolves references and labels by hand today. What Fossil supports of RDF is then the
+([One database, end to end](/docs/design/incremental) says where it lives), where
+`fossil_hir::shex` resolves references and labels by hand today. What Fossil supports of RDF is then the
 set of those conversions, and the page that lists it is generated from what has a `From`.
 
 **What would reverse it:** an RDF concept Fossil needs that rudof does not model, or a rudof release

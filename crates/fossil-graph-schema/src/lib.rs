@@ -63,7 +63,10 @@ pub use span::Span;
 
 /// A whole graph's schema: its node types and edge types. The single contract
 /// shared by the producer, every materializer, and the consumer.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// The empty schema types nothing, so every predicate stays a vertex property:
+/// what a program that names no output shape is run against.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GraphSchema {
     pub nodes: Vec<NodeType>,
     pub edges: Vec<EdgeType>,

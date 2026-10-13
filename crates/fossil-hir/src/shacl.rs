@@ -38,7 +38,7 @@
 //!
 //! `fossil_graph_schema::PropertyConstraint::span` is what lets a type error
 //! underline the line that declares the constraint it violated, in the shape
-//! document itself. `fossil_shex::spans` supplies it for `ShExC` and this
+//! document itself. `crate::shex::spans` supplies it for `ShExC` and this
 //! decoder supplies `None`, so a program checked against a `.ttl` gets the
 //! half-report every program used to get. **That is deliberate, and here is the
 //! measurement.**
@@ -51,7 +51,7 @@
 //! `ShEx` side reads the document text.
 //!
 //! **What does not transfer is that reading the text is SAFE there.**
-//! `fossil_shex::spans` is a lookup and never a parser: a predicate sits inside
+//! `crate::shex::spans` is a lookup and never a parser: a predicate sits inside
 //! `label { … }`, textually delimited, and the shape's identity IS that label,
 //! so scoping a search to one shape is matching a brace. Turtle gives none of
 //! that. A shape is identified by its `sh:targetClass` and not by the subject
@@ -88,7 +88,7 @@
 //! store this replaces used a `BTreeMap`, whose iteration is alphabetical by
 //! subject IRI; with two shapes that is a different answer from the
 //! document's, and when binding was positional it silently swapped what a
-//! program bound. `crates/fossil-shex/examples/declaration_order.rs` measured
+//! program bound. `crates/fossil-hir/examples/shex_declaration_order.rs` measured
 //! the same class of bug once already.
 
 use std::collections::BTreeMap;
@@ -209,7 +209,7 @@ impl Store {
 ///
 /// The `uri` is unread: SHACL's relative-reference base would change which IRIs
 /// a document resolves to, and choosing one is a decision rather than a
-/// tidy-up — the same call [`crate::decode_shex`] makes and for the same reason.
+/// tidy-up — the same call [`crate::providers::decode_shex`] makes and for the same reason.
 ///
 /// # Errors
 ///

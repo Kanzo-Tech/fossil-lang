@@ -24,7 +24,7 @@
 //!
 //! # What answers «which open files are programs»
 //!
-//! Nothing new. `FossilWorkspace` installs `fossil_descriptors_output::
+//! Nothing new. `FossilWorkspace` installs `fossil_hir::providers::
 //! PROVIDERS` (`wasm_system.rs`), every row of which declares the extensions it
 //! accepts, and `fossil_base::claimed` asks all of them at once. A URI some row
 //! reads is an INPUT — that is what `io.shex("person.shex")` means — and an

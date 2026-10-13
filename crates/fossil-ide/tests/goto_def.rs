@@ -21,7 +21,7 @@ use fossil_ide::{NavigationTarget, goto_definition};
 
 fn host_db() -> FossilDb {
     FossilDb::new(Arc::new(NativeSystem::with_providers(
-        fossil_descriptors_output::PROVIDERS,
+        fossil_hir::providers::PROVIDERS,
     )))
 }
 

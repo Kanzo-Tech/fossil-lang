@@ -38,11 +38,6 @@ fossil-mir     = { path = "../fossil-mir" }
 # Rust forward-propagation path reads them through the System trait accessor,
 # because the browser has no filesystem to introspect a CSV from.
 fossil-descriptors-input = { path = "../fossil-descriptors-input" }
-# The `SHEX` decoder row this host installs on its `System`. A table of `fn`
-# so the dependency buys one const and no vtable — and the
-# host never names a ShEx type: it hands the row over and the compiler
-# calls it.
-fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 smol_str = { workspace = true }
 # `Failure` is what every call here refuses with, and `js` the one function
 # that throws it as a `FossilError` — shared by the three wasm crates.

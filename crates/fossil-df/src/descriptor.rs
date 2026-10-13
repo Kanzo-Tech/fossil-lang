@@ -9,8 +9,7 @@
 
 use fossil_base::providers::provider;
 use fossil_base::{Db, SourceFile};
-use fossil_descriptors_output::OutputDescriptorKind;
-use fossil_graph_schema::{Failure, Problem};
+use fossil_graph_schema::{Failure, GraphSchema, Problem};
 use fossil_hir::def_map::def_map;
 
 /// Resolve the output descriptor `file` names.
@@ -22,7 +21,7 @@ use fossil_hir::def_map::def_map;
 ///    [`fossil_hir::shapes::program_shapes`] gathers them. It is what the
 ///    CHECKER resolves the mappings against, so it wins: the types the run
 ///    classifies edges with have to be the ones the program compiled against,
-///    or a CSV program gets `ACCEPT_ALL_DEFAULT` and emits zero edges.
+///    or a CSV program gets the empty schema and emits zero edges.
 /// 2. `io.rdf(schema = io.shex(…))` — an RDF input whose shape doubles as the
 ///    output contract, for a program that reads a graph and writes one back.
 ///
@@ -32,9 +31,9 @@ use fossil_hir::def_map::def_map;
 /// # Errors
 /// The document is unregistered, named by no provider or by one that reads no
 /// types, has an extension the row declines, or fails to decode.
-pub fn output_descriptor(db: &dyn Db, file: SourceFile) -> Result<OutputDescriptorKind, Failure> {
+pub fn output_descriptor(db: &dyn Db, file: SourceFile) -> Result<GraphSchema, Failure> {
     if let Some(shapes) = fossil_hir::shapes::program_shapes(db, file)? {
-        return Ok(OutputDescriptorKind::Lowered(shapes.to_graph_schema()));
+        return Ok(shapes.to_graph_schema());
     }
 
     let def_map = def_map(db, file);
@@ -63,7 +62,7 @@ pub fn output_descriptor(db: &dyn Db, file: SourceFile) -> Result<OutputDescript
 
     match schema {
         Some((provider, document)) => decode(db, file, provider, document),
-        None => Ok(OutputDescriptorKind::ACCEPT_ALL_DEFAULT),
+        None => Ok(GraphSchema::default()),
     }
 }
 
@@ -75,7 +74,7 @@ fn decode(
     file: SourceFile,
     constructor: Option<&str>,
     document: &str,
-) -> Result<OutputDescriptorKind, Failure> {
+) -> Result<GraphSchema, Failure> {
     let shapes = fossil_hir::shapes::decoded_document(db, file, constructor, document)?;
-    Ok(OutputDescriptorKind::Lowered(shapes.to_graph_schema()))
+    Ok(shapes.to_graph_schema())
 }

@@ -47,6 +47,6 @@ impl System for WasmSystem {
     /// completion silently empty for exactly the programs that declare a
     /// shape.
     fn providers(&self) -> &'static [&'static Provider] {
-        fossil_descriptors_output::PROVIDERS
+        fossil_hir::providers::PROVIDERS
     }
 }

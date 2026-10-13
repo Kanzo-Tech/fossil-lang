@@ -15,7 +15,7 @@
 //! The shapes are named so that declaration order, alphabetical order and IRI
 //! order all differ; otherwise a wrong order could pass by coincidence.
 
-use fossil_shex::ShExDescriptor;
+use fossil_hir::shex::ShExDescriptor;
 
 const SHEXC: &str = r"PREFIX ex: <https://example.org/>
 

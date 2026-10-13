@@ -46,12 +46,6 @@ bytes = { workspace = true }
 # The canonical graph-schema contract — the metadata fossil-df produces and the
 # manifest materializes from (the universal substrate's single source).
 fossil-graph-schema = { path = "../fossil-graph-schema" }
-# The program-resident output descriptor (ShEx) that drives edge/cardinality
-# classification, threaded into execute_graph as an argument, never read off
-# the db. This
-# crate is where it stops: `to_graph_schema()` is called here and only the
-# format-neutral schema crosses into `fossil_mir::apply_output_shape`.
-fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 # RDF input seam: Turtle parsing for `io.rdf` sources → Arrow rows. Pure Rust,
 # WASM-clean (the oxigraph parsers rudof's ShEx already pulls) — RDF is decoded
 # at the I/O border, same as in the browser.
@@ -127,12 +121,6 @@ fossil-base = { path = "../fossil-base", features = ["test-support"] }
 # Dev-only: the tests drive the async executor on a current-thread runtime. The
 # library holds no tokio at all — the browser drives it from JS's event loop.
 tokio = { workspace = true }
-fossil-hir = { path = "../fossil-hir" }
-# `tests/rdf_source.rs` builds a `ShExDescriptor` to exercise the ShEx→edge path
-# end to end. It names the decode directly because `fossil-descriptors-output`
-# stopped re-exporting ShEx types: a host may know what ShEx is, the compiler
-# may not.
-fossil-shex = { path = "../fossil-shex" }
 tempfile = { workspace = true }
 # tests/pipeline.rs builds the op list by hand — the MIR operators, which no
 # `.fossil` reaches yet — so it spells `SmolStr` directly.

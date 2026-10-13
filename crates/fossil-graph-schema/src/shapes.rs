@@ -7,7 +7,7 @@
 //! is what a materializer consumes. But the checker needs something else — the
 //! per-shape constraint table it asks "given target shape `ex:Person`, what is
 //! the expected type and cardinality of predicate `p`?" — and until now the only
-//! spelling of that table was `fossil_shex::ShapeBinding`, whose fields are
+//! spelling of that table was `fossil_hir::shex::ShapeBinding`, whose fields are
 //! `rudof_iri::IriS` and `shex_ast::ShapeExpr`. Reading it meant linking `ShEx`.
 //!
 //! This module is the same table with no type from any schema language in it. A
@@ -56,7 +56,7 @@ use crate::{Cardinality, EdgeType, GraphSchema, NodeType, Primitive, Property, S
 /// the decoder that produces the IRIs and the schema that carries the names.
 /// There were three independent copies of this three-line function in the tree
 /// — in the MIR lowering, in the `ShEx` descriptor, and in the SHACL decoder
-/// (`fossil-descriptors-output/src/shacl.rs`); this is the one they collapse
+/// (`fossil-hir/src/shacl.rs`); this is the one they collapse
 /// onto.
 #[must_use]
 pub fn local_name(iri: &str) -> &str {
@@ -135,7 +135,7 @@ pub struct Shape {
 // said «the checker reads it to decide whether an unlisted predicate is an
 // error». The checker never saw it: `ResolvedShape::from_shape` reads `iri` and
 // `properties` and drops the rest, so the only reader in the workspace was one
-// test in `fossil-shex`.
+// test of the `ShEx` decoder.
 //
 // It is deleted rather than wired, and the reason is that wiring it would
 // change nothing. A property key is a BARE NAME resolved against this table
@@ -192,7 +192,7 @@ pub struct PropertyConstraint {
     /// a SHACL one (a separate decoder over Turtle, with no lookup of its own
     /// yet), and a compact document where the lookup did not find the
     /// predicate. A consumer drops one label; nothing else changes. See
-    /// `fossil_shex::spans`, which is a lookup over text and explains at length
+    /// `fossil_hir::shex::spans`, which is a lookup over text and explains at length
     /// why that is not a second parser.
     pub span: Option<Span>,
 }
@@ -351,7 +351,7 @@ impl OutputShapes {
     /// not by position, but the order still reaches a person: an import naming
     /// no shape lists the ones the document declares, and two shapes sharing a
     /// local name are named first-then-second. A `HashMap` lived where this
-    /// `Vec` is until `crates/fossil-shex/examples/declaration_order.rs`
+    /// `Vec` is until `crates/fossil-hir/examples/shex_declaration_order.rs`
     /// measured what it cost — six parses of one document handed back six
     /// different orders, because Rust seeds its hasher per process. The order
     /// is the document's; it is not ours to choose.

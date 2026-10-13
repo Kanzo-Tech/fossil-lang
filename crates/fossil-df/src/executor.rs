@@ -35,8 +35,7 @@ use std::time::SystemTime;
 use datafusion::error::DataFusionError;
 use datafusion::execution::context::SessionContext;
 use fossil_base::{FossilDb, FsError, Provider, SourceFile, System};
-use fossil_descriptors_output::OutputDescriptorKind;
-use fossil_graph_schema::{Failure, Problem, Related};
+use fossil_graph_schema::{Failure, GraphSchema, Problem, Related};
 use fossil_hir::documents::MissingDocument;
 use fossil_hir::lineage::Input;
 use fossil_storage::Storage;
@@ -66,7 +65,7 @@ impl System for ExecutorSystem {
         SystemTime::UNIX_EPOCH
     }
     fn providers(&self) -> &'static [&'static Provider] {
-        fossil_descriptors_output::PROVIDERS
+        fossil_hir::providers::PROVIDERS
     }
 }
 
@@ -162,7 +161,7 @@ impl Executor {
         Ok(())
     }
 
-    fn descriptor(&self) -> Result<OutputDescriptorKind, Failure> {
+    fn descriptor(&self) -> Result<GraphSchema, Failure> {
         crate::output_descriptor(&self.db, self.file)
     }
 
@@ -228,7 +227,7 @@ async fn register_rdf_sources(
     ctx: &SessionContext,
     db: &dyn fossil_base::Db,
     file: SourceFile,
-    descriptor: &OutputDescriptorKind,
+    descriptor: &GraphSchema,
     storage: &Storage,
 ) -> Result<(), Failure> {
     for binding in crate::provider_bindings(db, file, descriptor) {

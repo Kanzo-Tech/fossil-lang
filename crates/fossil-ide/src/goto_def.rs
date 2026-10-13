@@ -30,7 +30,7 @@
 //! The decoded shape carries where the document declares it and each of its
 //! predicates — [`fossil_graph_schema::Shape::span`] and
 //! [`fossil_graph_schema::PropertyConstraint::span`], found by
-//! `fossil_shex::spans` with rudof's own prefix spellings. When there is no span
+//! `fossil_hir::shex::spans` with rudof's own prefix spellings. When there is no span
 //! (`ShExJ`, SHACL), the answer is still the right FILE with a `0..0` range —
 //! the top of the document. That is the honest degraded answer, and it is
 //! deliberately not a `None`: an editor that opens `shop.shex` at line 1 has

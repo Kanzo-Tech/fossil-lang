@@ -752,7 +752,7 @@ Orders : Order from Purchase
                     value_ty: Some(Ty::new(db, TyKind::Primitive(Primitive::Float))),
                     term: None,
                     occurs: Occurs::ONE,
-                    // What the decoder found — see `fossil_shex::spans`.
+                    // What the decoder found — see `crate::shex::spans`.
                     span: Some(fossil_graph_schema::Span::new(60, 70)),
                 }],
                 rejections: Vec::new(),

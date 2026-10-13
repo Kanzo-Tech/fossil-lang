@@ -30,9 +30,7 @@ smol_str        = { workspace = true }
 
 [dev-dependencies]
 # The host with a shape decoder installed. A DEV-dependency on a DEV-only
-# feature of a crate this one already depends on — NOT a new crate in the graph,
-# and above all not `fossil-shex` or `fossil-descriptors-output`, which `0e6898d`
-# cut out of here on purpose. The decoder reads a three-token line format with no
-# schema language behind it, so a test can resolve a shape without this crate
-# learning that ShEx exists.
+# feature of a crate this one already depends on, NOT a new crate in the graph.
+# The decoder reads a three-token line format with no schema language behind it,
+# so a test can resolve a shape without this crate learning that ShEx exists.
 fossil-base = { path = "../fossil-base", features = ["test-support"] }

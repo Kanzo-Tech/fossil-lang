@@ -47,12 +47,10 @@ Order : Order from orders
 
 const GRAPH_SHEX: &str = include_str!("fixtures/graph.shex");
 
-fn descriptor() -> fossil_df::OutputDescriptorKind {
-    fossil_df::OutputDescriptorKind::Lowered(
-        fossil_shex::ShExDescriptor::from_shex_source(GRAPH_SHEX)
-            .expect("parse graph.shex")
-            .to_graph_schema(),
-    )
+fn descriptor() -> fossil_graph_schema::GraphSchema {
+    fossil_hir::shex::ShExDescriptor::from_shex_source(GRAPH_SHEX)
+        .expect("parse graph.shex")
+        .to_graph_schema()
 }
 
 #[tokio::test]

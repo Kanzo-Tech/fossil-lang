@@ -26,7 +26,7 @@ pub trait System: Send + Sync + std::fmt::Debug {
     /// moved to the input and this method stayed a declaration.
     ///
     /// **This method is a seam that should close.** All but two implementations
-    /// return the identical `fossil_descriptors_output::PROVIDERS`, so "the host
+    /// return the identical `fossil_hir::providers::PROVIDERS`, so "the host
     /// chooses what is installed" is a choice nobody makes. When the catalogue
     /// is loaded from a file there is one loader, and they all go with it.
     ///

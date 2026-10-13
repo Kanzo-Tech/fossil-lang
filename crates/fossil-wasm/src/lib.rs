@@ -786,7 +786,7 @@ impl Default for FossilWorkspace {
 pub fn formats() -> Result<JsValue, JsValue> {
     to_value(
         "the formats",
-        &fossil_hir::lineage::formats(fossil_descriptors_output::PROVIDERS),
+        &fossil_hir::lineage::formats(fossil_hir::providers::PROVIDERS),
     )
 }
 

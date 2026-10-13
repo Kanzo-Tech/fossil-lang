@@ -28,7 +28,7 @@ use datafusion::arrow::array::{ArrayRef, ListBuilder, StringArray, StringBuilder
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::error::DataFusionError;
-use fossil_descriptors_output::subject_value;
+use fossil_hir::shacl::subject_value;
 use oxrdf::{Literal, Term};
 use oxttl::TurtleParser;
 

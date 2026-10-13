@@ -35,7 +35,7 @@ use lsp_types::CompletionItemKind;
 /// documents the program names are readable.
 fn host_db() -> FossilDb {
     FossilDb::new(Arc::new(NativeSystem::with_providers(
-        fossil_descriptors_output::PROVIDERS,
+        fossil_hir::providers::PROVIDERS,
     )))
 }
 

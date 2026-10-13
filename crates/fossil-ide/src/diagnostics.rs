@@ -51,7 +51,7 @@ use crate::related::related_locations;
 /// row declares the extensions it accepts, [`fossil_base::claimed`] asks all of
 /// them at once, and a URI some row READS is an input to a program rather than a
 /// program. Nothing about fossil's syntax is decided here. Both hosts install
-/// `fossil_descriptors_output::PROVIDERS`, and a buffer's registry path is its
+/// `fossil_hir::providers::PROVIDERS`, and a buffer's registry path is its
 /// whole URI in both, which `Provider::accepts` reads exactly as it reads a
 /// path.
 ///

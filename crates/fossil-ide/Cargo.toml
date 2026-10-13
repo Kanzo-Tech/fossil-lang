@@ -57,11 +57,6 @@ serde_json = { workspace = true }
 # The host with a shape decoder installed, so a test can ask the CHECKER
 # whether a registered document reached it.
 fossil-base = { path = "../fossil-base", features = ["test-support"] }
-# The completion test's host installs the `SHEX` decoder row on its `System`,
-# the way `fossil-wasm` does — without it a `.shex` the test can
-# read is still a document nothing decodes, and the shape-property completions
-# quietly disappear.
-fossil-descriptors-output = { path = "../fossil-descriptors-output" }
 # Source-field completion (4th source) test: builds an `InferredDescriptor` and
 # registers it on the test `System`, driving the `.<field>` completion path
 # end-to-end the way the host (browser DuckDB-WASM / native CLI) would.

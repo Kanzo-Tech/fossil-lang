@@ -1,50 +1,27 @@
-//! `fossil-descriptors-output` — the type-reading rows of the provider registry,
-//! and the assembled table a compiling host installs.
+//! The type-reading rows of the provider registry, and the assembled table a
+//! compiling host installs.
 //!
-//! # What this crate is now
-//!
-//! [`SHEX`] and [`SHACL`] are [`fossil_base::Provider`] rows: a `name` (what a program writes
-//! after `io.`), the extensions the row accepts, and a pure
+//! [`SHEX`] and [`SHACL`] are [`fossil_base::Provider`] rows: a `name` (what a
+//! program writes after `io.`), the extensions the row accepts, and a pure
 //! `fn(&str, &str) -> Result<OutputShapes, Rejection>` under the *read types*
 //! capability. [`PROVIDERS`] is those two spliced onto `fossil_base`'s data rows
 //! — the whole registry, which a host hands out from `System::providers`.
-//! `fossil_hir::shape_documents::shape_document` picks a row **by the name the program wrote**
-//! and calls it. The compiler reads the neutral vocabulary and never learns
-//! which language produced it — the cut `0e6898d` made for `fossil-mir`, now
-//! made for the checker.
+//! [`crate::shape_documents::shape_document`] picks a row **by the name the
+//! program wrote** and calls it, and the checker reads the neutral vocabulary
+//! the row produced.
 //!
-//! Both rows are here rather than one here and one in `fossil-df` because a
-//! decoder lives beside its machinery, and both machineries are shape-document
-//! parsers.
-//!
-//! # What it stopped being
-//!
-//! It used to re-export `fossil_shex`'s types from its own root
-//! (`ShExDescriptor`, `ShapeBinding`, `ResolvedConstraint`, `ConstraintValue`,
-//! `ShExLoweringError`, `OneOfRejection`, `SuggestionSeed`,
-//! `generate_split_suggestion`, and a `Cardinality` enum that no longer exists),
-//! so a consumer could reach `shex_ast` through a crate whose name says
-//! "descriptors". It does not. A consumer that genuinely wants the `ShEx` AST
-//! names [`fossil_shex`] directly and says so in its `Cargo.toml`; a consumer
-//! that wants a decoded document takes [`SHEX`] and gets no `ShEx` type at all.
-//!
-//! # What is still here, and why
-//!
-//! [`OutputDescriptor`] and [`OutputDescriptorKind`] stay for now: `fossil-df` and
-//! `fossil-df-wasm` carry an `OutputDescriptorKind` into the executor. They are the next thing to go — the kind enum's only live
-//! method is `to_graph_schema`, which is the seam `apply_output_shape` already
-//! takes directly.
+//! The decoders are this crate's because a shape document becomes a type, and
+//! the type system is here (`/docs/design/incremental`): [`crate::shex`] over
+//! `shex_ast`, [`crate::shacl`] over `oxrdf`.
 
 mod generated;
-pub mod kind;
-pub mod shacl;
 
 pub use generated::{PROVIDERS, SHACL, SHEX};
-pub use kind::OutputDescriptorKind;
-pub use shacl::{decode_shacl, subject_value};
 
 use fossil_graph_schema::{OutputShapes, Rejection};
-use fossil_shex::{ShExDescriptor, ShExLoweringError};
+
+use crate::shacl::decode_shacl;
+use crate::shex::{ShExDescriptor, ShExLoweringError};
 
 /// Decode a `ShEx` document — the `ShEx` row's `reads_types`.
 ///
@@ -83,63 +60,12 @@ pub fn decode_shex(_uri: &str, text: &str) -> Result<OutputShapes, Rejection> {
     }
 }
 
-/// Output-side shape descriptor.
-///
-/// Implementations parse a raw descriptor blob (`ShEx`, future `SHACL`) and
-/// expose shape membership / cardinality queries used by the type-checker
-/// for backward shape inference.
-pub trait OutputDescriptor: Send + Sync + std::fmt::Debug {
-    /// Stable, lowercase, namespace-free identifier (e.g. `"shex"`, `"accept-all"`).
-    ///
-    /// `&str` and not `&'static str`, so an impl may compute its name.
-    fn name(&self) -> &str;
-
-    /// Whether the descriptor is a permissive "anything goes" pass-through —
-    /// the no-shape-target case.
-    fn accepts_anything(&self) -> bool;
-}
-
-/// The accept-all output descriptor.
-///
-/// Returns `true` for [`OutputDescriptor::accepts_anything`]. It survives as
-/// the `AcceptAll` variant of [`OutputDescriptorKind`]: the fallback when no
-/// `ShEx` schema is loaded, and that variant — not this bool — is what a
-/// consumer branches on. The sentence here used to add "the type-checker
-/// short-circuits backward shape inference", which named a reader that does not
-/// exist: `fossil-hir` does not depend on this crate, and nothing in the tree
-/// calls `accepts_anything` outside these tests.
-///
-/// Declared as a unit struct (`pub struct AcceptAllDescriptor;`) so the
-/// [`OutputDescriptorKind::ACCEPT_ALL_DEFAULT`] inherent const is
-/// const-evaluable.
-#[derive(Debug, Default)]
-pub struct AcceptAllDescriptor;
-
-impl OutputDescriptor for AcceptAllDescriptor {
-    // A literal here; the trait's `&str` is for an impl that computes one.
-    #[allow(clippy::unnecessary_literal_bound)]
-    fn name(&self) -> &str {
-        "accept-all"
-    }
-
-    fn accepts_anything(&self) -> bool {
-        true
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use fossil_base::{Capability, provider};
     use fossil_graph_schema::PropertyConstraint;
 
     use super::*;
-
-    #[test]
-    fn accept_all_descriptor_says_yes() {
-        let d = AcceptAllDescriptor;
-        assert_eq!(d.name(), "accept-all");
-        assert!(d.accepts_anything());
-    }
 
     /// One schema, both surface syntaxes. `ShExC` is what a person writes and
     /// `ShExJ` is what a tool emits; if they did not decode to the same value,

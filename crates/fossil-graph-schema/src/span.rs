@@ -3,8 +3,8 @@
 //! # Why the leaf crate, and not `fossil-base`
 //!
 //! It lived in `fossil_base::diagnostic` beside [`crate::Shape`]'s consumers,
-//! and `fossil-base` carries salsa. `fossil-shex` is deliberately WASM-clean
-//! and depends on this crate and not on that one, so the moment a shape
+//! and `fossil-base` carries salsa. The `ShEx` decoder was a crate of its own
+//! that depended on this one and not on that one, so the moment a shape
 //! document had to say WHERE it declares a predicate — the label
 //! `shop:Order declares shop:total as xsd:float`, underlining a line of
 //! `shape.shex` — the decoder needed a span type it could not reach.

@@ -29,6 +29,10 @@
 //!   rather than in a `span` field on every `HirExpr` so that lowering stays
 //!   span-free and only the layers that emit diagnostics pay for them (same
 //!   rationale as the provenance side table).
+//! - The shape-document decoders a host installs: [`providers::PROVIDERS`],
+//!   whose type-reading rows are [`shex`] over `shex_ast` and [`shacl`] over
+//!   `oxrdf`. A document becomes the same [`fossil_graph_schema::OutputShapes`]
+//!   a declared type lowers to.
 //!
 //! # The locked surface
 //!
@@ -64,21 +68,21 @@ pub mod infer;
 pub mod lineage;
 pub mod lower;
 pub mod provenance;
+pub mod providers;
 /// What the compiler says when a program names a provider it cannot use. Three
 /// sentences, shared by every path that raises one. They were methods on `fossil_base::Provider`,
 /// which put English Fossil compiler errors in the trait-and-db substrate.
 pub mod refusals;
+pub mod shacl;
 pub mod shape_documents;
 pub mod shapes;
+pub mod shex;
 pub mod spans;
 /// The stdlib catalog: every function the language declares, its signature and
 /// how it compiles. It lives here because the checker resolves a call against
 /// it, and the checker cannot depend on a crate that depends on the checker —
 /// which is what `fossil-registry` was until it was folded in here.
 pub mod stdlib;
-// The host-with-a-decoder this crate's tests use is `fossil_base::test_support`
-// (feature `test-support`) and not a real ShEx decoder: this crate names no
-// schema language, and reaching for one as a dev-dependency puts it back.
 pub mod ty;
 
 // Type re-exports only; the query functions are intentionally kept under their

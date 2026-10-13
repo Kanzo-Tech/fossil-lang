@@ -138,7 +138,7 @@ pub struct Format {
 /// the day one row does both, `Both`.
 ///
 /// `table` is the host's, not a constant, because the rows that read types are
-/// the host's to install — `fossil_descriptors_output::PROVIDERS` for a host
+/// the host's to install — `crate::providers::PROVIDERS` for a host
 /// that compiles, `fossil_base::providers::DATA` for one that does not.
 #[must_use]
 pub fn formats(table: &[&'static fossil_base::Provider]) -> Vec<Format> {

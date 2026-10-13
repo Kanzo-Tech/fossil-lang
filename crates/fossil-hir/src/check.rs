@@ -213,11 +213,11 @@ pub fn typecheck_mapping<'db>(
 /// bound shape NAME, the `from` binding and the `@subject` are all read off the
 /// consuming mapping's CST, and a decoder has never seen the program — it has
 /// seen `ShEx`. Only the branch predicates come from the document, and those
-/// cross as plain strings in [`Rejection::Disjunction`], which is why
-/// `fossil-hir` needs no dependency on `fossil-shex` at all.
+/// cross as plain strings in [`Rejection::Disjunction`], which is why the
+/// checker reads no type of [`crate::shex`] at all.
 ///
 /// That was worth writing down because the opposite reasoning had been, and it
-/// produced a second renderer in `fossil-shex` that outlived its own argument:
+/// produced a second renderer in the `ShEx` decoder that outlived its own argument:
 /// «re-emitting syntax stays with the decoder, because it is the decoder that
 /// knows the syntax». It knew the `ShEx` syntax. It did not know Fossil's, and
 /// it emitted a CURIE header, `iri =`, a backtick template and a leading `.` —
@@ -927,7 +927,7 @@ pub fn compatible<'db>(
 /// hash seed. An unsorted `first` would put a different function in the message
 /// on different runs of the same compiler — and this text is committed as a
 /// conformance artefact, so it would be a golden that fails at random.
-/// `crates/fossil-shex/examples/declaration_order.rs` measured this exact class
+/// `crates/fossil-hir/examples/shex_declaration_order.rs` measured this exact class
 /// of bug once already: six parses, six orders.
 fn repair_for<'db>(
     cx: &Expr<'db>,

@@ -65,10 +65,6 @@ pub use descriptor::output_descriptor;
 /// The executor a host drives. Named at the crate root because it is the
 /// crate's answer, not a detail of the module it is written in.
 pub use executor::Executor;
-/// Re-exported so callers name the program-resident output descriptor that
-/// [`execute_graph`] / [`provider_bindings`] take: it is passed as an argument,
-/// never read through `Db::system()`.
-pub use fossil_descriptors_output::OutputDescriptorKind;
 /// The relation an op index produces — the seam a host (or a test that builds a
 /// [`fossil_mir::MirGraph`] by hand) uses to materialise an intermediate.
 pub use plan::plan_relation;
@@ -156,7 +152,7 @@ pub async fn execute_graph<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     file: SourceFile,
-    descriptor: &OutputDescriptorKind,
+    descriptor: &GraphSchema,
 ) -> datafusion::error::Result<Graph> {
     // The run's anchor, derived from the PROGRAM and not from the caller: a
     // source URI is a path the program wrote, so the directory it resolves
@@ -288,7 +284,7 @@ pub async fn execute_vertex<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
-    descriptor: &OutputDescriptorKind,
+    descriptor: &GraphSchema,
 ) -> datafusion::error::Result<(VertexTable, NodeType)> {
     let program_dir = fossil_base::location::program_dir(mapping.file(db).path(db));
     let anchor = SourceAnchor::new(&program_dir, fossil_base::connections(db));
@@ -351,12 +347,12 @@ async fn prepare_vertex<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
-    descriptor: &OutputDescriptorKind,
+    descriptor: &GraphSchema,
     anchor: SourceAnchor<'_>,
 ) -> datafusion::error::Result<PreparedVertex> {
     let mir = lower_to_mir_pg(db, mapping);
     refuse_if_poisoned(mir, db)?;
-    let ops = apply_output_shape(mir.ops(db), &descriptor.to_graph_schema());
+    let ops = apply_output_shape(mir.ops(db), descriptor);
     prepare_vertex_ops(ctx, db, &ops, anchor).await
 }
 
@@ -757,12 +753,12 @@ async fn execute_edges<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
-    descriptor: &OutputDescriptorKind,
+    descriptor: &GraphSchema,
     anchor: SourceAnchor<'_>,
 ) -> datafusion::error::Result<Vec<(PreparedEdge, GraphEdge)>> {
     let mir = lower_to_mir_pg(db, mapping);
     refuse_if_poisoned(mir, db)?;
-    let ops = apply_output_shape(mir.ops(db), &descriptor.to_graph_schema());
+    let ops = apply_output_shape(mir.ops(db), descriptor);
     let ops = ops.as_slice();
 
     let mut out = Vec::new();
@@ -1295,16 +1291,15 @@ pub struct ProviderBinding {
 pub fn provider_bindings(
     db: &dyn fossil_base::Db,
     file: SourceFile,
-    descriptor: &OutputDescriptorKind,
+    descriptor: &GraphSchema,
 ) -> Vec<ProviderBinding> {
     let program_dir = fossil_base::location::program_dir(file.path(db));
     let anchor = SourceAnchor::new(&program_dir, fossil_base::connections(db));
     let mappings = def_map(db, file).mappings(db).clone();
-    let schema = descriptor.to_graph_schema();
     let mut out = Vec::new();
     for mapping in mappings {
         let mir = lower_to_mir_pg(db, mapping);
-        let ops = apply_output_shape(mir.ops(db), &schema);
+        let ops = apply_output_shape(mir.ops(db), descriptor);
 
         let Some((uri, binding)) = ops.iter().find_map(|o| match o {
             Op::Source {

@@ -316,7 +316,7 @@ pub struct SuggestionSeed {
 pub struct ShExDescriptor {
     schema: Schema,
     /// In the order the document declares them. A `HashMap` lived here until
-    /// `crates/fossil-shex/examples/declaration_order.rs` measured what that
+    /// `crates/fossil-hir/examples/shex_declaration_order.rs` measured what that
     /// cost: `values()` handed back six different orders in six parses, because
     /// Rust seeds its hasher per process. Anything downstream that iterates —
     /// [`Self::to_graph_schema`] builds `nodes`/`edges` from this — was
@@ -330,7 +330,7 @@ pub struct ShExDescriptor {
     ///
     /// The AST carries no offsets — `shex_ast`'s own `Span` is `nom_locate` and
     /// lives in its parse errors — so the only way a decoded shape can say
-    /// WHERE it declares a predicate is to look in the text. [`crate::spans`]
+    /// WHERE it declares a predicate is to look in the text. [`crate::shex::spans`]
     /// does that looking and says why it is safe.
     ///
     /// `None` for [`Self::from_reader`], which is the `ShExJ` path: a JSON
@@ -367,7 +367,7 @@ impl ShExDescriptor {
         let schema = ShExParser::parse(src, None, &base)
             .map_err(|e| ShExLoweringError::MalformedSchema(e.to_string()))?;
         let mut descriptor = Self::from_schema(schema)?;
-        // Kept for [`crate::spans`], and only on this path — see the field.
+        // Kept for [`crate::shex::spans`], and only on this path — see the field.
         descriptor.source = Some(src.to_string());
         Ok(descriptor)
     }
@@ -400,7 +400,7 @@ impl ShExDescriptor {
                         // which is the one way looking in the text could give a
                         // wrong answer rather than no answer.
                         span: self.source.as_deref().and_then(|src| {
-                            crate::spans::predicate_span(
+                            crate::shex::spans::predicate_span(
                                 src,
                                 &prefixmap.qualify(&binding.iri),
                                 &prefixmap.qualify(&c.predicate),
@@ -409,7 +409,7 @@ impl ShExDescriptor {
                     })
                     .collect(),
                 span: self.source.as_deref().and_then(|src| {
-                    crate::spans::shape_span(src, &prefixmap.qualify(&binding.iri))
+                    crate::shex::spans::shape_span(src, &prefixmap.qualify(&binding.iri))
                 }),
             })
             .collect();
@@ -812,7 +812,7 @@ mod tests {
     /// The range survives the whole decode, and it is the range of the
     /// PREDICATE — not of the line, not of the shape.
     ///
-    /// `crate::spans` proves the lookup over strings; this proves the wiring:
+    /// `crate::shex::spans` proves the lookup over strings; this proves the wiring:
     /// that `from_shex_source` keeps the text, that `to_output_shapes` asks
     /// with rudof's own qualified spellings, and that what comes out the
     /// neutral end still points at the document. Sliced out of the source,

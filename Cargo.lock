@@ -1701,17 +1701,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fossil-descriptors-output"
-version = "0.1.0"
-dependencies = [
- "fossil-base",
- "fossil-graph-schema",
- "fossil-shex",
- "oxrdf",
- "oxttl",
-]
-
-[[package]]
 name = "fossil-df"
 version = "0.1.0"
 dependencies = [
@@ -1722,12 +1711,10 @@ dependencies = [
  "expect-test",
  "fossil-base",
  "fossil-descriptors-input",
- "fossil-descriptors-output",
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-mir",
  "fossil-profile",
- "fossil-shex",
  "fossil-storage",
  "fossil-syntax",
  "futures",
@@ -1794,10 +1781,15 @@ dependencies = [
  "fossil-graph-schema",
  "fossil-syntax",
  "indexmap",
+ "oxrdf",
+ "oxttl",
+ "prefixmap",
  "rowan",
+ "rudof_iri",
  "salsa",
  "schemars",
  "serde",
+ "shex_ast",
  "smol_str",
  "strsim",
  "thiserror 1.0.69",
@@ -1810,7 +1802,6 @@ dependencies = [
  "expect-test",
  "fossil-base",
  "fossil-descriptors-input",
- "fossil-descriptors-output",
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-mir",
@@ -1850,16 +1841,6 @@ dependencies = [
  "serde",
  "smol_str",
  "tempfile",
-]
-
-[[package]]
-name = "fossil-shex"
-version = "0.1.0"
-dependencies = [
- "fossil-graph-schema",
- "prefixmap",
- "rudof_iri",
- "shex_ast",
 ]
 
 [[package]]
@@ -1926,7 +1907,6 @@ dependencies = [
  "console_error_panic_hook",
  "fossil-base",
  "fossil-descriptors-input",
- "fossil-descriptors-output",
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-ide",
