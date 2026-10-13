@@ -76,7 +76,7 @@ User : Person from users
 ";
     let mut db = host();
     let f = program(&mut db, SRC);
-    let items = fossil_ide::completions(&db, &[f], f, 2, after_trailing_dot(SRC, 2));
+    let items = fossil_ide::completions(&db, f, 2, after_trailing_dot(SRC, 2));
 
     assert_eq!(
         labels(&items, CompletionItemKind::FUNCTION),
@@ -128,7 +128,7 @@ User : Person from users
 ";
     let mut db = host();
     let f = program(&mut db, SRC);
-    let items = fossil_ide::completions(&db, &[f], f, 2, after_trailing_dot(SRC, 2));
+    let items = fossil_ide::completions(&db, f, 2, after_trailing_dot(SRC, 2));
     assert!(
         items.is_empty(),
         "an Integer has no catalogued members and is not a row; got {:?}",
@@ -149,7 +149,7 @@ User : Person from users
 ";
     let mut db = host();
     let f = program(&mut db, SRC);
-    let items = fossil_ide::completions(&db, &[f], f, 2, after_trailing_dot(SRC, 2));
+    let items = fossil_ide::completions(&db, f, 2, after_trailing_dot(SRC, 2));
     assert!(
         labels(&items, CompletionItemKind::FUNCTION).contains(&"trim"),
         "`str.` still offers what a string has; got {:?}",
@@ -176,7 +176,7 @@ User : Person from users
 ";
     let mut db = host();
     let f = program(&mut db, SRC);
-    let items = fossil_ide::completions(&db, &[f], f, 2, after_trailing_dot(SRC, 2));
+    let items = fossil_ide::completions(&db, f, 2, after_trailing_dot(SRC, 2));
     assert!(
         items.is_empty(),
         "`orders` names nothing, in either source; got {:?}",
@@ -202,7 +202,7 @@ User : Person from users
 ";
     let mut db = host();
     let f = program(&mut db, SRC);
-    let items = fossil_ide::completions(&db, &[f], f, 2, after_trailing_dot(SRC, 2));
+    let items = fossil_ide::completions(&db, f, 2, after_trailing_dot(SRC, 2));
     assert_eq!(
         labels(&items, CompletionItemKind::FIELD),
         vec!["name", "age"],
@@ -228,7 +228,7 @@ Order : Thing from orders
     let mut db = host();
     // `program` registers `users.csv`, which this program does not name.
     let f = program(&mut db, SRC);
-    let items = fossil_ide::completions(&db, &[f], f, 2, after_trailing_dot(SRC, 2));
+    let items = fossil_ide::completions(&db, f, 2, after_trailing_dot(SRC, 2));
     assert!(
         labels(&items, CompletionItemKind::FIELD).is_empty(),
         "no descriptor, no columns — the editor does not invent names; got {:?}",
@@ -250,7 +250,7 @@ User : Person from users
     let mut db = host();
     let f = program(&mut db, SRC);
     let col = u32::try_from(SRC.lines().nth(2).unwrap().len()).unwrap();
-    let items = fossil_ide::completions(&db, &[f], f, 2, col);
+    let items = fossil_ide::completions(&db, f, 2, col);
     assert!(
         labels(&items, CompletionItemKind::FUNCTION).contains(&"trim"),
         "`users.name.tr|` is still a String receiver; got {:?}",
@@ -272,7 +272,7 @@ User : Person from users
 ";
     let mut db = host();
     let f = program(&mut db, SRC);
-    let items = fossil_ide::completions(&db, &[f], f, 2, after_trailing_dot(SRC, 2));
+    let items = fossil_ide::completions(&db, f, 2, after_trailing_dot(SRC, 2));
     assert!(
         items.is_empty(),
         "`nope` is not a column of the row; got {:?}",
@@ -290,7 +290,7 @@ User : Person from users
 ";
     let mut db = host();
     let f = program(&mut db, SRC);
-    let items = fossil_ide::completions(&db, &[f], f, 2, after_trailing_dot(SRC, 2));
+    let items = fossil_ide::completions(&db, f, 2, after_trailing_dot(SRC, 2));
     assert!(
         items.is_empty(),
         "a leading `.` starts nothing; got {:?}",
@@ -315,7 +315,7 @@ User : Person from users
 ";
     let mut db = host();
     let f = program(&mut db, SRC);
-    let items = fossil_ide::completions(&db, &[f], f, 2, after_trailing_dot(SRC, 2));
+    let items = fossil_ide::completions(&db, f, 2, after_trailing_dot(SRC, 2));
     assert!(
         items.is_empty(),
         "a call result is not a receiver this resolves; got {:?}",
@@ -344,7 +344,7 @@ User : Person from knows
         ],
     );
     let f = SourceFile::new(&db, SRC.to_string(), "receiver.fossil".to_string());
-    let items = fossil_ide::completions(&db, &[f], f, 2, after_trailing_dot(SRC, 2));
+    let items = fossil_ide::completions(&db, f, 2, after_trailing_dot(SRC, 2));
     let fields: Vec<(&str, Option<&str>)> = items
         .iter()
         .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
@@ -372,7 +372,7 @@ User : Person from knows
     let mut db = host();
     register_inferred(&mut db, "knows.csv", &[("first name", Primitive::String)]);
     let f = SourceFile::new(&db, SRC.to_string(), "receiver.fossil".to_string());
-    let items = fossil_ide::completions(&db, &[f], f, 2, after_trailing_dot(SRC, 2));
+    let items = fossil_ide::completions(&db, f, 2, after_trailing_dot(SRC, 2));
     let functions = labels(&items, CompletionItemKind::FUNCTION);
     assert!(functions.contains(&"trim"), "{functions:?}");
     assert!(labels(&items, CompletionItemKind::FIELD).is_empty());

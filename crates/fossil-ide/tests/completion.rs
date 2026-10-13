@@ -78,7 +78,7 @@ fn shape_property_names_are_offered_when_shape_resolves() {
     // and the item it found was labelled `http://example.org/name`: an
     // expression position, and a label no `PropertyLhs := IDENT` accepts.
     // `tests/completion_property_key.rs` is the whole of that measurement.
-    let items = fossil_ide::completions(&db, &[f], f, 3, 8);
+    let items = fossil_ide::completions(&db, f, 3, 8);
 
     let shape_prop = items
         .iter()
@@ -125,7 +125,7 @@ User : Person from users
     // this pass for the wrong reason: no position but that one offers a shape
     // property at all now, so an expression position is silent whether the
     // document resolves or not.
-    let items = fossil_ide::completions(&db, &[f], f, 2, 8);
+    let items = fossil_ide::completions(&db, f, 2, 8);
 
     assert!(
         !items
@@ -138,7 +138,7 @@ User : Person from users
     // offers no catalogued row either now — `PropertyLhs := IDENT` and every
     // row is dotted — so asking here would prove the catalogue silent for the
     // narrowing's reason and read as if the document were the reason.
-    let header = fossil_ide::completions(&db, &[f], f, 1, 3);
+    let header = fossil_ide::completions(&db, f, 1, 3);
     assert!(
         header.iter().any(|i| i.label == "str.trim"),
         "stdlib completions must still be offered; labels = {:?}",
@@ -166,7 +166,7 @@ fn a_relation_receiver_offers_the_verbs_and_no_other_row() {
     let f = file(&mut db, SRC);
     // `    name = users.name` is line 3; the `.` is at column 16, so 17 is the
     // first character of the member.
-    let items = fossil_ide::completions(&db, &[f], f, 3, 17);
+    let items = fossil_ide::completions(&db, f, 3, 17);
     let fns: Vec<&str> = items
         .iter()
         .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
@@ -202,7 +202,7 @@ User : Person from users
     let mut db = host_db();
     let f = file(&mut db, WITH_STR);
     // `    name = str.` — the `.` is the last character of line 2, column 14.
-    let items = fossil_ide::completions(&db, &[f], f, 2, 15);
+    let items = fossil_ide::completions(&db, f, 2, 15);
     let fns: Vec<&str> = items
         .iter()
         .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
@@ -228,7 +228,7 @@ users := io.
 ";
     let mut db = host_db();
     let f = file(&mut db, WITH_IO);
-    let items = fossil_ide::completions(&db, &[f], f, 0, 12);
+    let items = fossil_ide::completions(&db, f, 0, 12);
     let fns: Vec<&str> = items
         .iter()
         .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
@@ -252,7 +252,7 @@ User : Person from users
 ";
     let mut db = host_db();
     let f = file(&mut db, UNKNOWN);
-    let items = fossil_ide::completions(&db, &[f], f, 2, 18);
+    let items = fossil_ide::completions(&db, f, 2, 18);
     assert!(
         !items
             .iter()
@@ -275,7 +275,7 @@ fn the_bare_catalogue_is_whole_and_sorted() {
     let mut db = host_db();
     let f = file(&mut db, SRC);
     // Line 2 is `User : Person from users`; column 3 is inside `User`.
-    let items = fossil_ide::completions(&db, &[f], f, 2, 3);
+    let items = fossil_ide::completions(&db, f, 2, 3);
     let fns: Vec<&str> = items
         .iter()
         .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
@@ -289,7 +289,7 @@ fn the_bare_catalogue_is_whole_and_sorted() {
     sorted.sort_unstable();
     assert_eq!(fns, sorted, "ordered by label, always");
     // The same call twice is the same list. This is what was false.
-    let again: Vec<String> = fossil_ide::completions(&db, &[f], f, 2, 3)
+    let again: Vec<String> = fossil_ide::completions(&db, f, 2, 3)
         .into_iter()
         .map(|i| i.label)
         .collect();

@@ -709,12 +709,6 @@ impl FossilWorkspace {
         &self.db
     }
 
-    /// Snapshot of currently-open `SourceFile`s — fed to `goto_definition` /
-    /// `completions` for their workspace-wide name resolution pass.
-    pub(crate) fn open_source_files(&self) -> Vec<SourceFile> {
-        self.files.iter().map(|(_, f)| f).collect()
-    }
-
     // ----- Inferred-descriptor registration -----
 
     /// Pure-Rust mirror of [`WasmWorkspace::register_inferred_descriptor`] (the

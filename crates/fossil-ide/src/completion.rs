@@ -1,8 +1,8 @@
-//! `textDocument/completion` — three sources.
+//! `textDocument/completion` — three sources over one position.
 //!
 //! Merges three completion sources into a single `Vec<lsp_types::CompletionItem>`
-//! (the `lsp-types`-direct shape is WASM-clean, so the browser host and the LSP
-//! both consume it without a second conversion):
+//! (the `lsp-types`-direct shape is WASM-clean, so every host consumes it
+//! without a second conversion):
 //!
 //! 1. **stdlib functions**, narrowed to the cursor's RECEIVER and to its
 //!    POSITION. After `str.` the list is what a string HAS, labelled `trim`;
@@ -14,22 +14,34 @@
 //!    program writes — and no `(native-only)` tag, because every catalogued row
 //!    runs everywhere.
 //! 2. **shape properties** — the output contract of the mapping the cursor is
-//!    in, offered in the ONE position a property key can be written: the left
-//!    of a property line ([`Scope::PropertyKey`]). Each is labelled
-//!    [`fossil_graph_schema::local_name`] of its predicate IRI because that is
-//!    what `PropertyLhs := IDENT` accepts and what the checker resolves a key
-//!    against. It offered the raw `constraints[].predicate` IRI, wherever the
-//!    cursor was inside a mapping whose shape resolved.
+//!    in, offered in the ONE position a property key can be written: the start
+//!    of a body line ([`Scope::PropertyKey`]). Each is labelled with the name a
+//!    program writes for its predicate, because that is what
+//!    `PropertyLhs := IDENT` accepts and what the checker resolves a key
+//!    against.
 //! 3. **source fields** — the columns of the row the mapping reads, when the
 //!    host has registered a descriptor for it AND the receiver is the name that
-//!    row is addressed by. It fired on every `.` inside a mapping instead, so
-//!    the columns were offered as the members of a string and of a name that
-//!    denotes nothing.
+//!    row is addressed by.
 //!
 //! All three read ONE [`Scope`], resolved once per request: the rows a
 //! catalogue has for a receiver, the columns a source row has and *whether a
 //! key can be written here at all* are answers to the same question — where
-//! the cursor is — and asking it three times is how they came to disagree.
+//! the cursor is — and three sources asking it separately would disagree.
+//!
+//! # How the position is read
+//!
+//! As `ty_ide`'s completion reads it: a member position from the TOKENS before
+//! the cursor, and everything else from the tree and the semantic layer. A
+//! half-typed member (`users.`, `users.wh`) is where the parser's recovery tree
+//! is least like the program being written — `users.` at the end of a line
+//! takes the next line's first name as its member — while the token before the
+//! `.` is exactly what was typed. A key position is a node (`PROPERTY_LHS`) or,
+//! before any key is typed, the start of an indented body line; a name the
+//! program binds is the def map's ([`fossil_hir::def_map::DefMap::resolve`]),
+//! the resolver every other feature asks.
+//!
+//! The program is one file and the documents it names, so completion takes
+//! the file and nothing beside it.
 //!
 //! # Domain + WASM boundary
 //!
@@ -40,51 +52,44 @@
 //! `shape_document`, which the HOST must have registered (see
 //! [`fossil_hir::documents`]). Both dependencies are file-keyed, not
 //! per-mapping: ten mappings checked against one document share one decode, so
-//! no new per-mapping key appears and the `body()` fan-out is unchanged
+//! no new per-mapping key appears and the `body()` fan-out is unchanged.
 //! All type rendering routes through
 //! [`fossil_hir::render_ty_kind`], so `TyKind::Unknown` never leaks into a
 //! `detail` string: internal inference state must not reach the user.
 
 use fossil_base::SourceFile;
 use fossil_graph_schema::Primitive;
-use fossil_hir::def_map::MappingLoc;
+use fossil_hir::def_map::{MappingLoc, Namespace, def_map, mapping_of};
 use fossil_hir::render_ty_kind;
 use fossil_hir::shapes::resolve_target_shape;
 use fossil_hir::stdlib::{FunctionRegistry, Receiver, ScalarTy};
 use fossil_hir::ty::{Record, Ty, TyKind};
-use fossil_syntax::{SyntaxKind, SyntaxToken};
+use fossil_syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 use lsp_types::{CompletionItem, CompletionItemKind, CompletionItemTag};
 use smol_str::SmolStr;
 
-use crate::position::{node_at_position, token_at_position};
+use crate::position::{line_index, node_at_position, offset, position, token_at_position};
 
-/// Compute completion items at an LSP position, merging the three sources.
+/// Compute completion items at an LSP position in `file`, merging the three
+/// sources.
 ///
-/// `files` is the host's open-file set (for cross-file prefix resolution);
-/// `file` is the file the cursor is in. No source is unconditional — this
-/// sentence said the stdlib and prefix ones were, and there is no prefix source
-/// left and no position at which the whole catalogue is the honest answer to a
-/// dot. A program that names no output shape document contributes no
-/// shape-property items; a cursor outside a key position contributes none
-/// either.
+/// No source is unconditional: there is no position at which the whole
+/// catalogue is the honest answer to a dot. A mapping whose type does not
+/// resolve contributes no shape-property items; a cursor outside a key
+/// position contributes none either.
 ///
 /// `line` / `character` are UTF-16 LSP coordinates.
 #[must_use]
 pub fn completions(
     db: &dyn fossil_base::Db,
-    // The open-file set. It fed `prefix_completions`, the one source that was
-    // cross-file; nothing left here reads past `file`, and the parameter stays
-    // for the next cross-file source (a type declared in a sibling file).
-    _files: &[SourceFile],
     file: SourceFile,
     line: u32,
     character: u32,
 ) -> Vec<CompletionItem> {
     let mut items = Vec::new();
 
-    // ONE receiver question, asked once, read by the two sources that have a
-    // receiver. It was asked by `stdlib_completions` alone and
-    // `source_field_completions` did not ask at all — see [`Scope`].
+    // ONE position question, asked once, read by all three sources — see
+    // [`Scope`].
     let registry = fossil_hir::stdlib::stdlib();
     let scope = scope_at_cursor(db, file, line, character, registry);
 
@@ -98,15 +103,12 @@ pub fn completions(
 /// Where the cursor is — which is what decides both *which rows* are offered
 /// and *what they are labelled*, taken in one place.
 ///
-/// It began as the receiver question alone («what does the head to the left of
-/// the dot name?») and every variant but one still answers it. All three
-/// sources read it: the catalogue's rows, the source row's COLUMNS and the
-/// shape's property KEYS are answers to one question, and each source that
-/// asked it separately got it wrong. The second fired on every `.` inside a
-/// mapping and offered the row's columns as the members of a string, of an
-/// unknown name, and of a call's result; the third asked only «is the cursor
-/// inside a mapping whose shape resolves», which is true of the header, of the
-/// right of an `=`, and of the member position after a dot.
+/// Every variant but one answers the receiver question — what does the head to
+/// the left of the dot name? — and the one that does not is the key position.
+/// All three sources read it: the catalogue's rows, the source row's COLUMNS
+/// and the shape's property KEYS are answers to one question. A source that
+/// asked «is the cursor inside a mapping» instead would fire on the header, on
+/// the right of an `=` and after a dot, where no key can be written.
 enum Scope<'db> {
     /// No dot: the cursor is not in a member position, so the catalogue is
     /// offered whole and spelled in full (`str.trim`). Nothing narrower is
@@ -116,12 +118,11 @@ enum Scope<'db> {
     /// position `PropertyLhs := IDENT` puts a property key, carrying the
     /// mapping whose target shape declares which keys those are.
     ///
-    /// It is a POSITION and not a receiver, which is why the shape source could
-    /// not be narrowed by the receiver question the other variants answer. The
-    /// CST is what says so: the cursor's token is an `IDENT` whose parent is a
-    /// `PROPERTY_LHS`. An `AT_ATTR` parented the same way is the identity line
-    /// (`SubjectAssign := AT_ATTR ASSIGN Expression`, a different production
-    /// sharing the node), and `@subject` is not a key.
+    /// It is a POSITION and not a receiver, so no receiver question can find
+    /// it; [`key_position`] reads it off the tree. An `AT_ATTR` under a
+    /// `PROPERTY_LHS` is the identity line (`SubjectAssign := AT_ATTR ASSIGN
+    /// Expression`, a different production sharing the node), and `@subject`
+    /// is not a key.
     ///
     /// It is the one variant where the shape source speaks and the stdlib one
     /// is silent: the catalogue is dotted and a key is a bare name.
@@ -155,23 +156,12 @@ enum Scope<'db> {
 /// Source 1: the standard library, narrowed to the cursor's RECEIVER — and,
 /// where there is no receiver to narrow by, to its POSITION.
 ///
-/// It was not narrowed at all: every row of `stdlib_default` was pushed
-/// wherever completion fired, so a `.` after a relation offered 51 items — 13
-/// `str.*` and 3 `io.*` among them — in `HashMap` iteration order, which three
-/// consecutive runs gave three different spellings of. `RegistryEntry` has
-/// carried `recv` and `member` since the receiver replaced dispatch-by-string,
-/// and nothing in this crate read either field.
-///
 /// **The position, which the receiver question cannot ask.** A property key is
 /// `PropertyLhs := IDENT` (grammar.bnf) — a bare name — and every catalogued row
-/// is dotted, so none of them is writable there and
-/// [`Scope::PropertyKey`] offers none. That was the last position left
-/// unnarrowed after the shape source was repaired: the two sources were
-/// offering different unwritable spellings of the same wrong thing in the same
-/// place, 51 rows and 2 raw IRIs. `tests/completion_property_key.rs` has both
-/// numbers and
-/// `every_position_that_is_not_a_key_keeps_its_catalogue` pins the six
-/// positions the cut must not reach.
+/// is dotted, so none of them is writable there and [`Scope::PropertyKey`]
+/// offers none. `tests/completion_property_key.rs`'s
+/// `every_position_that_is_not_a_key_keeps_its_catalogue` pins the positions
+/// that cut must not reach.
 ///
 /// Two things follow from knowing the receiver, and both are here:
 ///
@@ -185,12 +175,12 @@ enum Scope<'db> {
 /// emitter sorts its groups for the same reason (`crates/xtask/src/reference.rs`,
 /// `by_head`).
 ///
-/// **Now covered:** a column. `users.name.` reads `name`'s type off the row
+/// **Covered:** a column. `users.name.` reads `name`'s type off the row
 /// [`fossil_hir::infer::source_row_inferred`] built and offers the members of
 /// THAT — the 13 `str.*` for a String, nothing for an Integer, because the
 /// catalogue has no row whose receiver is any scalar but String.
 ///
-/// **Still not covered:** a receiver that is an EXPRESSION.
+/// **Not covered:** a receiver that is an EXPRESSION.
 /// `users.name.trim().` has a `)` to the left of its dot, and typing it needs
 /// an id the body arena does not mint — one entry per property VALUE, so a
 /// sub-expression has none (`crate::hover` records the same limit for the same
@@ -204,11 +194,7 @@ fn stdlib_completions(
     // decided while selecting rather than guessed afterwards from the name.
     let mut rows: Vec<(String, &fossil_hir::stdlib::RegistryEntry)> = match scope {
         // A key position is `PropertyLhs := IDENT` and no catalogued row is one:
-        // `str.trim` is no more writable there than the raw predicate IRI the
-        // shape source used to offer. Both sources were making the same
-        // mistake, and this arm shared `Scope::Catalogue`'s while the shape
-        // source was repaired alone — 51 items, dotted, offered where none of
-        // them parses.
+        // `str.trim` is no more writable there than a predicate IRI.
         Scope::Nothing | Scope::PropertyKey(_) => Vec::new(),
         Scope::Catalogue => registry.iter().map(|e| (e.name.to_string(), e)).collect(),
         // A row binding is a relation as well as a row — see [`Scope::Row`].
@@ -257,9 +243,9 @@ fn stdlib_completions(
 
 /// Which rows the cursor's position selects.
 ///
-/// The key position is decided first and structurally — the CST says whether
-/// the cursor is on a `PROPERTY_LHS` — because it is the one variant that is
-/// not a receiver, and because a key has no dot to reason from.
+/// The key position is decided first and structurally ([`key_position`])
+/// because it is the one variant that is not a receiver, and because a key has
+/// no dot to reason from.
 ///
 /// After that, the head is the token before the dot, and there are two ways to
 /// be after one: the cursor is ON the dot (completion fired the moment `.` was
@@ -277,9 +263,7 @@ fn scope_at_cursor<'db>(
     let Some(token) = token_at_position(db, file, line, character) else {
         return Scope::Catalogue;
     };
-    if at_property_key(&token)
-        && let Some(mapping) = enclosing_mapping_loc(db, file, line, character)
-    {
+    if let Some(mapping) = key_position(db, file, &token, line, character) {
         return Scope::PropertyKey(mapping);
     }
     let dot = if token.kind() == SyntaxKind::DOT {
@@ -319,9 +303,8 @@ fn scope_at_cursor<'db>(
     }
 
     // The row the enclosing mapping's `from` clause bound, and the two things
-    // the head can be against it. This is the INFERENCE the previous commit
-    // left open: `users.name.` is a member of the type of the COLUMN `name`,
-    // and the type is on the row the host's descriptor produced.
+    // the head can be against it: `users.name.` is a member of the type of the
+    // COLUMN `name`, and the type is on the row the host's descriptor produced.
     if let Some((binding, record)) = enclosing_row(db, file, line, character) {
         if !quoted_column && head == binding {
             return Scope::Row(record);
@@ -338,19 +321,86 @@ fn scope_at_cursor<'db>(
         }
     }
 
-    // A `:=` binding is a relation, so its members are the verbs. The symbol
-    // index is the file's own table of them and is a plain CST walk — no Salsa
-    // key is added here.
+    // A `:=` binding is a relation, so its members are the verbs — and which
+    // names are bindings is the def map's to say.
     if quoted_column {
         return Scope::Nothing;
     }
-    let indexed_source = crate::SymbolIndex::build(db, file)
-        .of_kind(crate::SymbolKind::Source)
-        .any(|e| e.name == head);
-    if indexed_source {
+    if def_map(db, file)
+        .resolve(db, Namespace::Value, &head)
+        .is_some()
+    {
         return Scope::Members(Receiver::Relation);
     }
     Scope::Nothing
+}
+
+/// The mapping whose key the cursor is on, if it is on one.
+///
+/// Two positions are a key's, and the tree says both:
+///
+/// - the name on the left of a property line — `PropertyLhs := IDENT`
+///   (`grammar.bnf`), which the parser gives a `PROPERTY_LHS` node of its own;
+/// - the START of a body line, before a key is typed — a fresh line after
+///   `Enter`, or the column before a key's first character. Lines inside a
+///   mapping are statements at the body's indentation, so a token written
+///   where the cursor is would be the first of a `Property`.
+///
+/// The second is read from the cursor and not from the node it lands in: the
+/// parser attaches a line's indent to whatever came before it — the header's
+/// `from` expression, or the previous property's value — so the node says
+/// nothing about the line the cursor is on. What does say it is that the
+/// indent is all that stands before the cursor on its line, inside a
+/// `MAPPING`, at the column the body's keys are written at.
+fn key_position<'db>(
+    db: &'db dyn fossil_base::Db,
+    file: SourceFile,
+    token: &SyntaxToken,
+    line: u32,
+    character: u32,
+) -> Option<MappingLoc<'db>> {
+    let mapping = token
+        .parent_ancestors()
+        .find(|n| n.kind() == SyntaxKind::MAPPING)?;
+    let at_key =
+        at_property_key(token) || at_body_line_start(db, file, &mapping, token, line, character);
+    if !at_key {
+        return None;
+    }
+    mapping_of(db, file, &mapping)
+}
+
+/// Whether the cursor stands at the end of a body line's indentation, with
+/// nothing else before it on the line — see [`key_position`].
+fn at_body_line_start(
+    db: &dyn fossil_base::Db,
+    file: SourceFile,
+    mapping: &SyntaxNode,
+    token: &SyntaxToken,
+    line: u32,
+    character: u32,
+) -> bool {
+    let is_indent = token.kind() == SyntaxKind::WHITESPACE
+        && token
+            .prev_token()
+            .is_some_and(|t| t.kind() == SyntaxKind::NEWLINE);
+    if !is_indent || character == 0 {
+        return false;
+    }
+    let li = line_index(db, file);
+    let Some(cursor) = offset(li, lsp_types::Position::new(line, character)) else {
+        return false;
+    };
+    if cursor != u32::from(token.text_range().end()) {
+        return false;
+    }
+    // The body's own indentation, read off its first key. A mapping with no
+    // body yet has none to match, and any indent opens it.
+    let body_column = mapping
+        .descendants()
+        .find(|n| n.kind() == SyntaxKind::PROPERTY_LHS)
+        .map(|lhs| position(li, u32::from(lhs.text_range().start())).character);
+    body_column.is_none_or(|column| column == character)
 }
 
 /// Is the cursor's token the name on the left of a property line?
@@ -358,21 +408,10 @@ fn scope_at_cursor<'db>(
 /// `PropertyLhs := IDENT` (`grammar.bnf`) — a bare name, and the only place one
 /// goes. The parser gives that name a `PROPERTY_LHS` node of its own, so this
 /// is a parent check and not a search: no scan for an `=` to the right, which
-/// is the condition that would also accept the header's `:` line and would
-/// answer wrongly for a key not yet followed by one.
-///
-/// Two positions a key COULD occupy answer `false`, and both are the CST
-/// declining to say rather than this function narrowing:
-///
-/// - a still-blank body line, whose indent the parser attaches to the PREVIOUS
-///   property's expression — indistinguishable from a value continued onto a
-///   second line;
-/// - the column immediately before a key's first character, which is the same
-///   whitespace token.
-///
-/// The first keystroke closes both. An `AT_ATTR` under the same node is
-/// `@subject`, a different production (`SubjectAssign`) sharing the node, and
-/// no property key can be written where it already stands.
+/// would also accept the header's `:` line and would answer wrongly for a key
+/// not yet followed by one. An `AT_ATTR` under the same node is `@subject`, a
+/// different production (`SubjectAssign`) sharing the node, and no property key
+/// can be written where it already stands.
 fn at_property_key(token: &SyntaxToken) -> bool {
     token.kind() == SyntaxKind::IDENT
         && token
@@ -421,10 +460,9 @@ fn qualifier(head: &SyntaxToken) -> Option<String> {
 /// **The one name, and not the scope.** A body that draws `from Adults`, where
 /// `Adults := Users.where(…)`, addresses its columns as `Users` — see
 /// `fossil_hir::ty::Rows`. Only the checker's `Rows` knows that, and only a
-/// join makes a second name addressable. Neither is reachable from here without
-/// the panic above, so a derived binding and a join alias resolve no row and
-/// offer no columns, which is what they did before this and is measured in
-/// `tests/completion_receiver_inference.rs`.
+/// join makes a second name addressable. Neither is reachable without the
+/// check's walk, so a derived binding and a join alias resolve no row and
+/// offer no columns; `tests/completion_receiver_inference.rs` measures both.
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Salsa-handle lifetime contract
 fn enclosing_row<'db>(
     db: &'db dyn fossil_base::Db,
@@ -484,22 +522,15 @@ const fn scalar_of(primitive: Primitive) -> Option<ScalarTy> {
 /// Source 2: the mapping's output contract — its target shape's predicates,
 /// under the names a program can WRITE, in the one position it can write them.
 ///
-/// It had two defects and they are independent.
-///
-/// **The label** was `constraint.predicate`, the raw predicate IRI, so every
-/// item it offered wrote a line the parser refuses: `PropertyLhs := IDENT`, and
-/// `https://shop.example/voc#email` is not one. The name is
-/// [`ResolvedShape::short_names`], the IRI's last segment: the same table
-/// [`fossil_hir::check`] resolves a written key against and the same name
-/// `OutputShapes::to_graph_schema` emits the column under, so what is offered,
-/// what compiles and what ships are one name.
+/// **The label** is [`ResolvedShape::short_names`], never the predicate IRI:
+/// `PropertyLhs := IDENT`, and `https://shop.example/voc#email` is not one. It
+/// is the same table [`fossil_hir::check`] resolves a written key against and
+/// the same name `OutputShapes::to_graph_schema` emits the column under, so
+/// what is offered, what compiles and what ships are one name.
 ///
 /// [`ResolvedShape::short_names`]: fossil_hir::shapes::ResolvedShape::short_names
 ///
-/// **The position** was «the cursor is inside a mapping whose shape resolves»,
-/// which is also true of the header, of the right-hand side of an `=`, and of
-/// the member position after a dot. It is [`Scope::PropertyKey`] and nothing
-/// else.
+/// **The position** is [`Scope::PropertyKey`] and nothing else.
 ///
 /// A predicate dropped for a short-name COLLISION is not offered: `short_names`
 /// keeps the first and reports the rest, and a name that resolves to two IRIs
@@ -543,14 +574,9 @@ fn shape_property_completions(
 
 /// Source 3: the COLUMNS of the row the receiver names.
 ///
-/// It had no receiver. The trigger was `at_field_ref_context` — «the cursor is
-/// on a `DOT` and somewhere under a `MAPPING`» — so every dot in a body got the
-/// row's columns whatever stood to its left, and the three that are not the row
-/// all got the same wrong two items: `str.` got them beside the 13 correct
-/// string members, `orders.` and `users.name.` got them and nothing else, and a
-/// leading `.` — a form `parser/expr.rs` refuses by name — got them too.
-///
-/// The receiver is [`Scope::Row`] and nothing else: the head has to be the name
+/// The receiver is [`Scope::Row`] and nothing else — not every dot inside a
+/// mapping, which would offer the row's columns after `str.`, after a column
+/// and after a leading `.`. The head has to be the name
 /// the mapping's `from` clause bound (see [`enclosing_row`] for the one name it
 /// can be, and for the two it cannot). The fields + their inferred types are
 /// [`fossil_hir::infer::source_row_inferred`]'s — the same forward-typed record
@@ -584,28 +610,18 @@ fn source_field_completions(
     }
 }
 
-/// Resolve the cursor's enclosing mapping to its
-/// [`fossil_hir::def_map::def_map`] `MappingLoc` (mirrors
-/// `hover::resolve_hover_target`'s filter-then-nth contract, without the
-/// property-level resolution).
+/// The mapping the cursor is in, as the def map keys it.
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db documents the Salsa-handle lifetime contract
 fn enclosing_mapping_loc<'db>(
     db: &'db dyn fossil_base::Db,
     file: SourceFile,
     line: u32,
     character: u32,
-) -> Option<fossil_hir::def_map::MappingLoc<'db>> {
-    let node = node_at_position(db, file, line, character)?;
-    let mut current = Some(node);
-    let mut mapping_node = None;
-    while let Some(n) = current {
-        if n.kind() == SyntaxKind::MAPPING {
-            mapping_node = Some(n);
-            break;
-        }
-        current = n.parent();
-    }
-    fossil_hir::def_map::mapping_of(db, file, &mapping_node?)
+) -> Option<MappingLoc<'db>> {
+    let node = node_at_position(db, file, line, character)?
+        .ancestors()
+        .find(|n| n.kind() == SyntaxKind::MAPPING)?;
+    mapping_of(db, file, &node)
 }
 
 /// Render a stdlib entry's signature as a `detail` string from its `'db`-free
@@ -626,8 +642,7 @@ fn render_sig(namespace: &str, entry: &fossil_hir::stdlib::RegistryEntry) -> Str
 /// surface names.
 ///
 /// A verb of the algebra shows `Rows` and `Predicate` — what completion offers
-/// for `User.` is `where(Rows, Predicate) -> Rows`, and until the catalogue
-/// could say that it offered `where(String) -> String`.
+/// for `User.` is `where(Rows, Predicate) -> Rows`.
 fn sig_name(t: fossil_hir::stdlib::SigTy) -> String {
     use fossil_hir::stdlib::SigTy;
     match t {
@@ -636,8 +651,7 @@ fn sig_name(t: fossil_hir::stdlib::SigTy) -> String {
         SigTy::Predicate => "Predicate".to_string(),
         // A position that NAMES rather than evaluates, and completion says so:
         // `select(Rows, Column)` tells a reader to write `User.id` and not an
-        // expression, which is the one thing the offer could not convey while
-        // the catalogue said every verb took a bare relation.
+        // expression.
         SigTy::Column => "Column".to_string(),
         SigTy::Binding => "Binding".to_string(),
         SigTy::Aggregate => "Aggregate".to_string(),
@@ -667,18 +681,15 @@ mod tests {
     /// The stdlib source is BARE: no auto-import edit and no tag on any row it
     /// offers, and no `prefix:` completion at all.
     ///
-    /// It said "unconditional — every catalogued entry is offered wherever the
-    /// cursor is", and that stopped being true twice: `5be2de6` gave completion
-    /// a [`Scope`], and `88091c0` gave the row binding one. The catalogue is
-    /// offered WHOLE only in [`Scope::Catalogue`] — no dot to the left of the
-    /// cursor — which is the position this fixture puts it in. After a dot the
-    /// rows are the receiver's, and after an unknown one there are none.
-    ///
+    /// The catalogue is offered WHOLE only in [`Scope::Catalogue`] — no dot to
+    /// the left of the cursor — which is the position this fixture puts it in.
+    /// After a dot the rows are the receiver's, and after an unknown one there
+    /// are none.
     #[test]
     fn stdlib_entries_are_offered_bare() {
         let db = db();
         let f = file(&db, "Users : Person from u\n    name = u.name\n");
-        let items = completions(&db, &[f], f, 0, 0);
+        let items = completions(&db, f, 0, 0);
         let trim = items
             .iter()
             .find(|i| i.label == "str.trim")
@@ -691,7 +702,7 @@ mod tests {
         );
         assert!(
             trim.tags.is_none(),
-            "no entry is native-only any more; got {:?}",
+            "no entry is native-only; got {:?}",
             trim.tags,
         );
         assert!(
@@ -703,9 +714,8 @@ mod tests {
     /// Source 3: with a host-registered `InferredDescriptor`, the ROW BINDING's
     /// dot offers the source's columns as Field completions.
     ///
-    /// `u.` is the position they belong to, and the only one: the trigger was
-    /// «a `DOT` under a `MAPPING`», which a refused leading `.` still is, so
-    /// the columns were offered where the language cannot write anything.
+    /// `u.` is the position they belong to, and the only one: a leading `.` is
+    /// also a `DOT` under a `MAPPING`, and the language writes nothing there.
     #[test]
     fn offers_source_fields_after_the_row_binding_s_dot() {
         use fossil_base::sources::{InferredColumn, InferredDescriptor};
@@ -733,7 +743,7 @@ mod tests {
         let src = "u := io.csv(\"u.csv\")\nUser : Person from u\n    name = u.\n";
         let f = file(&db, src);
         // The cursor an editor puts one character past the `.` it fired on.
-        let items = completions(&db, &[f], f, 2, 13);
+        let items = completions(&db, f, 2, 13);
         let fields: Vec<&str> = items
             .iter()
             .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
@@ -753,7 +763,7 @@ mod tests {
         let db = db();
         let src = "u := io.csv(\"u.csv\")\nUser : Person from u\n    name = u.\n";
         let f = file(&db, src);
-        let items = completions(&db, &[f], f, 2, 13);
+        let items = completions(&db, f, 2, 13);
         assert!(
             !items.iter().any(|i| i.label == "name" || i.label == "age"),
             "no source fields should be offered without a descriptor",
@@ -765,7 +775,7 @@ mod tests {
     fn no_unknown_leaks_into_detail() {
         let db = db();
         let f = file(&db, "User : ex:Person from u\n");
-        let items = completions(&db, &[f], f, 0, 0);
+        let items = completions(&db, f, 0, 0);
         for i in &items {
             let d = i.detail.as_deref().unwrap_or("");
             assert!(

@@ -1,8 +1,8 @@
 /**
  * Go to definition — and the half of it that is not a cursor move.
  *
- * `fossil_ide::goto_definition` recognises four positions, and **two of them
- * leave the file**: a shape name in a mapping header resolves into the shape
+ * `fossil_ide::goto_definition` resolves every name a program binds, and **two
+ * kinds leave the file**: an imported type's name resolves into the shape
  * document, and so does a property key. That is not an edge case in a mapping
  * language, it is the common one — the whole point is that the two ends of a
  * program are written in two files by two people. So this extension cannot

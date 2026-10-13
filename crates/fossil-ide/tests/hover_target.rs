@@ -48,7 +48,7 @@ fn host_db() -> FossilDb {
 }
 
 /// The introspected `users` row, registered by the HOST before the compile —
-/// what the browser's `registerProfile` does for real. Its `name` column is
+/// what the browser's `describe` does for real. Its `name` column is
 /// `Integer`; see `SHEX_SRC` for why it is not `String` any more.
 fn register_users(db: &mut dyn fossil_base::Db) {
     use fossil_base::sources::{InferredColumn, InferredDescriptor};
