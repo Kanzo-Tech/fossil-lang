@@ -408,7 +408,7 @@ impl Checker<'_> {
     }
 
     /// A constant tag — `"x"@en`, or `Row.x.lang("en")` — outside the
-    /// languages the shape admits (`sh:languageIn`, a ShEx language set) is
+    /// languages the shape admits (`sh:languageIn`, a `ShEx` language set) is
     /// refused here; a tag read from a column is the writer's to check.
     fn check_constant_language(&mut self, expr_id: ExprId, name: &SmolStr, value: &HirExpr) {
         let tag = match value {

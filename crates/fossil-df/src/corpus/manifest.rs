@@ -123,7 +123,7 @@ pub struct VertexTable {
     /// The type's IRI, when the program's shape document gives one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub iri: Option<String>,
-    /// The type's annotations — ShEx 2.1's `Annotation` (§5.9), as its shape
+    /// The type's annotations — `ShEx` 2.1's `Annotation` (§5.9), as its shape
     /// or its declaration carries them. Absent when there is none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub annotations: Vec<Annotation>,

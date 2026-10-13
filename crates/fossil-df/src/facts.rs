@@ -16,6 +16,10 @@
 //! before it, and a profile that does not fit is `run/over-budget` like any
 //! other — before `fossil.json`, so no corpus is committed without its facts.
 
+// `pub(crate)` and not `pub`: `unreachable_pub` holds the crate's surface to
+// what it exports, and this module exports nothing.
+#![allow(clippy::redundant_pub_crate)]
+
 use std::sync::Arc;
 
 use datafusion::arrow::array::{Array, RecordBatch, StringArray};
@@ -27,7 +31,7 @@ use datafusion::error::{DataFusionError, Result};
 use datafusion::functions_aggregate::expr_fn::{count, count_distinct, max, min};
 use datafusion::logical_expr::{Expr, JoinType, cast as cast_expr};
 use datafusion::prelude::{DataFrame, SessionContext, lit};
-use fossil_profile::{Ask, Options, Profiler, Relation, Rows, Table, TOP_VALUES};
+use fossil_profile::{Ask, Options, Profiler, Relation, Rows, TOP_VALUES, Table};
 
 /// One table as the writer wrote it, to be counted.
 #[derive(Debug)]
@@ -96,7 +100,10 @@ pub(crate) async fn count_written(ctx: &SessionContext, tables: &[Written]) -> R
             .into_iter()
             .map(|s| {
                 (
-                    s.candidate_keys.into_iter().map(|k| k.to_string()).collect(),
+                    s.candidate_keys
+                        .into_iter()
+                        .map(|k| k.to_string())
+                        .collect(),
                     s.columns,
                 )
             })
@@ -203,11 +210,13 @@ async fn render(ctx: &SessionContext, ask: &Ask) -> Result<DataFrame> {
                 column("__v").sort(true, false),
             ])?
             .limit(0, Some(TOP_VALUES)),
-        Ask::Inclusion { .. } | Ask::Describe { .. } | Ask::Sample { .. } => Err(DataFusionError::Plan(
-            "a written table's columns are known, none of its rows is kept, and an inclusion \
+        Ask::Inclusion { .. } | Ask::Describe { .. } | Ask::Sample { .. } => {
+            Err(DataFusionError::Plan(
+                "a written table's columns are known, none of its rows is kept, and an inclusion \
              is two counts"
-                .to_string(),
-        )),
+                    .to_string(),
+            ))
+        }
     }
 }
 

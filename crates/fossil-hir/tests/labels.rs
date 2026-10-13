@@ -53,7 +53,12 @@ fn problems(src: &str) -> Vec<Problem> {
         .iter()
         .map(|d| d.problem.clone())
         .collect();
-    out.extend(lower_to_hir(&db, file).diagnostics(&db).iter().map(|d| d.problem.clone()));
+    out.extend(
+        lower_to_hir(&db, file)
+            .diagnostics(&db)
+            .iter()
+            .map(|d| d.problem.clone()),
+    );
     for m in def_map(&db, file).mappings(&db) {
         out.extend(
             fossil_hir::body::body(&db, *m)
@@ -81,20 +86,31 @@ Laureates : Laureate from rows
     )
 }
 
-/// `@annotation` lowers to ShEx's Annotation on the shape and on the field, in
+/// `@annotation` lowers to `ShEx`'s Annotation on the shape and on the field, in
 /// written order, the object a plain or a tagged string; a `LangString` field
 /// is a literal of `rdf:langString`.
 #[test]
 fn an_annotation_lowers_onto_the_type_and_the_field_it_is_written_above() {
     let (db, file) = open(&mapping("rows.name.lang(rows.lang)"));
-    let shapes = program_shapes(&db, file).expect("reads").expect("has types");
-    let laureate = shapes.lookup("https://schema.org/Person").expect("the type");
+    let shapes = program_shapes(&db, file)
+        .expect("reads")
+        .expect("has types");
+    let laureate = shapes
+        .lookup("https://schema.org/Person")
+        .expect("the type");
     assert_eq!(
         laureate.annotations,
-        [Annotation::literal(RDFS_LABEL, "Nobel laureate", Some("en"))]
+        [Annotation::literal(
+            RDFS_LABEL,
+            "Nobel laureate",
+            Some("en")
+        )]
     );
     let name = &laureate.properties[0];
-    assert_eq!(name.term, Some(Term::Literal(Some(RDF_LANG_STRING.to_string()))));
+    assert_eq!(
+        name.term,
+        Some(Term::Literal(Some(RDF_LANG_STRING.to_string())))
+    );
     assert!(name.annotations.is_empty());
     let alias = &laureate.properties[1];
     assert_eq!(
@@ -160,11 +176,17 @@ Laureates : Laureate from rows
     );
     assert_eq!(problems(&src).iter().filter(|p| bad(p)).count(), 1);
     assert_eq!(
-        problems(&mapping("\"x\"@abcdefghi")).iter().filter(|p| bad(p)).count(),
+        problems(&mapping("\"x\"@abcdefghi"))
+            .iter()
+            .filter(|p| bad(p))
+            .count(),
         1
     );
     assert_eq!(
-        problems(&mapping("rows.name.lang(\"abcdefghi\")")).iter().filter(|p| bad(p)).count(),
+        problems(&mapping("rows.name.lang(\"abcdefghi\")"))
+            .iter()
+            .filter(|p| bad(p))
+            .count(),
         1
     );
 }
@@ -182,8 +204,10 @@ fn a_prefixed_name_is_refused_naming_the_iri_it_abbreviates() {
         written: "rdfs:label".to_string(),
         expands_to: RDFS_LABEL.to_string(),
     }));
-    let src = mapping("rows.name.lang(rows.lang)")
-        .replace("\"https://schema.org/alternateName\"", "\"schema:alternateName\"");
+    let src = mapping("rows.name.lang(rows.lang)").replace(
+        "\"https://schema.org/alternateName\"",
+        "\"schema:alternateName\"",
+    );
     assert!(problems(&src).contains(&Problem::PrefixedIri {
         written: "schema:alternateName".to_string(),
         expands_to: "http://schema.org/alternateName".to_string(),

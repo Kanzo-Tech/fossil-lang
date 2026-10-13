@@ -57,7 +57,8 @@ pub mod span;
 
 pub use problem::{CODES, Failure, Foreign, Problem, Related, Severity, TEMPLATES};
 pub use shapes::{
-    Occurs, language_matches, OutputShapes, PropertyConstraint, Rejection, SUBJECT_COLUMN, Shape, local_name,
+    Occurs, OutputShapes, PropertyConstraint, Rejection, SUBJECT_COLUMN, Shape, language_matches,
+    local_name,
 };
 pub use span::Span;
 
@@ -113,7 +114,7 @@ pub struct Property {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub annotations: Vec<Annotation>,
     /// For a [`Primitive::LangString`], the basic language ranges a value's
-    /// tag must match (RFC 4647 §3.3.1) — SHACL's `sh:languageIn`, a ShEx
+    /// tag must match (RFC 4647 §3.3.1) — SHACL's `sh:languageIn`, a `ShEx`
     /// language value set. Empty is any tag.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub languages: Vec<String>,
@@ -307,26 +308,26 @@ pub const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
 /// `rdfs:comment` — the one predicate a description has in a corpus.
 pub const RDFS_COMMENT: &str = "http://www.w3.org/2000/01/rdf-schema#comment";
 
-/// A ShEx 2.1 `Annotation` (§5.9): a predicate and an RDF object, about a
-/// type, a field or a relation — never about the data. ShExJ's shape, with one
+/// A `ShEx` 2.1 `Annotation` (§5.9): a predicate and an RDF object, about a
+/// type, a field or a relation — never about the data. `ShExJ`'s shape, with one
 /// word changed: a literal's datatype IRI is `datatype`, the word a corpus
-/// column already uses for it, where ShExJ writes `type`
+/// column already uses for it, where `ShExJ` writes `type`
 /// (`/docs/design/labels`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Annotation {
     /// The predicate, a whole IRI.
     pub predicate: String,
-    /// ShExJ's `objectValue`: an IRI as a bare string, or a literal.
+    /// `ShExJ`'s `objectValue`: an IRI as a bare string, or a literal.
     pub object: AnnotationObject,
 }
 
-/// An annotation's object — ShExJ's `objectValue`.
+/// An annotation's object — `ShExJ`'s `objectValue`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum AnnotationObject {
     /// An IRI, written as a bare string.
     Iri(String),
-    /// A literal: ShExJ's `ObjectLiteral`.
+    /// A literal: `ShExJ`'s `ObjectLiteral`.
     Literal(ObjectLiteral),
 }
 
@@ -339,7 +340,7 @@ pub struct ObjectLiteral {
     /// The BCP 47 tag of a language-tagged string.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub language: Option<String>,
-    /// The datatype IRI of a typed literal; ShExJ's `type`.
+    /// The datatype IRI of a typed literal; `ShExJ`'s `type`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub datatype: Option<String>,
 }

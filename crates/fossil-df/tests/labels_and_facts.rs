@@ -44,8 +44,16 @@ fn a_lang_string_is_a_property_table_with_a_language_column() {
     }
     let root = corpus.materialise();
     assert_eq!(
-        native::column(root.path(), "property/Person_name.parquet", "name || '@' || lang"),
-        ["Albert Einstein@en", "Maria Skłodowska-Curie@pl", "Marie Curie@en"]
+        native::column(
+            root.path(),
+            "property/Person_name.parquet",
+            "name || '@' || lang"
+        ),
+        [
+            "Albert Einstein@en",
+            "Maria Skłodowska-Curie@pl",
+            "Marie Curie@en"
+        ]
     );
     assert_eq!(
         native::column(root.path(), "property/Prize_motivation.parquet", "lang"),
@@ -55,7 +63,7 @@ fn a_lang_string_is_a_property_table_with_a_language_column() {
 }
 
 /// The annotations are carried onto the type, the field and the relation,
-/// ShEx's Annotation as written.
+/// `ShEx`'s Annotation as written.
 #[test]
 fn annotations_reach_the_manifest() {
     let manifest = labels().manifest();
@@ -83,7 +91,11 @@ fn annotations_reach_the_manifest() {
         [Annotation::literal(RDFS_LABEL, "awarded", Some("en"))]
     );
     let text = String::from_utf8(
-        labels().files.get("fossil.json").cloned().expect("fossil.json"),
+        labels()
+            .files
+            .get("fossil.json")
+            .cloned()
+            .expect("fossil.json"),
     )
     .unwrap();
     assert!(
@@ -118,7 +130,10 @@ fn the_writer_counts_what_it_wrote() {
     assert_eq!(category.max_value.as_deref(), Some("physics"));
     assert_eq!(category.top_values.len(), 1);
     assert_eq!(
-        (category.top_values[0].value.as_str(), category.top_values[0].count),
+        (
+            category.top_values[0].value.as_str(),
+            category.top_values[0].count
+        ),
         ("physics", 2)
     );
     let motivation = &manifest
@@ -157,9 +172,9 @@ fn a_per_row_tag_that_is_not_bcp_47_refuses_the_run() {
         "laureate,lang,name\n6,en,Marie Curie\n26,abcdefghi,Albert Einstein\n",
     )
     .expect("names");
-    let refused = native::run_dir(dir.path(), "labels.fossil", &[])
-        .err()
-        .expect("the run is refused");
+    let Err(refused) = native::run_dir(dir.path(), "labels.fossil", &[]) else {
+        panic!("the run is refused");
+    };
     assert!(refused.contains("abcdefghi"), "{refused}");
     assert!(refused.contains("not a well-formed BCP 47"), "{refused}");
 }

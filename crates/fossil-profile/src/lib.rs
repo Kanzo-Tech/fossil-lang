@@ -588,7 +588,8 @@ impl Profiler {
     /// hand out now: either the profile is done, or the phase waits on answers
     /// still out.
     pub fn next_query(&mut self) -> Option<Query> {
-        self.next_ask().map(|(id, ask)| Query { id, sql: ask.sql() })
+        self.next_ask()
+            .map(|(id, ask)| Query { id, sql: ask.sql() })
     }
 
     /// The next query to run, as data, for a host that renders it itself.
@@ -740,9 +741,7 @@ impl Profiler {
             .columns
             .iter()
             .zip(&state.stats)
-            .filter(|(c, s)| {
-                keyable(c.primitive) && s.null_count == 0 && s.distinct_count == rows
-            })
+            .filter(|(c, s)| keyable(c.primitive) && s.null_count == 0 && s.distinct_count == rows)
             .map(|(c, _)| c.name.clone())
             .collect()
     }
@@ -1011,8 +1010,19 @@ mod tests {
             } else if q.sql.contains("count(DISTINCT \"id\")") && q.sql.contains("awards.csv") {
                 // 4 awards: ids unique, 3 laureates among them, one share repeated.
                 rows(&[&[
-                    "4", "4", "4", "1903-physics-1", "1954-chemistry-3", "3", "4", "1", "3", "2",
-                    "4", "0.25", "1.0",
+                    "4",
+                    "4",
+                    "4",
+                    "1903-physics-1",
+                    "1954-chemistry-3",
+                    "3",
+                    "4",
+                    "1",
+                    "3",
+                    "2",
+                    "4",
+                    "0.25",
+                    "1.0",
                 ]])
             } else if q.sql.contains("count(DISTINCT \"id\")") {
                 // 3 laureates, ids and names unique.

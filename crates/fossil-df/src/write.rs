@@ -278,7 +278,7 @@ pub async fn write(
             name: name.clone(),
             schema: laid.0,
             batches: laid.1,
-            columns: properties.iter().map(|p| writer_column(p)).collect(),
+            columns: properties.iter().map(writer_column).collect(),
         });
         edge_tables.push(EdgeEntry {
             name: name.clone(),
@@ -390,15 +390,14 @@ fn counted(
                 if p.role.is_some() {
                     return writer_column(p);
                 }
-                let primitive = node
-                    .properties
-                    .iter()
-                    .find(|d| d.name == p.name)
-                    .map_or(Primitive::String, |d| match d.datatype {
+                let primitive = node.properties.iter().find(|d| d.name == p.name).map_or(
+                    Primitive::String,
+                    |d| match d.datatype {
                         // The tag is beside it: the column holds the form.
                         Primitive::LangString => Primitive::String,
                         other => other,
-                    });
+                    },
+                );
                 if p.term_type.as_deref() == Some(RR_IRI) {
                     TableColumn {
                         name: p.name.as_str().into(),
@@ -506,7 +505,7 @@ fn fixed(column: &WriterColumn) -> Property {
 /// this is a size/time trade, not a format decision. Level 3 is zstd's own
 /// default. Measured 2026-09-30 on `docs/programs/shop` over 60,000 generated
 /// people and 180,000 orders, through the wasm executor: 13.47 MB uncompressed,
-/// 2.31 MB here, and no measurable change in the run's time. DuckDB-WASM reads
+/// 2.31 MB here, and no measurable change in the run's time. `DuckDB`-WASM reads
 /// it: `packages/corpus/integration/round-trip.test.ts` opens what this writes.
 const ZSTD_LEVEL: i32 = 3;
 
@@ -664,7 +663,11 @@ fn property_parquet(
         .iter()
         .map(|c| Field::new(c.name, DataType::UInt32, false))
         .chain(std::iter::once(Field::new(property, value.clone(), false)))
-        .chain(trailing.iter().map(|c| Field::new(c.name, DataType::Utf8, false)))
+        .chain(
+            trailing
+                .iter()
+                .map(|c| Field::new(c.name, DataType::Utf8, false)),
+        )
         .collect();
     let (bytes, laid) = encode(&Arc::new(Schema::new(fields)), batches, &[ENDPOINT_SRC])?;
     let properties = endpoints

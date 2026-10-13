@@ -188,9 +188,8 @@ fn unquote(text: &str) -> &str {
 /// tag: `"birth date"@en` is `("birth date", "en")`.
 #[must_use]
 pub fn split_lang_string(text: &str) -> (&str, &str) {
-    text.rfind("\"@").map_or((text, ""), |at| {
-        (unquote(&text[..=at]), &text[at + 2..])
-    })
+    text.rfind("\"@")
+        .map_or((text, ""), |at| (unquote(&text[..=at]), &text[at + 2..]))
 }
 
 impl AnnotationAttr {

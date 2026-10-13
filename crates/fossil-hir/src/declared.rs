@@ -132,7 +132,7 @@ fn lower_decl(
     })
 }
 
-/// A declaration's `@annotation`s as the vocabulary carries them — ShEx's
+/// A declaration's `@annotation`s as the vocabulary carries them — `ShEx`'s
 /// Annotation, the object a plain or a language-tagged string. A predicate
 /// written as a prefixed name and a tag that is not BCP 47 are refused, and
 /// the annotation is left out: it would carry an IRI nobody meant, or a
@@ -149,7 +149,9 @@ fn lower_annotations(
             continue;
         };
         if let Some(expands_to) = crate::terms::prefixed_name(&predicate) {
-            let at = attr.predicate().map_or_else(|| node_span(attr.syntax()), |t| token_span(&t));
+            let at = attr
+                .predicate()
+                .map_or_else(|| node_span(attr.syntax()), |t| token_span(&t));
             emit(
                 sink,
                 at,
@@ -164,7 +166,9 @@ fn lower_annotations(
         if let Some(tag) = tag.as_deref()
             && !crate::terms::well_formed_language_tag(tag)
         {
-            let at = attr.object().map_or_else(|| node_span(attr.syntax()), |t| token_span(&t));
+            let at = attr
+                .object()
+                .map_or_else(|| node_span(attr.syntax()), |t| token_span(&t));
             emit(
                 sink,
                 at,

@@ -362,7 +362,7 @@ async fn run_dir_async(
             let mut text = e.to_string();
             let mut cause = std::error::Error::source(&e);
             while let Some(c) = cause {
-                text.push_str(&format!(": {c}"));
+                text = format!("{text}: {c}");
                 cause = c.source();
             }
             text

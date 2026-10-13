@@ -42,6 +42,7 @@ pub mod descriptor;
 /// The run a host drives: one compiled program, its documents, its sources,
 /// and the corpus it writes.
 pub mod executor;
+mod facts;
 /// What a run's operators may reserve, and the compaction that keeps
 /// `DataFusion`'s count of it true.
 pub mod memory;
@@ -58,7 +59,6 @@ pub mod session;
 /// The catalog rendered for this engine: which `DataFusion` function each
 /// stdlib entry becomes, and which rows this engine cannot render.
 pub mod stdlib;
-mod facts;
 /// The corpus, written: one Parquet per table, `fossil.json` last.
 pub mod write;
 
@@ -1048,7 +1048,7 @@ fn union<'a>(sets: impl Iterator<Item = &'a [String]>) -> Vec<String> {
 ///   `uri` may be local or remote — the host owns that registration, NOT this
 ///   crate. Streaming reads preserve larger-than-RAM behaviour, so these are
 ///   never pre-materialised.
-/// - **`Provider` formats** (RDF) are NOT DataFusion-native: the host reads the
+/// - **`Provider` formats** (RDF) are NOT `DataFusion`-native: the host reads the
 ///   source bytes (fs natively, `fetch` in the browser) and registers the
 ///   decoded relation as a `MemTable` under `binding` *before* this call (see
 ///   [`register_rdf`] / [`provider_bindings`]). Here we simply scan that
@@ -1192,7 +1192,7 @@ fn source_not_found(uri: &str) -> DataFusionError {
 }
 
 /// A header's names made unique by `DuckDB`'s rule, because `DuckDB` is the
-/// engine that DESCRIBES a source (`fossil-profile`'s plan, on DuckDB-WASM in the browser)
+/// engine that DESCRIBES a source (`fossil-profile`'s plan, on `DuckDB`-WASM in the browser)
 /// and the checker types a program against what it describes: a name already
 /// taken — compared without case — becomes `name_1`, then `name_2`, and a
 /// generated name that is itself taken grows another suffix. `a|a|a_1|b|a` is

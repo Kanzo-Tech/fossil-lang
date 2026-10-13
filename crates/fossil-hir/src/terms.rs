@@ -14,7 +14,7 @@ pub fn well_formed_language_tag(tag: &str) -> bool {
     oxilangtag::LanguageTag::parse(tag).is_ok()
 }
 
-/// The prefixes of the W3C's RDFa Core Initial Context
+/// The prefixes of the W3C's `RDFa` Core Initial Context
 /// (<https://www.w3.org/2011/rdfa-context/rdfa-1.1>) and the namespaces they
 /// abbreviate. It is the list a person writing `rdfs:label` has in mind, which
 /// is why it is the list a prefixed name is recognised by. Nothing EXPANDS
@@ -70,7 +70,7 @@ const RDFA_INITIAL_CONTEXT: &[(&str, &str)] = &[
     ("xsd", "http://www.w3.org/2001/XMLSchema#"),
 ];
 
-/// When `iri` is a prefixed name — its scheme is a prefix of the RDFa Core
+/// When `iri` is a prefixed name — its scheme is a prefix of the `RDFa` Core
 /// Initial Context — the IRI it abbreviates there, which the refusal names.
 /// `None` for anything else, including every `http:` and `https:` IRI.
 #[must_use]
@@ -91,7 +91,15 @@ mod tests {
 
     #[test]
     fn a_tag_is_held_to_bcp_47() {
-        for good in ["en", "es", "pl", "en-US", "de-CH-1996", "zh-Hant-TW", "x-private"] {
+        for good in [
+            "en",
+            "es",
+            "pl",
+            "en-US",
+            "de-CH-1996",
+            "zh-Hant-TW",
+            "x-private",
+        ] {
             assert!(well_formed_language_tag(good), "{good}");
         }
         // `english-language` is well-formed — a five-to-eight letter

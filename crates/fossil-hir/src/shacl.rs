@@ -578,7 +578,7 @@ ex:Thing a sh:NodeShape ; sh:property [ sh:path ex:label ] .
     /// whose tags are the list.
     #[test]
     fn sh_name_is_a_label_and_language_in_is_the_languages() {
-        use fossil_graph_schema::{Annotation, RDFS_COMMENT, RDFS_LABEL, RDF_LANG_STRING};
+        use fossil_graph_schema::{Annotation, RDF_LANG_STRING, RDFS_COMMENT, RDFS_LABEL};
         const LABELLED: &str = r#"
 @prefix sh:   <http://www.w3.org/ns/shacl#> .
 @prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
@@ -615,7 +615,9 @@ ex:PersonShape a sh:NodeShape ;
         assert_eq!(name.datatype(), Some(Primitive::LangString));
         assert_eq!(
             name.term,
-            Some(fossil_graph_schema::Term::Literal(Some(RDF_LANG_STRING.to_string())))
+            Some(fossil_graph_schema::Term::Literal(Some(
+                RDF_LANG_STRING.to_string()
+            )))
         );
         assert_eq!(name.languages, ["en", "es"]);
     }

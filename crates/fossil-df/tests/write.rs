@@ -226,9 +226,14 @@ async fn run(
     let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor)
         .await
         .expect("the graph");
-    let result = fossil_df::write(&graph, &datafusion::prelude::SessionContext::new(), &storage, DEST)
-        .await
-        .map_err(fossil_graph_schema::Failure::from);
+    let result = fossil_df::write(
+        &graph,
+        &datafusion::prelude::SessionContext::new(),
+        &storage,
+        DEST,
+    )
+    .await
+    .map_err(fossil_graph_schema::Failure::from);
     (result, out)
 }
 

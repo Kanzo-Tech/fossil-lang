@@ -50,7 +50,7 @@ syntax_kinds! {
     NULL,
     STRING,
     /// `"birth date"@en` — `LANG_STRING := STRING LANGTAG` (grammar.bnf,
-    /// LANG_STRING): a constant `rdf:langString`, the tag touching the quote.
+    /// `LANG_STRING`): a constant `rdf:langString`, the tag touching the quote.
     LANG_STRING,
     /// The opening `"` of an interpolated string.
     ///
@@ -152,7 +152,7 @@ syntax_kinds! {
     IRI_ATTR,
     /// `@annotation("…rdf-schema#label", "birth date"@en)` — `AnnotationAttr
     /// := AT_ATTR LPAREN STRING COMMA AnnotationObject RPAREN` (grammar.bnf,
-    /// `AnnotationAttr`): a ShEx annotation, a predicate and an object, above a
+    /// `AnnotationAttr`): a `ShEx` annotation, a predicate and an object, above a
     /// `TYPE_DECL` or a `FIELD`, any number of times.
     ANNOTATION_ATTR,
     /// `String`, `Option<Date>`, `Seq<Ref<City>>` — `TypeExpr := IDENT (LT

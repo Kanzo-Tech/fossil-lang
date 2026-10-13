@@ -1126,7 +1126,10 @@ mod disambiguation {
             .map(|f| {
                 (
                     f.name().unwrap_or_default().to_string(),
-                    f.iri_attr().and_then(|a| a.iri()).unwrap_or_default().to_string(),
+                    f.iri_attr()
+                        .and_then(|a| a.iri())
+                        .unwrap_or_default()
+                        .to_string(),
                     f.annotations()
                         .filter_map(|a| a.object_value())
                         .map(|(v, t)| (v.to_string(), t.map(|t| t.to_string())))
@@ -1137,7 +1140,11 @@ mod disambiguation {
         assert_eq!(
             fields,
             [
-                ("name".to_string(), "https://schema.org/name".to_string(), vec![]),
+                (
+                    "name".to_string(),
+                    "https://schema.org/name".to_string(),
+                    vec![]
+                ),
                 (
                     "birthDate".to_string(),
                     "https://schema.org/birthDate".to_string(),

@@ -129,7 +129,7 @@ pub struct Shape {
     /// into that document's text. `None` on the same terms as
     /// [`PropertyConstraint::span`].
     pub span: Option<Span>,
-    /// The shape's annotations — ShEx's on the shape, SHACL's non-validating
+    /// The shape's annotations — `ShEx`'s on the shape, SHACL's non-validating
     /// triples on the node shape, a declaration's `@annotation` above `type`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub annotations: Vec<Annotation>,
@@ -201,7 +201,7 @@ pub struct PropertyConstraint {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub annotations: Vec<Annotation>,
     /// The basic language ranges a language-tagged value's tag must match —
-    /// SHACL's `sh:languageIn`, ShEx's language value set. Empty is any tag.
+    /// SHACL's `sh:languageIn`, `ShEx`'s language value set. Empty is any tag.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub languages: Vec<String>,
 }
@@ -209,7 +209,7 @@ pub struct PropertyConstraint {
 /// Does `tag` match one of `ranges` by RFC 4647's basic filtering (§3.3.1)?
 /// An empty list admits every tag, and `*` matches any. Tags compare without
 /// case (RFC 5646 §2.1.1). It is the one reading of `sh:languageIn` and of a
-/// ShEx language stem, which are the same thing.
+/// `ShEx` language stem, which are the same thing.
 #[must_use]
 pub fn language_matches(tag: &str, ranges: &[String]) -> bool {
     ranges.is_empty()

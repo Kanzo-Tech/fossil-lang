@@ -98,6 +98,8 @@ pub struct ShapeConstraint<'db> {
     /// The language ranges a tagged value must match —
     /// [`PropertyConstraint::languages`]. Empty is any.
     pub languages: Vec<String>,
+    /// The field's annotations — [`PropertyConstraint::annotations`].
+    pub annotations: Vec<fossil_graph_schema::Annotation>,
 }
 
 /// One predicate of a mapping's target shape, by the short name a body writes —
@@ -181,6 +183,7 @@ impl<'db> ResolvedShape<'db> {
                 occurs: c.occurs,
                 span: c.span,
                 languages: c.languages.clone(),
+                annotations: c.annotations.clone(),
             })
             .collect();
         Self {

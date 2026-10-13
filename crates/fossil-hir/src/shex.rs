@@ -120,7 +120,7 @@ pub struct ResolvedConstraint {
 
 /// Decode `ShEx`'s `(min, max)` `Option<i32>` encoding into [`Occurs`].
 ///
-/// Per [the ShEx 2.1 spec](https://shex.io/shex-semantics/), `max = -1` means
+/// Per [the `ShEx` 2.1 spec](https://shex.io/shex-semantics/), `max = -1` means
 /// "unbounded" in the JSON form, and `(None, None)` means "exactly 1" (the
 /// default). Negative `min`/`max` values other than that one `-1` shouldn't
 /// occur in a well-formed schema; they clamp to zero rather than panicking.
@@ -211,7 +211,7 @@ fn term_of(
 
 /// A value set made only of languages — `[@en @es]`, `[@en~]`, `[@~]` — as the
 /// basic language ranges it admits: a language-tagged string, whatever its
-/// tag's case (RFC 4647 basic filtering, which ShEx's stems and SHACL's
+/// tag's case (RFC 4647 basic filtering, which `ShEx`'s stems and SHACL's
 /// `sh:languageIn` share). `None` for any other value expression.
 fn language_set(value_expr: Option<&ShapeExpr>) -> Option<Vec<String>> {
     use shex_ast::{LangOrWildcard, ValueSetValue};
@@ -257,7 +257,9 @@ fn annotations_of(
                     let datatype = if language.is_some() {
                         None
                     } else {
-                        let dt = resolve_iri_ref(&lit.datatype(), prefixmap).ok()?.to_string();
+                        let dt = resolve_iri_ref(&lit.datatype(), prefixmap)
+                            .ok()?
+                            .to_string();
                         // A plain string is `xsd:string`, and says nothing more.
                         (dt != "http://www.w3.org/2001/XMLSchema#string").then_some(dt)
                     };
@@ -949,7 +951,11 @@ ex:Person {
         );
         assert_eq!(
             person.properties[1].annotations,
-            [Annotation::literal(RDFS_LABEL, "fecha de nacimiento", Some("es"))]
+            [Annotation::literal(
+                RDFS_LABEL,
+                "fecha de nacimiento",
+                Some("es")
+            )]
         );
     }
 

@@ -528,7 +528,10 @@ mod tests {
     #[test]
     fn a_tag_touching_the_quote_is_one_lang_string() {
         assert_eq!(just_kinds(r#""birth date"@en"#), vec![Token::LangString]);
-        assert_eq!(just_kinds(r#""Straße"@de-CH-1996"#), vec![Token::LangString]);
+        assert_eq!(
+            just_kinds(r#""Straße"@de-CH-1996"#),
+            vec![Token::LangString]
+        );
         // A space between is a string and an attribute, which no production
         // takes.
         assert_eq!(

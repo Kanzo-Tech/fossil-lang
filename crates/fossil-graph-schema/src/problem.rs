@@ -364,7 +364,7 @@ catalogue! {
     InvalidLanguageTag { tag: String },
 
     /// An IRI written as a prefixed name — `"rdfs:label"` — whose scheme is a
-    /// prefix of the RDFa Core Initial Context. There are no prefixes, so it
+    /// prefix of the `RDFa` Core Initial Context. There are no prefixes, so it
     /// would be an IRI whose scheme is `rdfs`; `expands_to` is the IRI meant.
     "syntax/prefixed-iri", "A prefixed name where an IRI belongs",
     #[error("`{written}` is a prefixed name, and an IRI is written whole: `{expands_to}`")]
@@ -532,7 +532,7 @@ catalogue! {
     BranchMismatch { then: String, otherwise: String },
 
     /// A constant language tag outside the languages the property's shape
-    /// admits (`sh:languageIn`, a ShEx language value set).
+    /// admits (`sh:languageIn`, a `ShEx` language value set).
     "type/language-not-allowed", "A language the shape does not admit",
     #[error("`{property}` admits {}, and `{tag}` is not one of them", code_list(.languages))]
     LanguageNotAllowed { property: String, tag: String, languages: Vec<String> },
