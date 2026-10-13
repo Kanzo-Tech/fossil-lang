@@ -108,8 +108,8 @@ fn members_of_partitions_the_catalogue() {
 
 /// The value path resolves a member by name, so an ambiguous member would make
 /// it guess. None is, and this is what says so out loud — `crate::lower`
-/// reports a second candidate as `internal/bug`, and `name/ambiguous-member`
-/// went with no row that reached it.
+/// reports a second candidate as `internal/bug`: there is no user-facing
+/// `name/ambiguous-member`, because no row could reach it.
 #[test]
 fn no_member_is_spelled_on_two_receivers() {
     let r = FunctionRegistry::stdlib_default();
@@ -224,7 +224,7 @@ fn expected_stdlib_names() -> Vec<&'static str> {
         "str.upper",
         "str.slug",
         "str.strip_html",
-        // validate/ and anon/ are GONE — see `the_deleted_names_are_gone`.
+        // No validate/ and no anon/ — see `the_deleted_names_are_gone`.
     ]
 }
 
@@ -252,10 +252,10 @@ fn catalog_is_bidirectionally_complete() {
     );
     // 6 + 5 + 6 + 12 = 29 surface functions.
     assert_eq!(catalog.len(), 29);
-    // The FOUR io/ constructors on top, not three. `io.rdf` reads rows like the
-    // other three and had no row here at all while the registry stated its `io.`
-    // half by hand — so a program writing `io.rdf(...)` in a value position got
-    // no diagnostic. The signature comes off `catalogue.bnf` with the rest now.
+    // The FOUR io/ constructors on top, `io.rdf` among them: it reads rows like
+    // the other three, and without a signature a program writing `io.rdf(...)`
+    // in a value position would get no diagnostic. The signatures come off
+    // `catalogue.bnf` with the rest.
     //
     // `io.shex` and `io.shacl` are still absent, and deliberately: they give
     // back a shape document, which `SigTy` has no spelling for.
@@ -264,10 +264,10 @@ fn catalog_is_bidirectionally_complete() {
 
 /// **Every name the language has deleted, pinned so that none can come back.**
 ///
-/// `clean/` does not exist; neither do the two functions that could not be
-/// ported honestly, the two renamed verbs' old spellings, nor the ten rows that
-/// left when the catalogue moved into `catalogue.bnf`. A deletion that is only
-/// an absence is a deletion somebody re-adds by accident.
+/// `clean/` does not exist; neither do the two functions that cannot be done
+/// honestly in SQL, the two renamed verbs' other spellings, nor the ten rows
+/// below with their reasons. A deletion that is only an absence is a deletion
+/// somebody re-adds by accident.
 #[test]
 fn the_deleted_names_are_gone() {
     let r = FunctionRegistry::stdlib_default();
@@ -281,10 +281,10 @@ fn the_deleted_names_are_gone() {
         // These two cannot be done honestly in SQL.
         "clean.normalize_unicode",
         "anon.hmac",
-        // The old spellings of the two renamed verbs.
+        // The other spellings of `where` and `select`.
         "seq.filter",
         "seq.project",
-        // ── The ten that left when the catalogue moved into the file ──────
+        // ── Ten more, each with its reason ────────────────────────────────
         //
         // Six needed `error()`, which has no DataFusion equivalent: there is no
         // way to raise from an expression, so "this value or stop the run" has
@@ -301,11 +301,11 @@ fn the_deleted_names_are_gone() {
         // Renders perfectly well and is simply not wanted: pulling a field out
         // of a line of CSV is what `io.csv` is for, and a row that re-does the
         // reader's work inside a mapping invites a program to parse its own
-        // input twice. It was `split_part`'s only user.
+        // input twice.
         "parse.csv_row",
         // The `anon.` namespace goes entirely: fossil has no anonymisation
-        // (`/docs/design/discarded`). `anon.hash` was also `sha256`'s last
-        // user, which is why `fossil-df` leaves `crypto_expressions` off.
+        // (`/docs/design/discarded`). With no `anon.hash` nothing needs
+        // `sha256`, which is why `fossil-df` leaves `crypto_expressions` off.
         "anon.hash",
         "anon.redact",
         // Rows that ran nothing or said what another says (`/docs/design/declared`).

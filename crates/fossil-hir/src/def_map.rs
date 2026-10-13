@@ -6,29 +6,21 @@
 //! source` block). Populated by the [`def_map`] Salsa query,
 //! which consumes the CST from [`fossil_syntax::parse`].
 //!
-//! # There was a prefix table here, and its absence is the point
+//! # There is no prefix table, and its absence is the point
 //!
-//! `prefixes: Vec<PrefixEntry>` was the first field of [`DefMap`], and a
-//! `&[PrefixEntry]` slice was threaded through nine functions in
-//! [`crate::lower`] to expand `ex:Person` into `https://example.org/Person`. The
-//! CURIE is gone from every position it held — a shape name, a property key, an
-//! expression and an interpolation hole are all bare names or full IRIs in
-//! strings now — so there is nothing left to expand.
+//! A shape name, a property key, an expression and an interpolation hole are
+//! all bare names or full IRIs in strings, so there is nothing to expand. A
+//! mapping's SHAPE resolves through [`DefMap::lookup_type`]: the header names
+//! one of the bare names a `type { … } := …` binding introduced, and that
+//! binding knows the shape IRI. The resolution is a lookup against a document
+//! the program names, not a text substitution the program spelled out — and
+//! naming one is MANDATORY, because a bare name has nowhere else to come from.
+//! It is why a shape name can be MISSPELT and reported rather than expanded
+//! into an IRI that happens to denote nothing.
 //!
-//! What replaces it for a mapping's SHAPE is [`DefMap::lookup_type`], which was
-//! already here: the header names one of the bare names a `type { … } := …`
-//! binding introduced, and that binding already knew the shape IRI. The
-//! resolution moved from a text substitution the program spelled out to a
-//! lookup against a document the program names — and naming one is MANDATORY,
-//! because a bare name has nowhere else to come from. It is why a shape name can
-//! now be MISSPELT and reported rather than expanded into an IRI that happens to
-//! denote nothing.
-//!
-//! Mapping and source
-//! locations are interned with a `'db` lifetime so downstream queries can be
-//! keyed per-item (rust-analyzer's per-item Salsa fan-out). Even though the
-//! Phase 1 example has only one mapping, the SHAPE of the query graph matters
-//! for Phase 2's stable item tree (CORE-02) and Phase 6's LSP perf benchmark.
+//! Mapping and source locations are interned with a `'db` lifetime so
+//! downstream queries can be keyed per-item (rust-analyzer's per-item Salsa
+//! fan-out): one mapping's edit does not re-run another's queries.
 //!
 //! # Storage choice
 //!
@@ -83,10 +75,9 @@ pub struct SourceLoc<'db> {
 
 /// Why a destructuring member bound no shape.
 ///
-/// Four causes used to collapse into one `None`, and the single diagnostic that
-/// existed blamed the member's NAME for all of them — so an unreadable file
-/// reported "matches no shape in the schema". They are separated here because
-/// the reader cannot act on a message that names the wrong thing.
+/// Four causes, separated because the reader cannot act on a message that
+/// names the wrong thing: collapsed into one `None`, an unreadable file would
+/// report that the member's NAME "matches no shape in the schema".
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum ShapeBindError {
     /// The constructor carries no `schema = …`, so there is no document.
@@ -184,12 +175,10 @@ pub struct SourceEntry<'db> {
     pub schema_arg: Option<SmolStr>,
     /// The PROVIDER that argument names — `io.shex`, `io.shacl`.
     ///
-    /// `schema = "x.shex"` was a bare path, and it was the last position in the
-    /// language where a document was named without a row to read it: the
-    /// document got its decoder from its own extension. `schema =` takes a
-    /// provider call now, so there is one rule — where there is a document,
-    /// there is a row that names it — and `None` here means the program wrote a
-    /// bare string, which `crate::lower::check_provider` reports with a span.
+    /// `schema =` takes a provider call, not a bare path, so there is one rule
+    /// — where there is a document, there is a row that names it — and `None`
+    /// here means the program wrote a bare string, which
+    /// `crate::lower::check_provider` reports with a span.
     pub schema_provider: Option<SmolStr>,
     /// For a destructuring RDF source member (`{ IfcBeam, ... } := io.rdf(...,
     /// schema = io.shex("x.shex"))`), the shape IRI this member's local-name resolves to
@@ -204,12 +193,11 @@ pub struct SourceEntry<'db> {
     /// `io.parquet`), if a call-shaped RHS could be parsed. The
     /// constructor name selects the source FORMAT downstream
     /// (`fossil-mir::lower` maps it to `SourceFormat`). Like [`Self::schema_arg`]
-    /// this is a SIGNATURE-only `SOURCE_DEF`-header datum (Phase 5 STDL-06).
+    /// this is a SIGNATURE-only `SOURCE_DEF`-header datum.
     pub constructor: Option<SmolStr>,
     /// The first POSITIONAL string argument of the constructor — the source
     /// URI (`io.csv("examples/users.csv")` → `examples/users.csv`). Resolved by
-    /// `fossil-mir::lower` into `Op::Source.uri`, replacing the Phase-1
-    /// hardcoded `examples/users.csv`. Signature-only (Phase 5 STDL-06).
+    /// `fossil-mir::lower` into `Op::Source.uri`. Signature-only.
     pub uri: Option<SmolStr>,
     /// The READER OPTION the constructor's row declares — `io.csv("u.csv",
     /// delimiter = "|")` → `|`.
@@ -385,16 +373,15 @@ impl<'db> DefMap<'db> {
     }
 
     /// Look up the constructor call bound to a source name (e.g. `users` →
-    /// `io.csv("examples/users.csv")`). Used by Phase 5 `fossil-mir::lower`
-    /// (STDL-06) to resolve `Op::Source`'s format + URI from the real binding
-    /// instead of the Phase-1 hardcode. Any component is `None` when the
-    /// `SOURCE_DEF` RHS is not a recognisable `io.*("...")` call.
+    /// `io.csv("examples/users.csv")`). `fossil-mir::lower` reads it to resolve
+    /// `Op::Source`'s format + URI from the binding. Any component is `None`
+    /// when the `SOURCE_DEF` RHS is not a recognisable `io.*("...")` call.
     ///
-    /// It gave back a `(constructor, uri)` PAIR and gives back a [`SourceCall`]
-    /// now, for the reason [`Self::lookup_source_schema_binding`] is a pair
-    /// rather than two lookups: the delimiter is meaningless without the
-    /// constructor that declares it, and a caller handed them separately is a
-    /// caller who can read one and forget the other.
+    /// One [`SourceCall`], for the reason
+    /// [`Self::lookup_source_schema_binding`] is a pair rather than two
+    /// lookups: the delimiter is meaningless without the constructor that
+    /// declares it, and a caller handed them separately is a caller who can
+    /// read one and forget the other.
     #[must_use]
     pub fn lookup_source_call(
         self,
@@ -685,14 +672,14 @@ pub(crate) struct SchemaArg {
 /// widen the per-mapping `body()` fan-out, which is what keeps
 /// [`crate::infer::resolve_source_scope`] out of `parse(file)`.
 ///
-/// # It used to take a bare string, and that was the last hole in the rule
+/// # It takes a provider call, not a bare string
 ///
-/// `schema = "x.shex"` named a document and no provider, so the decoder came
-/// from the document's own EXTENSION — the one dispatch left that did not go by
-/// name. The value is a provider call now, read by the same scan as any other
-/// (`io` `.` `shex` `(` `"…"` `)`), so a document is never named without the row
-/// that reads it. A value that is not a call yields `provider: None`, which is
-/// reported with the span below rather than quietly falling back.
+/// A bare `schema = "x.shex"` names a document and no provider, so the decoder
+/// would come from the document's own EXTENSION — a dispatch that does not go
+/// by name. The value is read by the same scan as any other call
+/// (`io` `.` `shex` `(` `"…"` `)`), so a document is never named without the
+/// row that reads it. A value that is not a call yields `provider: None`, which
+/// is reported with the span below rather than quietly falling back.
 ///
 pub(crate) fn parse_schema_arg(node: &SyntaxNode) -> Option<SchemaArg> {
     let value = Call::of_binding(node)?.named("schema")?.value?;
@@ -1088,9 +1075,9 @@ Users : Person from User
     ///
     /// The corpus writes these: `// #region` / `// #endregion` mark the runs
     /// `docs/` transcludes, so the binding a documentation page shows is
-    /// exactly the binding with a comment glued to its range. Measured on
-    /// `compound-key` with its join condition broken — the report underlined
-    /// `// #endregion on` and the blank line after it, as a multi-line block.
+    /// exactly the binding with a comment glued to its range — on
+    /// `compound-key` with its join condition broken, the report would
+    /// underline `// #endregion on` and the blank line after it.
     #[test]
     fn a_trailing_comment_is_trivia_and_stays_out_of_the_span() {
         const COMMENTED: &str = "\
@@ -1123,8 +1110,7 @@ Users : Person from User
     fn def_map_for_hello_fossil_has_one_type_one_source_one_mapping() {
         let (db, file) = db_with_hello();
         let dm = def_map(&db, file);
-        // The prefix table is gone and the TYPE table is what replaced it as
-        // the thing a shape name resolves against.
+        // The TYPE table is the thing a shape name resolves against.
         assert_eq!(dm.types(&db).len(), 1);
         assert_eq!(dm.types(&db)[0].name, "Person");
         assert_eq!(dm.types(&db)[0].document.as_deref(), Some("personas.shex"));
@@ -1372,8 +1358,8 @@ shape https://a.example/Tag
         );
     }
 
-    /// The four causes used to be one `None` behind one message that blamed the
-    /// member's name. A document that is not there is not a misspelt name.
+    /// A document that is not there is not a misspelt name: the cause is
+    /// reported, not the member's name.
     #[test]
     fn a_document_that_cannot_be_read_says_so_instead_of_blaming_the_name() {
         let src = "{ a } := io.rdf(\"g.ttl\", schema = io.shex(\"does_not_exist.shex\"))\n";

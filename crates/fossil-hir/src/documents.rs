@@ -13,17 +13,14 @@
 //! # Why the pair lives here
 //!
 //! Because a key that stops matching reads exactly like a document nobody
-//! registered — the least debuggable failure the registry can produce — and
-//! there were three answers to «what key».
-//! The native CLI's `documents` and `fossil_ide::shape_documents` each
-//! carried a copy of [`documents_named`], and `fossil-ide`'s [`registry_key`]
-//! was a hand-rolled `parent().join()` that disagreed with this one on two live
-//! cases: a document named through a scheme (`s3://bucket/x.shex` came back as
-//! `/programs/s3://bucket/x.shex`) and one named through a `@conn` alias. Both
-//! files carried a docblock asserting the drift was closed. It was not, and no
-//! test held it — which is why there is one function now and not a claim.
+//! registered — the least debuggable failure the registry can produce — so
+//! there is one answer to «what key», and every host calls it. A hand-rolled
+//! `parent().join()` disagrees with it on two live cases: a document named
+//! through a scheme (`s3://bucket/x.shex` would come back as
+//! `/programs/s3://bucket/x.shex`) and one named through a `@conn` alias. One
+//! function holds that; a docblock asserting two copies agree would not.
 //!
-//! Both hosts already depend on this crate, so nothing forced the copies.
+//! Every host already depends on this crate, so nothing forces a copy.
 //!
 //! # Sans-IO
 //!
@@ -77,7 +74,7 @@ pub fn documents_named(db: &dyn Db, file: SourceFile) -> Vec<SmolStr> {
 /// program wrote, put through [`fossil_base::location::SourceAnchor`] — the one
 /// resolution rule.
 ///
-/// It is a KEY and not a location. The LSP's file paths are `file://` URIs, so
+/// It is a KEY and not a location. An editor's file paths are `file://` URIs, so
 /// the key for `prog.fossil`'s `person.shex` is `file:///…/person.shex` — a
 /// string no filesystem will open, and the right thing to key by anyway, since
 /// the editor's own `didOpen` for that document arrives under the same URI.

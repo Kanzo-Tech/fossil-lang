@@ -95,8 +95,8 @@ fn a_name_the_catalogue_does_not_have_is_a_different_answer() {
 
 #[test]
 fn a_verb_the_catalogue_dropped_is_not_a_relation_verb() {
-    // `sort` was catalogued with no lowering and is gone (`/docs/design/declared`);
-    // it is refused like any other name the catalogue does not have.
+    // `sort` is not catalogued (`/docs/design/declared`); it is refused like
+    // any other name the catalogue does not have.
     let m = one_about(
         "derived := pedidos.sort(pedidos.id)",
         "is not a relation verb",
@@ -121,8 +121,9 @@ fn a_joins_condition_is_written_with_its_name() {
 
 #[test]
 fn the_example_in_a_message_names_the_binding_the_program_wrote() {
-    // Rendered from the signature, not hardcoded. The old messages said
-    // `e.g. select(User.id, User.name)` in a program that has no `User`.
+    // Rendered from the signature, not hardcoded: a fixed
+    // `e.g. select(User.id, User.name)` would name a `User` this program does
+    // not have.
     let m = one_about("derived := pedidos.select()", "select");
     assert!(
         m.contains("pedidos."),
@@ -160,9 +161,8 @@ fn a_union_refuses_the_alias_a_join_takes() {
 /// `group_by` goes 1 to 0. That zero is the shape of the defect — not a wrong
 /// message, no message.
 ///
-/// A hand-written emptiness check stood here first and was deleted for being
-/// the second refusal of one mistake: removing it left the count at 1, because
-/// the binder's own too-few-arguments arm had it covered.
+/// There is no hand-written emptiness check: it would be the second refusal of
+/// one mistake, because the binder's own too-few-arguments arm covers it.
 #[test]
 fn a_group_by_with_nothing_aggregated_is_refused() {
     let m = one_about("derived := pedidos.group_by(pedidos.id)", "group_by");

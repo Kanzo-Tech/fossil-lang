@@ -1,25 +1,21 @@
 //! Decoding a shape document — the query that runs one row of
 //! [`fossil_base::providers`] against one registered file.
 //!
-//! # What this replaces
+//! # Why a query over an input, and not a read
 //!
-//! The compiler used to read a `.shex` by calling
-//! `db.system().read_file(&resolved)` from inside a tracked query and handing
-//! the bytes to `crate::shex::ShExDescriptor::from_shex_source`. Two things were
-//! wrong with that, and they are different problems:
+//! Reading a `.shex` with `db.system().read_file(&resolved)` from inside a
+//! tracked query and handing the bytes to a decoder is wrong twice, and the two
+//! are different problems:
 //!
-//! 1. **`fossil-hir` had to link `ShEx`** to name the return type. That is the
-//!    dependency [`fossil_graph_schema::shapes`] exists to cut: the compiler now
-//!    names [`OutputShapes`], and a *host* supplies the row.
-//! 2. **The read registered no Salsa dependency.** `read_file` is a host call,
-//!    not an input; `crates/fossil-hir/src/infer.rs` says so in its own module
-//!    docs ("Reads from inside a tracked query do not register a Salsa
-//!    dependency"), and that read was chosen deliberately, on the grounds that
-//!    it keeps `MAX_PER_MAPPING_FAN_OUT` at 1. Editing the `.shex`
-//!    therefore re-ran nothing, and in the LSP that is a stale diagnostic that
-//!    never clears. [`decode_shape_document`] pays for the fix: it reads the text
-//!    from a [`SourceFile`] input instead — see [`fossil_base::files`] for the
-//!    registry that turns a path into one.
+//! 1. **The compiler would name a schema language's type** as the return type.
+//!    [`fossil_graph_schema::shapes`] exists to cut that: the compiler names
+//!    [`OutputShapes`], and a *host* supplies the row.
+//! 2. **The read would register no Salsa dependency.** `read_file` is a host
+//!    call, not an input, so editing the `.shex` would re-run nothing, and in
+//!    an editor that is a stale diagnostic that never clears.
+//!    [`decode_shape_document`] reads the text from a [`SourceFile`] input
+//!    instead — see [`fossil_base::files`] for the registry that turns a path
+//!    into one.
 //!
 //! # The row is chosen by NAME
 //!
@@ -111,8 +107,8 @@ mod tests {
     /// The registration half: a document written to the registry is reachable
     /// through the same `file_at` the compiler resolves with.
     ///
-    /// It was a `test_support` unit test in `fossil-base`, and it came here with
-    /// the query — a `#[cfg(test)]` module cannot reach a crate above its own.
+    /// It lives with the query — a `#[cfg(test)]` module cannot reach a crate
+    /// above its own.
     #[test]
     fn a_registered_document_decodes_through_the_query() {
         let (db, _file) = fossil_base::test_support::db_with_document(
@@ -136,10 +132,8 @@ mod tests {
     /// Does `provider_name` name an installed row that reads types?
     ///
     /// The cheap half of the question [`shape_document`] answers expensively.
-    /// It was a `pub fn` beside it, for "a caller that wants to diagnose the
-    /// name before spending a decode" — and in the whole workspace no such
-    /// caller was ever written. These three assertions were its only callers,
-    /// so it lives where its callers do.
+    /// No caller outside these assertions wants to diagnose the name before
+    /// spending a decode, so it lives where its callers do.
     fn reads_types(db: &dyn Db, provider_name: &str) -> bool {
         provider(fossil_base::providers::installed(db), provider_name)
             .is_some_and(|p| p.provides(Capability::ReadTypes))

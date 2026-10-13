@@ -24,23 +24,22 @@
 //! failure: everything above is either lowered or is a validation constraint the
 //! output model has no place for.
 //!
-//! # Where this used to live, and why it moved
+//! # Why it produces `OutputShapes` and not a `GraphSchema`
 //!
-//! `crates/fossil-df/src/shacl.rs`, producing a `GraphSchema` directly. That was
-//! the OUTPUT model, one step past the vocabulary the checker reads, so SHACL
-//! could reach the executor and never the checker — which is exactly why
-//! `catalogue.fossil` had no output contract and could not write a property.
-//! Producing [`OutputShapes`] puts SHACL on the same seam as `ShEx`, and
-//! `OutputShapes::to_graph_schema` gives the executor byte-identical output to
-//! what the old walk produced.
+//! A `GraphSchema` is the OUTPUT model, one step past the vocabulary the
+//! checker reads: produced directly, SHACL would reach the executor and never
+//! the checker, and a program like `catalogue.fossil` would have no output
+//! contract and could not write a property. Producing [`OutputShapes`] puts
+//! SHACL on the same seam as `ShEx`, and `OutputShapes::to_graph_schema` gives
+//! the executor its `GraphSchema`.
 //!
 //! # Positions: a `.shex` report cites the document and a `.ttl` one does not
 //!
 //! `fossil_graph_schema::PropertyConstraint::span` is what lets a type error
 //! underline the line that declares the constraint it violated, in the shape
 //! document itself. `crate::shex::spans` supplies it for `ShExC` and this
-//! decoder supplies `None`, so a program checked against a `.ttl` gets the
-//! half-report every program used to get. **That is deliberate, and here is the
+//! decoder supplies `None`, so a program checked against a `.ttl` gets a
+//! report with the program's span alone. **That is deliberate, and here is the
 //! measurement.**
 //!
 //! `oxttl` carries no position on a parsed triple. Its `TextPosition` exists
@@ -84,12 +83,11 @@
 //! order shapes come out in still reaches a person and a corpus: the shapes an
 //! import naming none is told about, the first and second of two that share a
 //! name, and the node types the output model lists. So it is the order the
-//! document declares them: first appearance as a subject in the Turtle. The
-//! store this replaces used a `BTreeMap`, whose iteration is alphabetical by
-//! subject IRI; with two shapes that is a different answer from the
-//! document's, and when binding was positional it silently swapped what a
-//! program bound. `crates/fossil-hir/examples/shex_declaration_order.rs` measured
-//! the same class of bug once already.
+//! document declares them: first appearance as a subject in the Turtle. A
+//! `BTreeMap` iterates alphabetically by subject IRI; with two shapes that is a
+//! different answer from the document's.
+//! `crates/fossil-hir/examples/shex_declaration_order.rs` measures the same
+//! class of bug on the `ShEx` side.
 
 use std::collections::BTreeMap;
 
@@ -425,10 +423,10 @@ ex:PersonShape a sh:NodeShape ;
         );
     }
 
-    /// The executor consumes `GraphSchema`, and it must get exactly what the
-    /// `GraphSchema`-producing walk this replaces produced.
+    /// The executor consumes `GraphSchema`: one node per shape, its literal
+    /// properties with their cardinalities, and one edge per alternative.
     #[test]
-    fn the_graph_schema_is_what_the_direct_walk_used_to_produce() {
+    fn the_graph_schema_has_the_nodes_properties_and_edges_the_document_declares() {
         let gs = decode_shacl("shapes.ttl", SHAPES)
             .expect("parses")
             .to_graph_schema();
@@ -455,8 +453,8 @@ ex:PersonShape a sh:NodeShape ;
     }
 
     /// Shapes come out in DECLARATION order. Alphabetically
-    /// `ex:A…` sorts before `ex:Z…`; the document declares Z first, and the
-    /// `BTreeMap` this walk used to iterate would have swapped them.
+    /// `ex:A…` sorts before `ex:Z…`; the document declares Z first, and a
+    /// `BTreeMap` would swap them.
     #[test]
     fn shapes_come_out_in_declaration_order_not_alphabetical() {
         const TWO: &str = r"

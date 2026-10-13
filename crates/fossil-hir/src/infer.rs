@@ -187,8 +187,8 @@ pub fn resolve_binding_row<'db>(
 ///
 /// Split out of [`resolve_source_scope`] because a pipeline's row is its base's
 /// row transformed, and the base is a binding, not a mapping. Everything below
-/// the pipeline branch is what the function has always done for a binding that
-/// reads a file — and it is where the scope BOTTOMS OUT at one row under one
+/// the pipeline branch is what the function does for a binding that reads a
+/// file — and it is where the scope BOTTOMS OUT at one row under one
 /// name. Every verb but `union` carries, restricts or extends the names its
 /// base already had; `union` replaces them with the pipeline's own, because a
 /// row of its result came from one of two sides and nothing says which.
@@ -196,8 +196,8 @@ pub fn resolve_binding_row<'db>(
 /// `resolving` is the pipelines whose rows are being resolved, outermost
 /// first — `&[]` from outside. A pipeline already on it is a CYCLE
 /// (`a := b.where(…)`, `b := a.where(…)`): a diagnostic, not an infinite loop.
-/// A chain of distinct pipelines is as long as the program writes it; it was a
-/// depth of 32, which reported a long legal chain as a cycle.
+/// A chain of distinct pipelines is as long as the program writes it: a depth
+/// limit would report a long legal chain as a cycle.
 pub fn resolve_binding_scope<'db>(
     db: &'db dyn fossil_base::Db,
     sink: &mut Diagnostics,
@@ -317,9 +317,9 @@ fn resolve_leaf_row<'db>(
         return Ok(Some(record_from_shape(db, shape)));
     }
 
-    // A destructuring member that bound no shape, reported by CAUSE. One
-    // message used to cover all four and blamed the member's name for every
-    // one of them, so an unreadable file read as a misspelt name.
+    // A destructuring member that bound no shape, reported by CAUSE: one
+    // message for all four would blame the member's name for every one of
+    // them, and an unreadable file would read as a misspelt name.
     if let Some(err) = dm.lookup_source_shape_error(db, source_name) {
         let document = dm
             .lookup_source_schema_binding(db, source_name)
@@ -331,8 +331,8 @@ fn resolve_leaf_row<'db>(
 
     // There is no fallback below this: a source with no INFERRED descriptor has
     // no row, and that is not an error — it is every schemaless program in the
-    // tree. The host profiles the sources (the browser's `registerProfile`)
-    // and what it finds arrives above.
+    // tree. The host profiles the sources (`program.describe`) and what it
+    // finds arrives above.
     Ok(None)
 }
 
@@ -360,8 +360,8 @@ fn apply_source_op<'db>(
     // tree — and nothing below can check a column against a row nobody
     // declared. The NAMES still flow, so the scope is returned rather than
     // dropped.
-    // The COLUMNS are no longer read here — `typecheck_stage` asks the scope.
-    // What this still is, is the question «does this relation have a schema at
+    // The COLUMNS are not read here — `typecheck_stage` asks the scope.
+    // What this is, is the question «does this relation have a schema at
     // all», and the answer decides whether there is anything to check.
     let Some(_) = scope.fields(db) else {
         return match op {
@@ -374,8 +374,8 @@ fn apply_source_op<'db>(
             // reason this arm names `on` at all. Whether the two sides are
             // related is a question about bindings and operators, and neither
             // needs a column type to answer — so a schemaless join, which is
-            // `hello.fossil` and every program like it, is where the engine's
-            // late refusal used to be the only one there was.
+            // `hello.fossil` and every program like it, is refused here and
+            // not only late, by the engine.
             HirSourceOp::Join { right, alias, on } => {
                 let right = right_scope(db, sink, file, right, alias.as_ref(), resolving)?;
                 check_join_condition(sink, pipe, on, &scope, &right)?;
@@ -448,16 +448,12 @@ fn apply_source_op<'db>(
             };
 
             // Every column the condition names has to exist on ONE of the two
-            // sides, under the binding that qualifies it. It used to have to
-            // exist on BOTH, because there was one key; a predicate relates two
-            // different columns, so "both" is the wrong question. And "on either
-            // side, under any name" is not the right one either — that is what
-            // let `on = Purchase.user_id == Nobody.id` through while `Nobody`
-            // named nothing at all.
-            // The two sides' columns were concatenated into one flat list here
-            // and handed to `check_refs`, which resolved a name against it. The
-            // scope IS that answer and keeps the sides apart, so the flat list
-            // went with the walk.
+            // sides, under the binding that qualifies it. Not on BOTH: a
+            // predicate relates two different columns. And not "on either side,
+            // under any name" — that would let
+            // `on = Purchase.user_id == Nobody.id` through while `Nobody` named
+            // nothing at all. The scope keeps the sides apart, so a name is
+            // resolved against its own side and not against a flat list.
             // Two questions, and the order is the useful one. `typecheck_stage`
             // answers «is this a condition at all, and do its columns exist»;
             // `check_join_condition` answers «and does it relate THESE two
@@ -669,11 +665,10 @@ fn right_scope<'db>(
 /// answers what the condition IS. That is the whole of it: an expression is
 /// typed the same way wherever it is written.
 ///
-/// It replaces `check_refs`, a hand-written walk that collected the
-/// `ColumnRef`s a condition mentions and asked whether each name existed. Every
-/// one of those questions is one `synth` of a `ColumnRef` already asks, with
-/// the same scope — and the walk could not ask the other one, so
-/// `Row.celsius > "abc"` passed clean two lines above a
+/// Not a walk that collects the `ColumnRef`s a condition mentions and asks
+/// whether each name exists: every one of those questions is one `synth` of a
+/// `ColumnRef` already asks, with the same scope — and a walk cannot ask the
+/// other one, so `Row.celsius > "abc"` would pass clean two lines above a
 /// `parse.float(Row.celsius)` refused for the same mismatch.
 ///
 /// The scope AT THIS STAGE and not the pipeline's final one: a `select` after a
@@ -754,22 +749,20 @@ enum ConditionSide {
 ///
 /// # Why here and not one layer down
 ///
-/// The rule is not new: `fossil_df::plan::join_equalities` has enforced it since
-/// the day joins executed, and refused a malformed condition with a
-/// `DataFusionError::Plan` at `fossil run` — late, and with no span, because by
-/// then the author's text is gone. The engine keeps its copy as a backstop: a
-/// MIR reaching it need not have come through this checker.
+/// `fossil_df::plan::join_equalities` enforces the same rule, and refuses a
+/// malformed condition with a `DataFusionError::Plan` at run time — late, and
+/// with no span, because by then the author's text is gone. The engine keeps
+/// its copy as a backstop: a MIR reaching it need not have come through this
+/// checker.
 ///
 /// What the checker can say that the engine cannot is WHICH SIDE, in the
 /// author's own names, and WHERE — a span over the text the author wrote. The
 /// engine sees a `JoinSide` and a `DataFrame`; by then the program is a plan.
 ///
-/// It also used to see less. A `JoinSide` carried one relation name, filled with
-/// the pipeline's after a previous join, so it could not tell `Third` from a
-/// binding of its own left side; the name is a SET now
-/// (`fossil_mir::JoinSide::relations`) and the two layers admit the same
-/// conditions. They still answer in different currencies, which is why both
-/// copies stay: a MIR reaching the engine need not have come through here.
+/// A `JoinSide` names a SET of relations (`fossil_mir::JoinSide::relations`),
+/// so the engine can tell `Third` from a binding of its own left side and the
+/// two layers admit the same conditions. They answer in different currencies,
+/// which is why both copies stay.
 ///
 /// # What is refused that a relational algebra would allow
 ///
@@ -990,40 +983,35 @@ fn pipe_error(
 ///   [`fossil_graph_schema::OutputShapes::to_graph_schema`] applies, so the row
 ///   the checker sees and the column the writer emits cannot disagree.
 ///
-/// # Why the edge column is `Iri` and not `String`
+/// # Why the edge column is a reference and not `String`
 ///
-/// It used to be `String`, with this very doc-comment calling it "the referenced
-/// subject's IRI" in the same sentence. Three places then contradicted each
-/// other: [`crate::shapes::expected_value_ty`] demands `Iri` of a predicate
-/// whose range is a shape, this row supplied `String`, and
-/// [`crate::check`]'s `subtypes` has no rule between them — so
-/// `hasProject = .hasProject`, copying an edge straight from an RDF input to an
-/// RDF output, was **unsatisfiable**: "expected `Iri`, got `String`". And a type
-/// error is not informational — it taints `typecheck_mapping`, which poisons
-/// `lower_to_mir_pg`, which fails the run.
+/// [`crate::shapes::expected_value_ty`] demands a reference of a predicate
+/// whose range is a shape, and [`crate::check`]'s `subtypes` has no rule from
+/// `String` to it — so typed as text, `hasProject = Row.hasProject`, copying an
+/// edge straight from an RDF input to an RDF output, would be
+/// **unsatisfiable**. And a type error is not informational — it taints
+/// `typecheck_mapping`, which poisons `lower_to_mir_pg`, which fails the run.
 ///
-/// The lie was here. `expected_value_ty`'s own reasoning is sound — *the only
-/// thing a reference can be is an IRI* — so the fix is the row that knew it was
-/// handing back an IRI and typed it as text. Nothing downstream of the writer
-/// moves: `fossil_df` derives the physical column with
-/// `inner_primitive(...).unwrap_or(Primitive::String)`, and `Iri` has no inner
-/// primitive, so the column is still `string`. What changes is that the checker
-/// can tell an edge column from a text column — the same argument the `AnyUri`
-/// row of `a_shape_becomes_a_source_row_of_subject_plus_one_column_per_constraint`
-/// already makes for opaque IRIs.
+/// Nothing downstream of the writer depends on it: `fossil_df` derives the
+/// physical column with `inner_primitive(...).unwrap_or(Primitive::String)`,
+/// and a reference has no inner primitive, so the column is `string`. What it
+/// buys is that the checker can tell an edge column from a text column — the
+/// same argument the `AnyUri` row of
+/// `a_shape_becomes_a_source_row_of_subject_plus_one_column_per_constraint`
+/// makes for opaque IRIs.
 ///
-/// The `subject` column moves with it, and for the same reason: it holds the
-/// pivoted row's entity IRI, so `@subject = User.subject` is an identity built
-/// from an IRI rather than from text.
+/// The `subject` column is a reference too, and for the same reason: it holds
+/// the pivoted row's entity IRI, so `@subject = User.subject` is an identity
+/// built from an IRI rather than from text.
 ///
 /// The field name is the constraint's [`name`](fossil_graph_schema::PropertyConstraint::name)
 /// — for a document, the predicate's [`local_name`](fossil_graph_schema::local_name), which the decoder took from
-/// the one function the vocabulary owns rather than a fourth copy of it.
+/// the one function the vocabulary owns.
 #[must_use]
 pub(crate) fn record_from_shape<'db>(db: &'db dyn fossil_base::Db, shape: &Shape) -> Ty<'db> {
     // Every pivoted RDF row carries its entity IRI in `subject`, and that IRI
     // identifies a node of THIS shape — so the column is a reference to it,
-    // where it used to be the untyped `TyKind::Iri` every reference shared.
+    // not an untyped `TyKind::Iri` every reference would share.
     let mut fields: Vec<RecordField<'db>> = vec![RecordField {
         name: SmolStr::new_static(fossil_graph_schema::SUBJECT_COLUMN),
         ty: Ty::reference(db, std::iter::once(SmolStr::from(shape.iri.as_str()))),
@@ -1047,7 +1035,7 @@ pub(crate) fn record_from_shape<'db>(db: &'db dyn fossil_base::Db, shape: &Shape
 
 /// Build a `Record` [`Ty`] from a host-provided [`InferredDescriptor`].
 ///
-/// There is no unknown-datatype branch here any more: a column carries a
+/// There is no unknown-datatype branch here: a column carries a
 /// [`Primitive`], not the name of one, so a host that sends something outside
 /// the lattice is rejected where its JSON is deserialised — before any of this
 /// runs, and with the offending value in the error.
@@ -1240,8 +1228,7 @@ mod tests {
         // The two `id`s differ in TYPE, which is the whole point — and that is
         // why the join is on `k` and not on them. `on = Left.id == Right.id`
         // compares an Integer with a String, and since the condition is typed
-        // (`typecheck_stage`) that is a refusal, not a fixture. It was legal
-        // here for as long as a stage's condition was walked for names only.
+        // (`typecheck_stage`) that is a refusal, not a fixture.
         fossil_base::test_support::register_inferred(
             &mut db,
             "l.csv",
@@ -1269,9 +1256,8 @@ mod tests {
         );
     }
 
-    /// The unknown-primitive branch that used to live here is gone with the
-    /// string: a non-lattice name no longer reaches the checker at all, it fails
-    /// at the host boundary. `fossil_base::sources` owns that test now
+    /// A non-lattice name never reaches the checker: it fails at the host
+    /// boundary, and `fossil_base::sources` owns that test
     /// (`a_primitive_outside_the_lattice_is_a_deserialisation_error`).
     #[test]
     fn a_column_carries_the_lattice_and_not_its_spelling() {
@@ -1296,31 +1282,25 @@ mod tests {
 
     /// The source row an `io.rdf` member gets, one column at a time.
     ///
-    /// This used to read a `ShEx` `ConstraintValue` and its three cases;
-    /// it reads two fields of a decoded constraint now, and the table below is
-    /// the whole of the difference. Three of the four rows produce exactly what
-    /// the old `ConstraintValue` match produced:
+    /// It reads two fields of a decoded constraint:
     ///
-    /// | the document says            | before   | now      |
-    /// |------------------------------|----------|----------|
-    /// | `xsd:integer` (in lattice)   | Integer  | Integer  |
-    /// | an xsd type outside the lattice | String | String  |
-    /// | `@<Shape>` (an edge)         | String   | `Iri`    |
-    /// | `nodeKind IRI` (opaque IRI)  | String   | `AnyUri` |
+    /// | the document says               | the column  |
+    /// |---------------------------------|-------------|
+    /// | `xsd:integer` (in lattice)      | Integer     |
+    /// | an xsd type outside the lattice | String      |
+    /// | `@<Shape>` (an edge)            | a reference |
+    /// | `nodeKind IRI` (opaque IRI)     | `AnyUri`    |
     ///
-    /// The `AnyUri` row moved because the vocabulary carries the distinction the
-    /// old `ConstraintValue::Iri` threw away: an opaque IRI column is
-    /// `Some(Primitive::AnyUri)` with no targets, and `AnyUri` is in the
-    /// lattice. The writer stores both as a `string` column, so nothing
-    /// downstream of the writer changes; what changes is that the checker can
-    /// now tell an IRI column from a text column.
+    /// An opaque IRI column is `Some(Primitive::AnyUri)` with no targets, and
+    /// `AnyUri` is in the lattice. The writer stores both IRI kinds as a
+    /// `string` column; what the types buy is that the checker can tell an IRI
+    /// column from a text column.
     ///
-    /// The `@<Shape>` row is the one that moved next, and it had teeth: a
-    /// shape-ref column is what `hasProject = .hasProject` reads, and
-    /// `expected_value_ty` demands `Iri` of that predicate on the way out. While
-    /// this row said `String` the copy was unsatisfiable — see
-    /// [`record_from_shape`]'s own note. `subject` moved with it, being the
-    /// pivoted row's entity IRI.
+    /// The `@<Shape>` row has teeth: a shape-ref column is what
+    /// `hasProject = Row.hasProject` reads, and `expected_value_ty` demands a
+    /// reference of that predicate on the way out — see [`record_from_shape`]'s
+    /// own note. `subject` is a reference too, being the pivoted row's entity
+    /// IRI.
     #[test]
     fn a_shape_becomes_a_source_row_of_subject_plus_one_column_per_constraint() {
         use fossil_graph_schema::{Occurs, PropertyConstraint, Shape, Term};
@@ -1364,7 +1344,7 @@ mod tests {
             vec![
                 // Every pivoted RDF row carries its entity IRI here, so
                 // `@subject = User.subject` types — and it identifies a node of
-                // THIS shape, which is what the type now says.
+                // THIS shape, which is what the type says.
                 (
                     "subject",
                     &TyKind::Ref(vec![SmolStr::new_static("https://example.org/Beam")]),
@@ -1380,7 +1360,7 @@ mod tests {
                     "in",
                     &TyKind::Ref(vec![SmolStr::new_static("https://example.org/Storey")]),
                 ),
-                // The one row that differs from the ShEx-typed predecessor.
+                // An opaque IRI: in the lattice, and not a reference.
                 ("seeAlso", &TyKind::Primitive(Primitive::AnyUri)),
             ],
             "field names are predicate local names, in declaration order"

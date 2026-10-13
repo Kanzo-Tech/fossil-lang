@@ -108,9 +108,10 @@ fn re_registering_a_uri_changes_what_the_checker_sees() {
     assert_eq!(field_names(&db, file), ["id", "email"]);
 }
 
-/// The bug the registry being an input fixes: a check that already ran against
-/// a source's old columns re-runs when the source is described again. Read
-/// beside Salsa, the memoised check kept refusing a column the source now has.
+/// What the registry being an input buys: a check that already ran against a
+/// source's earlier columns re-runs when the source is described again. Read
+/// beside Salsa, the memoised check would keep refusing a column the source
+/// now has.
 #[test]
 fn describing_a_source_after_a_check_re_runs_the_check() {
     let (mut db, file) = db_with(vec![descriptor(

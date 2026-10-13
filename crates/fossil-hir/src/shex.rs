@@ -33,7 +33,7 @@
 //! targets, [`fossil_graph_schema::Occurs`], and every lowering error as a
 //! [`fossil_graph_schema::Rejection`]. No `shex_ast` or `rudof_iri` type
 //! crosses, which is what lets the middle of the compiler read a shape document
-//! without linking `ShEx` — the cut `0e6898d` made for `fossil-mir`.
+//! without naming a `ShEx` type.
 //!
 //! [`ShExDescriptor::to_graph_schema`] goes through it rather than beside it, so
 //! there is one lowering and not two. The `ShEx`-typed surface
@@ -117,12 +117,9 @@ pub struct ResolvedConstraint {
 /// default). Negative `min`/`max` values other than that one `-1` shouldn't
 /// occur in a well-formed schema; they clamp to zero rather than panicking.
 ///
-/// This produces the pair directly. It used to route through a five-variant
-/// enum that could spell one cardinality two ways — `Exact(3)` and
-/// `Range { min: 3, max: Some(3) }` — and disagree with itself about whether
-/// that was single-valued. `fossil-graph-schema`'s
-/// `collapse_pins_every_shape_the_old_enum_could_take` pins every case the enum
-/// could take, including that unreachable divergence.
+/// This produces the pair directly, with no intermediate enum of named cases
+/// that could spell one cardinality two ways. `fossil-graph-schema`'s
+/// `collapse_pins_every_cardinality_a_document_can_state` pins every case.
 #[must_use]
 pub fn occurs_from_shex(min: Option<i32>, max: Option<i32>) -> Occurs {
     let to_u32 = |v: i32| u32::try_from(v.max(0)).unwrap_or(0);
@@ -315,13 +312,13 @@ pub struct SuggestionSeed {
 #[derive(Debug)]
 pub struct ShExDescriptor {
     schema: Schema,
-    /// In the order the document declares them. A `HashMap` lived here until
-    /// `crates/fossil-hir/examples/shex_declaration_order.rs` measured what that
-    /// cost: `values()` handed back six different orders in six parses, because
-    /// Rust seeds its hasher per process. Anything downstream that iterates —
-    /// [`Self::to_graph_schema`] builds `nodes`/`edges` from this — was
-    /// non-deterministic across runs. rudof preserves it for both `ShExC` and `ShExJ`; we were
-    /// the ones throwing it away on insert.
+    /// In the order the document declares them, and not a `HashMap`:
+    /// `crates/fossil-hir/examples/shex_declaration_order.rs` measures what
+    /// that costs — `values()` hands back a different order per parse, because
+    /// Rust seeds its hasher per process, and anything downstream that iterates
+    /// ([`Self::to_graph_schema`] builds `nodes`/`edges` from this) would be
+    /// non-deterministic across runs. rudof preserves the order for both
+    /// `ShExC` and `ShExJ`.
     shapes: Vec<ShapeBinding>,
     /// Resolved IRI → index into `shapes`. Lookup only; never iterated.
     index: HashMap<String, usize>,
@@ -445,9 +442,8 @@ impl ShExDescriptor {
         let mut errors: Vec<ShExLoweringError> = Vec::new();
 
         // Declaration order, because the caller may bind by position. A repeated
-        // IRI keeps its FIRST declaration and its first slot — the old `insert`
-        // let the last one win silently, and either rule is arbitrary, but only
-        // one of them leaves the order alone.
+        // IRI keeps its FIRST declaration and its first slot. Last-one-wins is
+        // as arbitrary, but only first-one-wins leaves the order alone.
         for decl in schema.shapes().into_iter().flatten() {
             if let Some(binding) = lower_shape_decl(&decl, &prefixmap, &mut errors) {
                 let iri = binding.iri.to_string();
@@ -555,10 +551,9 @@ fn lower_shape_decl(
         );
     }
 
-    // `shape.closed` is read here and thrown away, deliberately: the field it
-    // used to fill is gone from `fossil_graph_schema::Shape`. Nothing downstream
-    // ever read it, and a bare property key is resolved against the declared
-    // predicates either way — see the tombstone in `graph-schema/src/shapes.rs`.
+    // `shape.closed` is not read, deliberately: `fossil_graph_schema::Shape`
+    // has no such field, because a bare property key is resolved against the
+    // declared predicates either way — see `fossil-graph-schema/src/shapes.rs`.
     Some(ShapeBinding {
         iri: shape_iri,
         constraints,
@@ -778,9 +773,9 @@ mod tests {
     use super::*;
     use fossil_graph_schema::Primitive;
 
-    /// An undeclared prefix is a malformed schema. It used to resolve to the
-    /// prefix and local name glued together without the colon — a wrong IRI the
-    /// rest of the compiler then trusted.
+    /// An undeclared prefix is a malformed schema, not the prefix and local
+    /// name glued together without the colon — a wrong IRI the rest of the
+    /// compiler would then trust.
     #[test]
     fn an_undeclared_prefix_is_malformed_not_glued() {
         let iri_ref = IriRef::Prefixed {
@@ -1072,9 +1067,8 @@ shop:Order {
     }
 
     /// Every `(min, max)` pair `ShEx` can hand over, and the `Occurs` it decodes
-    /// to — the cases the enum this replaces had names for, and the encodings
-    /// that fell through to its `Range` arm. The pair is produced directly now,
-    /// so there is no intermediate spelling to drift from. `(None, Some(-1))`
+    /// to. The pair is produced directly, so there is no intermediate spelling
+    /// to drift from. `(None, Some(-1))`
     /// is degenerate: `-1` only means "unbounded" beside an explicit `min`.
     #[test]
     fn occurs_decodes_every_shex_min_max_encoding() {
@@ -1332,10 +1326,8 @@ shop:Order {
             .to_output_shapes()
     }
 
-    /// The document's declaration order. This also asserted that `closed` was
-    /// carried over per shape, and it was the ONLY reader of that field in the
-    /// workspace — the checker never saw it. The field is gone; the ordering
-    /// half is what keeps the output model's node order the document's.
+    /// The document's declaration order: what keeps the output model's node
+    /// order the document's.
     #[test]
     fn output_shapes_keep_declaration_order() {
         let doc = order_shapes();
@@ -1559,8 +1551,7 @@ shop:Order {
     // -----------------------------------------------------------------------
 
     /// The output model, constructed **by hand** rather than snapshotted
-    /// against ourselves. Every distinction the old direct lowering made is
-    /// here: an un-narrowed value is a `String` column, a `nodeKind IRI` is an
+    /// against ourselves. Every distinction the lowering makes is here: an un-narrowed value is a `String` column, a `nodeKind IRI` is an
     /// `AnyUri` column and not an edge, a disjunction emits one edge per
     /// destination sharing the predicate, and the single/multi collapse follows
     /// `Occurs::is_single_valued`.

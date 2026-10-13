@@ -1149,9 +1149,8 @@ pub fn emit_descriptors(rows: &[Row]) -> String {
          //! `catalogue.bnf`, which is what a COMPILING host installs.\n\
          //!\n\
          //! Each `decodes` token below is a Rust path, so the compiler resolves it.\n\
-         //! That is what the parity test this replaces said it could not prove: a `fn`\n\
-         //! pointer has no name at run time, and a row could declare a capability whose\n\
-         //! function nobody had written.",
+         //! A comparison could not prove that: a `fn` pointer has no name at run time,\n\
+         //! and a row could declare a capability whose function nobody had written.",
     );
     out.push_str("use fossil_base::Provider;\n");
     out.push_str("use fossil_base::providers::{");
