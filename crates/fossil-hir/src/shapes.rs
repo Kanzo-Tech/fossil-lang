@@ -484,20 +484,36 @@ pub fn resolve_target_shape<'db>(
     }
 
     // The type that introduced THIS shape — not the first document the file
-    // happens to name. A program with two documents resolved its second mapping
-    // against the wrong one until the lookup went by type; the fixture is
+    // happens to name; the fixture that holds it is
     // `docs/programs/multi-document`.
     let entry = crate::def_map::def_map(db, file).type_of_shape(db, shape_iri.as_str())?;
+    resolve_type(db, file, entry)
+}
 
+/// Resolve a type the program has — a [`TypeEntry`] of its def map — to the
+/// shape it names, wherever that is declared.
+///
+/// What [`resolve_target_shape`] does for a mapping's header, for any position
+/// that names a type: an editor asks it of the name under the cursor, and a
+/// mapping asks it of its target. `None` when the name bound no shape, or the
+/// document it names is not registered or does not decode.
+///
+/// [`TypeEntry`]: crate::def_map::TypeEntry
+pub fn resolve_type<'db>(
+    db: &'db dyn fossil_base::Db,
+    file: fossil_base::SourceFile,
+    entry: &crate::def_map::TypeEntry,
+) -> Option<ResolvedShape<'db>> {
+    let shape_iri = entry.shape_iri.as_ref()?;
     // For an import this is the SECOND decode of the same document, and the
-    // first one has already decided everything: `shape_iri` is non-empty only
+    // first one has already decided everything: `shape_iri` is set only
     // because `def_map` decoded this document and took a shape out of it. So a
     // failure here would have failed there — where it is reported, by cause —
     // and a shape the lookup misses cannot exist, because the IRI came out of
     // this document's declaration list.
     let (shapes, document, home) = if entry.declared {
         (
-            hir.declared(db).clone(),
+            crate::lower::lower_to_hir(db, file).declared(db).clone(),
             SmolStr::from(file.path(db).as_str()),
             Some(file),
         )

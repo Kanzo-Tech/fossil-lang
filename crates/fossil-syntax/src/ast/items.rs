@@ -111,10 +111,13 @@ impl TypeDecl {
     /// contextual `type`.
     #[must_use]
     pub fn name(&self) -> Option<smol_str::SmolStr> {
-        idents(&self.0)
-            .skip_while(|t| t.text() != "type")
-            .nth(1)
-            .map(|t| smol_str::SmolStr::from(t.text()))
+        self.name_token().map(|t| smol_str::SmolStr::from(t.text()))
+    }
+
+    /// The token [`Self::name`] reads, for a caller that needs where it is.
+    #[must_use]
+    pub fn name_token(&self) -> Option<crate::SyntaxToken> {
+        idents(&self.0).skip_while(|t| t.text() != "type").nth(1)
     }
 
     pub fn fields(&self) -> impl Iterator<Item = Field> {
