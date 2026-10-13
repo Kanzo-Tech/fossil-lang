@@ -195,6 +195,7 @@ parameter it takes is argued in [the dot](/docs/design/the-dot).
 | source | what it settles |
 | --- | --- |
 | **`lsp-server` against `tower-lsp`** | What a native language server is built on if one returns ([discarded](/docs/design/discarded#the-tooling)): the ergonomic framework had roughly three years without maintenance, and all three reference implementations use the low-level library. |
+| **`ty_ide` over `ty_python_semantic`'s `SemanticModel`**, and **rust-analyzer's `ide` over `hir`** (`ide-db`'s `NameClass` / `NameRefClass`) | That an IDE layer classifies syntax and asks the semantic layer, and resolves no name itself — the rule `fossil-ide` follows ([Tooling for humans](/docs/design/tooling-for-humans#one-resolver-and-every-feature-asks-it)). And `ty_ide`'s completion is the precedent for reading a member position from the tokens before the cursor while every other position comes from the tree. |
 | **`@codemirror/lsp-client`** | Probed rather than read: 27 exports and 17 prototype methods, **none** matching semantic tokens; the generic request escape hatch does work. The transferable part is the technique — probe a package by its exports before adopting it. |
 | **Salsa** | The incremental core. The 52% saving borrowed from a comparable project does not transfer, and measuring locally says why: there, compilation *is* the process; here it is two thousandths of a command dominated by process start-up. |
 
