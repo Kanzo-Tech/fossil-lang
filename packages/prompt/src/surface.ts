@@ -19,7 +19,7 @@
  */
 
 /** SHA-256 of the `grammar.bnf` {@link SURFACE} and {@link FORBIDDEN} were last reviewed against. */
-export const GRAMMAR_DIGEST = '9fb7938baad5b2ef4b81772170c8089f67691ba93ebe92a107c5f4d4cc6961ce';
+export const GRAMMAR_DIGEST = '52c93563f4326f9e359b767c8b69bbf660b9c54f677b5a81a06a87b1bba678e9';
 
 /** A complete program: `docs/programs/shop/shop.fossil`, region markers removed. */
 export const EXAMPLE = `type { Person, Order } := io.shex("shop.shex")
