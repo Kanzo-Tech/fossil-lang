@@ -8,13 +8,11 @@
 //! doc comments repeat the constant as the reason they are written the way they
 //! are; `src/schema.rs` opens by saying its queries do not affect it.
 //!
-//! **The constant exists only in two `fossil-hir` test files**, and both measure
-//! `fossil-hir` queries — `body`, `typecheck_mapping`, `expr_types`, `spans`,
-//! `check_identities`. Nothing in `crates/fossil-mir/tests/` instrumented Salsa
-//! at all, so every one of the four sentences above was unheld: a
-//! `parse(db, file)` read added to `lower_to_mir_pg` would leave all of
-//! `fossil-hir` green, and the editor would re-lower ten mappings on every
-//! keystroke in one of them.
+//! **The `fossil-hir` tests that measure the constant** measure `fossil-hir`
+//! queries — `body`, `typecheck_mapping`, `expr_types`, `spans`,
+//! `check_identities`. Without this file a `parse(db, file)` read added to
+//! `lower_to_mir_pg` would leave all of `fossil-hir` green, and the editor
+//! would re-lower ten mappings on every keystroke in one of them.
 //!
 //! # What this proves
 //!
