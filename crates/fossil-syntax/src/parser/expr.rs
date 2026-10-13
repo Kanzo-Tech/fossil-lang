@@ -17,9 +17,9 @@
 //! cleaner than nested precedence functions.
 //!
 //! The `BNF` column below is the level the specified table gives each operator,
-//! and this parser implements every one of them (grammar.bnf, § OPERATOR
-//! PRECEDENCE TABLE). Only the ORDER of the binding powers means anything, which
-//! is why the lowest few are unused.
+//! and this parser implements every one of them
+//! (grammar.bnf, § OPERATOR PRECEDENCE TABLE). Only the ORDER of the binding
+//! powers means anything, which is why the lowest few are unused.
 //!
 //! Binding-power table (lbp = left binding power; rbp = right binding
 //! power; tighter operators → higher numbers). The `BNF` column is the
