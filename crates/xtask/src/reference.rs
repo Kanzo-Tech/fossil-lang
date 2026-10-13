@@ -5,47 +5,28 @@
 //! The catalogue is DATA and a compiler reads it. `crate::catalogue` parses
 //! `catalogue.bnf`; this turns the same parse into the page's tables.
 //!
-//! `docs/content/docs/book/stdlib.mdx` was that table written a second
-//! time, by hand, in Markdown — and the second copy had drifted, which is what
-//! a second copy does. Measured on 2026-08-23, before this file existed:
+//! A table written a second time, by hand, drifts, which is what a second copy
+//! does: measured against a hand-written page of 58 rows, seven named nothing
+//! the checker knew — rows renamed, deleted, or never in the language — and a
+//! reader could not tell them apart from the rest, because the page rendered
+//! all 58 identically.
 //!
-//! - 51 rows in the registry, **every one of them on the page**;
-//! - 58 distinct rows on the page, so **seven named nothing the checker knows**;
-//! - of those seven, `io.rdf`, `io.shex` and `io.shacl` were real language
-//!   surface the registry did not carry; `seq.filter` was renamed to
-//!   `seq.where`; `str.normalize_unicode` was deleted from the language
-//!   outright; and `io.sql` and `io.http` occur nowhere in the repository at
-//!   all — the page is their only existence.
+//! **Twelve more described a call the checker rejects** — wrong arity, or a
+//! named argument naming no parameter of the row (`from`/`to` on `str.replace`,
+//! whose parameters are `needle`/`replacement`; `by`/`key`/`desc` on verbs
+//! with no such parameters). That is why [`signature`] prints every parameter
+//! WITH ITS NAME: a page that cannot be told apart from one that is wrong is
+//! not a reference.
 //!
-//! The seven are the argument for generating this. A reader could not have told
-//! them apart from the 51, because the page rendered all 58 identically.
+//! # One source
 //!
-//! **Twelve of the 51 that did exist described a call the checker rejects** —
-//! wrong arity, or a named argument naming no parameter of the row: `dir` on
-//! `core.lang`, `digits` on `math.round`, `end` on `str.slice`, `delimiter` and
-//! `header` on `io.csv`, `from`/`to` on `str.replace` (`needle`/`replacement`),
-//! `sep` on `str.split` (`separator`), `by`/`key`/`desc` on `seq.distinct`,
-//! `seq.group_by` and `seq.sort`, which have no such parameters, and
-//! `str.concat` written variadic where it takes two. That is why [`signature`]
-//! prints every parameter WITH ITS NAME: the other 39 rows differed only in
-//! notation, and a page that cannot be told apart from one that is wrong is not
-//! a reference.
-//!
-//! # One source, at last
-//!
-//! This module used to read TWO: `catalogue.bnf` for the `io` table and
-//! `fossil_hir::stdlib`'s `FunctionRegistry` for every other section, because
-//! only the `io.` half of the catalogue had become a file. Fifteen lines of
-//! module doc existed to explain which datum came from where.
-//!
-//! Both halves are in the file now, so the special case is gone and so is
-//! `xtask`'s dependency on `fossil-hir` — which mattered for a reason beyond
-//! tidiness. `cargo xtask catalogue` GENERATES `fossil-hir`'s stdlib table; a
-//! generator that must link the crate it writes cannot be run to repair a bad
-//! emit, because the bad emit is what stops the crate compiling. `fossil-hir`
-//! is a DEV-dependency now: the tests can still hold the generated table
-//! against the registry it becomes, and the binary that fixes it links none of
-//! it.
+//! Every section reads `catalogue.bnf`, and nothing reads `fossil-hir` — which
+//! matters for a reason beyond tidiness. `cargo xtask catalogue` GENERATES
+//! `fossil-hir`'s stdlib table; a generator that must link the crate it writes
+//! cannot be run to repair a bad emit, because the bad emit is what stops the
+//! crate compiling. `fossil-hir` is a DEV-dependency: the tests can still hold
+//! the generated table against the registry it becomes, and the binary that
+//! fixes it links none of it.
 //!
 //! # What this does NOT generate, deliberately
 //!
@@ -79,18 +60,17 @@ fn head_of(name: &str) -> &str {
 
 /// `(text: String, start: Integer) -> String`.
 ///
-/// Every parameter is printed WITH ITS NAME, and that is the part the hand
-/// written page could not be trusted on. A name here is not decoration: it is
+/// Every parameter is printed WITH ITS NAME, and that is the part a hand
+/// written page cannot be trusted on. A name here is not decoration: it is
 /// what a named argument writes to reach the position (`grammar.bnf, NamedArg`),
-/// so a page that called `str.replace`'s parameters `from` and `to` — as this
-/// one did — documented a call the checker rejects, the row spelling them
-/// `needle` and `replacement`.
+/// so a page that called `str.replace`'s parameters `from` and `to` would
+/// document a call the checker rejects, the row spelling them `needle` and
+/// `replacement`.
 ///
 /// The notation carries the two things a name and a type cannot: `…` for a
-/// position that repeats and `name =` for one written with its name. Both were
-/// unprintable while arity and named-ness did not exist, and their absence is
-/// what let this page write `sort(by)`, `distinct(key)` and `group_by(desc)` —
-/// three parameters no row had.
+/// position that repeats and `name =` for one written with its name. Without
+/// them a page can write `distinct(key)` or `group_by(desc)` — parameters no
+/// row has.
 #[must_use]
 pub fn signature(sig: &Signature) -> String {
     let params: Vec<String> = sig
@@ -262,7 +242,7 @@ pub fn emit_stdlib_reference(cat: &Catalogue) -> String {
 
     // `io` is a section of its own: its rows print extensions and readers, not
     // signatures, so it is not one of the grouped heads even though the four
-    // data rows now carry a signature like any other.
+    // data rows carry a signature like any other.
     let mut ids: BTreeSet<&str> = grouped.keys().copied().collect();
     ids.insert("io");
 

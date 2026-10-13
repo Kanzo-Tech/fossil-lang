@@ -31,10 +31,9 @@
 //!
 //! # The lexer, and why it is not a `split('"')`
 //!
-//! This module used to extract a row's string literals with
-//! `body.split('"').skip(1).step_by(2)` — "the odd segments are literals" —
-//! which is exactly true for a file whose only literals are extensions like
-//! `"csv"` and exactly false for the stdlib half. A template is SQL text: it
+//! `body.split('"').skip(1).step_by(2)` — "the odd segments are literals" — is
+//! exactly true for a file whose only literals are extensions like `"csv"` and
+//! exactly false for the stdlib half. A template is SQL text: it
 //! carries `|`, `%`, `$`, `{`, `}`, backslashes, doubled single quotes and, in
 //! `str.strip_html`, double quotes of its own. One `"` inside one literal and
 //! every later segment of the line changes parity, so the failure is not a
@@ -42,8 +41,7 @@
 //!
 //! [`lex`] is therefore a real scanner: it knows a string literal from a
 //! comment from a word, and `\"` and `\\` are escapes inside a literal. That
-//! also makes a row free to span lines, which four of the templates did as Rust
-//! constants and which a line scanner could not have read.
+//! also makes a row free to span lines, which a line scanner could not read.
 //!
 //! # What this does NOT generate, deliberately
 //!
@@ -53,11 +51,10 @@
 //! generator that tried to carry it would make the `.bnf` a second Rust file
 //! with different syntax.
 //!
-//! That is also where the measured templates' prose went. `SLUG_TEMPLATE` and
-//! `STRIP_HTML_TEMPLATE` were Rust constants carrying paragraphs of fuzzing
-//! results, and the value they justify is now a literal in the file — so the
-//! paragraphs are `(* … *)` commentary above the row they are about, which is
-//! the placement `catalogue.bnf` already uses for every argument it makes.
+//! That is also where a measured template's prose is: the fuzzing results that
+//! justify `str.slug`'s and `str.strip_html`'s templates are `(* … *)`
+//! commentary above the row they are about, the placement `catalogue.bnf` uses
+//! for every argument it makes.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -99,7 +96,7 @@ const PUNCT: &[&str] = &["->", "=", ";", ".", "(", ")", ",", ":", "+", "?"];
 /// # Panics
 ///
 /// On an unterminated string literal, and on any character that begins no
-/// token — both are malformed input to a file that is now a source of truth.
+/// token — both are malformed input to a file that is a source of truth.
 pub(crate) fn lex(text: &str) -> Vec<Tok> {
     let chars: Vec<char> = text.chars().collect();
     let mut toks = Vec::new();
@@ -339,7 +336,7 @@ impl Arity {
 /// `named` is spelled by the SEPARATOR — `on = Predicate` rather than
 /// `on: Predicate` — because that is the separator the call site writes. A
 /// reader copying a signature off the reference page copies a program that
-/// parses, and the file and the page now agree because one is printed from the
+/// parses, and the file and the page agree because one is printed from the
 /// other.
 #[derive(Debug, Clone)]
 pub struct Param {
@@ -400,9 +397,8 @@ pub struct Row {
     ///
     /// Optional, and its absence is a real answer rather than an omission: a
     /// row that `decodes` gives back a shape document, and `SigTy` has no
-    /// spelling for one. Inventing `Rows` for `io.shex` would be the mistake
-    /// `add`/`add_verb` used to make one layer down, where three constructors
-    /// of relations declared that they returned a string.
+    /// spelling for one. Inventing `Rows` for `io.shex` would be as wrong as a
+    /// constructor of relations declaring that it returns a string.
     pub call: Option<(Signature, Lowering)>,
 }
 
@@ -455,11 +451,10 @@ impl Catalogue {
     /// Every row the checker's `FunctionRegistry` carries: the stdlib rows, and
     /// the `io.` rows that declared a signature.
     ///
-    /// The `io.` rows are here and not stated a second time in Rust, which is
-    /// the drift this fold ends: the registry used to carry `csv`, `json` and
-    /// `parquet` written out by hand while `catalogue.bnf` carried six, so
-    /// `io.rdf` — a real source a program may bind — had no signature at all
-    /// and no diagnostic when written in a value position.
+    /// The `io.` rows are here and not stated a second time in Rust: a
+    /// hand-written half drifts, and a real source a program may bind —
+    /// `io.rdf` — would have no signature and no diagnostic when written in a
+    /// value position.
     #[must_use]
     pub fn registry_rows(&self) -> Vec<(String, &Signature, &Lowering)> {
         let mut out: Vec<(String, &Signature, &Lowering)> = self
@@ -637,7 +632,7 @@ impl Parser {
 ///
 /// Everything outside a statement is `(* … *)` commentary, which is where the
 /// argument lives and which [`lex`] drops. A malformed statement is a panic and
-/// not a skip: this is the source of truth now, so a line that does not parse is
+/// not a skip: this is the source of truth, so a line that does not parse is
 /// a build failure rather than a name that quietly stops existing.
 ///
 /// # Panics
@@ -1253,7 +1248,7 @@ pub fn read() -> Catalogue {
 ///
 /// Each is a projection of `catalogue.bnf` and of nothing else. `fossil-hir`'s stdlib table is why the
 /// reference page needs no second source: both halves of the catalogue are in
-/// the file now, so `crate::reference` reads the same parse everything else does.
+/// the file, so `crate::reference` reads the same parse everything else does.
 ///
 /// # Panics
 ///
