@@ -16,7 +16,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use fossil_base::{Db as _, Diagnostic, FossilDb, SourceFile, System, file_at};
+use fossil_base::{Diagnostic, FossilDb, SourceFile, System, file_at};
 use fossil_hir::documents::{documents_named, registry_key};
 use fossil_hir::shape_documents::shape_document;
 use salsa::Setter as _;

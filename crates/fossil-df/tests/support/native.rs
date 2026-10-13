@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
-use fossil_base::{Db as _, Diagnostic, FossilDb, SourceFile, System, file_at};
+use fossil_base::{Diagnostic, FossilDb, SourceFile, System, file_at};
 use fossil_df::{Executor, RunReport};
 use fossil_hir::documents::{documents_named, register_missing_documents, registry_key};
 use fossil_sinks::manifest::Manifest;
