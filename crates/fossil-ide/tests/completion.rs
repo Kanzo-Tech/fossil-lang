@@ -1,4 +1,4 @@
-//! SC#4 (LSP-01 completion half) — completion integration test.
+//! Completion integration test.
 //!
 //! Proves [`fossil_ide::completions`] merges its sources end-to-end:
 //!
@@ -7,15 +7,10 @@
 //!   (b) a program that names no document contributes none of those, while the
 //!       stdlib catalogue still answers — the "if reachable" hedge.
 //!
-//! Three cases stood in front of (a) and all three named something that no
-//! longer exists: a `clean.trim` whose completion carried a top-of-file
-//! `use clean` auto-import edit, a `clean.slug` tagged `DEPRECATED` for being
-//! `NativeUdfOnly`, and a declared `ex:` prefix offered as its own item. There
-//! is no `use` production, no `WasmClass::NativeUdfOnly`, and no `prefix`
-//! declaration; the catalogue is `str.*` / `io.*` / `seq.*` and every row of it
-//! runs everywhere. `completion.rs`'s own `stdlib_entries_are_offered_bare` is
-//! what asserts that now, and case (b) below is what keeps a stdlib assertion at
-//! the integration layer.
+//! There is no `use` production, no native-only row and no `prefix`
+//! declaration, so no item carries an import edit, a tag or a prefix;
+//! `completion.rs`'s own `stdlib_entries_are_offered_bare` asserts that, and
+//! case (b) below keeps a stdlib assertion at the integration layer.
 //!
 //! Case (a) needs a program that NAMES its output shape document and
 //! a HOST that has done its two jobs for it: installed a decoder row that
@@ -73,12 +68,9 @@ fn shape_property_names_are_offered_when_shape_resolves() {
     let f = file(&mut db, SRC);
     // Line 3 (`    name = users.name`) is inside the `User : Person` mapping
     // whose target shape resolves to `http://example.org/Person`. Column 8 is
-    // the end of the KEY — the one position a property key can be written. The
-    // cursor sat at column 14 instead, inside `users` on the right of the `=`,
-    // and the item it found was labelled `http://example.org/name`: an
-    // expression position, and a label no `PropertyLhs := IDENT` accepts.
-    // `tests/completion_property_key.rs` is the whole of that measurement.
-    let items = fossil_ide::completions(&db, &[f], f, 3, 8);
+    // the end of the KEY — a position a property key can be written at;
+    // `tests/completion_property_key.rs` measures the rest.
+    let items = fossil_ide::completions(&db, f, 3, 8);
 
     let shape_prop = items
         .iter()
@@ -105,12 +97,9 @@ fn shape_property_names_are_offered_when_shape_resolves() {
 ///     the stdlib catalogue still does — the "if reachable" hedge.
 ///
 /// What turns backward checking off is the program declaring no output
-/// contract; there is nowhere else for that condition to come from any more.
-///
-/// This is also the one integration-level assertion left that the stdlib source
-/// answers at all: the three tests that used to make it did so about entries
-/// (`clean.trim`, `clean.slug`) and an item kind (`ex:`) the catalogue no longer
-/// has. `str.trim` is a row it does have.
+/// contract, and nothing else. This is also the integration-level assertion
+/// that the stdlib source answers at all, about a row the catalogue has:
+/// `str.trim`.
 #[test]
 fn a_program_naming_no_document_yields_no_shape_properties_but_keeps_stdlib() {
     const NO_DOCUMENT: &str = "\
@@ -122,10 +111,10 @@ User : Person from users
     let f = file(&mut db, NO_DOCUMENT);
     // One line shorter than `SRC` — the body is line 2 here, and column 8 is
     // the same KEY position case (a) asks from. Asking anywhere else would make
-    // this pass for the wrong reason: no position but that one offers a shape
-    // property at all now, so an expression position is silent whether the
-    // document resolves or not.
-    let items = fossil_ide::completions(&db, &[f], f, 2, 8);
+    // this pass for the wrong reason: no other position offers a shape property
+    // at all, so an expression position is silent whether the document
+    // resolves or not.
+    let items = fossil_ide::completions(&db, f, 2, 8);
 
     assert!(
         !items
@@ -135,10 +124,10 @@ User : Person from users
          (Field) completions",
     );
     // The stdlib half is asked one line up, at the header. A key position
-    // offers no catalogued row either now — `PropertyLhs := IDENT` and every
-    // row is dotted — so asking here would prove the catalogue silent for the
+    // offers no catalogued row either — `PropertyLhs := IDENT` and every row is
+    // dotted — so asking here would prove the catalogue silent for the
     // narrowing's reason and read as if the document were the reason.
-    let header = fossil_ide::completions(&db, &[f], f, 1, 3);
+    let header = fossil_ide::completions(&db, f, 1, 3);
     assert!(
         header.iter().any(|i| i.label == "str.trim"),
         "stdlib completions must still be offered; labels = {:?}",
@@ -152,11 +141,9 @@ User : Person from users
 
 // ── The receiver ───────────────────────────────────────────────────────────
 //
-// Measured before the narrowing existed, at the `.` of `users.name` in `SRC`:
-// **51 stdlib rows** offered whatever the receiver — 13 `seq.*`, 13 `str.*`,
-// 3 `io.*`, the rest `parse` / `math` / `validate` / `core` / `anon` — in
-// `HashMap` order, which three consecutive runs printed three different
-// spellings of. Below: all of them `seq.*`, in one order.
+// After a receiver, the rows are what that receiver has, in one order: the
+// catalogue is a `HashMap`, so an unsorted list would be a different list on
+// every call.
 
 /// After a `:=` binding's dot, the catalogue offers the RELATION VERBS and
 /// nothing else — labelled bare, because the member is what is being typed.
@@ -166,7 +153,7 @@ fn a_relation_receiver_offers_the_verbs_and_no_other_row() {
     let f = file(&mut db, SRC);
     // `    name = users.name` is line 3; the `.` is at column 16, so 17 is the
     // first character of the member.
-    let items = fossil_ide::completions(&db, &[f], f, 3, 17);
+    let items = fossil_ide::completions(&db, f, 3, 17);
     let fns: Vec<&str> = items
         .iter()
         .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
@@ -202,7 +189,7 @@ User : Person from users
     let mut db = host_db();
     let f = file(&mut db, WITH_STR);
     // `    name = str.` — the `.` is the last character of line 2, column 14.
-    let items = fossil_ide::completions(&db, &[f], f, 2, 15);
+    let items = fossil_ide::completions(&db, f, 2, 15);
     let fns: Vec<&str> = items
         .iter()
         .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
@@ -228,7 +215,7 @@ users := io.
 ";
     let mut db = host_db();
     let f = file(&mut db, WITH_IO);
-    let items = fossil_ide::completions(&db, &[f], f, 0, 12);
+    let items = fossil_ide::completions(&db, f, 0, 12);
     let fns: Vec<&str> = items
         .iter()
         .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
@@ -252,7 +239,7 @@ User : Person from users
 ";
     let mut db = host_db();
     let f = file(&mut db, UNKNOWN);
-    let items = fossil_ide::completions(&db, &[f], f, 2, 18);
+    let items = fossil_ide::completions(&db, f, 2, 18);
     assert!(
         !items
             .iter()
@@ -275,7 +262,7 @@ fn the_bare_catalogue_is_whole_and_sorted() {
     let mut db = host_db();
     let f = file(&mut db, SRC);
     // Line 2 is `User : Person from users`; column 3 is inside `User`.
-    let items = fossil_ide::completions(&db, &[f], f, 2, 3);
+    let items = fossil_ide::completions(&db, f, 2, 3);
     let fns: Vec<&str> = items
         .iter()
         .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
@@ -288,8 +275,8 @@ fn the_bare_catalogue_is_whole_and_sorted() {
     let mut sorted = fns.clone();
     sorted.sort_unstable();
     assert_eq!(fns, sorted, "ordered by label, always");
-    // The same call twice is the same list. This is what was false.
-    let again: Vec<String> = fossil_ide::completions(&db, &[f], f, 2, 3)
+    // The same call twice is the same list.
+    let again: Vec<String> = fossil_ide::completions(&db, f, 2, 3)
         .into_iter()
         .map(|i| i.label)
         .collect();

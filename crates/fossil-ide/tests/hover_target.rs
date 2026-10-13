@@ -48,8 +48,8 @@ fn host_db() -> FossilDb {
 }
 
 /// The introspected `users` row, registered by the HOST before the compile —
-/// what the browser's `registerProfile` does for real. Its `name` column is
-/// `Integer`; see `SHEX_SRC` for why it is not `String` any more.
+/// what the browser's `describe` does for real. Its `name` column is
+/// `Integer`; see `SHEX_SRC` for why.
 fn register_users(db: &mut dyn fossil_base::Db) {
     use fossil_base::sources::{InferredColumn, InferredDescriptor};
     use fossil_graph_schema::Primitive;
@@ -79,11 +79,8 @@ fn register_users(db: &mut dyn fossil_base::Db) {
 /// The property key `name` is what binds the two: a bare key is the last segment
 /// of a predicate IRI **the document declares**.
 ///
-/// The pair used to be `String` against `Integer`, which is not merely distinct
-/// but INCOMPATIBLE. Now that `resolve_target_shape` reads the document the
-/// program names, the mismatch is a real error, the expression
-/// stops typing, and hover has no type to show. An unchecked mismatch is no
-/// longer a state this language can be in.
+/// Not `String` against `Integer`: that pair is INCOMPATIBLE, the checker
+/// reports it, the expression stops typing, and hover has no type to show.
 ///
 /// `Integer` against `Float` keeps the two blocks distinct AND well-typed, via
 /// `S-IntFlt` — the subtyping rule kept precisely so

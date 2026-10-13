@@ -2,11 +2,12 @@
  * Go to definition, and the branch that matters: **is the target in this
  * buffer**.
  *
- * Two of the four positions `fossil_ide::goto_definition` recognises resolve
- * into the shape document. A version of this that always moved the cursor would
- * work on the two in-file positions and put the caret at the shape document's
- * coordinates in the program for the other two — a jump that goes somewhere
- * plausible and wrong, which is the worst kind.
+ * An imported type's name and a property key — two of the names
+ * `fossil_ide::goto_definition` resolves — resolve into the shape document. A
+ * version of this that always moved the cursor would work on the names declared
+ * in the program and put the caret at the shape document's coordinates in the
+ * program for the other two — a jump that goes somewhere plausible and wrong,
+ * which is the worst kind.
  */
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';

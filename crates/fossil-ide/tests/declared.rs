@@ -51,7 +51,7 @@ fn text_at(file: SourceFile, db: &FossilDb, range: std::ops::Range<u32>) -> Stri
 #[test]
 fn the_key_position_offers_a_declared_types_fields() {
     let (db, file) = program();
-    let fields: Vec<String> = fossil_ide::completions(&db, &[file], file, 7, 6)
+    let fields: Vec<String> = fossil_ide::completions(&db, file, 7, 6)
         .into_iter()
         .filter(|i| i.kind == Some(CompletionItemKind::FIELD))
         .map(|i| i.label)
@@ -69,7 +69,7 @@ fn a_keys_hover_shows_the_declared_fields_type() {
 #[test]
 fn the_type_name_goes_to_its_declaration() {
     let (db, file) = program();
-    let targets = fossil_ide::goto_definition(&db, &[file], file, 5, 10);
+    let targets = fossil_ide::goto_definition(&db, file, 5, 10);
     assert_eq!(targets.len(), 1, "{targets:?}");
     assert_eq!(targets[0].file, file);
     let declaration = PROGRAM.find("type Person").unwrap() + "type ".len();
@@ -83,7 +83,7 @@ fn the_type_name_goes_to_its_declaration() {
 #[test]
 fn a_key_goes_to_its_field() {
     let (db, file) = program();
-    let targets = fossil_ide::goto_definition(&db, &[file], file, 7, 5);
+    let targets = fossil_ide::goto_definition(&db, file, 7, 5);
     assert_eq!(targets.len(), 1, "{targets:?}");
     assert_eq!(targets[0].file, file);
     let field = PROGRAM.find("name: String").unwrap();

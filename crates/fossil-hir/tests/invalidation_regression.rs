@@ -133,11 +133,8 @@
 //!     returns `Ok(None)` before touching either, and `MAX_REEXECUTIONS` is
 //!     unmoved by it. A future fixture that DOES name one must budget the
 //!     `shape_document` re-execution here, once, and not per mapping.
-//!   * The CLI and `fossil_ide::WorkspaceIndex` touch
-//!     only native CLI / WASM-clean IDE-index code; neither introduces a
-//!     `#[salsa::tracked]` query keyed by `MappingLoc`. The IDE indexes are
-//!     plain structs built from `def_map` (file-keyed) — not per-mapping
-//!     tracked queries.
+//!   * `fossil_ide` resolves names through `def_map` (file-keyed) and
+//!     introduces no `#[salsa::tracked]` query keyed by `MappingLoc`.
 //!
 //! The complete per-mapping (`MappingLoc`-keyed) `#[salsa::tracked]` query
 //! set is therefore `body`, `typecheck_mapping`,

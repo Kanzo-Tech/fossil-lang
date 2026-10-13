@@ -1,8 +1,8 @@
-//! Snapshot test for `fossil_ide::document_symbols` (LSP-01 / SC#5).
+//! Snapshot test for `fossil_ide::document_symbols`.
 //!
-//! Renders the document-symbol outline (a flat `Vec<DocumentSymbol>` in v0.1)
-//! into a stable `kind name @ start-end` table so the snapshot diffs readably
-//! when the `SymbolIndex` walk or the kind mapping changes.
+//! Renders the document-symbol outline (a flat `Vec<DocumentSymbol>`) into a
+//! stable `kind name @ range / selection` table so the snapshot diffs readably
+//! when the def map's definitions or the kind mapping change.
 
 use std::sync::Arc;
 
@@ -11,17 +11,10 @@ use fossil_base::{FossilDb, SourceFile, System};
 use fossil_ide::document_symbols;
 use lsp_types::SymbolKind;
 
-/// A multi-item fixture: a type binding, a source def, and two mappings (each
-/// with a shape ref).
-///
-/// It opened with `prefix ex: <https://example.org/>`, and the outline carried a
-/// NAMESPACE for it. There is no vocabulary declaration and so no namespace to
-/// outline — `outline.rs`'s `map_kind` emits CLASS, INTERFACE and VARIABLE and
+/// A multi-item fixture: a type binding of two names, a source binding, and two
+/// mappings. The two types share their binding's range and each has its own
+/// selection; `outline.rs`'s `kind_of` emits CLASS, INTERFACE and VARIABLE and
 /// nothing else, which is why `kind_name` names only those three.
-///
-/// `users` is the third: the `:=` binding on line 2 was in NO outline until
-/// `SymbolIndex` grew its `SOURCE_DEF` arm, because the walk tested only for
-/// `MAPPING`. The snapshot below gained exactly that row.
 const FIXTURE: &str = "\
 type { Person, Organization } := io.shex(\"org.shex\")
 
@@ -52,13 +45,17 @@ fn render(src: &str) -> String {
     for s in document_symbols(&db, file) {
         let _ = writeln!(
             out,
-            "{:<10} {:<16} @ {}:{}-{}:{}",
+            "{:<10} {:<16} @ {}:{}-{}:{} / {}:{}-{}:{}",
             kind_name(s.kind),
             s.name,
             s.range.start.line,
             s.range.start.character,
             s.range.end.line,
             s.range.end.character,
+            s.selection_range.start.line,
+            s.selection_range.start.character,
+            s.selection_range.end.line,
+            s.selection_range.end.character,
         );
     }
     out
