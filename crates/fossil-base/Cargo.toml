@@ -50,6 +50,11 @@ fossil-descriptors-input = { path = "../fossil-descriptors-input" }
 # and nothing else, which is exactly why the vocabulary lives there rather
 # than beside a parser.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
+# A host's profile arrives as JSON, and both hosts that take one — the editor's
+# workspace and the executor — read it through `sources::columns_from_json` and
+# `sources::refusal_from_json`, so the decode is written once.
+serde = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
 # The eight crates that use `test_support` turn the feature on here; an

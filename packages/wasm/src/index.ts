@@ -24,6 +24,6 @@
 export { initFossilWasm, type InitInput } from './load.js';
 export { formatFor, formats } from './format.js';
 export { inputs, openProgram } from './program.js';
-export type { FossilProgram, OpenProgramOptions, Profiled } from './program.js';
+export type { FossilProgram, OpenProgramOptions } from './program.js';
 export { runProfiler, type ProfileRows } from './profile.js';
 export { mappingGrammar, type MappingGrammar } from './mapping.js';

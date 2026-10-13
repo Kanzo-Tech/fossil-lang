@@ -15,7 +15,7 @@
  */
 import { FossilExecutor } from '../pkg/fossil_df_wasm.js';
 import { resolveDocuments } from '@fossil-lang/storage';
-import { FossilError, isFossilError, type Host, type RunReport } from '@fossil-lang/types';
+import { FossilError, isFossilError, type Host, type Profiled, type RunReport } from '@fossil-lang/types';
 import { until, type MissingDocument, type Related, type UnreadDocument } from '@fossil-lang/types/internal';
 
 import { initFossilExecutor } from './load.js';
@@ -43,6 +43,10 @@ export type RunOptions = (
       path: string;
     }
 ) & {
+  /** What the host's profile of the sources answered — what `FossilProgram.registerProfile` was
+   *  given — so the run checks the program against the columns the editor checked it against.
+   *  Without it every source is an open row. */
+  profiled?: Profiled;
   /** Stops the run; it rejects with the signal's reason. */
   signal?: AbortSignal;
 };
@@ -69,11 +73,12 @@ export async function run(
   program: string,
   options: RunOptions,
 ): Promise<RunReport | { report: RunReport; files: CorpusFile[] }> {
-  const { signal } = options;
+  const { profiled, signal } = options;
   try {
     await until(initFossilExecutor(), signal);
     const exec = new FossilExecutor(program, 'files' in options ? options.path : undefined);
     try {
+      if (profiled !== undefined) registerProfile(exec, profiled);
       if ('host' in options) {
         const { unread } = await resolveDocuments(exec, options.host, { signal });
         if (unread.length > 0) throw unreadable(unread);
@@ -93,6 +98,12 @@ export async function run(
     if (isFossilError(e)) throw e;
     throw FossilError.of('internal/bug', { what: 'the run failed outside fossil' }, { cause: e });
   }
+}
+
+/** `FossilProgram.registerProfile`, into the run's database. */
+function registerProfile(exec: FossilExecutor, { descriptors, undescribed }: Profiled): void {
+  for (const descriptor of descriptors) exec.registerInferredDescriptor(JSON.stringify(descriptor));
+  for (const { source, problem } of undescribed) exec.registerUndescribed(source.key, JSON.stringify(problem));
 }
 
 /** `resolveDocuments` over bytes in hand: every document the program names, read from `files`

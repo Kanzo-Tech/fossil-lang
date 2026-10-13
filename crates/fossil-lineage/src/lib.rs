@@ -18,8 +18,6 @@
 //! registry, and the result type in a third crate that nothing but this one
 //! produced. A contract belongs to whoever fills it.
 
-use std::collections::HashMap;
-
 use fossil_base::{Db, SourceFile};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -51,7 +49,7 @@ pub struct Input {
     /// `key` through [`fossil_location::SourceAnchor`]: what a host signs and reads.
     pub location: String,
     /// The connection the location lies under, when it was written `@name/…`
-    /// and the connection map has that name.
+    /// and the connections have that name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection: Option<String>,
     /// The binding a data input is read into (`users` in `users := io.csv(…)`).
@@ -70,14 +68,13 @@ pub struct Input {
 /// row the host installs — a destructured `{ A, B } := io.rdf(…)` is two — then
 /// each distinct shape document it names.
 ///
-/// `connections` expands `@conn` aliases in the location only; the key is what
-/// the program wrote, so the descriptor a host registers under it survives a
-/// connection being repointed.
-#[allow(clippy::implicit_hasher)] // `SourceAnchor` takes the std map.
+/// The database's connections ([`fossil_base::connections`]) expand `@conn`
+/// aliases in the location only; the key is what the program wrote, so the
+/// descriptor a host registers under it survives a connection being repointed.
 #[must_use]
-pub fn inputs(db: &dyn Db, file: SourceFile, connections: &HashMap<String, String>) -> Vec<Input> {
+pub fn inputs(db: &dyn Db, file: SourceFile) -> Vec<Input> {
     let dir = fossil_location::program_dir(file.path(db));
-    let anchor = fossil_location::SourceAnchor::new(&dir, connections);
+    let anchor = fossil_location::SourceAnchor::new(&dir, fossil_base::connections(db));
     let read = |role, key: &str| Input {
         role,
         key: key.to_string(),
@@ -176,7 +173,7 @@ mod tests {
 
     #[test]
     fn an_input_keeps_what_the_program_wrote_and_resolves_where_it_is_read() {
-        let db = fossil_base::test_support::new_db();
+        let mut db = fossil_base::test_support::new_db();
         let file = fossil_base::SourceFile::new(
             &db,
             "users := io.csv(\"@lake/users.csv\", delimiter = \"|\")\n\
@@ -184,10 +181,12 @@ mod tests {
                 .to_string(),
             "a/prog.fossil".to_string(),
         );
-        let connections =
-            std::collections::HashMap::from([("lake".to_string(), "s3://bucket/".to_string())]);
+        fossil_base::set_connections(
+            &mut db,
+            [("lake".to_string(), "s3://bucket/".to_string())].into(),
+        );
         assert_eq!(
-            inputs(&db, file, &connections),
+            inputs(&db, file),
             [
                 Input {
                     role: Role::Data,
@@ -213,7 +212,7 @@ mod tests {
 
     #[test]
     fn a_shape_document_is_an_input_once() {
-        let db = fossil_base::test_support::new_db();
+        let mut db = fossil_base::test_support::new_db();
         let file = fossil_base::SourceFile::new(
             &db,
             "type { P } := io.shex(\"@lake/x.shex\")\n\
@@ -221,9 +220,11 @@ mod tests {
                 .to_string(),
             "prog.fossil".to_string(),
         );
-        let connections =
-            std::collections::HashMap::from([("lake".to_string(), "s3://bucket/".to_string())]);
-        let schemas: Vec<Input> = inputs(&db, file, &connections)
+        fossil_base::set_connections(
+            &mut db,
+            [("lake".to_string(), "s3://bucket/".to_string())].into(),
+        );
+        let schemas: Vec<Input> = inputs(&db, file)
             .into_iter()
             .filter(|i| i.role == Role::Schema)
             .collect();

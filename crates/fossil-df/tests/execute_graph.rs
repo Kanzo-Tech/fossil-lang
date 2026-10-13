@@ -61,15 +61,9 @@ async fn execute_graph_resolves_edges_to_dense_ids() {
         support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
 
     let ctx = SessionContext::new();
-    let graph = fossil_df::execute_graph(
-        &ctx,
-        &db,
-        file,
-        &descriptor(),
-        &std::collections::HashMap::new(),
-    )
-    .await
-    .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
+    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor())
+        .await
+        .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
     // Two vertex types (source order: Person, Order); one edge (placedBy).
     let vtypes: Vec<&str> = graph.vertices.iter().map(|v| v.label.as_str()).collect();
@@ -113,15 +107,9 @@ async fn the_write_emits_one_manifest_over_one_table_per_type_and_relation() {
         support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
 
     let ctx = SessionContext::new();
-    let graph = fossil_df::execute_graph(
-        &ctx,
-        &db,
-        file,
-        &descriptor(),
-        &std::collections::HashMap::new(),
-    )
-    .await
-    .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
+    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor())
+        .await
+        .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
     let (written, files) = support::write_in_memory(&graph).await;
     assert_eq!(

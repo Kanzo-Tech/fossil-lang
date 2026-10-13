@@ -84,7 +84,6 @@ async fn run(program: &str) -> fossil_df::Graph {
                 .expect("parse graph.shex")
                 .to_graph_schema(&fossil_graph_schema::Renames::default()),
         ),
-        &std::collections::HashMap::new(),
     )
     .await
     .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)))

@@ -285,8 +285,8 @@ export interface Input {
    */
   binding?: string;
   /**
-   * The connection the location lies under, when it was written `@name/…` and the connection map
-   * has that name.
+   * The connection the location lies under, when it was written `@name/…` and the connections
+   * have that name.
    */
   connection?: string;
   /**
@@ -371,12 +371,12 @@ export interface MissingDocument {
    */
   connection?: string;
   /**
-   * What it is registered under: `registry_key`, anchored with no connection map, so repointing a
-   * connection never invalidates a query.
+   * What it is registered under: `registry_key`, anchored with no connections, so repointing a
+   * connection never moves a registered document.
    */
   key: string;
   /**
-   * Where it is fetched from: the same reference through the connection map.
+   * Where it is fetched from: the same reference through the connections.
    */
   location: string;
 }

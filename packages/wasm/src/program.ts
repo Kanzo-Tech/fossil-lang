@@ -23,25 +23,15 @@ import type {
   Diagnostic,
   Host,
   Hover,
-  InferredDescriptor,
   Input,
   Location,
-  Problem,
+  Profiled,
   SemanticToken,
   Token,
 } from '@fossil-lang/types';
 import { diagnosticOf, until, type DocumentWorkspace, type UnreadDocument } from '@fossil-lang/types/internal';
 
 import { initFossilWasm } from './load.js';
-
-/**
- * What a host's profile of the sources answered — `profile`'s result in `@fossil-lang/profile`,
- * passed as it came back: the sources it described, and the ones it could not, each with its problem.
- */
-export interface Profiled {
-  descriptors: readonly InferredDescriptor[];
-  undescribed: readonly { source: Pick<Input, 'key'>; problem: Problem }[];
-}
 
 /** What {@link openProgram} takes beside the key. */
 export interface OpenProgramOptions {

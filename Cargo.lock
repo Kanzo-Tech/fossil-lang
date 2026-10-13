@@ -1681,6 +1681,8 @@ dependencies = [
  "fossil-descriptors-input",
  "fossil-graph-schema",
  "salsa",
+ "serde",
+ "serde_json",
  "smol_str",
  "thiserror 1.0.69",
 ]

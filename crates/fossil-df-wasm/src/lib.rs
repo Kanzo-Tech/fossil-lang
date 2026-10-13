@@ -15,7 +15,7 @@
 #![allow(clippy::result_large_err)]
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use fossil_df::Executor;
@@ -80,7 +80,7 @@ impl FossilExecutor {
         &self,
         #[wasm_bindgen(unchecked_param_type = "Record<string, string>")] connections: JsValue,
     ) -> Result<(), JsValue> {
-        let connections: HashMap<String, String> = serde_wasm_bindgen::from_value(connections)
+        let connections: BTreeMap<String, String> = serde_wasm_bindgen::from_value(connections)
             .map_err(|e| {
                 invalid_argument(
                     "connections",
@@ -117,6 +117,33 @@ impl FossilExecutor {
         self.borrow_mut("registerDocument")?
             .register_document(&key, &text);
         Ok(())
+    }
+
+    /// Record the columns the host's profile found for a source —
+    /// `FossilWorkspace.registerInferredDescriptor`, so the run checks the
+    /// program against the columns the editor checked it against.
+    ///
+    /// # Errors
+    /// `api/invalid-argument` if `descriptor_json` is not an
+    /// `InferredDescriptor` as JSON, `api/busy` if a run is in flight.
+    #[wasm_bindgen(js_name = registerInferredDescriptor)]
+    pub fn register_inferred_descriptor(&self, descriptor_json: &str) -> Result<(), JsValue> {
+        Ok(self
+            .borrow_mut("registerInferredDescriptor")?
+            .register_inferred_descriptor(descriptor_json)?)
+    }
+
+    /// Record that the host's profile could not describe the source the
+    /// program wrote as `key` — `FossilWorkspace.registerUndescribed`.
+    ///
+    /// # Errors
+    /// `api/invalid-argument` if `problem_json` is not a `Problem` fossil
+    /// knows, `api/busy` if a run is in flight.
+    #[wasm_bindgen(js_name = registerUndescribed)]
+    pub fn register_undescribed(&self, key: &str, problem_json: &str) -> Result<(), JsValue> {
+        Ok(self
+            .borrow_mut("registerUndescribed")?
+            .register_undescribed(key, problem_json)?)
     }
 
     /// Run with the storage `host` vends: read each source through its

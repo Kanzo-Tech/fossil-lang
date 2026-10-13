@@ -37,8 +37,7 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
     // The seam fossil exposes: enumerate the provider sources (MIR-derived) so
     // the host knows what to read + how to pivot it.
     let accept_all = fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT;
-    let bindings =
-        fossil_df::provider_bindings(&db, file, &accept_all, &std::collections::HashMap::new());
+    let bindings = fossil_df::provider_bindings(&db, file, &accept_all);
     assert_eq!(bindings.len(), 1, "one io.rdf source");
     let b = &bindings[0];
     assert_eq!(b.binding, "people");
@@ -63,15 +62,9 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
     let ctx = SessionContext::new();
     support::register_provider_sources(&ctx, &db, file, &accept_all);
 
-    let graph = fossil_df::execute_graph(
-        &ctx,
-        &db,
-        file,
-        &accept_all,
-        &std::collections::HashMap::new(),
-    )
-    .await
-    .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
+    let graph = fossil_df::execute_graph(&ctx, &db, file, &accept_all)
+        .await
+        .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
     // One vertex type; no edges. Subject selection by rdf:type drops the Org.
     let vtypes: Vec<&str> = graph.vertices.iter().map(|v| v.label.as_str()).collect();
@@ -166,15 +159,9 @@ async fn io_rdf_shex_descriptor_yields_typed_multivalued_edges() {
 
     let ctx = SessionContext::new();
     support::register_provider_sources(&ctx, &db, file, &descriptor);
-    let graph = fossil_df::execute_graph(
-        &ctx,
-        &db,
-        file,
-        &descriptor,
-        &std::collections::HashMap::new(),
-    )
-    .await
-    .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
+    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor)
+        .await
+        .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
     // Two vertex types, each from ITS shape: KB carries `label` (NOT hasProject —
     // that's an edge), Project carries `title`.

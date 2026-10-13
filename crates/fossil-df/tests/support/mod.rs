@@ -135,8 +135,7 @@ pub(crate) fn register_provider_sources(
     file: SourceFile,
     descriptor: &fossil_df::OutputDescriptorKind,
 ) {
-    let none = std::collections::HashMap::new();
-    for binding in fossil_df::provider_bindings(db, file, descriptor, &none) {
+    for binding in fossil_df::provider_bindings(db, file, descriptor) {
         let turtle = std::fs::read_to_string(&binding.uri)
             .unwrap_or_else(|e| panic!("read RDF source `{}`: {e}", binding.uri));
         fossil_df::register_rdf(ctx, &binding, &turtle).expect("register the RDF source");

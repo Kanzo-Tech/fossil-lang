@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 use fossil_descriptors_input::InferredDescriptor;
-use fossil_graph_schema::Problem;
+use fossil_graph_schema::{Failure, Problem};
 use smol_str::SmolStr;
 
 use crate::db::Db;
@@ -94,6 +94,56 @@ pub fn describe(db: &mut dyn Db, location: &str, description: Described) {
 pub fn describe_columns(db: &mut dyn Db, descriptor: InferredDescriptor) {
     let location = descriptor.key.clone();
     describe(db, &location, Described::Columns(descriptor));
+}
+
+/// A host's columns for a source, as the JSON of an [`InferredDescriptor`].
+///
+/// # Errors
+///
+/// `api/invalid-argument`, the `serde_json` error as its cause, naming
+/// `descriptorJson` — the argument both hosts take it as.
+// `result_large_err`: a host refuses the call with this `Failure` whole, once,
+// on the path that ends it — `fossil-df`'s crate root says the same.
+#[allow(clippy::result_large_err)]
+pub fn columns_from_json(json: &str) -> Result<InferredDescriptor, Failure> {
+    serde_json::from_str(json).map_err(|e| {
+        Failure::new(Problem::InvalidArgument {
+            argument: "descriptorJson".to_string(),
+            expected: "an InferredDescriptor as JSON".to_string(),
+        })
+        .caused_by(e)
+    })
+}
+
+/// Why a host could not describe a source, as the JSON of the `Problem` its
+/// profile answered (`{ code, data, help?, … }`, as `@fossil-lang/types`
+/// carries it) — a [`Described::Refused`].
+///
+/// `title`, `detail` and `cause` are not read: the first two are rendered
+/// again from the code and its data, and a diagnostic has no place for the
+/// third.
+///
+/// # Errors
+///
+/// `api/invalid-argument`, the `serde_json` error as its cause, naming
+/// `problemJson`, when it is not a `Problem` this build of fossil knows.
+#[allow(clippy::result_large_err)] // as `columns_from_json`.
+pub fn refusal_from_json(json: &str) -> Result<Described, Failure> {
+    #[derive(serde::Deserialize)]
+    struct Refusal {
+        #[serde(flatten)]
+        problem: Problem,
+        #[serde(default)]
+        help: Option<String>,
+    }
+    let Refusal { problem, help } = serde_json::from_str(json).map_err(|e| {
+        Failure::new(Problem::InvalidArgument {
+            argument: "problemJson".to_string(),
+            expected: "a Problem as JSON".to_string(),
+        })
+        .caused_by(e)
+    })?;
+    Ok(Described::Refused { problem, help })
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]

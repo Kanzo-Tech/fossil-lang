@@ -23,7 +23,8 @@ that refusal is the `cause`. The places that raise it:
 | `attach` (`@fossil-lang/corpus`) | `engine` | an Engine |
 | `attach` (`@fossil-lang/corpus`) | `host` | exactly one of host and url |
 | `setConnections` (workspace and executor) | `connections` | an object of `{ name: baseUrl }` |
-| `registerInferredDescriptor` | `descriptorJson` | an InferredDescriptor as JSON |
+| `registerInferredDescriptor` (workspace and executor) | `descriptorJson` | an InferredDescriptor as JSON |
+| `registerUndescribed` (workspace and executor) | `problemJson` | a Problem as JSON |
 | `run` over `files` (`@fossil-lang/executor`) | `files`, `path` | an object of `{ [url]: Uint8Array }` keyed by URL; a URL |
 | `storageGrant`, `storageName` | `credential`, `access` | a StorageCredential; `read` or `write` |
 | `storageRead` | `targets` | an array of `{ location, connection? }` |

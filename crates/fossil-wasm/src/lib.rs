@@ -67,7 +67,7 @@ pub use crate::ide::{CompletionItem, CompletionKind, Hover, Location, SemanticTo
 pub use crate::tokenize::{Token, tokenize_native};
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use fossil_base::{FossilDb, SourceFile, System};
@@ -95,10 +95,6 @@ use crate::workspace::OpenFiles;
 /// for a real defect — the type-level note on [`WasmWorkspace`] says which.
 pub struct FossilWorkspace {
     db: FossilDb,
-    /// Connection name → base, as `@name/…` expands against it. Outside Salsa:
-    /// it reaches locations only, never a registry key, so setting it
-    /// invalidates nothing.
-    connections: HashMap<String, String>,
     /// The open-file lifecycle map (handle → `SourceFile` + URI index).
     /// Mutated by `open_file` / `update_file` / `close_file`; iterated by
     /// `diagnostics` / `diagnostics_for`.
@@ -125,7 +121,6 @@ impl FossilWorkspace {
         let db = FossilDb::new(Arc::new(WasmSystem) as Arc<dyn System>);
         Self {
             db,
-            connections: HashMap::new(),
             files: OpenFiles::default(),
         }
     }
@@ -336,8 +331,9 @@ impl WasmWorkspace {
 
     // ----- Documents and sources: fossil resolves, the host reads -----
 
-    /// Replace the connection map `@name/…` expands against, as
-    /// `Host.connections()` answers it.
+    /// Replace the connections `@name/…` expands against, as
+    /// `Host.connections()` answers them — an input, so what expanded one
+    /// re-runs ([`fossil_base::set_connections`]).
     ///
     /// # Errors
     ///
@@ -348,7 +344,7 @@ impl WasmWorkspace {
         &self,
         #[wasm_bindgen(unchecked_param_type = "Record<string, string>")] connections: JsValue,
     ) -> Result<(), JsValue> {
-        let connections: HashMap<String, String> = serde_wasm_bindgen::from_value(connections)
+        let connections: BTreeMap<String, String> = serde_wasm_bindgen::from_value(connections)
             .map_err(|e| {
                 invalid_argument(
                     "connections",
@@ -364,7 +360,7 @@ impl WasmWorkspace {
     }
 
     /// The documents the file at `handle` names that nothing has registered:
-    /// `{ key, location }` rows, the location expanded through the connection map.
+    /// `{ key, location }` rows, the location expanded through the connections.
     ///
     /// # Errors
     ///
@@ -670,8 +666,8 @@ impl FossilWorkspace {
     }
 
     /// Pure-Rust mirror of [`WasmWorkspace::set_connections`].
-    pub fn set_connections_native(&mut self, connections: HashMap<String, String>) {
-        self.connections = connections;
+    pub fn set_connections_native(&mut self, connections: BTreeMap<String, String>) {
+        fossil_base::set_connections(&mut self.db, connections);
     }
 
     /// Pure-Rust mirror of [`WasmWorkspace::missing_documents`]; `None` for an
@@ -679,11 +675,7 @@ impl FossilWorkspace {
     #[must_use]
     pub fn missing_documents_native(&self, handle: FileHandle) -> Option<Vec<MissingDocument>> {
         let file = self.files.get(handle)?;
-        Some(fossil_hir::documents::missing_documents(
-            &self.db,
-            file,
-            &self.connections,
-        ))
+        Some(fossil_hir::documents::missing_documents(&self.db, file))
     }
 
     /// Pure-Rust mirror of [`WasmWorkspace::register_document`].
@@ -696,7 +688,7 @@ impl FossilWorkspace {
     #[must_use]
     pub fn inputs_native(&self, handle: FileHandle) -> Option<Vec<fossil_lineage::Input>> {
         let file = self.files.get(handle)?;
-        Some(fossil_lineage::inputs(&self.db, file, &self.connections))
+        Some(fossil_lineage::inputs(&self.db, file))
     }
 
     // ----- Accessors for the editor surface in [`ide`] (pub(crate)) -----
@@ -738,20 +730,13 @@ impl FossilWorkspace {
     ///
     /// # Errors
     ///
-    /// Returns `api/invalid-argument`, the `serde_json` error as its cause, if
-    /// the JSON fails to deserialise. Nothing is recorded on error.
+    /// What [`fossil_base::columns_from_json`] refuses. Nothing is recorded on
+    /// error.
     pub fn register_inferred_descriptor_native(
         &mut self,
         descriptor_json: &str,
     ) -> Result<(), Failure> {
-        let descriptor: fossil_descriptors_input::InferredDescriptor =
-            serde_json::from_str(descriptor_json).map_err(|e| {
-                Failure::new(Problem::InvalidArgument {
-                    argument: "descriptorJson".to_string(),
-                    expected: "an InferredDescriptor as JSON".to_string(),
-                })
-                .caused_by(e)
-            })?;
+        let descriptor = fossil_base::columns_from_json(descriptor_json)?;
         fossil_base::describe_columns(&mut self.db, descriptor);
         Ok(())
     }
@@ -760,26 +745,15 @@ impl FossilWorkspace {
     ///
     /// # Errors
     ///
-    /// Returns `api/invalid-argument`, the `serde_json` error as its cause, if
-    /// `problem_json` is not a `Problem` this build of fossil knows. Nothing is
-    /// recorded on error.
+    /// What [`fossil_base::refusal_from_json`] refuses. Nothing is recorded on
+    /// error.
     pub fn register_undescribed_native(
         &mut self,
         key: &str,
         problem_json: &str,
     ) -> Result<(), Failure> {
-        let Undescribed { problem, help } = serde_json::from_str(problem_json).map_err(|e| {
-            Failure::new(Problem::InvalidArgument {
-                argument: "problemJson".to_string(),
-                expected: "a Problem as JSON".to_string(),
-            })
-            .caused_by(e)
-        })?;
-        fossil_base::describe(
-            &mut self.db,
-            key,
-            fossil_base::Described::Refused { problem, help },
-        );
+        let refused = fossil_base::refusal_from_json(problem_json)?;
+        fossil_base::describe(&mut self.db, key, refused);
         Ok(())
     }
 
@@ -814,18 +788,6 @@ pub fn formats() -> Result<JsValue, JsValue> {
         "the formats",
         &fossil_lineage::formats(fossil_descriptors_output::PROVIDERS),
     )
-}
-
-/// Why a source could not be described: the problem a host's introspection
-/// answered, as `@fossil-lang/types`' `Problem` carries it. `title`, `detail`
-/// and `cause` are not read — the first two are rendered again from the code
-/// and its data, and a diagnostic has no place for the third.
-#[derive(Debug, Clone, serde::Deserialize)]
-struct Undescribed {
-    #[serde(flatten)]
-    problem: Problem,
-    #[serde(default)]
-    help: Option<String>,
 }
 
 /// One diagnostic row in the [`WasmWorkspace::diagnostics`] return array: the

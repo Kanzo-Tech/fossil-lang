@@ -30,7 +30,7 @@
 #[path = "profile.rs"]
 pub(crate) mod profile;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -64,7 +64,7 @@ pub(crate) fn open_db(path: &Path) -> (FossilDb, SourceFile) {
     let file = SourceFile::new(&db, text, path.to_string_lossy().into_owned());
     // A source that cannot be described is skipped, not fatal: the compile then
     // has no forward-propagated type for it, which is what the checker reports.
-    let inputs = fossil_lineage::inputs(&db, file, &HashMap::new());
+    let inputs = fossil_lineage::inputs(&db, file);
     profile::profile_and_register(&mut db, &inputs);
     register_shape_documents(&mut db, file);
     (db, file)
@@ -349,7 +349,7 @@ async fn run_dir_async(
         connections
             .iter()
             .map(|(name, url)| ((*name).to_string(), (*url).to_string()))
-            .collect::<HashMap<_, _>>(),
+            .collect(),
     );
     for missing in exec.missing_documents() {
         let rel = missing

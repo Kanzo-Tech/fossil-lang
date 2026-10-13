@@ -3,6 +3,7 @@
 export type { Host, HostCall } from './host.js';
 export type { Engine, Table, Vector } from './engine.js';
 export type { Diagnostic } from './diagnostic.js';
+export type { Profiled } from './profiled.js';
 export type {
   Access,
   CompletionItem,

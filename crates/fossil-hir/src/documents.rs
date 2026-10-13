@@ -33,8 +33,6 @@
 //! under [`MissingDocument::key`]. A host that reads synchronously has
 //! [`register_missing_documents`], which is that loop and nothing else.
 
-use std::collections::HashMap;
-
 use fossil_base::{Db, SourceFile, file_at, register_document};
 use smol_str::SmolStr;
 
@@ -99,9 +97,9 @@ pub fn registry_key(db: &dyn Db, file: SourceFile, document: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, schemars::JsonSchema)]
 pub struct MissingDocument {
     /// What it is registered under: [`registry_key`], anchored with no
-    /// connection map, so repointing a connection never invalidates a query.
+    /// connections, so repointing a connection never moves a registered document.
     pub key: String,
-    /// Where it is fetched from: the same reference through the connection map.
+    /// Where it is fetched from: the same reference through the connections.
     pub location: String,
     /// The connection the location lies under, when it was written `@name/…`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -111,18 +109,13 @@ pub struct MissingDocument {
 /// Every document `file` names that is not registered yet, with the key it
 /// goes under and the location it is fetched from.
 ///
-/// `connections` expands `@conn` aliases in the location only. The program's
-/// directory comes from `file`, so the key and the location cannot be anchored
-/// against two different places.
-#[allow(clippy::implicit_hasher)] // `SourceAnchor` takes the std map.
+/// The database's connections ([`fossil_base::connections`]) expand `@conn`
+/// aliases in the location only. The program's directory comes from `file`, so
+/// the key and the location cannot be anchored against two different places.
 #[must_use]
-pub fn missing_documents(
-    db: &dyn Db,
-    file: SourceFile,
-    connections: &HashMap<String, String>,
-) -> Vec<MissingDocument> {
+pub fn missing_documents(db: &dyn Db, file: SourceFile) -> Vec<MissingDocument> {
     let dir = fossil_location::program_dir(file.path(db));
-    let anchor = fossil_location::SourceAnchor::new(&dir, connections);
+    let anchor = fossil_location::SourceAnchor::new(&dir, fossil_base::connections(db));
     documents_named(db, file)
         .into_iter()
         .filter_map(|document| {
@@ -137,7 +130,7 @@ pub fn missing_documents(
 }
 
 /// [`missing_documents`] read synchronously and registered — the loop for a
-/// host with no connection map, so each location is its key.
+/// host that reads each location itself.
 ///
 /// `read` answers `None` for a document it cannot produce, and that document
 /// stays unregistered: the checker's diagnostic has the span, this loop does
@@ -151,7 +144,7 @@ pub fn register_missing_documents(
     read: &dyn Fn(&dyn Db, &str) -> Option<String>,
 ) -> usize {
     // Read first, register second: registering takes the database exclusively.
-    let pending: Vec<(String, String)> = missing_documents(&*db, file, &HashMap::new())
+    let pending: Vec<(String, String)> = missing_documents(&*db, file)
         .into_iter()
         .filter_map(|missing| read(&*db, &missing.location).map(|text| (missing.key, text)))
         .collect();
@@ -230,9 +223,8 @@ mod tests {
         );
     }
 
-    /// The other one. An alias this host cannot expand — the checker is never
-    /// given a connection map — passes through verbatim, so the "not found"
-    /// that follows names what the program wrote.
+    /// The other one. A key never expands an alias, so it passes through
+    /// verbatim and the "not found" that follows names what the program wrote.
     #[test]
     fn a_document_named_through_a_connection_alias_is_not_anchored() {
         let db = new_db();
@@ -243,11 +235,12 @@ mod tests {
         );
     }
 
-    fn connections(pairs: &[(&str, &str)]) -> HashMap<String, String> {
-        pairs
+    fn connect(db: &mut fossil_base::FossilDb, pairs: &[(&str, &str)]) {
+        let connections = pairs
             .iter()
             .map(|(name, base)| ((*name).to_string(), (*base).to_string()))
-            .collect()
+            .collect();
+        fossil_base::set_connections(db, connections);
     }
 
     fn resolves_target_shape(db: &fossil_base::FossilDb, file: SourceFile) -> bool {
@@ -259,11 +252,11 @@ mod tests {
     }
 
     #[test]
-    fn without_a_connection_map_the_location_is_the_key() {
+    fn without_connections_the_location_is_the_key() {
         let db = new_db();
         let file = program(&db, "a/prog.fossil", "shapes/person.shex");
         assert_eq!(
-            missing_documents(&db, file, &HashMap::new()),
+            missing_documents(&db, file),
             [MissingDocument {
                 key: "a/shapes/person.shex".to_string(),
                 location: "a/shapes/person.shex".to_string(),
@@ -272,18 +265,15 @@ mod tests {
         );
     }
 
-    /// The map reaches the location and never the key: the key is what the
-    /// program wrote, so repointing `warehouse` invalidates nothing.
+    /// The connections reach the location and never the key: the key is what
+    /// the program wrote, so repointing `warehouse` moves no registered document.
     #[test]
     fn a_connection_expands_the_location_and_leaves_the_key_as_written() {
-        let db = new_db();
+        let mut db = new_db();
         let file = program(&db, "a/prog.fossil", "@warehouse/shapes/person.shex");
+        connect(&mut db, &[("warehouse", "s3://bucket/base/")]);
         assert_eq!(
-            missing_documents(
-                &db,
-                file,
-                &connections(&[("warehouse", "s3://bucket/base/")])
-            ),
+            missing_documents(&db, file),
             [MissingDocument {
                 key: "@warehouse/shapes/person.shex".to_string(),
                 location: "s3://bucket/base/shapes/person.shex".to_string(),
@@ -294,11 +284,29 @@ mod tests {
 
     #[test]
     fn an_alias_the_map_does_not_name_passes_through_verbatim() {
-        let db = new_db();
+        let mut db = new_db();
         let file = program(&db, "a/prog.fossil", "@warehouse/person.shex");
-        let missing = missing_documents(&db, file, &connections(&[("lake", "s3://lake")]));
+        connect(&mut db, &[("lake", "s3://lake")]);
+        let missing = missing_documents(&db, file);
         assert_eq!(missing[0].location, "@warehouse/person.shex");
         assert_eq!(missing[0].key, "@warehouse/person.shex");
+    }
+
+    /// The connections are an input: set after a first answer, the next answer
+    /// reads them.
+    #[test]
+    fn a_connection_set_after_asking_moves_the_location() {
+        let mut db = new_db();
+        let file = program(&db, "a/prog.fossil", "@warehouse/person.shex");
+        assert_eq!(
+            missing_documents(&db, file)[0].location,
+            "@warehouse/person.shex"
+        );
+        connect(&mut db, &[("warehouse", "https://w.example")]);
+        assert_eq!(
+            missing_documents(&db, file)[0].location,
+            "https://w.example/person.shex"
+        );
     }
 
     #[test]
@@ -306,7 +314,7 @@ mod tests {
         let mut db = new_db();
         let file = program(&db, "a/prog.fossil", "shapes/person.shex");
         register_document(&mut db, "a/shapes/person.shex", PERSON_DOCUMENT);
-        assert!(missing_documents(&db, file, &HashMap::new()).is_empty());
+        assert!(missing_documents(&db, file).is_empty());
     }
 
     /// Registering under the reported key is what the checker resolves.
@@ -314,8 +322,8 @@ mod tests {
     fn registering_what_is_missing_resolves_the_target_shape() {
         let mut db = new_db();
         let file = program(&db, "a/prog.fossil", "@warehouse/person.shex");
-        let conns = connections(&[("warehouse", "https://w.example")]);
-        for missing in missing_documents(&db, file, &conns) {
+        connect(&mut db, &[("warehouse", "https://w.example")]);
+        for missing in missing_documents(&db, file) {
             assert_eq!(missing.location, "https://w.example/person.shex");
             register_document(&mut db, &missing.key, PERSON_DOCUMENT);
         }

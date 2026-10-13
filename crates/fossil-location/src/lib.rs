@@ -55,9 +55,8 @@
 //! them pays for a substrate edge to reach it — `fossil-base` has no dependency
 //! on it at all.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 
 /// `@name/path` → `("name", "path")`, and `None` for a reference that is not
 /// written through a connection.
@@ -101,22 +100,22 @@ pub fn program_dir(program_path: &str) -> PathBuf {
 #[derive(Debug, Clone, Copy)]
 pub struct SourceAnchor<'a> {
     program_dir: &'a Path,
-    connections: &'a HashMap<String, String>,
+    connections: &'a BTreeMap<String, String>,
 }
 
 impl<'a> SourceAnchor<'a> {
     /// An anchor for a program in `program_dir` whose `@conn` aliases resolve
     /// through `connections` (name → base URL).
     #[must_use]
-    pub const fn new(program_dir: &'a Path, connections: &'a HashMap<String, String>) -> Self {
+    pub const fn new(program_dir: &'a Path, connections: &'a BTreeMap<String, String>) -> Self {
         Self {
             program_dir,
             connections,
         }
     }
 
-    /// An anchor for a host that has no connection map — the checker, which
-    /// resolves shape documents and is never given credentials.
+    /// An anchor that expands no alias — the one a registry key is anchored
+    /// with, so repointing a connection never moves a registered document.
     ///
     /// An unknown alias passes through verbatim ([`Self::location`]), so a
     /// program naming `@warehouse/shapes/x.shex` reads here as the literal
@@ -124,11 +123,11 @@ impl<'a> SourceAnchor<'a> {
     /// the program wrote. That is the same answer an unknown alias gets from a
     /// host that DOES have a map, which is why there is no third behaviour.
     #[must_use]
-    pub fn beside(program_dir: &'a Path) -> Self {
-        static NO_CONNECTIONS: OnceLock<HashMap<String, String>> = OnceLock::new();
+    pub const fn beside(program_dir: &'a Path) -> Self {
+        static NO_CONNECTIONS: BTreeMap<String, String> = BTreeMap::new();
         Self {
             program_dir,
-            connections: NO_CONNECTIONS.get_or_init(HashMap::new),
+            connections: &NO_CONNECTIONS,
         }
     }
 
@@ -140,7 +139,7 @@ impl<'a> SourceAnchor<'a> {
 
     /// The `@conn` name → base-URL map this anchor expands aliases through.
     #[must_use]
-    pub const fn connections(&self) -> &HashMap<String, String> {
+    pub const fn connections(&self) -> &BTreeMap<String, String> {
         self.connections
     }
 
@@ -207,7 +206,7 @@ impl<'a> SourceAnchor<'a> {
 mod tests {
     use super::*;
 
-    fn conns(pairs: &[(&str, &str)]) -> HashMap<String, String> {
+    fn conns(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs
             .iter()
             .map(|(n, u)| ((*n).to_string(), (*u).to_string()))

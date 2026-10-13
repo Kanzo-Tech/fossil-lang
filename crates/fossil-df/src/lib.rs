@@ -149,18 +149,12 @@ pub struct EdgeTable {
 ///
 /// # Errors
 /// Propagates `DataFusion` read/plan/execute errors.
-// The hasher is not ours to choose: `connections` is the host's connection map —
-// the browser's `parse_refs` builds one, a plain `HashMap`. Generalising over
-// `BuildHasher` would add a parameter no caller can vary, which is the same call
-// `fossil-df-wasm` made.
-#[allow(clippy::implicit_hasher)]
 #[tracing::instrument(skip_all, fields(program = %file.path(db)))]
 pub async fn execute_graph<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     file: SourceFile,
     descriptor: &OutputDescriptorKind,
-    connections: &HashMap<String, String>,
 ) -> datafusion::error::Result<Graph> {
     // The run's anchor, derived from the PROGRAM and not from the caller: a
     // source URI is a path the program wrote, so the directory it resolves
@@ -170,7 +164,7 @@ pub async fn execute_graph<'db>(
     // on where you invoked from, while `io.shex("shop.shex")` in the same
     // program was already resolved beside it.
     let program_dir = fossil_location::program_dir(file.path(db));
-    let anchor = SourceAnchor::new(&program_dir, connections);
+    let anchor = SourceAnchor::new(&program_dir, fossil_base::connections(db));
     let mappings: Vec<MappingLoc<'db>> = def_map(db, file).mappings(db).clone();
 
     // Phase 1 (barrier): prepare every mapping's vertex projection, then merge
@@ -288,16 +282,14 @@ struct PreparedVertex {
 ///
 /// # Errors
 /// Propagates `DataFusion` read/plan/execute errors.
-#[allow(clippy::implicit_hasher)] // as `execute_graph` above.
 pub async fn execute_vertex<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
     descriptor: &OutputDescriptorKind,
-    connections: &HashMap<String, String>,
 ) -> datafusion::error::Result<(VertexTable, NodeType)> {
     let program_dir = fossil_location::program_dir(mapping.file(db).path(db));
-    let anchor = SourceAnchor::new(&program_dir, connections);
+    let anchor = SourceAnchor::new(&program_dir, fossil_base::connections(db));
     let prepared = prepare_vertex(ctx, db, mapping, descriptor, anchor).await?;
     finalize_vertex(ctx, vec![prepared], 0).await
 }
@@ -1299,15 +1291,13 @@ pub struct ProviderBinding {
 /// bytes and calls [`register_rdf`] to put the pivoted relation in the ctx
 /// before running [`execute_graph`].
 #[must_use]
-#[allow(clippy::implicit_hasher)] // as `execute_graph` above.
 pub fn provider_bindings(
     db: &dyn fossil_base::Db,
     file: SourceFile,
     descriptor: &OutputDescriptorKind,
-    connections: &HashMap<String, String>,
 ) -> Vec<ProviderBinding> {
     let program_dir = fossil_location::program_dir(file.path(db));
-    let anchor = SourceAnchor::new(&program_dir, connections);
+    let anchor = SourceAnchor::new(&program_dir, fossil_base::connections(db));
     let mappings = def_map(db, file).mappings(db).clone();
     let schema = descriptor.to_graph_schema();
     let mut out = Vec::new();

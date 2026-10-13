@@ -176,7 +176,9 @@ takes `profile`'s result as it came back. Under it are two workspace primitives 
 that calls them, for the reason it exists at all: a protocol every host would otherwise write by
 hand, and get the order of wrong. The order does not matter even underneath: the latest answer about
 a key wins, so a descriptor registered under a key forgets the problem recorded under it and a
-source that describes on a later call loses its warning.
+source that describes on a later call loses its warning. A run takes the same value — `run`'s `profiled` in
+`@fossil-lang/executor`, written through the same two primitives on the executor — so it checks a
+program against the columns the editor did.
 
 The row is the workspace's and not the TypeScript layer's because only the def map knows where a
 source is read. It is one row per key — two bindings over one file are one `DESCRIBE` and one

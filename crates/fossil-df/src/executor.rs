@@ -6,7 +6,10 @@
 //! ([`Executor::missing_documents`]), the host reads them and registers each
 //! one, and only then are the sources listed and the run executed — against the
 //! output descriptor decoded from those registered documents, which is what the
-//! checker read. [`Executor::execute`] builds a `DataFusion` plan
+//! checker read. The host's profile is written in the same way the editor's
+//! workspace takes it ([`Executor::register_inferred_descriptor`],
+//! [`Executor::register_undescribed`]), so the run checks the program against
+//! the columns the editor checked it against. [`Executor::execute`] builds a `DataFusion` plan
 //! (`lower_to_mir_pg` → `execute_graph`), writes the corpus under the
 //! destination with [`crate::write()`], and answers the [`RunReport`].
 //!
@@ -24,7 +27,7 @@
 //! native tests drive it on a current-thread runtime, the browser on its own
 //! event loop.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -77,13 +80,12 @@ impl System for ExecutorSystem {
 pub struct Executor {
     db: FossilDb,
     file: SourceFile,
-    connections: HashMap<String, String>,
 }
 
 impl std::fmt::Debug for Executor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Executor")
-            .field("connections", &self.connections)
+            .field("connections", fossil_base::connections(&self.db))
             .finish_non_exhaustive()
     }
 }
@@ -106,26 +108,20 @@ impl Executor {
         let system: Arc<dyn System> = Arc::new(ExecutorSystem);
         let db = FossilDb::new(system);
         let file = SourceFile::new(&db, program.to_string(), path.to_string());
-        Self {
-            db,
-            file,
-            connections: HashMap::new(),
-        }
+        Self { db, file }
     }
 
-    /// The map (`{ name: baseUrl }`) every `@name/…` a document or source names
-    /// expands against. It moves locations, never registry keys.
-    // The hasher is not ours to choose: the map arrives from
-    // `parse_connections(&JsValue)`, which builds a plain `HashMap`.
-    #[allow(clippy::implicit_hasher)]
-    pub fn set_connections(&mut self, connections: HashMap<String, String>) {
-        self.connections = connections;
+    /// The connections (`{ name: baseUrl }`) every `@name/…` a document or
+    /// source names expands against — [`fossil_base::set_connections`]. They
+    /// move locations, never registry keys.
+    pub fn set_connections(&mut self, connections: BTreeMap<String, String>) {
+        fossil_base::set_connections(&mut self.db, connections);
     }
 
     /// The documents the program names that are not registered yet.
     #[must_use]
     pub fn missing_documents(&self) -> Vec<MissingDocument> {
-        fossil_hir::documents::missing_documents(&self.db, self.file, &self.connections)
+        fossil_hir::documents::missing_documents(&self.db, self.file)
     }
 
     /// Register a fetched document under the key [`Self::missing_documents`]
@@ -138,7 +134,32 @@ impl Executor {
     /// host introspects; its data inputs are what [`Self::execute`] reads.
     #[must_use]
     pub fn inputs(&self) -> Vec<Input> {
-        fossil_lineage::inputs(&self.db, self.file, &self.connections)
+        fossil_lineage::inputs(&self.db, self.file)
+    }
+
+    /// Record the columns the host's profile found for a source, as the JSON of
+    /// an `InferredDescriptor` — what the editor's workspace takes under the
+    /// same name, so the run checks against the columns the editor did.
+    ///
+    /// # Errors
+    /// What [`fossil_base::columns_from_json`] refuses. Nothing is recorded on
+    /// error.
+    pub fn register_inferred_descriptor(&mut self, descriptor_json: &str) -> Result<(), Failure> {
+        let descriptor = fossil_base::columns_from_json(descriptor_json)?;
+        fossil_base::describe_columns(&mut self.db, descriptor);
+        Ok(())
+    }
+
+    /// Record that the host's profile could not describe the source the program
+    /// wrote as `key`, and the `Problem` it answered, as JSON.
+    ///
+    /// # Errors
+    /// What [`fossil_base::refusal_from_json`] refuses. Nothing is recorded on
+    /// error.
+    pub fn register_undescribed(&mut self, key: &str, problem_json: &str) -> Result<(), Failure> {
+        let refused = fossil_base::refusal_from_json(problem_json)?;
+        fossil_base::describe(&mut self.db, key, refused);
+        Ok(())
     }
 
     fn descriptor(&self) -> Result<OutputDescriptorKind, Failure> {
@@ -159,7 +180,7 @@ impl Executor {
     /// is not in its store; `engine/failed`, with `DataFusion`'s error as the
     /// cause; or what [`crate::write()`] refused.
     pub async fn execute(&self, storage: &mut Storage, dest: &str) -> Result<RunReport, Failure> {
-        let (db, file, connections) = (&self.db, self.file, &self.connections);
+        let (db, file) = (&self.db, self.file);
         let descriptor = self.descriptor()?;
         if !dest.ends_with('/') || !storage.covers(&format!("{dest}{MANIFEST_FILE}")) {
             return Err(Problem::DestinationUncovered {
@@ -168,7 +189,7 @@ impl Executor {
             .into());
         }
 
-        for source in fossil_lineage::inputs(db, file, connections)
+        for source in fossil_lineage::inputs(db, file)
             .into_iter()
             .filter(|i| i.role == fossil_lineage::Role::Data)
         {
@@ -186,9 +207,9 @@ impl Executor {
         for (authority, store) in storage.stores() {
             ctx.register_object_store(authority, store);
         }
-        register_rdf_sources(&ctx, db, file, &descriptor, storage, connections).await?;
+        register_rdf_sources(&ctx, db, file, &descriptor, storage).await?;
 
-        let graph = crate::execute_graph(&ctx, db, file, &descriptor, connections)
+        let graph = crate::execute_graph(&ctx, db, file, &descriptor)
             .await
             .map_err(|e| engine_failure(e, budget.refusal(), db, file))?;
         drop(ctx);
@@ -209,9 +230,8 @@ async fn register_rdf_sources(
     file: SourceFile,
     descriptor: &OutputDescriptorKind,
     storage: &Storage,
-    connections: &HashMap<String, String>,
 ) -> Result<(), Failure> {
-    for binding in crate::provider_bindings(db, file, descriptor, connections) {
+    for binding in crate::provider_bindings(db, file, descriptor) {
         let bytes = storage.get(&binding.uri).await?;
         let turtle = std::str::from_utf8(&bytes).map_err(|e| {
             Failure::new(Problem::NotUtf8 {

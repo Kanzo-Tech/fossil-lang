@@ -40,7 +40,6 @@ async fn same_type_from_two_sources_merges_into_one_table() {
         &db,
         file,
         &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-        &std::collections::HashMap::new(),
     )
     .await
     .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));

@@ -51,7 +51,6 @@ async fn a_call_produces_its_column() {
         &db,
         mapping,
         &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-        &std::collections::HashMap::new(),
     )
     .await
     .unwrap_or_else(|e| {
@@ -114,7 +113,6 @@ User : Person from users
         &db,
         mapping,
         &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-        &std::collections::HashMap::new(),
     )
     .await
     .unwrap_or_else(|e| {
@@ -169,7 +167,6 @@ User : Person from users
         &db,
         mapping,
         &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-        &std::collections::HashMap::new(),
     )
     .await
     .unwrap_or_else(|e| {
@@ -224,7 +221,6 @@ User : Person from users
         &db,
         mapping,
         &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-        &std::collections::HashMap::new(),
     )
     .await
     .unwrap_or_else(|e| {
@@ -282,7 +278,6 @@ User : Person from users
         &db,
         mapping,
         &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-        &std::collections::HashMap::new(),
     )
     .await
     .unwrap_or_else(|e| {

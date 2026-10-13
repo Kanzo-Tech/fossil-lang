@@ -49,10 +49,9 @@ rather than the installed one, and run again on every execute. Two copies of a d
 a run and a check can disagree about the document. It calls the checker's now
 (`crates/fossil-hir/src/shapes.rs, decoded_document`), whose read of the document's text is tracked.
 
-What the run does not have yet is the third input. The executor builds its own database and no host
-describes its sources, so a run checks a program with open rows where the editor checked it with
-columns. The two agree on every program the editor accepted — an open row refuses less — and the gap
-closes with the next section.
+It reads the third input too: a run is given the profile the editor was given, so it checks a
+program against the columns the editor checked it against — [the last section](#one-database-and-the-run-checks-what-the-editor-checked)
+says how.
 
 ## Diagnostics are returned by value
 
@@ -79,23 +78,30 @@ helper that found a mistake needed a database to report it to.
 reported from deep inside a query on behalf of another. An accumulator is the tool for that, and
 fossil has no such case: every diagnostic belongs to the query that found it.
 
-## Where this is going
+## One database, and the run checks what the editor checked
 
-**One database.** The editor's workspace and the executor build two databases from two `Db`
-implementations, and the JavaScript hosts learn two objects that repeat `setConnections`,
-`missingDocuments` and `registerDocument`. One concrete database, used by both, makes a run execute the
-plan the editor checked, from the same inputs. The executor stays a separate wasm module — the editor
-does not load DataFusion — but it compiles the same database type.
+The editor's workspace and the executor build the same database type, `FossilDb`, and write the same
+inputs into it. Nothing else is shared state:
 
-**The connections are an input.** They travel as an argument to three plain functions today, so
-nothing that depends on them is memoised.
+- **The connections are an input**, beside the files and the sources
+  (`crates/fossil-base/src/connections.rs, Connections`). A location expands through them, so a
+  document the program names, the list of what it reads and the run's routing read the connections
+  from the database rather than from a map handed beside it — and changing a connection re-runs the
+  queries that read them.
+- **The run is given the profile the editor was given.** `run` takes the same answer of the host's
+  profile that `registerProfile` takes, and writes it into the run's database before the check. A
+  run then refuses exactly what the editor refused, against the same columns.
+- **The executor stays its own wasm module**, so the editor does not load DataFusion. It compiles the
+  same queries over the same database type, so the two cannot answer differently about one program
+  and one set of inputs.
 
-**What would reverse it:** a host that needs two databases to disagree on purpose — a run against
-inputs the editor must not see. None does: the run's inputs are the program, its documents and its
-sources, which are the editor's.
+**What would reverse it:** a host that needs a run and an edit to disagree on purpose — a run against
+inputs the editor must not see. None does: the run's inputs are the program, its documents, its
+connections and its sources, which are the editor's.
 
 ## Held by
 
 `crates/fossil-wasm/tests/register_inferred_descriptor.rs` describes a source after a check and asserts
 the check re-runs against the new columns; `crates/fossil-df/tests/documents.rs` runs a program whose
-output document the checker decoded.
+output document the checker decoded; `crates/fossil-base/src/connections.rs` sets the connections
+after a query read them and asserts it re-runs, and that setting the same map again does not.

@@ -5,7 +5,7 @@
 //! `fossil-codegen`, which has not existed for some time.
 //!
 //! **What a host writes is a Salsa input**, reached through a handle on `Db`:
-//! files, sources and the provider catalogue. `System` keeps only what no
+//! files, sources, connections and the provider catalogue. `System` keeps only what no
 //! answer depends on (`/docs/design/incremental`).
 //!
 //! **What is deliberately not here**, because a substrate decides nothing about
@@ -14,6 +14,7 @@
 //! `fossil_hir::shape_documents` — `providers` still declares the ROW a decoder
 //! fills, because a row is a table entry and not a decision.
 
+pub mod connections;
 pub mod db;
 pub mod diagnostic;
 pub mod error;
@@ -30,6 +31,7 @@ pub mod system;
 #[cfg(all(any(feature = "test-support", test), not(target_arch = "wasm32")))]
 pub mod test_support;
 
+pub use connections::{Connections, connections, set_connections};
 pub use db::{Db, FossilDb};
 pub use diagnostic::{Diagnostic, SpanFrame, SpanLabel};
 pub use error::{Diagnostics, ErrorGuaranteed};
@@ -39,7 +41,8 @@ pub use providers::{
     claimed, install, installed, provider,
 };
 pub use sources::{
-    Described, SourceRegistry, Sources, columns, describe, describe_columns, described,
+    Described, SourceRegistry, Sources, columns, columns_from_json, describe, describe_columns,
+    described, refusal_from_json,
 };
 pub use system::{FsError, System};
 

@@ -46,7 +46,6 @@ async fn execute_vertex_materialises_the_vertex_table_shape() {
         &db,
         mapping,
         &fossil_df::OutputDescriptorKind::ACCEPT_ALL_DEFAULT,
-        &std::collections::HashMap::new(),
     )
     .await
     .unwrap_or_else(|e| panic!("execute_vertex: {e}; {:?}", support::diagnostics(&db, file)));
