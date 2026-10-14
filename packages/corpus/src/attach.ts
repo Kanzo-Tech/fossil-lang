@@ -7,7 +7,7 @@ import { mount } from '@fossil-lang/storage';
 import { FossilError, type CorpusFile, type Engine, type Host } from '@fossil-lang/types';
 import { attachCause } from '@fossil-lang/types/internal';
 
-import type { Annotation, Manifest, TopValue } from './manifest.gen.js';
+import type { Annotation, Manifest } from './manifest.gen.js';
 import { parseManifest, tablesIn } from './manifest.js';
 import { ident, lit, query } from './sql.js';
 import { triplesOf } from './triples.js';
@@ -24,7 +24,6 @@ const CATALOG_VIEWS: Readonly<Record<string, (manifest: Manifest, relation: (tab
   fossil_columns: columnsOf,
   fossil_annotations: annotationsOf,
   fossil_stats: statsOf,
-  fossil_inclusions: inclusionsOf,
   triples: triplesOf,
 };
 
@@ -112,9 +111,8 @@ const holders = new WeakMap<object, Map<string, number>>();
  * `int32`), each null where it declared none. `fossil_annotations(table_name, column_name, predicate,
  * o_type, o_value, o_datatype, o_lang)` — a row per annotation, `column_name` null for a table's own.
  * `fossil_stats(table_name, column_name, null_count, distinct_count, min_value, max_value,
- * top_values)` — the writer's counts per column. `fossil_inclusions(table_name, column_name,
- * referenced_table_name, referenced_column_name)` — a column whose every value is a value of another
- * table's key. `triples(s_type, s_value, p, o_type, o_value, o_datatype, o_lang)` — one row per RDF
+ * most_common_vals, most_common_freqs)` — the writer's counts per column, under Parquet's `Statistics`
+ * names and, for the commonest values and their share of the rows, `pg_stats`'. `triples(s_type, s_value, p, o_type, o_value, o_datatype, o_lang)` — one row per RDF
  * triple, each term as its type (`I` or `L`), its IRI or lexical form, its datatype and language
  * (`/docs/format/reading/rdf`): what a SHACL engine validates. `/docs/design/facts` says why each is
  * there.
@@ -381,10 +379,6 @@ function annotationsOf(manifest: Manifest): string {
   );
 }
 
-/** A `top_values` list as a SQL list of structs. */
-const tops = (values: readonly TopValue[] | undefined): string =>
-  `[${(values ?? []).map((v) => `{'value': ${lit(v.value)}, 'count': ${v.count}::UBIGINT}`).join(', ')}]::STRUCT(value VARCHAR, count UBIGINT)[]`;
-
 /**
  * `fossil_stats`: one row per column of every table, the writer's counts over every row it wrote. A
  * corpus written before the writer counted has a row of nulls per column.
@@ -398,26 +392,16 @@ function statsOf(manifest: Manifest): string {
         s === undefined ? 'NULL' : String(s.null_count),
         s === undefined ? 'NULL' : String(s.distinct_count),
         opt(s?.min_value), opt(s?.max_value),
-        s === undefined ? 'NULL' : tops(s.top_values),
+        s === undefined ? 'NULL' : list(s.most_common_vals),
+        s === undefined ? 'NULL' : `[${(s.most_common_freqs ?? []).join(', ')}]::DOUBLE[]`,
       ];
     }),
   );
   return relationOf(
     [
       ['table_name', 'VARCHAR'], ['column_name', 'VARCHAR'], ['null_count', 'UBIGINT'], ['distinct_count', 'UBIGINT'],
-      ['min_value', 'VARCHAR'], ['max_value', 'VARCHAR'], ['top_values', 'STRUCT(value VARCHAR, count UBIGINT)[]'],
-    ],
-    rows,
-  );
-}
-
-/** `fossil_inclusions`: every program column whose values are all values of another table's key. */
-function inclusionsOf(manifest: Manifest): string {
-  const rows = (manifest.inclusions ?? []).map((i) => [lit(i.from.table), lit(i.from.column), lit(i.to.table), lit(i.to.column)]);
-  return relationOf(
-    [
-      ['table_name', 'VARCHAR'], ['column_name', 'VARCHAR'], ['referenced_table_name', 'VARCHAR'],
-      ['referenced_column_name', 'VARCHAR'],
+      ['min_value', 'VARCHAR'], ['max_value', 'VARCHAR'], ['most_common_vals', 'VARCHAR[]'],
+      ['most_common_freqs', 'DOUBLE[]'],
     ],
     rows,
   );

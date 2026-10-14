@@ -19,9 +19,10 @@
 //! Each query is an [`Ask`] — the counts of a relation, the commonest values of
 //! a column, an inclusion between two, a sample — and SQL is one rendering of
 //! it, [`Ask::sql`], `DuckDB`'s, which the two hosts that profile SOURCES run.
-//! The corpus writer profiles the TABLES it wrote with the same plan
+//! The corpus writer counts the TABLES it wrote with the same plan
 //! ([`Profiler::over_tables`]) on `DataFusion`, which has no SQL in this build,
-//! and renders the same `Ask` as a `DataFusion` plan. Which queries to run, how
+//! and renders the same `Ask` as a `DataFusion` plan. A table plan stops at the
+//! counts: a corpus carries no inclusions (`/docs/design/facts`). Which queries to run, how
 //! to prune them and what a count means stay here; only the rendering is per
 //! engine (`/docs/design/facts`).
 //!
@@ -84,39 +85,13 @@ pub struct Source {
     pub etag: String,
 }
 
-/// A table the host already holds, with no reader: the columns are known, so
-/// it is not described. What the corpus writer profiles.
+/// A table the host already holds, with no reader: the columns and their
+/// types are known, so it is not described. What the corpus writer counts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Table {
     /// The name the host's engine holds it under.
     pub name: SmolStr,
-    pub columns: Vec<TableColumn>,
-}
-
-/// One column of a [`Table`]: its name, its type, and which side of an
-/// inclusion it may stand on.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TableColumn {
-    pub name: SmolStr,
-    pub primitive: Primitive,
-    pub kind: ColumnKind,
-}
-
-/// What an inclusion may test a column as. A source's columns are all
-/// [`Self::Value`]; a corpus's are pruned two ways a source's cannot be: only a
-/// program's column is a dependent side, and one whose values are IRIs is tested
-/// against the identity columns alone (`/docs/design/facts`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ColumnKind {
-    /// A value: the dependent side, tested against keys of its own type.
-    Value,
-    /// An IRI-valued value: the dependent side, tested against identities.
-    Reference,
-    /// What a reference names — a vertex's `subject`. Never dependent.
-    Identity,
-    /// A column the writer emits whose meaning is declared — an address, an
-    /// endpoint, a tag. Counted, and never either side.
-    Declared,
+    pub columns: Vec<InferredColumn>,
 }
 
 /// How far a profile goes.
@@ -453,7 +428,6 @@ struct State {
     relation: Relation,
     described: bool,
     columns: Vec<InferredColumn>,
-    kinds: Vec<ColumnKind>,
     rows: Option<u64>,
     stats: Vec<ColumnStats>,
     sample: Rows,
@@ -494,6 +468,9 @@ pub struct Profiler {
     queue: VecDeque<(u32, Ask)>,
     pending: HashMap<u32, Pending>,
     next_id: u32,
+    /// Whether the inclusions between the relations are tested: between
+    /// sources, and never between the tables of a corpus.
+    between: bool,
     inclusions: Vec<Inclusion>,
     failed: Vec<Failure>,
 }
@@ -520,7 +497,6 @@ impl Profiler {
                 relation,
                 described: false,
                 columns: Vec::new(),
-                kinds: Vec::new(),
                 rows: None,
                 stats: Vec::new(),
                 sample: Vec::new(),
@@ -535,8 +511,10 @@ impl Profiler {
     }
 
     /// A plan over tables the host already holds, whose columns are known: no
-    /// `DESCRIBE`, and each column tested only on the side of an inclusion its
-    /// [`ColumnKind`] allows. What the corpus writer counts what it wrote with.
+    /// `DESCRIBE`, and no inclusion — the counts, the commonest values and the
+    /// keys they make. What the corpus writer counts what it wrote with: a
+    /// corpus carries no inclusions, which were measured and dropped
+    /// (`/docs/design/facts`).
     #[must_use]
     pub fn over_tables(tables: impl IntoIterator<Item = Table>, options: Options) -> Self {
         let states = tables
@@ -547,21 +525,16 @@ impl Profiler {
                 format: None,
                 relation: Relation::Table(t.name),
                 described: true,
-                kinds: t.columns.iter().map(|c| c.kind).collect(),
-                columns: t
-                    .columns
-                    .into_iter()
-                    .map(|c| InferredColumn {
-                        name: c.name,
-                        primitive: c.primitive,
-                    })
-                    .collect(),
+                columns: t.columns,
                 rows: None,
                 stats: Vec::new(),
                 sample: Vec::new(),
             })
             .collect();
-        Self::with(states, options)
+        Self {
+            between: false,
+            ..Self::with(states, options)
+        }
     }
 
     fn with(states: Vec<State>, options: Options) -> Self {
@@ -572,6 +545,7 @@ impl Profiler {
             queue: VecDeque::new(),
             pending: HashMap::new(),
             next_id: 0,
+            between: true,
             inclusions: Vec::new(),
             failed: Vec::new(),
         }
@@ -652,7 +626,9 @@ impl Profiler {
                 Phase::Top
             }
             Phase::Top => {
-                self.plan_inclusions();
+                if self.between {
+                    self.plan_inclusions();
+                }
                 Phase::Inclusions
             }
             Phase::Inclusions => {
@@ -674,38 +650,22 @@ impl Profiler {
         };
     }
 
-    /// Every pair the types and the kinds allow: a dependent column with
-    /// values, and a referenced column of the same primitive that is not the
-    /// column itself — a candidate key for a value, an identity for a
-    /// reference.
+    /// Every pair the types allow: a dependent column with values, and a
+    /// candidate key of another column of the same primitive.
     fn plan_inclusions(&mut self) {
         let mut asks = Vec::new();
         for (b, target) in self.states.iter().enumerate() {
-            let keys = self.candidate_keys(b);
-            for (k, key) in target.columns.iter().enumerate() {
-                let to = target.kinds.get(k).copied().unwrap_or(ColumnKind::Value);
-                let referable = match to {
-                    ColumnKind::Identity => true,
-                    ColumnKind::Value | ColumnKind::Reference => keys.contains(&key.name),
-                    ColumnKind::Declared => false,
-                };
-                if !referable {
+            for key in self.candidate_keys(b) {
+                let Some(k) = target.columns.iter().position(|c| c.name == key) else {
                     continue;
-                }
+                };
+                let primitive = target.columns[k].primitive;
                 for (a, dependent) in self.states.iter().enumerate() {
                     for (c, column) in dependent.columns.iter().enumerate() {
-                        let from = dependent.kinds.get(c).copied().unwrap_or(ColumnKind::Value);
-                        let pairs = match (from, to) {
-                            (ColumnKind::Value, ColumnKind::Value | ColumnKind::Reference) => {
-                                column.primitive == key.primitive
-                            }
-                            (ColumnKind::Reference, ColumnKind::Identity) => true,
-                            _ => false,
-                        };
                         let has_values = dependent.stats.get(c).is_some_and(|s| {
                             dependent.rows.is_some_and(|rows| s.null_count < rows)
                         });
-                        if (a, c) == (b, k) || !pairs || !has_values {
+                        if (a, c) == (b, k) || column.primitive != primitive || !has_values {
                             continue;
                         }
                         asks.push((
@@ -714,7 +674,7 @@ impl Profiler {
                                 sample: self.options.sample,
                                 column: column.name.clone(),
                                 referenced: target.relation.clone(),
-                                key: key.name.clone(),
+                                key: key.clone(),
                             },
                             Pending::Inclusion {
                                 from: (a, c),
@@ -773,7 +733,6 @@ impl Profiler {
                         })
                     })
                     .collect();
-                state.kinds = vec![ColumnKind::Value; state.columns.len()];
             }
             Pending::Stats(i) => {
                 let Some(row) = rows.first() else { return };
@@ -1134,63 +1093,51 @@ mod tests {
         assert!(note.top_values.is_empty());
     }
 
-    /// Tables the host holds are not described, a declared column is never a
-    /// side of an inclusion, and a reference is tested against identities
-    /// alone, whatever their types.
+    /// Tables the host holds are not described, and no inclusion is tested
+    /// between them: the plan is the counts, and the keys they make.
     #[test]
-    fn tables_are_counted_without_a_describe_and_pruned_by_kind() {
-        let column = |name: &str, primitive, kind| TableColumn {
+    fn tables_are_counted_without_a_describe_or_an_inclusion() {
+        let column = |name: &str, primitive| InferredColumn {
             name: name.into(),
             primitive,
-            kind,
         };
         let mut plan = Profiler::over_tables(
             [
                 Table {
                     name: "Person".into(),
                     columns: vec![
-                        column("dense_id", Primitive::Integer, ColumnKind::Declared),
-                        column("subject", Primitive::AnyUri, ColumnKind::Identity),
+                        column("dense_id", Primitive::Integer),
+                        column("subject", Primitive::AnyUri),
                     ],
                 },
                 Table {
                     name: "Prize".into(),
                     columns: vec![
-                        column("dense_id", Primitive::Integer, ColumnKind::Declared),
-                        column("subject", Primitive::AnyUri, ColumnKind::Identity),
-                        column("winner", Primitive::String, ColumnKind::Reference),
+                        column("dense_id", Primitive::Integer),
+                        column("subject", Primitive::AnyUri),
+                        column("winner", Primitive::AnyUri),
                     ],
                 },
             ],
             Options::WHOLE,
         );
-        let mut inclusions = Vec::new();
         while let Some((id, ask)) = plan.next_ask() {
-            assert!(!matches!(ask, Ask::Describe { .. } | Ask::Sample { .. }));
-            match &ask {
-                Ask::Counts { columns, .. } => {
-                    let mut row = vec!["2".to_string()];
-                    for _ in columns {
-                        row.extend(["2", "2", "a", "b"].map(String::from));
-                    }
-                    plan.feed(id, &[row.into_iter().map(Some).collect()]);
+            assert!(
+                matches!(ask, Ask::Counts { .. } | Ask::TopValues { .. }),
+                "only counts and commonest values: {ask:?}"
+            );
+            if let Ask::Counts { columns, .. } = &ask {
+                let mut row = vec!["2".to_string()];
+                for _ in columns {
+                    row.extend(["2", "2", "a", "b"].map(String::from));
                 }
-                Ask::Inclusion { column, key, .. } => {
-                    inclusions.push((column.to_string(), key.to_string()));
-                    plan.feed(id, &rows(&[&["2", "0"]]));
-                }
-                _ => plan.feed(id, &[]),
+                plan.feed(id, &[row.into_iter().map(Some).collect()]);
+            } else {
+                plan.feed(id, &[]);
             }
         }
-        assert_eq!(
-            inclusions,
-            [
-                ("winner".to_string(), "subject".to_string()),
-                ("winner".to_string(), "subject".to_string())
-            ],
-            "the reference against each identity, and nothing against an address"
-        );
         let profile = plan.finish();
+        assert!(profile.inclusions.is_empty());
         assert_eq!(profile.sources[0].candidate_keys, ["dense_id", "subject"]);
     }
 

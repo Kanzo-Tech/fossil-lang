@@ -17,7 +17,7 @@ not `fossil/1` before a byte of Parquet is read, and attaches the corpus to the 
 catalog it is given: one view per table, and the manifest itself as relations —
 `fossil_tables`, a row per table with its kind, its `record_count`, the sources it was derived from
 and, for a vertex table, the first id of its range; `fossil_columns`, a row per column with its
-`data_type` and its writer's role; and the annotations, the counts and the inclusions beside them.
+`data_type` and its writer's role; and the annotations and the counts beside them.
 The `Attachment` it answers detaches the catalog. What every relation carries, and a corpus attached
 from the files a run answered in memory, are [the corpus's own facts](/docs/design/facts) and
 [A run off the page](/docs/design/off-the-page). The contract is [the corpus](/docs/design/corpus); the format

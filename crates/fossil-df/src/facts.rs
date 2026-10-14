@@ -1,9 +1,10 @@
 //! The corpus's own facts: the writer counts what it wrote.
 //!
 //! Per column the nulls, the distinct values, the least and greatest value and
-//! the commonest ones; per table its candidate keys; and the inclusions between
-//! tables — the profile `fossil-profile` takes of a source, taken of the tables
-//! of the corpus instead, over every row (`/docs/design/facts`).
+//! the commonest ones, and per table the candidate keys those counts make — the
+//! counts `fossil-profile` takes of a source, taken of the tables of the corpus
+//! instead, over every row (`/docs/design/facts`). No inclusion: they were
+//! measured on the write path and dropped.
 //!
 //! **The plan is `fossil-profile`'s and only the rendering is here.** The
 //! profiler hands out each query as an [`Ask`]; `DuckDB`'s rendering of one is
@@ -29,8 +30,9 @@ use datafusion::common::Column;
 use datafusion::datasource::MemTable;
 use datafusion::error::{DataFusionError, Result};
 use datafusion::functions_aggregate::expr_fn::{count, count_distinct, max, min};
-use datafusion::logical_expr::{Expr, JoinType, cast as cast_expr};
+use datafusion::logical_expr::{Expr, cast as cast_expr};
 use datafusion::prelude::{DataFrame, SessionContext, lit};
+use fossil_base::sources::InferredColumn;
 use fossil_profile::{Ask, Options, Profiler, Relation, Rows, TOP_VALUES, Table};
 
 /// One table as the writer wrote it, to be counted.
@@ -40,9 +42,9 @@ pub(crate) struct Written {
     pub name: String,
     pub schema: SchemaRef,
     pub batches: Vec<RecordBatch>,
-    /// What each column may be in an inclusion, and its primitive, in schema
-    /// order.
-    pub columns: Vec<fossil_profile::TableColumn>,
+    /// Each column and its primitive, in schema order: the primitive says
+    /// whether it can be a key.
+    pub columns: Vec<InferredColumn>,
 }
 
 /// What the writer counted, by the manifest's table names.
@@ -51,8 +53,6 @@ pub(crate) struct Facts {
     /// Per table, in the order given: its candidate keys, and each column's
     /// counts in schema order.
     pub tables: Vec<(Vec<String>, Vec<fossil_profile::ColumnStats>)>,
-    /// `(from table, from column, to table, to column)`.
-    pub inclusions: Vec<(String, String, String, String)>,
 }
 
 /// The engine's name for a written table while it is counted. The tables a run
@@ -87,13 +87,6 @@ pub(crate) async fn count_written(ctx: &SessionContext, tables: &[Written]) -> R
         ctx.deregister_table(registered(&t.name))?;
     }
     let profile = plan.finish();
-    let name_of = |registered_name: &str| {
-        tables
-            .iter()
-            .find(|t| registered(&t.name) == registered_name)
-            .map(|t| t.name.clone())
-            .unwrap_or_default()
-    };
     Ok(Facts {
         tables: profile
             .sources
@@ -105,18 +98,6 @@ pub(crate) async fn count_written(ctx: &SessionContext, tables: &[Written]) -> R
                         .map(|k| k.to_string())
                         .collect(),
                     s.columns,
-                )
-            })
-            .collect(),
-        inclusions: profile
-            .inclusions
-            .into_iter()
-            .map(|i| {
-                (
-                    name_of(&i.from.source),
-                    i.from.column.to_string(),
-                    name_of(&i.to.source),
-                    i.to.column.to_string(),
                 )
             })
             .collect(),
@@ -142,36 +123,6 @@ async fn relation(ctx: &SessionContext, relation: &Relation) -> Result<DataFrame
 
 /// An [`Ask`] answered on `DataFusion`: the rows its SQL would answer.
 async fn answer(ctx: &SessionContext, ask: &Ask) -> Result<Rows> {
-    if let Ask::Inclusion {
-        dependent,
-        column: c,
-        referenced,
-        key,
-        ..
-    } = ask
-    {
-        // Two counts: the dependent's distinct values, and those of them the
-        // key does not hold.
-        let values = relation(ctx, dependent)
-            .await?
-            .filter(column(c).is_not_null())?
-            .select(vec![text(column(c)).alias("__v")])?
-            .distinct()?;
-        let keys = relation(ctx, referenced)
-            .await?
-            .select(vec![text(column(key)).alias("__k")])?
-            .distinct()?;
-        let missing = values
-            .clone()
-            .join(keys, JoinType::LeftAnti, &["__v"], &["__k"], None)?
-            .count()
-            .await?;
-        let values = values.count().await?;
-        return Ok(vec![vec![
-            Some(values.to_string()),
-            Some(missing.to_string()),
-        ]]);
-    }
     text_rows(render(ctx, ask).await?.collect().await?)
 }
 
@@ -212,8 +163,8 @@ async fn render(ctx: &SessionContext, ask: &Ask) -> Result<DataFrame> {
             .limit(0, Some(TOP_VALUES)),
         Ask::Inclusion { .. } | Ask::Describe { .. } | Ask::Sample { .. } => {
             Err(DataFusionError::Plan(
-                "a written table's columns are known, none of its rows is kept, and an inclusion \
-             is two counts"
+                "a written table's columns are known, none of its rows is kept, and no inclusion \
+             is tested between tables"
                     .to_string(),
             ))
         }

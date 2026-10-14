@@ -23,7 +23,7 @@ const MANIFEST = JSON.parse(readFileSync(join(CORPUS, 'fossil.json'), 'utf8')) a
 const TABLES = [...MANIFEST.vertex_tables, ...MANIFEST.edge_tables, ...(MANIFEST.property_tables ?? [])];
 
 /** The relations every attach makes beside the tables' views. */
-const RELATIONS = ['fossil_annotations', 'fossil_columns', 'fossil_inclusions', 'fossil_stats', 'fossil_tables', 'triples'];
+const RELATIONS = ['fossil_annotations', 'fossil_columns', 'fossil_stats', 'fossil_tables', 'triples'];
 
 let engine: Engine;
 let query: (sql: string) => Promise<Record<string, unknown>[]>;
@@ -143,7 +143,7 @@ describe('attach', () => {
     expect(await query('SELECT * FROM extra.fossil_tables')).toEqual([]);
     expect(await query('SELECT * FROM extra.fossil_columns')).toEqual([]);
     expect(await query('SELECT * FROM extra.triples')).toEqual([]);
-    for (const relation of ['fossil_annotations', 'fossil_stats', 'fossil_inclusions']) {
+    for (const relation of ['fossil_annotations', 'fossil_stats']) {
       expect(await query(`SELECT * FROM extra.${relation}`)).toEqual([]);
     }
     await corpus.detach();
@@ -160,14 +160,13 @@ describe('attach', () => {
       candidate_keys: ['dense_id', 'subject'],
       properties: person!.properties.map((p, at) =>
         at === 0
-          ? { ...p, stats: { null_count: 0, distinct_count: 3, min_value: '0', max_value: '2' } }
+          ? { ...p, stats: { null_count: 0, distinct_count: 3, min_value: '0', max_value: '2', most_common_vals: ['1'], most_common_freqs: [0.5] } }
           : at === 1
             ? { ...p, annotations: [{ predicate: label, object: 'https://example.org/Identity' }] }
             : p,
       ),
     };
-    const inclusions = [{ from: { table: 'Order', column: 'buyer' }, to: { table: 'Person', column: 'subject' } }];
-    writeFileSync(join(dir, 'fossil.json'), JSON.stringify({ ...MANIFEST, vertex_tables: [named, ...others], inclusions }));
+    writeFileSync(join(dir, 'fossil.json'), JSON.stringify({ ...MANIFEST, vertex_tables: [named, ...others] }));
     const corpus = await attach('facts', { engine, url: dir });
 
     const tables = await query(`SELECT table_name, label, source_key, destination_key, candidate_keys FROM facts.fossil_tables`);
@@ -196,14 +195,13 @@ describe('attach', () => {
       { table_name: named.name, column_name: named.properties[1]!.name, predicate: label, o_type: 'I', o_value: 'https://example.org/Identity', o_datatype: '', o_lang: '' },
     ]);
     const [stats] = await query(
-      `SELECT null_count::INTEGER AS n, distinct_count::INTEGER AS d, min_value, max_value, len(top_values)::INTEGER AS top FROM facts.fossil_stats WHERE table_name = '${named.name}' AND column_name = '${named.properties[0]!.name}'`,
+      `SELECT null_count::INTEGER AS n, distinct_count::INTEGER AS d, min_value, max_value, most_common_vals AS vals, most_common_freqs AS freqs FROM facts.fossil_stats WHERE table_name = '${named.name}' AND column_name = '${named.properties[0]!.name}'`,
     );
-    expect(stats).toEqual({ n: 0, d: 3, min_value: '0', max_value: '2', top: 0 });
+    expect({ ...stats, vals: Array.from(stats!.vals as Iterable<unknown>, String), freqs: Array.from(stats!.freqs as Iterable<unknown>, Number) }).toEqual({
+      n: 0, d: 3, min_value: '0', max_value: '2', vals: ['1'], freqs: [0.5],
+    });
     const [uncounted] = await query(`SELECT null_count FROM facts.fossil_stats WHERE table_name = '${named.name}' AND column_name = '${named.properties[1]!.name}'`);
     expect(uncounted).toEqual({ null_count: null });
-    expect(await query(`SELECT * FROM facts.fossil_inclusions`)).toEqual([
-      { table_name: 'Order', column_name: 'buyer', referenced_table_name: 'Person', referenced_column_name: 'subject' },
-    ]);
     await corpus.detach();
   });
 
@@ -237,7 +235,7 @@ describe('attach', () => {
     await expect(attach('twice', { engine, url: twice })).rejects.toThrow(fossil('corpus/duplicate-table', { table: 'Person' }));
     const reserved = manifestOnly('reserved', JSON.stringify({ ...MANIFEST, edge_tables: [{ ...MANIFEST.edge_tables[0], name: 'fossil_tables' }] }));
     await expect(attach('reserved', { engine, url: reserved })).rejects.toThrow(fossil('corpus/duplicate-table', { table: 'fossil_tables' }));
-    for (const relation of ['triples', 'fossil_annotations', 'fossil_stats', 'fossil_inclusions']) {
+    for (const relation of ['triples', 'fossil_annotations', 'fossil_stats']) {
       const dir = manifestOnly(relation, JSON.stringify({ ...MANIFEST, edge_tables: [{ ...MANIFEST.edge_tables[0], name: relation }] }));
       await expect(attach(relation, { engine, url: dir })).rejects.toThrow(fossil('corpus/duplicate-table', { table: relation }));
     }

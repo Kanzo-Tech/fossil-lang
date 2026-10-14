@@ -150,8 +150,8 @@ try {
       manifest(dir, (m) => (property(m, "postcode").stats = { null_count: 1_000_000, distinct_count: 0 }))],
     ["counted", "a candidate key that repeats", (dir) =>
       manifest(dir, (m) => (m.vertex_tables.find((t) => t.name === "Person").candidate_keys = ["dense_id", "subject", "postcode"]))],
-    ["counted", "an inclusion that does not hold", (dir) =>
-      manifest(dir, (m) => (m.inclusions = [{ from: { table: "Person", column: "postcode" }, to: { table: "Tag", column: "subject" } }]))],
+    ["counted", "a commonest value with a share of the rows it does not have", (dir) =>
+      manifest(dir, (m) => (m.edge_tables[0].properties[0].stats = { null_count: 0, distinct_count: 0, most_common_vals: ["0"], most_common_freqs: [2] }))],
   ];
 
   for (const [id, what, mutate] of MUTATIONS) {

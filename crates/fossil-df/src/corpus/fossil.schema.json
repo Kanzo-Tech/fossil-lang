@@ -20,13 +20,6 @@
       "description": "The format the corpus is written in.",
       "const": "fossil/1"
     },
-    "inclusions": {
-      "description": "Every column of the program's whose every value is a value of another table's candidate key or identity column — the shape of an edge the program did not declare. Counted by the writer over every row it wrote. Absent when there is none.",
-      "type": "array",
-      "items": {
-        "$ref": "#/definitions/Inclusion"
-      }
-    },
     "property_tables": {
       "description": "One per multi-valued property, in the order the compiled schema lists their types and, inside a type, them. Absent when there is none.",
       "type": "array",
@@ -81,22 +74,6 @@
           ]
         }
       ]
-    },
-    "ColumnAt": {
-      "description": "A column of a table of the corpus.",
-      "type": "object",
-      "required": [
-        "column",
-        "table"
-      ],
-      "properties": {
-        "column": {
-          "type": "string"
-        },
-        "table": {
-          "type": "string"
-        }
-      }
     },
     "ColumnRole": {
       "description": "What a column IS — never what a reader does with it.\n\nA reader names the roles it means, never a list of names. It is data in `fossil.json` too: a writer column's `role` in its table's `properties`, spelled as the variant in lowercase.",
@@ -227,32 +204,6 @@
         "references": {
           "description": "The vertex table whose `key` it holds.",
           "type": "string"
-        }
-      }
-    },
-    "Inclusion": {
-      "description": "Every value of `from` is a value of `to`.",
-      "type": "object",
-      "required": [
-        "from",
-        "to"
-      ],
-      "properties": {
-        "from": {
-          "description": "A column of the program's.",
-          "allOf": [
-            {
-              "$ref": "#/definitions/ColumnAt"
-            }
-          ]
-        },
-        "to": {
-          "description": "A candidate key, or an `identity` column.",
-          "allOf": [
-            {
-              "$ref": "#/definitions/ColumnAt"
-            }
-          ]
         }
       }
     },
@@ -391,7 +342,7 @@
       }
     },
     "Stats": {
-      "description": "A column's counts — Parquet's `Statistics` names, and the ones a source's profile uses (`fossil_profile::ColumnStats`). Every value is the text the corpus's `triples` gives it, the natural lexical form of the column's type; one longer than [`fossil_profile::MAX_VALUE_BYTES`] is left out, never cut.",
+      "description": "A column's counts, named as the references name them: Parquet's `Statistics` for the counts and the bounds (`null_count`, `distinct_count`, `min_value`, `max_value`), and `PostgreSQL`'s `pg_stats` for the commonest values, which Parquet does not carry (`most_common_vals`, `most_common_freqs`). How many values the column holds is the table's `record_count` — Iceberg's `value_counts` — less `null_count`. Every value is the text the corpus's `triples` gives it, the natural lexical form of the column's type; one longer than [`fossil_profile::MAX_VALUE_BYTES`] is left out, never cut.",
       "type": "object",
       "required": [
         "distinct_count",
@@ -412,36 +363,26 @@
           "description": "The least value; absent for a column with none, or one too long to keep.",
           "type": "string"
         },
+        "most_common_freqs": {
+          "description": "Each of `most_common_vals`' share of the table's rows, nulls among them, in the same order: the value's count over `record_count`.",
+          "type": "array",
+          "items": {
+            "type": "number",
+            "format": "double"
+          }
+        },
+        "most_common_vals": {
+          "description": "The ten commonest non-null values that occur at least twice, most frequent first and ties by value. Absent when no value repeats, or when one of the ten is too long to keep.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "null_count": {
           "description": "Rows with no value.",
           "type": "integer",
           "format": "uint64",
           "minimum": 0.0
-        },
-        "top_values": {
-          "description": "The ten commonest non-null values that occur at least twice, most frequent first and ties by value. Absent when no value repeats, or when one of the ten is too long to keep.",
-          "type": "array",
-          "items": {
-            "$ref": "#/definitions/TopValue"
-          }
-        }
-      }
-    },
-    "TopValue": {
-      "description": "One of a column's commonest values, and how many rows hold it.",
-      "type": "object",
-      "required": [
-        "count",
-        "value"
-      ],
-      "properties": {
-        "count": {
-          "type": "integer",
-          "format": "uint64",
-          "minimum": 0.0
-        },
-        "value": {
-          "type": "string"
         }
       }
     },

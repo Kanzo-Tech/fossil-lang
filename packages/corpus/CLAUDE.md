@@ -13,7 +13,7 @@ never sees them. The prose half is `docs/content/docs/format/`.
 
 `src/` is TypeScript and nothing else: `attach` reads `fossil.json` through `JSON.parse`, creates a
 view per table, the manifest's facts as relations — `fossil_tables`, `fossil_columns`,
-`fossil_annotations`, `fossil_stats`, `fossil_inclusions` — and the corpus
+`fossil_annotations`, `fossil_stats` — and the corpus
 as RDF, `triples`, and answers the attachment that detaches them. **Every read after that is the host's SQL** (Mosaic's, in keasy).
 Do not put a query API back here — `scan` and its `Filter` were a second, poorer copy of SQL, and the
 one consumer translated Mosaic's predicates into it — and do not export the manifest's types: a

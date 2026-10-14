@@ -497,17 +497,17 @@ export const GUARDS = [
     id: "counted",
     title: "The writer's counts are the rows' counts",
     proves:
-      "Every column's `stats` — `null_count`, `distinct_count`, `min_value`, `max_value` and " +
-      "`top_values` — is what SQL counts over the column's file, each value the column's natural " +
-      "lexical form and one longer than 64 bytes left out rather than cut; every table's " +
-      "`candidate_keys` is exactly its columns of a keyable type never null and never repeated; and " +
-      "every listed inclusion holds: each value of its column is a value of the column it names. A " +
+      "Every column's `stats` — `null_count`, `distinct_count`, `min_value`, `max_value`, " +
+      "`most_common_vals` and `most_common_freqs` — is what SQL counts over the column's file, each " +
+      "value the column's natural lexical form and one longer than 64 bytes left out rather than " +
+      "cut, each frequency the value's count over the table's rows; and every table's " +
+      "`candidate_keys` is exactly its columns of a keyable type never null and never repeated. A " +
       "reader reads these instead of counting (`/docs/design/facts`), so a count that is wrong is an " +
       "answer that is wrong.",
     cannotProve:
-      "That the writer found every inclusion there is. Which pairs it tests is pruned, and an " +
-      "inclusion it did not list is not one this guard looks for. A corpus written before the " +
-      "writer counted carries no `stats`, and is reported and not failed.",
+      "That a frequency gives its count back exactly to a reader that multiplies it out: it is a " +
+      "double, as `pg_stats`' is, and this guard compares it to the same division. A corpus " +
+      "written before the writer counted carries no `stats`, and is reported and not failed.",
     run(corpus) {
       const failures = [];
       const notes = [];
@@ -536,12 +536,14 @@ export const GUARDS = [
             `SELECT ${text} AS v, count(*) AS n FROM ${parquet(table.file)} WHERE ${column} IS NOT NULL
               GROUP BY ${column} HAVING count(*) >= 2 ORDER BY count(*) DESC, v LIMIT 10`,
           );
-          const top = tops.every((t) => kept(t.v) !== undefined) ? tops.map((t) => ({ value: String(t.v), count: Number(t.n) })) : [];
+          const top = tops.every((t) => kept(t.v) !== undefined) ? tops : [];
           const want = {
             null_count: Number(row.nulls), distinct_count: Number(row.distinct_n),
-            min_value: kept(row.lo), max_value: kept(row.hi), top_values: top,
+            min_value: kept(row.lo), max_value: kept(row.hi),
+            most_common_vals: top.map((t) => String(t.v)),
+            most_common_freqs: top.map((t) => Number(t.n) / Number(row.n)),
           };
-          const have = { ...stats, top_values: stats.top_values ?? [] };
+          const have = { ...stats, most_common_vals: stats.most_common_vals ?? [], most_common_freqs: stats.most_common_freqs ?? [] };
           for (const field of Object.keys(want)) {
             if (JSON.stringify(have[field]) !== JSON.stringify(want[field])) {
               failures.push(
@@ -556,19 +558,6 @@ export const GUARDS = [
             failures.push(`${table.name}: candidate_keys is ${JSON.stringify(declared)} and the rows say ${JSON.stringify(keys.sort())}`);
           }
         }
-      }
-      const inclusions = Array.isArray(corpus.manifest.json?.inclusions) ? corpus.manifest.json.inclusions : [];
-      for (const { from, to } of inclusions) {
-        const [a, b] = [corpus.tables.find((t) => t.name === from?.table), corpus.tables.find((t) => t.name === to?.table)];
-        if (a === undefined || b === undefined || !a.columns.has(from.column) || !b.columns.has(to.column)) {
-          failures.push(`an inclusion names ${from?.table}.${from?.column} ⊆ ${to?.table}.${to?.column}, which are not both columns`);
-          continue;
-        }
-        const missing = scalar(
-          `SELECT count(*) FROM (SELECT DISTINCT ${ident(from.column)}::VARCHAR AS v FROM ${parquet(a.file)} WHERE ${ident(from.column)} IS NOT NULL) x
-            WHERE v NOT IN (SELECT ${ident(to.column)}::VARCHAR FROM ${parquet(b.file)})`,
-        );
-        failures.push(...violations(missing, `${from.table}.${from.column}: a value ${to.table}.${to.column} does not hold`));
       }
       if (counted === 0) notes.push("no column carries stats: a corpus written before the writer counted");
       return result(failures, notes);

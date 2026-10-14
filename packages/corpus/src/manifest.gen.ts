@@ -24,14 +24,6 @@ export interface Annotation {
 export type AnnotationObject = string | ObjectLiteral;
 
 /**
- * A column of a table of the corpus.
- */
-export interface ColumnAt {
-  column: string;
-  table: string;
-}
-
-/**
  * What a column IS — never what a reader does with it.
  *
  * A reader names the roles it means, never a list of names. It is data in `fossil.json` too: a
@@ -107,20 +99,6 @@ export interface Endpoint {
 }
 
 /**
- * Every value of `from` is a value of `to`.
- */
-export interface Inclusion {
-  /**
-   * A column of the program's.
-   */
-  from: ColumnAt;
-  /**
-   * A candidate key, or an `identity` column.
-   */
-  to: ColumnAt;
-}
-
-/**
  * The whole of `fossil.json`.
  */
 export interface Manifest {
@@ -132,12 +110,6 @@ export interface Manifest {
    * The format the corpus is written in.
    */
   format: 'fossil/1';
-  /**
-   * Every column of the program's whose every value is a value of another table's candidate key or
-   * identity column — the shape of an edge the program did not declare. Counted by the writer
-   * over every row it wrote. Absent when there is none.
-   */
-  inclusions?: Inclusion[];
   /**
    * One per multi-valued property, in the order the compiled schema lists their types and, inside a
    * type, them. Absent when there is none.
@@ -256,10 +228,13 @@ export interface PropertyTable {
 }
 
 /**
- * A column's counts — Parquet's `Statistics` names, and the ones a source's profile uses
- * (`fossil_profile::ColumnStats`). Every value is the text the corpus's `triples` gives it, the
- * natural lexical form of the column's type; one longer than `fossil_profile::MAX_VALUE_BYTES` is
- * left out, never cut.
+ * A column's counts, named as the references name them: Parquet's `Statistics` for the counts and
+ * the bounds (`null_count`, `distinct_count`, `min_value`, `max_value`), and `PostgreSQL`'s
+ * `pg_stats` for the commonest values, which Parquet does not carry (`most_common_vals`,
+ * `most_common_freqs`). How many values the column holds is the table's `record_count` —
+ * Iceberg's `value_counts` — less `null_count`. Every value is the text the corpus's `triples`
+ * gives it, the natural lexical form of the column's type; one longer than
+ * `fossil_profile::MAX_VALUE_BYTES` is left out, never cut.
  */
 export interface Stats {
   /**
@@ -275,22 +250,19 @@ export interface Stats {
    */
   min_value?: string;
   /**
-   * Rows with no value.
+   * Each of `most_common_vals`' share of the table's rows, nulls among them, in the same order: the
+   * value's count over `record_count`.
    */
-  null_count: number;
+  most_common_freqs?: number[];
   /**
    * The ten commonest non-null values that occur at least twice, most frequent first and ties by
    * value. Absent when no value repeats, or when one of the ten is too long to keep.
    */
-  top_values?: TopValue[];
-}
-
-/**
- * One of a column's commonest values, and how many rows hold it.
- */
-export interface TopValue {
-  count: number;
-  value: string;
+  most_common_vals?: string[];
+  /**
+   * Rows with no value.
+   */
+  null_count: number;
 }
 
 /**

@@ -95,7 +95,7 @@ pub const MANIFEST_FILE: &str = "fossil.json";
 pub const ROW_GROUP_ROWS: usize = 122_880;
 
 /// The whole of `fossil.json`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Manifest {
     /// The format the corpus is written in.
     pub format: Format,
@@ -107,16 +107,10 @@ pub struct Manifest {
     /// their types and, inside a type, them. Absent when there is none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub property_tables: Vec<PropertyTable>,
-    /// Every column of the program's whose every value is a value of another
-    /// table's candidate key or identity column — the shape of an edge the
-    /// program did not declare. Counted by the writer over every row it
-    /// wrote. Absent when there is none.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub inclusions: Vec<Inclusion>,
 }
 
 /// One vertex type's table.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct VertexTable {
     /// The type's label: the name of the table and its PGQ label.
     pub name: String,
@@ -151,7 +145,7 @@ pub struct VertexTable {
 }
 
 /// One relation's table.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct EdgeTable {
     /// `<Src>_<label>_<Dst>`, unique: the label repeats across relations.
     pub name: String,
@@ -187,7 +181,7 @@ pub struct EdgeTable {
 
 /// One multi-valued property's table, a row per value: first normal form,
 /// because a cell is one RDF term (R2RML §10.2) and an array is no Core SQL.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct PropertyTable {
     /// `<Type>_<property>`.
     pub name: String,
@@ -223,7 +217,7 @@ pub struct Endpoint {
 }
 
 /// One column.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Property {
     /// The column name, as in the Parquet schema.
     pub name: String,
@@ -261,11 +255,16 @@ pub struct Property {
     pub stats: Option<Stats>,
 }
 
-/// A column's counts — Parquet's `Statistics` names, and the ones a source's
-/// profile uses (`fossil_profile::ColumnStats`). Every value is the text the
-/// corpus's `triples` gives it, the natural lexical form of the column's type;
-/// one longer than [`fossil_profile::MAX_VALUE_BYTES`] is left out, never cut.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+/// A column's counts, named as the references name them: Parquet's
+/// `Statistics` for the counts and the bounds (`null_count`, `distinct_count`,
+/// `min_value`, `max_value`), and `PostgreSQL`'s `pg_stats` for the commonest
+/// values, which Parquet does not carry (`most_common_vals`,
+/// `most_common_freqs`). How many values the column holds is the table's
+/// `record_count` — Iceberg's `value_counts` — less `null_count`. Every value is
+/// the text the corpus's `triples` gives it, the natural lexical form of the
+/// column's type; one longer than [`fossil_profile::MAX_VALUE_BYTES`] is left
+/// out, never cut.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Stats {
     /// Rows with no value.
     pub null_count: u64,
@@ -281,30 +280,11 @@ pub struct Stats {
     /// frequent first and ties by value. Absent when no value repeats, or when
     /// one of the ten is too long to keep.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub top_values: Vec<TopValue>,
-}
-
-/// One of a column's commonest values, and how many rows hold it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct TopValue {
-    pub value: String,
-    pub count: u64,
-}
-
-/// Every value of `from` is a value of `to`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct Inclusion {
-    /// A column of the program's.
-    pub from: ColumnAt,
-    /// A candidate key, or an `identity` column.
-    pub to: ColumnAt,
-}
-
-/// A column of a table of the corpus.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct ColumnAt {
-    pub table: String,
-    pub column: String,
+    pub most_common_vals: Vec<String>,
+    /// Each of `most_common_vals`' share of the table's rows, nulls among
+    /// them, in the same order: the value's count over `record_count`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub most_common_freqs: Vec<f64>,
 }
 
 impl Manifest {
@@ -482,7 +462,6 @@ mod tests {
                 ],
                 candidate_keys: Vec::new(),
             }],
-            inclusions: Vec::new(),
         }
     }
 

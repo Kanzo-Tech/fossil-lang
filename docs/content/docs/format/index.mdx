@@ -117,13 +117,12 @@ fixed column name, and because one value per language is the ordinary case — S
 | `references` | the vertex table at each end | knows which relations join which types, and whose values a property holds |
 | `properties[].stats` | the column's counts over every row of the table | knows nulls, distinct values, bounds and commonest values without a scan |
 | `candidate_keys` | the columns never null and never repeated | knows a table's identifiers without counting |
-| `inclusions` | columns whose every value is a value of another table's candidate key | finds a join the program did not declare as an edge |
 
 `type` is one of `string`, `bool`, `int8` … `int64`, `uint8` … `uint64`, `float`, `double`, `date`,
 `timestamp`, `time` and `decimal` — `corpus.bnf`'s spellings, written by
 `crates/fossil-df/src/corpus/manifest.rs, data_type_name`. The JSON Schema of the whole document is
 `crates/fossil-df/src/corpus/fossil.schema.json`. `iri`, `nullable`, `term_type`, `datatype`,
-`derived_from`, `annotations`, `stats`, `candidate_keys` and `inclusions` are optional and absent when
+`derived_from`, `annotations`, `stats` and `candidate_keys` are optional and absent when
 there is nothing to say.
 
 **`annotations` are the shape's and the program's.** Each is ShExJ's Annotation (ShEx 2.1 §5.9),
@@ -144,24 +143,26 @@ SHACL's `sh:name` and `sh:description` on a property shape are written as `rdfs:
 `rdfs:comment` annotations, ahead of any the same shape carries under those predicates. They state
 nothing about the data, and [the corpus as triples](/docs/format/reading/rdf) holds none of them.
 
-**`stats`, `candidate_keys` and `inclusions` are the writer's count of what it wrote**, taken over
+**`stats` and `candidate_keys` are the writer's count of what it wrote**, taken over
 every row of every table, exactly:
 
 ```jsonc
 "stats": { "null_count": 31, "distinct_count": 975, "min_value": "1817-11-30", "max_value": "1997-07-12",
-           "top_values": [{ "value": "1898-06-13", "count": 2 }] }
+           "most_common_vals": ["1898-06-13"], "most_common_freqs": [0.001976] }
 ```
 
-`null_count` is the rows with no value and `distinct_count` the distinct non-null values — Parquet's
-`Statistics` names. `min_value` and `max_value` are the least and greatest value, and `top_values` the
-ten commonest non-null values that occur at least twice, most frequent first and ties by value. Every value
+`null_count` is the rows with no value, `distinct_count` the distinct non-null values, and
+`min_value` and `max_value` the least and greatest value — Parquet's `Statistics` names.
+`most_common_vals` are the ten commonest non-null values that occur at least twice, most frequent
+first and ties by value, and `most_common_freqs` each one's share of the table's `record_count`, nulls
+among the rows, in the same order — PostgreSQL's `pg_stats` names, for the one statistic Parquet has
+no field for. Every value
 is the text [`triples`](/docs/format/reading/rdf) gives it, the natural lexical form of the column's
 `type`; a value longer than 64 bytes is left out rather than cut, so `min_value` or
-`max_value` is then absent, and so is a `top_values` that would hold it. A table's `candidate_keys` are
-its columns of a keyable type that are never null and never repeated; `inclusions`, at the top of the
-document, are `{ "from": { "table", "column" }, "to": { "table", "column" } }`, each a program's column
-whose every value is a value of `to`, a candidate key or an `identity` column. They describe the corpus
-as written: a corpus written from a sample of its sources counts the sample.
+`max_value` is then absent, and so are the `most_common_vals` and `most_common_freqs` that would hold
+it. A table's `candidate_keys` are its columns of a keyable type whose `null_count` is 0 and whose
+`distinct_count` is its `record_count` — read off the counts, not counted again. A corpus carries no
+dependency between two columns: no reference format does. They describe the corpus as written: a corpus written from a sample of its sources counts the sample.
 
 **`derived_from` names each source as the program wrote it** — `@crm/people.csv`, or a path relative
 to the program — and never the location it resolved to, so a corpus carries no storage prefix and

@@ -11,7 +11,7 @@
 
 use std::path::Path;
 
-use fossil_df::corpus::manifest::{Annotation, Inclusion};
+use fossil_df::corpus::manifest::Annotation;
 use fossil_graph_schema::{RDF_LANG_STRING, RDFS_LABEL};
 
 #[path = "support/native.rs"]
@@ -104,8 +104,9 @@ fn annotations_reach_the_manifest() {
     );
 }
 
-/// The writer counts every column of every table, names the candidate keys,
-/// and finds the reference the program wrote as a string.
+/// The writer counts every column of every table — Parquet's counts and
+/// bounds, `pg_stats`' commonest values with their share of the rows — names
+/// the candidate keys the counts make, and tests no inclusion.
 #[test]
 fn the_writer_counts_what_it_wrote() {
     let manifest = labels().manifest();
@@ -128,13 +129,11 @@ fn the_writer_counts_what_it_wrote() {
     );
     assert_eq!(category.min_value.as_deref(), Some("chemistry"));
     assert_eq!(category.max_value.as_deref(), Some("physics"));
-    assert_eq!(category.top_values.len(), 1);
+    assert_eq!(category.most_common_vals, ["physics"]);
     assert_eq!(
-        (
-            category.top_values[0].value.as_str(),
-            category.top_values[0].count
-        ),
-        ("physics", 2)
+        category.most_common_freqs,
+        [2.0 / 3.0],
+        "two of the three prizes"
     );
     let motivation = &manifest
         .property_tables
@@ -153,8 +152,11 @@ fn the_writer_counts_what_it_wrote() {
     );
     let edge = &manifest.edge_tables[0];
     assert!(edge.properties.iter().all(|p| p.stats.is_some()));
-    // No program column here holds another table's key.
-    assert_eq!(manifest.inclusions, Vec::<Inclusion>::new());
+    let text = String::from_utf8(labels().files["fossil.json"].clone()).unwrap();
+    assert!(
+        !text.contains("inclusions"),
+        "a corpus carries no inclusions: {text}"
+    );
 }
 
 /// `write/invalid-language-tag` — a tag read from the data that is not BCP 47

@@ -32,8 +32,8 @@ const preview = await attach('preview', { engine, files });   // what run(…, {
 //                                destination, destination_key, candidate_keys, derived_from
 //   "<name>".fossil_columns      table_name, column_name, ordinal_position, data_type, role, iri, term_type, datatype, is_nullable
 //   "<name>".fossil_annotations  table_name, column_name, predicate, o_type, o_value, o_datatype, o_lang
-//   "<name>".fossil_stats        table_name, column_name, null_count, distinct_count, min_value, max_value, top_values
-//   "<name>".fossil_inclusions   table_name, column_name, referenced_table_name, referenced_column_name
+//   "<name>".fossil_stats        table_name, column_name, null_count, distinct_count, min_value, max_value,
+//                                most_common_vals, most_common_freqs
 //   "<name>".triples             s_type, s_value, p, o_type, o_value, o_datatype, o_lang — the corpus as RDF
 
 await other.detach();             // `await using` detaches `corpus` when the block ends
@@ -41,7 +41,7 @@ await other.detach();             // `await using` detaches `corpus` when the bl
 
 `attach` reads `fossil.json` through the engine, refuses any `format` but `fossil/1` before it reads a
 byte of Parquet, creates one view per table, every fact of the manifest as a relation — `fossil_tables`,
-`fossil_columns`, `fossil_annotations`, `fossil_stats`, `fossil_inclusions` — and the corpus as triples, and
+`fossil_columns`, `fossil_annotations`, `fossil_stats` — and the corpus as triples, and
 answers an `Attachment` — `name`, `detach()` and `[Symbol.asyncDispose]` — that detaches them. Two
 attachments of one name share the catalog; the last to detach takes it.
 

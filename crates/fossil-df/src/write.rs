@@ -32,16 +32,16 @@ use fossil_storage::{Storage, StorageError};
 use datafusion::arrow::array::{Array, StringArray};
 use datafusion::error::DataFusionError;
 use datafusion::prelude::SessionContext;
+use fossil_base::sources::InferredColumn;
 use fossil_graph_schema::Primitive;
-use fossil_profile::{ColumnKind, TableColumn};
 
 use crate::corpus::generated::{
     ColumnRole, EDGE_COLUMNS, ENDPOINT_DST, ENDPOINT_SRC, PAYLOAD_ADDRESS, PAYLOAD_COLUMNS,
     PAYLOAD_IDENTITY, PROPERTY_COLUMNS, PROPERTY_LANGUAGE, WriterColumn,
 };
 use crate::corpus::manifest::{
-    ColumnAt, EdgeTable as EdgeEntry, Endpoint, Format, Inclusion, MANIFEST_FILE, Manifest,
-    Property, PropertyTable as PropertyEntry, ROW_GROUP_ROWS, RR_IRI, RR_LITERAL, Stats, TopValue,
+    EdgeTable as EdgeEntry, Endpoint, Format, MANIFEST_FILE, Manifest, Property,
+    PropertyTable as PropertyEntry, ROW_GROUP_ROWS, RR_IRI, RR_LITERAL, Stats,
     VertexTable as VertexEntry, data_type_name, edge_path, edge_table_name, property_path,
     property_table_name, vertex_path,
 };
@@ -51,7 +51,7 @@ use crate::{EdgeTable, Graph};
 
 /// What [`write`](fn@write) answers: the manifest it wrote, and what the edge join
 /// discarded — the one fact the corpus cannot hold about itself.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Written {
     /// `fossil.json`, as written.
     pub manifest: Manifest,
@@ -313,33 +313,36 @@ pub async fn write(
     let facts = facts::count_written(ctx, &counted).await?;
     let tables = vertex_tables
         .iter_mut()
-        .map(|t| (&mut t.candidate_keys, &mut t.properties))
+        .map(|t| (t.record_count, &mut t.candidate_keys, &mut t.properties))
         .chain(
             property_tables
                 .iter_mut()
-                .map(|t| (&mut t.candidate_keys, &mut t.properties)),
+                .map(|t| (t.record_count, &mut t.candidate_keys, &mut t.properties)),
         )
         .chain(
             edge_tables
                 .iter_mut()
-                .map(|t| (&mut t.candidate_keys, &mut t.properties)),
+                .map(|t| (t.record_count, &mut t.candidate_keys, &mut t.properties)),
         );
-    for ((keys, properties), (candidate_keys, stats)) in tables.zip(facts.tables) {
+    for ((rows, keys, properties), (candidate_keys, stats)) in tables.zip(facts.tables) {
         *keys = candidate_keys;
         for (property, s) in properties.iter_mut().zip(stats) {
+            // `pg_stats`' frequency: the share of the table's rows, nulls
+            // among them, that hold the value.
+            #[allow(clippy::cast_precision_loss)]
+            let freq = |count: u64| count as f64 / rows.max(1) as f64;
+            let (vals, freqs) = s
+                .top_values
+                .into_iter()
+                .map(|t| (t.value, freq(t.count)))
+                .unzip();
             property.stats = Some(Stats {
                 null_count: s.null_count,
                 distinct_count: s.distinct_count,
                 min_value: s.min_value,
                 max_value: s.max_value,
-                top_values: s
-                    .top_values
-                    .into_iter()
-                    .map(|t| TopValue {
-                        value: t.value,
-                        count: t.count,
-                    })
-                    .collect(),
+                most_common_vals: vals,
+                most_common_freqs: freqs,
             });
         }
     }
@@ -349,17 +352,6 @@ pub async fn write(
         vertex_tables,
         edge_tables,
         property_tables,
-        inclusions: facts
-            .inclusions
-            .into_iter()
-            .map(|(table, column, to_table, to_column)| Inclusion {
-                from: ColumnAt { table, column },
-                to: ColumnAt {
-                    table: to_table,
-                    column: to_column,
-                },
-            })
-            .collect(),
     };
     put(
         storage,
@@ -371,9 +363,9 @@ pub async fn write(
     Ok(Written { manifest, dropped })
 }
 
-/// A table as it is counted: its laid-out rows, and what each column may be
-/// in an inclusion — read off the manifest entry, so the counts and the
-/// document cannot describe two different tables.
+/// A table as it is counted: its laid-out rows, and each column's primitive —
+/// read off the manifest entry, so the counts and the document cannot describe
+/// two different tables.
 fn counted(
     name: &str,
     (schema, batches): (SchemaRef, Vec<RecordBatch>),
@@ -398,36 +390,30 @@ fn counted(
                         other => other,
                     },
                 );
-                if p.term_type.as_deref() == Some(RR_IRI) {
-                    TableColumn {
-                        name: p.name.as_str().into(),
-                        primitive: Primitive::AnyUri,
-                        kind: ColumnKind::Reference,
-                    }
-                } else {
-                    TableColumn {
-                        name: p.name.as_str().into(),
-                        primitive,
-                        kind: ColumnKind::Value,
-                    }
+                InferredColumn {
+                    name: p.name.as_str().into(),
+                    primitive: if p.term_type.as_deref() == Some(RR_IRI) {
+                        Primitive::AnyUri
+                    } else {
+                        primitive
+                    },
                 }
             })
             .collect(),
     }
 }
 
-/// A column the writer emits, as the counts see it: an identity is what a
-/// reference names, and every other role is declared by the manifest.
-fn writer_column(p: &Property) -> TableColumn {
-    let (primitive, kind) = match p.role {
-        Some(ColumnRole::Identity) => (Primitive::AnyUri, ColumnKind::Identity),
-        Some(ColumnRole::Language) => (Primitive::String, ColumnKind::Declared),
-        _ => (Primitive::Integer, ColumnKind::Declared),
+/// A column the writer emits, as the counts see it: an identity holds IRIs, a
+/// tag text, and every other role an integer.
+fn writer_column(p: &Property) -> InferredColumn {
+    let primitive = match p.role {
+        Some(ColumnRole::Identity) => Primitive::AnyUri,
+        Some(ColumnRole::Language) => Primitive::String,
+        _ => Primitive::Integer,
     };
-    TableColumn {
+    InferredColumn {
         name: p.name.as_str().into(),
         primitive,
-        kind,
     }
 }
 
