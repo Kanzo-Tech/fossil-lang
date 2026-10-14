@@ -300,15 +300,18 @@ version: gar/v1
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
 <#Person> a rml:TriplesMap ;
-  rml:logicalSource [ rml:referenceFormulation rml:SQL2008Table ; rml:iterator "Person" ] ;
+  rml:logicalSource [ rml:source [ a rml:Source ] ;
+                      rml:referenceFormulation rml:SQL2008Table ; rml:iterator "Person" ] ;
   rml:subjectMap [ rml:reference "subject" ; rml:termType rml:IRI ;
                    rml:class <https://example.org/Person> ] ;
   rml:predicateObjectMap [ rml:predicate <https://example.org/name> ;
                            rml:objectMap [ rml:reference "name" ; rml:datatype xsd:string ] ] .
 ```
 
-The logical sources are SQL table names, which the host resolves when it builds the relation
-(`tables:` in `Mapping.triples`). **The walking skeleton reads it back:** on DuckDB-WASM 1.4.3 the
+RML-IO §3.1 requires exactly one `rml:source` per logical source, so the writer emits one, and
+an anonymous `[ a rml:Source ]` is all it can honestly say: the logical sources are SQL table names,
+which the host resolves when it builds the relation (`tables:` in `Mapping.triples`), and a source
+description naming a file would claim what the host decides. **The walking skeleton reads it back:** on DuckDB-WASM 1.4.3 the
 prototype returned the five rows `(0, https://example.org/user/1, Alice)` to
 `(4, https://example.org/user/5, Eve)`. The invariant in `CLAUDE.md` holds with one word changed —
 "a GraphAr graph" for "a `fossil/1` corpus": five `Person` vertices, asserted by content read back
@@ -378,6 +381,14 @@ tag read per row, which only RML-Core can express; it "follows exactly the same 
 one vocabulary does the whole document. The price is a Community Group draft, not a Recommendation.
 Only RML-Core is used: RML-LV's logical views stay [discarded](/docs/design/discarded#the-corpus-as-rdf),
 and joins are SQL2008 queries.
+
+**The supported subset is the one the writer emits, and `rml` refuses the rest by name.** It models
+constants, references, templates, `rml:class`, language maps and constants, `rml:datatype`, and
+ref-object joins on references. A graph map, `rml:URI`, a template as a language map, a join that is
+not a reference, and any reference formulation other than `rml:SQL2008Table` and
+`rml:SQL2008Query` are refused with an error that names the construct, not read and dropped. RML-Core
+§4.1.1's default base IRI, `http://example.org/`, applies only when a host passes no base; the
+writer always emits absolute IRIs, so it never applies to a mapping fossil wrote.
 
 **What would reverse it.** A W3C R2RML revision with a language map, or a downstream consumer that
 runs R2RML only and refuses RML; then the tag is folded into a constant per table.
@@ -580,15 +591,21 @@ the RDF image cannot hold, so the mapping would silently discard what the files 
 duplicates when they are the same RDF term, which for a tagged value is the same lexical form with
 the same tag after the tag is lower-cased (RDF 1.1 Concepts §3.3 puts language tags in lower case,
 and RDF 1.2 §3.4 compares them ASCII case-insensitively). A NULL element is refused the same way. The
-writer lower-cases the tag it writes, and a malformed one is `write/invalid-language-tag`, as today.
+writer lower-cases the tag it writes, and a tag that is malformed, **empty or NULL** is refused as
+`write/invalid-language-tag`, as today: a query cannot raise RML-Core's data error (§12.2), so an
+element without a usable tag would make no triple, and the writer is the only place that can refuse
+it.
 RDF 1.2 adds a base direction (`rdf:dirLangString`), which a `(value, lang)` pair cannot carry; it is
 not written.
 
-The mapping unnests the column once, and so cannot misalign a value and its tag:
+The mapping unnests the column once. Value and tag are one struct element, so no correlated
+iteration is needed (that is RML-LV's, not RML-Core's), and §8.5's Cartesian product is one term
+per row:
 
 ```turtle
 <#Person_nickname> a rml:TriplesMap ;
-  rml:logicalSource [ rml:referenceFormulation rml:SQL2008Query ;
+  rml:logicalSource [ rml:source [ a rml:Source ] ;
+    rml:referenceFormulation rml:SQL2008Query ;
     rml:iterator "SELECT subject, n.value AS value, n.lang AS lang FROM (SELECT subject, unnest(nickname) AS n FROM Person)" ] ;
   rml:subjectMap [ rml:reference "subject" ; rml:termType rml:IRI ] ;
   rml:predicateObjectMap [ rml:predicate <https://example.org/nickname> ;
