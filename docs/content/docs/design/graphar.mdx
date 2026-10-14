@@ -105,8 +105,7 @@ what each does, and they are **published**: `graphar-info` and `graphar-parquet`
 
 `attachGraph` creates **one view per logical table** — `"<c>"."<type>"` and
 `"<c>"."<src>_<edge>_<dst>"` with GraphAr's own columns (`_graphArVertexIndex`, `_graphArSrcIndex`,
-`_graphArDstIndex`) — and **metadata relations in GraphAr's words**. Four are shipped; a fifth,
-`graphar_chunks`, is the next change in graphar:
+`_graphArDstIndex`) — and **metadata relations in GraphAr's words**, five:
 
 | relation | columns |
 | --- | --- |
@@ -114,7 +113,7 @@ what each does, and they are **published**: `graphar-info` and `graphar-parquet`
 | `graphar_edge_types` | `name`, `src_type`, `edge_type`, `dst_type`, `count`, `directed`, `ordinal` |
 | `graphar_properties` | `type`, `property`, `data_type`, `is_primary`, `is_nullable`, `ordinal` |
 | `graphar_extra_info` | `key`, `value` — the graph document's `extra_info`, in order; fossil writes none, so it is empty |
-| `graphar_chunks` (next) | `type`, `kind`, `path` — the data file behind each chunk, as the engine names it, so a reader of a Parquet footer needs no path arithmetic of its own |
+| `graphar_chunks` | `type`, `kind`, `path` — the data file behind each chunk, as the engine names it, so a reader of a Parquet footer needs no path arithmetic of its own |
 
 `ordinal` is the order of the YAML lists, which is what makes the global id stable (below). The
 relations are a SQL projection of `GraphInfo`, so they are one fact and not a second document; they
@@ -346,16 +345,14 @@ Yes. It has two readers: kanzo-ui's labels and datatypes, through `Mapping.model
 - **Materialising N-Triples** at run time is a second copy of the data, and the two can disagree.
 - **Validating the tables as a property graph** (PG-Schema; rudof has a `pgschema` crate) is not
   SHACL, and keasy's rules are SHACL documents; SHACL → PG-Schema is no standard.
-- **A virtual graph over a mapping is the standard way** — Ontop and Morph-RDB unfold a mapping into
-  SQL. `rml::sql::triples` producing a *view* that rudof's SQL validator reads is exactly that
-  composition, and DuckDB's optimiser does the unfolding.
+- **A virtual graph over a mapping** is the remaining way: `rml::sql::triples` produces a *view*
+  that rudof's SQL validator reads, nothing is materialised, and DuckDB's optimiser does the
+  unfolding.
 
 **Who owns "tables → RDF" is split by what each party knows.** The *content* — which class,
 predicate, term type, datatype and language column — is the program's, so fossil's run writes it. The
 *mechanism* — parsing, writing and rendering RML to a relation — is rudof's. graphar has no part in
-it. The precedents are the same split: Ontop keeps the mapping beside the database and executes it in
-the RDF engine; Neo4j's neosemantics keeps its RDF↔property-graph mapping in the RDF tool, not the
-store.
+it.
 
 ### R2RML or RML-Core
 
@@ -388,9 +385,42 @@ one id space.
 writes it:**
 
 ```
-first(t) = Σ count of the vertex types before t, in graphar_vertex_types.ordinal (the graph YAML's order)
+first(t) = Σ count of the node types before t, in graphar_vertex_types.ordinal
 dense_id = first(t) + _graphArVertexIndex          cast to UINTEGER
 ```
+
+**This is a prefix sum, and it is injective only if every type's indices are contiguous**: type
+`t`'s indices must be exactly `0 … count_t − 1`, or the ids of `t` reach into the range of the type
+after it. GraphAr does not promise that. Its specification says a vertex's index starts from 0 and
+corresponds to the row number in the logical vertex table, in "continuous" chunks; the GraphAr paper
+(PVLDB 18(3), §3.1) says the internal ids of partition *i* start at `partition_size × i` and that
+"bubbles are allowed at the end of each partition", so the actual rows may be fewer than the
+partition size and the index space then has gaps. The specification and the paper disagree, and a
+foreign writer may follow the paper. Three rules follow, each ours:
+
+1. **Our writer is contiguous by construction**: one chunk per table, rows numbered from 0.
+2. **`attachGraph` checks it.** For each node type it requires `count == max(_graphArVertexIndex) + 1`
+   (the vertex count file against the largest index in the chunks), and refuses a graph with a gap
+   as `invalid`, before any view is made. A graph with bubbles is not read by the global-id
+   arithmetic, and is not silently misnumbered. This is graphar-duckdb's, a change to ship before F1.
+3. **`ordinal` is our rule.** The specification gives the order of `vertices:` in the graph document
+   no meaning, and whether GraphAr's Java loader keeps it is not established (its `GraphInfo` constructor
+   takes a `Map`).
+   So `graphar_vertex_types.ordinal` is the position in the document **`attachGraph` read**, and
+   the writer writes `vertices:` in the order defined in [the order of shapes](#the-order-of-shapes).
+   `ordinal` is the whole of the id's stability, and it is a convention of fossil's writer and of
+   `attachGraph`, which a GraphAr reader is free to ignore.
+
+**The global id is not stable under change.** A prefix sum shifts: adding a row to an early type
+renumbers every later type's global ids. That holds for the id the GPU buffer uses and not for the
+files, where a new subject renumbers only the vertices after it in its own type. It is harmless while
+the id is regenerated on every attach, and wrong for anything that persists one; nothing does.
+Systems that need a stable global id carry the type in it: MillenniumDB's 8-byte identifiers put a
+class in the first byte, so an identifier is `(class, local index)` and depends on no other class's
+size, at the cost of not being dense (Vrgoč et al. 2023). The GPU buffer needs the dense one.
+Other RDF stores keep a dictionary that assigns each term a unique id and store only id triples
+(RDF-3X, Neumann and Weikum 2008; HDT, Fernández et al. 2013); there, as here, the id is internal
+and the identity is the IRI.
 
 Each vertex type's table in the graph's `JoinGraph` is a query projecting that `dense_id` and the
 program's columns; edges add `first(src_type)` and `first(dst_type)` to their indices. The reserved
@@ -421,12 +451,47 @@ double the column on disk (delta-encoded, 1–3%) — what doubles is the memory
 cast; and the 4.0 MB figure for `dense_id` at a million vertices was PLAIN encoding, which the writer
 left in `acf5da82`.
 
-Per-type numbering also gains something: a new subject renumbers only the vertices after it in its
-own type. Neither id is an identity; the identity is still `subject` ([identity](/docs/design/identity)).
+Neither id is an identity; the identity is still `subject` ([identity](/docs/design/identity)).
 
 **What would reverse it.** A reader that needs global ids **in the files**, with no query between it
 and them; then a `dense_id` property is written beside GraphAr's index, and the page that adds it says
-who checks the two agree. Or the arithmetic measured above 20% of a read on a quiet host.
+who checks the two agree. Or the arithmetic measured above 20% of a read on a quiet host. Or a use
+that persists a global id: then it is `(type, index)`, which depends on no other type.
+
+## The order of shapes
+
+**No order among shapes comes from the standards.** A SHACL shapes graph is an RDF graph, "zero or
+more shapes" (SHACL §3.1), and an RDF graph is a set (RDF 1.1 Concepts §3). `sh:order` is the only
+ordering SHACL has: it sits in a non-normative section (§2.3.2), applies to property shapes and
+groups "for purposes such as form building", and "is not used for validation purposes"; SHACL 1.2
+Core (Working Draft, 14 October 2026, §8.7) keeps it so. The members of an `sh:and` or `sh:or` list
+are in an order that "does not impact the validation results". ShEx 2.1 annotations "do not affect
+whether a node conforms" (§5.9). A document therefore has no declaration order that means anything,
+and a rule that reads one makes a program's output depend on how a file was laid out.
+
+**fossil defines the order explicitly, and it is not the document's.** The order of the shapes a
+program imports, and so of the vertex types it writes, is the order of this key, compared in turn:
+
+1. `sh:order` ascending, where the shape has one; a shape without one after every shape with one.
+   SHACL defines `sh:order` for property shapes and groups, so using it on a node shape is fossil's
+   extension, and a ShEx shape, which has none, goes to the next criterion.
+2. The shape's IRI, compared as the string it is, code point by code point (RDF 1.1 Concepts §3.2:
+   IRI equality is string comparison, so the comparison is defined).
+3. A shape that is a blank node has no IRI, and a blank node's label is not part of RDF's abstract
+   syntax (§3.4), so it is placed after the shapes with an IRI, by the sorted IRIs of its
+   `sh:targetClass` values and then of its property paths.
+4. A tie that survives all three is a compile error naming both shapes, and not a choice.
+
+Declared types (`@iri`, no document) take the same key, by their class IRI. This replaces the rule
+that read the document's order. It is a **deliberate behaviour change in F0**, and it changes two
+visible things: the order of the vertex types in `fossil.graph.yml` (and so the global id), and the
+members the error [`shape/not-in-document`](/docs/errors/shape/not-in-document) lists. A program that
+names every shape it uses does not change.
+
+**What would reverse it.** A standard giving node shapes an order that validation or construction
+may rely on (a SHACL revision making `sh:order` normative for node shapes), at which point step 1
+is that standard's. Or a program for which an author-chosen order of types is data: it then states
+the order in the program, not in a document.
 
 ## A relation, and a multi-valued property
 
@@ -461,45 +526,97 @@ version: gar/v1
 padding: its last chunk is **as long as its vertex chunk, plus one** (`write_edges` takes the
 `vertex_count` for it), the alignment `ldbc_sample/parquet` is written with.
 
-**A multi-valued property is a property of the vertex type that owns it, with GraphAr's
-`cardinality: list`** (D3): `nickname` is a column of `Person`, a Parquet list column, in `Person`'s
-property group and declared in `Person.vertex.yml`:
+**A multi-valued property is a property of the vertex type that owns it, with `cardinality: set`**
+(D3). A language-tagged one is one column whose element type is `langString`, a GraphAr
+user-defined type. `Person.vertex.yml` declares it, and the version line names the type it uses:
 
 ```yaml
-      - name: nickname
+property_groups:
+  - prefix: subject_name_nickname/
+    file_type: parquet
+    properties:
+      - name: subject
         data_type: string
-        cardinality: list
+        is_primary: true
+      - name: nickname
+        data_type: langString
+        cardinality: set
+version: gar/v1 (langString)
 ```
 
-`graphar-info` already carries `Cardinality::{Single, List, Set}`, and a reader of the type sees the
-property where it belongs. The format still allows a vertex type with no primary key; **fossil does
-not emit one for a property**, so every vertex type a run writes has a primary key and is a node.
+`langString` is `STRUCT<value: STRING, lang: STRING>`, and `cardinality: set` makes the column a
+`LIST` of it: Parquet's three-level `LIST` annotation over a group, which Parquet's `LogicalTypes.md`
+allows to hold nested structures, and Arrow's `List<Struct<value: Utf8, lang: Utf8>>`. GraphAr's C++
+writer already wraps any property whose cardinality is not single in `arrow::list(…)`, so the
+declaration `data_type: langString` with `cardinality: set` is one level of list, not two. An untagged
+multi-valued property is the same with `data_type: string`. A single-valued tagged property is
+`langString` with no cardinality, a bare struct. `graphar-info` carries `gar/v1 (langString)`
+(`InfoVersion`), and `attachGraph` takes the DuckDB type for a view with no chunk to read through
+its `userTypes` option, `{ langString: 'STRUCT(value VARCHAR, lang VARCHAR)' }`.
 
-A language tag is read per value, so it travels beside the values: `nickname_lang`, a `list<string>`
-property of the same type, position for position (a single-valued tagged property has a `string`
-`<property>_lang`). The mapping zips them, and states the link to the owner by being a query over the
-owner's own table:
+**Why `set`.** An RDF graph is a set of triples (RDF 1.1 Concepts §3; RDF 1.2 keeps it), and an
+R2RML output dataset is an RDF dataset (R2RML §11), so several objects for one predicate are an
+unordered set without duplicates. The one property-graph model that has multi-valued properties is
+set-valued (Angles 2018, Def. 1, `σ : (N ∪ E) × P → SET⁺(V)`); the others give one value per key
+(Angles et al. 2017, Def. 2.3; PG-Schema Def. 3.1, which takes `SINGLE`, `LIST` and `SET` from
+JanusGraph's key cardinalities and adds arrays as an extension). Hartig's formal translation of
+property graphs to RDF-star assumes a value-to-literal mapping that, in his words, rules out property
+values of a collection data type. GraphAr has `Cardinality::{Single, List, Set}` in its libraries, and
+the Java source documents `set` as "no duplicates"; the specification page does not mention
+cardinality at all. **`list` is rejected**: it declares an order and a multiplicity that
+the RDF image cannot hold, so the mapping would silently discard what the files promise.
+
+**The writer refuses duplicates**, as `write/duplicate-value`: two elements of one set are
+duplicates when they are the same RDF term, which for a tagged value is the same lexical form with
+the same tag after the tag is lower-cased (RDF 1.1 Concepts §3.3 puts language tags in lower case,
+and RDF 1.2 §3.4 compares them ASCII case-insensitively). A NULL element is refused the same way. The
+writer lower-cases the tag it writes, and a malformed one is `write/invalid-language-tag`, as today.
+RDF 1.2 adds a base direction (`rdf:dirLangString`), which a `(value, lang)` pair cannot carry; it is
+not written.
+
+The mapping unnests the column once, and so cannot misalign a value and its tag:
 
 ```turtle
 <#Person_nickname> a rml:TriplesMap ;
   rml:logicalSource [ rml:referenceFormulation rml:SQL2008Query ;
-    rml:iterator "SELECT subject, unnest(nickname) AS value, unnest(nickname_lang) AS lang FROM Person" ] ;
+    rml:iterator "SELECT subject, n.value AS value, n.lang AS lang FROM (SELECT subject, unnest(nickname) AS n FROM Person)" ] ;
   rml:subjectMap [ rml:reference "subject" ; rml:termType rml:IRI ] ;
   rml:predicateObjectMap [ rml:predicate <https://example.org/nickname> ;
     rml:objectMap [ rml:reference "value" ; rml:languageMap [ rml:reference "lang" ] ] ] .
 ```
 
-The unnest is the mapping's, in a SQL2008 query, and not the viewer's: the graph page draws a
-node's list as a list, and only the rules page asks for the `(s,p,o)` relation. This is the old
-design turned round. The first normal form that the standard mapping reads is no longer in the
-files; it is one `unnest` in the mapping, which DuckDB runs. What the files gain is the graph's: a
-table the graph reads is a node type, and there is no PK-less table whose owner only the mapping
-knows ([discarded](/docs/design/discarded#the-corpus-as-apache-graphar)).
+**A known departure from the reference readers.** The specification permits this: it "supports the
+user-defined data types, which can be used to represent complex data structures, such as the struct,
+map, and union types". The reference readers do not. Read at `apache/incubator-graphar@06dddb1` on
+2026-10-14:
 
-**What would reverse it.** A multi-valued property whose values carry more than a language tag — a
-value with properties of its own, or a tag the parallel list cannot align — which is a vertex type
-of its own again, linked by an edge. Or GraphAr's list cardinality read by one library and refused
-by another that fossil's users run.
+- C++ `DataType::TypeNameToDataType` (`cpp/src/graphar/types.cc`) accepts `bool`, `int32`, `int64`,
+  `float`, `double`, `string`, `date`, `timestamp` and `list<>` of `int32`, `int64`, `float`,
+  `double` or `string`, and throws `Unsupported data type` for any other name.
+- C++ `DataType::DataTypeToArrowDataType` and `ArrowDataTypeToDataType` throw "is not supported yet
+  in GraphAr" for every type outside that set, a user-defined one and an Arrow struct included.
+  `USER_DEFINED` is only a name string (`ToTypeName` returns it), so the C++ type has nowhere to say
+  what the struct holds.
+- Java `DataType.fromString` (`maven-projects/info`) accepts the same eight scalars and `list<…>` of
+  them, and throws `IllegalArgumentException("Unknown data type: …")` for any other name.
+
+So **a graph with a `langString` property is not opened by GraphAr's C++ and Java readers at that
+revision**, and the claim "a GraphAr reader opens the tables" holds for it only for readers that
+follow the specification's user-defined-type clause: `graphar-info` and `@kanzo-tech/graphar-duckdb`.
+The owner chose this knowing it, because the alternative either loses the tag or admits a
+misaligned state ([the parallel-list encoding](/docs/design/discarded#the-corpus-as-apache-graphar) is discarded for it). A graph with no tagged multi-valued property uses only
+built-in types and every reader opens it. The conformance job's C++ and PySpark readers therefore
+open the graphs without a `langString` property; the property is tested through `graphar-duckdb`.
+
+**What would reverse it.** The C++ and Java readers accepting a struct element type, or an upstream
+proposal for a tagged-string type merged into GraphAr (then the type takes GraphAr's name and
+`langString` goes). Or a reader our users run, that refuses a user-defined type, having to open such
+a graph: then the tag is dropped from that graph's files (`set` of `string`), and the tag stays in
+the mapping's constant `rml:language` where one language is all a column holds.
+
+**What would reverse `set`.** A downstream consumer for which order is data: then the order is
+carried by an index-carrying element or an `rdf:List`, which RML-Core has no construct for (its
+contents have no collection section), so it is a different design and not a flag.
 
 **What would reverse the edge layout.** Offsets measured as a cost on a write or a read that matters:
 then `ordered: false` (COO), and the `(src, dst)` sort is checked only by a test.
@@ -516,16 +633,55 @@ They go **in each chunk's own Parquet footer**, which is the one place a Parquet
 - `null_count`, `min_value` and `max_value` in the column chunks' `Statistics`, with
   `is_min_value_exact` / `is_max_value_exact`;
 - the distinct count and the most common values with their frequencies in the file's
-  `key_value_metadata`, under the key `fossil:stats`, because Parquet has no field for them.
+  `key_value_metadata`, under the key **`fossil:stats`**, because Parquet has no field for them.
+
+**This is fossil's convention, not GraphAr's and not Parquet's.** `parquet.thrift` gives the file
+metadata (`FileMetaData.key_value_metadata`) and each column chunk's (`ColumnMetaData.key_value_metadata`)
+a list of string keys and string values, and names none; Arrow uses the file-level one for its own
+`ARROW:schema`. The `fossil:` prefix namespaces the key the way `ARROW:` does, and the value is this
+document, versioned, and checked by the writer's tests:
 
 ```json
-{"subject":{"distinct_count":5,"most_common_vals":[…],"most_common_freqs":[…]},"name":{"distinct_count":5,…}}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["version", "columns"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "columns": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["distinct_count"],
+        "additionalProperties": false,
+        "properties": {
+          "distinct_count": { "type": "integer", "minimum": 0 },
+          "most_common_vals": { "type": "array", "maxItems": 10, "items": { "type": "string" } },
+          "most_common_freqs": { "type": "array", "maxItems": 10, "items": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 } }
+        }
+      }
+    }
+  }
+}
 ```
+
+`columns` is keyed by the property's name. `most_common_vals` and `most_common_freqs` are two arrays of
+the same length, as PostgreSQL's `pg_stats` has them: the ten most frequent non-null values that occur
+at least twice, most frequent first and ties by value, each as the column type's text, and each one's
+share of the chunk's rows. They are absent when no value repeats. A set column's `distinct_count` and
+values count its **elements**, since Parquet counts leaf values; a candidate key is read from
+single-valued scalar columns only. A reader that does not know the key loses nothing a Parquet reader
+needs; one that does checks `version` and refuses another.
 
 **Why `key_value_metadata` and not `Statistics.distinct_count`.** Parquet's statistics are per row
 group: `null_count` sums and the bounds fold, but a distinct count does not combine, and the arrow-rs
 `ArrowWriter` (`parquet` 58.3.0) writes none — `distinct_count` reaches a chunk only through
-`write_batch_with_statistics`, and only if nothing else wrote to it. `key_value_metadata` is the slot
+`write_batch_with_statistics`, and only if nothing else wrote to it. Nor is the reason only the
+writer's: `null_count` is a count and `min_value` and `max_value` are a minimum and a maximum, which
+combine across row groups by sum, minimum and maximum — the *distributive* aggregates of Gray et al.
+— while a distinct count over a union cannot be computed from the per-group ones (that it is
+*holistic* is our reading of their definition, which does not name it). `key_value_metadata` is the slot
 Parquet gives facts it has no field for, and the one Arrow itself uses (`ARROW:schema`). arrow-rs
 truncates a bound at 64 bytes and marks it inexact, so a reader that keeps only exact bounds never
 shows a cut value — the rule [the corpus's own facts](/docs/design/facts) already states.
@@ -555,9 +711,10 @@ they go.
 
 ## Datatypes GraphAr does not have
 
-GraphAr's built-in types are `bool`, `int32`, `int64`, `float`, `double`, `string`, `date` (days since
-the epoch), `timestamp` (**milliseconds** since the epoch), `time` (milliseconds since midnight) and
-`list<T>`. A datatype beyond them — `xsd:gYear` over an `int32` — lives **only in the mapping**.
+GraphAr's built-in types, as the reference readers at `06dddb1` accept them, are `bool`, `int32`,
+`int64`, `float`, `double`, `string`, `date` (days since the epoch) and `timestamp` (**milliseconds**
+since the epoch), and a `list<T>` of five of them. `graphar-info` also carries `time` (milliseconds
+since midnight), which neither reference parser names. A datatype beyond them — `xsd:gYear` over an `int32` — lives **only in the mapping**.
 kanzo-ui keeps its year axis by reading it from there (D4): the host loads rudof and passes the
 datatypes from `Mapping.model()` to the graph **after the first paint, never before**, so
 `rudof_wasm` (7.45 MB) never delays the page. Until it arrives, a year draws as a number. The graph
@@ -568,7 +725,9 @@ a number and nothing more. A copy of the datatypes in Arrow field metadata was n
 second document that can disagree with the mapping.
 
 Other widths: `int8`, `int16`, `uint8`, `uint16` and `uint32` widen without loss; `uint64` above
-`i64::MAX` is refused; `binary` becomes `string`, with `xsd:hexBinary` in the mapping. **A `timestamp`
+`i64::MAX` is refused; `binary` becomes `string`, with `xsd:hexBinary` in the mapping, and `time` is
+written as `string` with `xsd:time`, so a graph with no `langString` property stays within what the
+reference readers parse. The one type beyond them is `langString` ([above](#a-relation-and-a-multi-valued-property)). **A `timestamp`
 finer than a millisecond is refused, as `write/unrepresentable`**, because GraphAr's `timestamp` is
 milliseconds and a string would lose the type every other reader sees.
 **What would reverse it:** GraphAr gaining a finer timestamp.
@@ -591,6 +750,83 @@ milliseconds and a string would lose the type every other reader sees.
 | `annotations` | plain triples about the class and predicate IRIs, in the same document; read by `Mapping.model()` | RDF, `mapping.ttl` |
 | `derived_from` | not emitted until a reader exists (D1) | — |
 | a run's `dropped` | stays in the run's answer | — |
+
+## What a round trip preserves
+
+"An RDF reader opens their meaning without fossil" is only worth saying if it can be wrong, so this
+section states what the mapping preserves, on which graphs, and what it does not. **It is
+derived here from the definition of information preservation in Sequeda, Arenas and Miranker (WWW
+2012, Def. 2: a mapping is information preserving if a computable inverse recovers the database from
+its image), together with Hartig's conditions on property graphs (Defs. 7–10, Remark 3) and
+R2RML's rules for generating terms and for the output dataset (§11). It is not a statement quoted
+from a paper, and no paper proves it for a GraphAr graph.** Sequeda et al. prove it for the W3C
+Direct Mapping; the formal literature on property graphs and RDF has results for RDF to property
+graph (Angles, Thakkar and Tomaszuk 2020) and for property graph to RDF-star (Hartig 2014), and
+none for this direction and this mapping.
+
+**Setting.** A graph 𝔾 is the vertex tables (one per type, with the key `subject`), the edge tables
+(one per relation) and a mapping M, an RML-Core document whose logical sources are SQL queries over
+those tables. ⟦M⟧(𝔾) is M's output dataset restricted to the default graph, and it is a **set** of
+triples. 𝔾 ≈ 𝔾′ when, after renumbering the vertices of each type, both have for every type and
+column the same set of `(subject, value)` pairs and for every relation the same set of
+`(source subject, target subject)` pairs, the values compared **as RDF terms** — lexical form,
+datatype IRI and lower-cased language tag.
+
+**Statement R.**
+
+- **R1, layout independence.** If M defines no blank node and no term map reads
+  `_graphArVertexIndex`, `_graphArSrcIndex`, `_graphArDstIndex` or a row position, then ⟦M⟧(𝔾) =
+  ⟦M⟧(𝔾′) whenever 𝔾 and 𝔾′ differ only in vertex-row order (with endpoints renumbered), chunking,
+  file layout, integer width and statistics. The equality is of sets, not of graphs up to
+  isomorphism, because there is no blank node.
+- **R2, information preservation.** For every **admissible** 𝔾 there is a computable N from RDF
+  graphs to graphs with N(⟦M⟧(𝔾)) ≈ 𝔾. fossil ships no N and nothing needs one: R2 is what makes the
+  claim testable, by computing ⟦M⟧ twice from permuted inputs (R1) and from a graph and its recovery.
+- **R3, enforcement.** The writer **refuses** a graph that is not admissible, as `write/*`, and does
+  not write one whose RDF image loses it.
+- **R4, monotonicity.** If every logical source of M is monotone (selection, projection, join,
+  unnest; no aggregate, negation or limit), then adding rows to the tables only adds triples.
+
+**Admissible** means:
+
+- **A1.** Every `subject` is non-NULL, an absolute IRI, unique within its type **and not the
+  subject of a vertex of any other type**: the key's scope is every vertex type together, because
+  RDF identity is the IRI over the whole graph. (PG-Keys' `EXCLUSIVE` and `MANDATORY`, with that
+  scope.)
+- **A2.** Distinct types have distinct class IRIs, and within a class distinct columns have distinct
+  predicate IRIs; no relation's predicate is a column predicate of its source class.
+- **A3.** Each column's value-to-literal map (R2RML's natural mapping or a declared datatype) is
+  injective on the column's values and raises no data error.
+- **A4.** A multi-valued column is a `set`: its elements are pairwise distinct as RDF terms, none
+  is NULL, and a tag is well-formed and lower-case.
+- **A5.** The pairs `(src, dst)` of a relation are distinct, and an edge table carries no column
+  the mapping cannot express: a core mapping has no construct for a statement about a triple.
+- **A6.** M defines no blank node.
+- **A7.** No term raises a data error.
+
+**What is preserved:** the set of vertices as IRIs, their classes, the set of `(predicate, term)`
+pairs of each vertex, and the set of `(source, target)` pairs of each relation.
+
+**What is not preserved**, stated and not hidden:
+
+1. Row order, the per-type index, edge order, the offset structure, chunking and file layout.
+2. The physical type: `int32` and `int64` both read back as `xsd:integer`, and `float` and `double`
+   as `xsd:double` (R2RML §10.2); a timestamp's precision beyond its lexical form.
+3. The order and multiplicity of a multi-valued column (it is a set), and the difference between a
+   NULL set, an empty one and an absent column.
+4. The case of a language tag, and RDF 1.2's base direction.
+5. Parallel edges and statements about edges.
+6. `is_nullable`, `is_primary`, the key's scope and every other constraint. RDF is open-world and the
+   image does not entail them: Sequeda et al. prove for the Direct Mapping that no monotone mapping is
+   semantics preserving once foreign keys are considered. Constraints survive only if shapes are
+   emitted and validated, and D1 emits none.
+7. Statistics, `fossil:stats`, annotations and lineage.
+8. **Query preservation** (Def. 3 there) is not claimed: nothing states a translation from SPARQL to
+   SQL.
+
+**What would reverse it.** A test that finds a graph the writer accepts, whose image has no
+recovery: then either the writer refuses it (a new condition) or the claim narrows. Or a published
+proof for a mapping of this kind, which would replace the derivation.
 
 ## Reading a graph, after
 
@@ -664,12 +900,12 @@ Named here rather than hidden:
    [the format](/docs/format).
 3. **The commit** — the graph YAML written last. fossil's writer convention; GraphAr defines none.
 4. **The global id** — `@kanzo-tech/graph`'s arithmetic.
-5. **A language tag per list value** — the parallel `<property>_lang` list is fossil's convention, stated in [the format](/docs/format); GraphAr has no tagged value (D3).
+5. **A language tag per value** — `langString` is a user-defined type, which the specification permits and GraphAr's C++ and Java readers do not parse; the struct's shape is fossil's, stated in [the format](/docs/format) (D3).
 6. **The seven-column triples relation** — its column names come from SPARQL 1.1 Results JSON; no
    standard defines a "triples table". rudof owns it: `shacl/src/validator/sql/triples.rs`, `COLUMNS`,
    which `rml::sql` must produce.
-7. **`fossil:stats`** — the slot is Parquet's; the key and its JSON are the writer's, stated in
-   [the format](/docs/format).
+7. **`fossil:stats`** — the slot is Parquet's; the key, the JSON Schema of its value and its version are
+   the writer's, stated above and in [the format](/docs/format).
 8. **Datatypes beyond GraphAr's built-in types** — only in the mapping (D4).
 9. **Paths, chunk names and count files** — GraphAr conventions in its code and not its
    specification, already inconsistent: the specification names `<label>.vertex.yml` while C++
@@ -686,6 +922,27 @@ Named here rather than hidden:
 - **Block-style, indented YAML.** GraphAr C++ parses with mini-yaml and every test file is block
   style with sequences indented under their key; `graphar-info` dumps exactly that, omits an empty
   `edges:`, and the graph document omits `prefix` (above).
+- **RML-Core is a draft, and its one formalisation leaves out what we chose it for.** It is a
+  Community Group draft report (16 March 2026), "not a W3C Standard" and not on the Standards Track,
+  and RML-IO likewise. The only formalisation of RML found, Min Oo and Hartig's algebraic foundation
+  (arXiv:2503.10385), says in a footnote that it ignores the option of literals that have a language
+  tag. R2RML, a Recommendation, has no per-row language at all (§7.5: a constant). So the feature
+  that decided RML-Core over R2RML is exactly the part with prose-only semantics, and the conformance
+  plan (the KG-Construct test cases, SQL subset) is the substitute for a proof. **What would
+  reverse it:** an RML-Core test case that fixes a language-map result differently from `rml::sql`, a
+  formalisation that covers language tags and disagrees, or R2RML gaining a language map.
+- **RDF 1.2 and SHACL 1.2 are not Recommendations.** RDF 1.2 Concepts is a Candidate Recommendation
+  (7 April 2026) and SHACL 1.2 Core a Working Draft (14 October 2026). The Recommendations in this
+  design are R2RML, the Direct Mapping, RDF 1.1, SHACL 2017 and PROV-O. A tagged string is an RDF 1.1
+  concept that RDF 1.2 extends with a base direction, which `langString` does not carry.
+- **Annotations are statements about the vocabulary, in the document that defines the data.**
+  R2RML §4.1 and RML-Core §3.2 allow a mapping graph to hold arbitrary further triples and name
+  documentation such as `rdfs:label` as the example, but as documentation of *mapping components*.
+  Putting `rdfs:label` on the output class and predicate IRIs is allowed and is a different thing: a
+  consumer that loads `mapping.ttl` into the same store as the data asserts them, and a label on a
+  predicate cannot differ per class, where SHACL's context-local `sh:name` can. **What would reverse
+  it:** a consumer that does load the mapping as data; then the annotations go to a document of their
+  own, generated like the shapes.
 - **The WASM gate.** The closure gains `graphar-info`, `graphar-parquet`, `serde_yaml_ng` and rudof's
   `rml` (without `sql`). `cargo xtask wasm-check` decides it on the first PR that links them. `tokio`
   does not enter: `object_store` is in the closure without it, and R2 checks rudof's side.
@@ -706,8 +963,8 @@ No step leaves the walking skeleton red, and every one passes the WASM gate.
 | step | repository | content | gate |
 | --- | --- | --- | --- |
 | **R-a** | rudof fork | R0 + R1 + R2; tag `v0.3.5-kanzo.1` | rudof CI, with the new wasm32 checks |
-| **F0** | fossil | fossil on the fork at that tag (git, `allow-git`), **the format unchanged**: SHACL through rudof's `ShaclParser`, `io.rdf` through `rudof_rdf`, [incremental](/docs/design/incremental)'s SHACL paragraph replaced. **Measure `fossil_wasm_bg.wasm` before and after** (D9) | `cargo xtask wasm-check`, `cargo deny check`, `fossil-hir`'s tests |
-| **G0, G1** | graphar | `graphar-info`; then `graphar-parquet`, `@kanzo-tech/graphar-duckdb` with its relations (four shipped, `graphar_chunks` next), and conformance; published to crates.io and npm | its CI: wasm32, and the C++ and PySpark readers |
+| **F0** | fossil | fossil on the fork at that tag (git, `allow-git`), **the format unchanged** but for one deliberate behaviour change, [the order of shapes](#the-order-of-shapes) (the document's order is replaced by an explicit key): SHACL through rudof's `ShaclParser`, `io.rdf` through `rudof_rdf`, [incremental](/docs/design/incremental)'s SHACL paragraph replaced. **Measure `fossil_wasm_bg.wasm` before and after** (D9) | `cargo xtask wasm-check`, `cargo deny check`, `fossil-hir`'s tests |
+| **G0, G1** | graphar | `graphar-info`; then `graphar-parquet`, `@kanzo-tech/graphar-duckdb` with its five relations, the check that refuses a gap in a type's indices, and conformance; published to crates.io and npm | its CI: wasm32, and the C++ and PySpark readers |
 | **R-b** | rudof fork | R3 `rml` + R4 `Mapping`; publish `@kanzo-tech/rudof-wasm` 0.5 | the KG-Construct RML-Core test cases (SQL subset), and `rml::sql::triples` against today's `triples` on fossil's conformance fixture, as a differential test |
 | **F1** | fossil | **the format PR, one alpha:** `layout`, `describe`, the writer through `graphar-parquet`, per-type ids, `mapping.ttl`, the footer statistics. `@fossil-lang/corpus`, `corpus.bnf`, `xtask corpus` and the manifest deleted; the integration tests move to `@fossil-lang/executor`; `walking_skeleton.rs` and `CLAUDE.md`'s invariant say "a GraphAr graph"; [the format](/docs/format), [the corpus](/docs/design/corpus) and [the corpus's own facts](/docs/design/facts) rewritten, and this page loses its `direction:` | the full chain, plus the million-vertex scale test |
 | **U1** | kanzo-ui | `@kanzo-tech/graph` on GraphAr's relations and footers; datatypes and annotations from `Mapping.model()` after first paint, and the picker and Ask on names until R-b is wired. Can land after G1, in parallel with F1 | `pnpm verify` |
@@ -722,7 +979,7 @@ The owner decided D2, D3, D4, D7 and the names; the rest are the recommendation,
 | --- | --- | --- |
 | **D1** | The run describes its tables with the **mapping only**, which carries the program's annotations as triples. Shapes and lineage are not emitted; when they are, shapes are generated from `GraphSchema` through rudof, never passed through | The first reader of the program's shapes or lineage; or an annotation reader that cannot take them from the mapping |
 | **D2** | **Column statistics are kept**, counted once at write: Parquet footer `Statistics` (`null_count`, `min`, `max`) plus `key_value_metadata` (distinct count, most common values). kanzo-ui's `readCatalog` and `useFieldStats` read them through `parquet_metadata` and `parquet_kv_metadata` over `graphar_chunks` paths | No reader left; or a Parquet field for each fact, which moves it there |
-| **D3** | A multi-valued property is a **property of its owner with `cardinality: list`** (`Person.nickname`, with `nickname_lang` beside it); the format allows a vertex type with no primary key, and fossil does not emit one for a property | A value with properties of its own, or a tag the parallel list cannot align; or a library fossil's users run refusing the list cardinality |
+| **D3** | A multi-valued property is a property of its owner with **`cardinality: set`**; a tagged one has the user-defined element type `langString` (`STRUCT<value, lang>`), declared as `gar/v1 (langString)`. The writer refuses duplicates (`write/duplicate-value`). `list` is rejected. **A known departure:** GraphAr's C++ and Java readers at `06dddb1` do not parse a user-defined type | The C++ and Java readers accepting a struct element, or an upstream tagged-string type merged; for `set`, a consumer for which order is data |
 | **D4** | Datatypes such as `xsd:gYear`, and the annotations, are read from the mapping through rudof's `Mapping.model()`, **deferred after the first paint**; names until then | A first paint the deferred load measurably still hurts |
 | **D5** | The entry is the fixed name `fossil.graph.yml`, and the mapping the fixed name `mapping.ttl` beside it; no pointer in `extra_info`; `RunReport` unchanged | Two graphs under one location |
 | **D6** | `layout` and `describe` live in `fossil-df`, as the run's result | A host that needs the description without running |
@@ -731,6 +988,11 @@ The owner decided D2, D3, D4, D7 and the names; the rest are the recommendation,
 | **D9** | The editor's wasm is measured in F0 and accepted unless the first paint gets appreciably worse | That measured regression; then the SHACL decode stays out of the editor's module |
 | names | Repository `Kanzo-Tech/graphar`; crates `graphar-info`, `graphar-parquet`; npm `@kanzo-tech/graphar-duckdb`; the graph is named `fossil` | Apache taking the code, under Apache's names |
 | timestamps | Sub-millisecond timestamps are refused as `write/unrepresentable` | GraphAr gaining a finer timestamp |
+| global id | `dense_id` is a prefix sum of per-type counts, valid only on contiguous indices: the writer is contiguous, and `attachGraph` refuses a gap as `invalid`. `ordinal`, the position in the document, is ours | A reader that needs global ids in the files; or a use that persists one (then `(type, index)`) |
+| order of shapes | `sh:order` where present, then the shape's IRI, then blank-node shapes by their target and path IRIs; a surviving tie is an error; never the document's order | A standard giving node shapes a normative order |
+| round trip | Statement R: preserved set, admissibility A1–A7, the writer refuses the rest; derived from Sequeda et al., Def. 2, and not quoted | A graph the writer accepts whose image has no recovery |
+| `fossil:stats` | A namespaced, versioned key whose value has the JSON Schema above | A Parquet field for each fact |
+| RML-Core | A Community Group draft, whose one formalisation ignores language tags; kept for the language map | A conformance case or formalisation that disagrees, or R2RML gaining a language map |
 | upstream | Offered to Apache GraphAr **after** fossil runs on graphar | Apache asking for the code before fossil runs on it |
 
 The rejected alternative of every row is on [discarded](/docs/design/discarded#the-corpus-as-apache-graphar),
