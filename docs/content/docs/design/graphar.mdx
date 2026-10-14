@@ -93,14 +93,15 @@ write RDF itself (then rudof is missing an API, and it goes there).
 The repository's name is not a crate name. The `graphar` crate on crates.io belongs to a third party
 (codeberg.org/nordisk/knut, 0.2.0, on `tokio` and `serde_yaml`), and `graphar-rs` is what Apache's
 own `rust/` directory, a `cxx` binding over the C++ library, calls itself. So the crates are named by
-what each does, and they are **published**: `graphar-info` and `graphar-parquet` on crates.io,
-`@kanzo-tech/graphar-duckdb` on npm.
+what each does, and they are **published at `0.1.0-alpha.1`**: `graphar-info` and `graphar-parquet`
+on crates.io, and `@kanzo-tech/graphar-duckdb` on npm under the `alpha` dist-tag. fossil depends on
+the crates from crates.io, by version and not by git.
 
 | crate or package | ≈ lines | public API (names) | what it follows |
 | --- | ---: | --- | --- |
 | `graphar-info` | 900 + 400 tests | `GraphInfo` (`prefix: Option<String>`, `extra_info`), `VertexInfo`, `EdgeInfo`, `PropertyGroup`, `Property` (with `cardinality`), `Cardinality::{Single, List, Set}`, `DataType`, `AdjacentList`, `AdjListType`, `FileType`, `InfoVersion`, `GraphInfo::{load, load_file, dump, file_name, validate}`, `Error`. `dump` answers every document by file name, the graph document last. `extra_info` is carried and never interpreted | Apache's pure-Java `maven-projects/info` module: the same split, the same names |
-| `graphar-parquet` | 1,000 + 600 tests | `write_vertices(store, root, &VertexInfo, batches, &props)`, `write_edges(store, root, &EdgeInfo, adj_list_type, vertex_count, batches, &props)`, `write_info(store, root, &GraphInfo)` (the commit: every document, the graph document last), `read_vertex_chunk`, `read_adj_list_chunk`, `read_edge_property_chunk`, `read_offsets`, `read_count`, `paths::*`, `Error`. Takes `&dyn ObjectStore` and `&WriterProperties` | C++ `VertexPropertyWriter`, `EdgeChunkWriter` and the Arrow chunk readers; `ParquetObjectWriter`'s own pair of arguments |
-| `@kanzo-tech/graphar-duckdb` | 330 + 250 tests | `attachGraph(engine, catalog, resolve, { entry, signal })` → `GraphAttachment { catalog, graph: GraphInfo, detach, [Symbol.asyncDispose] }`; `resolve(paths) → names` is handed paths relative to the graph document and answers the names the engine reads them by; `GraphArError`, `VERTEX_INDEX_COL`, `SRC_INDEX_COL`, `DST_INDEX_COL`, `edgeName` | DuckDB's `ATTACH … AS name` and `read_parquet` |
+| `graphar-parquet` | 1,000 + 600 tests | `write_vertices(store, root, &VertexInfo, batches, &Options)`, `write_edges(store, root, &EdgeInfo, adj_list_type, vertex_count, batches, &Options)`, `write_info(store, root, &GraphInfo)` (the commit: every document, the graph document last), `read_vertex_chunk`, `read_adj_list_chunk`, `read_edge_property_chunk`, `read_offsets`, `read_count`, `paths::*`, `Options`, `UserTypes`, `Error`. Takes `&dyn ObjectStore` and `&Options` | C++ `VertexPropertyWriter`, `EdgeChunkWriter` and the Arrow chunk readers; `ParquetObjectWriter`'s own pair of arguments |
+| `@kanzo-tech/graphar-duckdb` | 330 + 250 tests | `attachGraph(engine, catalog, resolve, { entry, signal, userTypes })` → `GraphAttachment { catalog, graph: GraphInfo, detach, [Symbol.asyncDispose] }`; `resolve(paths) → names` is handed paths relative to the graph document and answers the names the engine reads them by; `GraphArError`, `VERTEX_INDEX_COL`, `SRC_INDEX_COL`, `DST_INDEX_COL`, `edgeName` | DuckDB's `ATTACH … AS name` and `read_parquet` |
 | `conformance/` | 300 | every `*.yml` of GraphAr's testing data loaded and dumped back; every chunk of `ldbc_sample/parquet` read; a graph fossil writes opened by GraphAr's own C++ and PySpark readers | `incubator-graphar-testing@8286724`, pinned as a submodule as GraphAr pins it |
 
 `attachGraph` creates **one view per logical table** — `"<c>"."<type>"` and
@@ -111,11 +112,17 @@ what each does, and they are **published**: `graphar-info` and `graphar-parquet`
 | --- | --- |
 | `graphar_vertex_types` | `type`, `count`, `ordinal` |
 | `graphar_edge_types` | `name`, `src_type`, `edge_type`, `dst_type`, `count`, `directed`, `ordinal` |
-| `graphar_properties` | `type`, `property`, `data_type`, `is_primary`, `is_nullable`, `ordinal` |
+| `graphar_properties` | `type`, `property`, `data_type` (as written), `is_primary`, `is_nullable`, `ordinal`, `cardinality` (`single`, `list` or `set`) |
 | `graphar_extra_info` | `key`, `value` — the graph document's `extra_info`, in order; fossil writes none, so it is empty |
 | `graphar_chunks` | `type`, `kind`, `path` — the data file behind each chunk, as the engine names it, so a reader of a Parquet footer needs no path arithmetic of its own |
 
-`ordinal` is the order of the YAML lists, which is what makes the global id stable (below). The
+Counts are `UBIGINT`. `ordinal` is the order of the YAML lists, which is what makes the global id stable (below).
+
+**A user-defined type has no storage in GraphAr, so its Arrow type comes from the caller.** The writer
+takes `Options { props, user_types }`, where `user_types` maps a declared name to its Arrow type
+(`langString` to `Struct<value: Utf8, lang: Utf8>`), and a column must match its entry exactly;
+`attachGraph` takes the same as a `userTypes` option, in DuckDB's spelling, and needs it only to type
+a view with no rows, since a view over chunks reads its type from the Parquet file. The
 relations are a SQL projection of `GraphInfo`, so they are one fact and not a second document; they
 exist because kanzo-ui reads its catalog through mosaic's coordinator, with its cache and queue, and
 keasy's overview is SQL.
@@ -140,15 +147,17 @@ retired — and then the crates are ours to keep.
 
 ### rudof: our fork, `Kanzo-Tech/rudof`
 
-fossil consumes rudof **from our fork, by git tag**, as keasy's server already does; `deny.toml`
-gains the fork under `allow-git`. Its npm half stays `@kanzo-tech/rudof-wasm`. Offering the changes
+fossil consumes rudof **from our fork, by git `rev`**, as keasy's server already does; `deny.toml`
+gains the fork under `allow-git`. F0 pins the merge commit of R-c, `9ff79986e4ed711c1ee70e5cfa1cc73358a0af45`,
+until a newer tag exists; the tag `v0.3.5-kanzo.1` points at the R-a commit, which is older. Its npm half stays `@kanzo-tech/rudof-wasm`. Offering the changes
 to upstream rudof is optional and later.
 
 | change | what | ≈ size | why |
 | --- | --- | ---: | --- |
-| R0 | `rudof_rdf`'s native `oxigraph` and `tokio` become optional, behind `sparql` (the fork's unmerged `c942876`) | 6 | a `default-features = false` consumer still compiles oxigraph and a full tokio |
+| R0 | `rudof_rdf`'s native `oxigraph` and `tokio` become optional, behind `sparql` | 6 | a `default-features = false` consumer still compiles oxigraph and a full tokio |
 | R1 | `rudof_iri`'s native `reqwest` becomes optional, behind `fetch`; `rudof_lib` and `rudof_cli` turn it on | 30 | blocking `reqwest` brings a tokio runtime into every native consumer; fossil already avoids `Schema::from_iri` for that reason |
 | R2 | wasm32 CI over `shex_ast`, `shacl` and `rml`, plus a `cargo tree --target wasm32-unknown-unknown -i tokio` that must find nothing | 15 | CI checks only `rudof_wasm` and `shacl`; `shex_ast` is unchecked |
+| R-c | the ASTs carry what fossil reads: `extra()`, `sh:order`, and `sh:name` and `sh:description` on shapes; and `ASTSchema` is a `BTreeMap`, so the walk is deterministic (rudof fork PR #33). Merged | — | the order of shapes needs `sh:order`, and a deterministic walk is the order's last tie-break |
 | R3 | **new crate `rml`**: the RML-Core AST (`Mapping`, `TriplesMap`, `LogicalSource`, `SubjectMap`, `PredicateObjectMap`, `TermMap`, `LanguageMap`, `RefObjectMap`); `rml::rdf::{parse, write}` over `rudof_rdf`; and feature `sql`: `rml::sql::triples`, a sqlparser query in the DuckDB dialect producing **exactly** the seven columns `shacl`'s SQL validator reads | 1,250 + 600 tests | parsing, writing and executing RDF is rudof's; the seven-column relation then has its producer and its consumer in one repository |
 | R4 | **`Mapping` on `rudof_wasm`**: `Mapping.parse(text, { base? })`, `mapping.triples({ engine, into, tables, signal })`, `mapping.model()` (per logical table: class and annotations; per column: predicate, term type, datatype, language column, annotations). Published as `@kanzo-tech/rudof-wasm` 0.5 | 200 | keasy's rules page already loads rudof lazily, and reads the mapping in the same load |
 
@@ -402,7 +411,8 @@ foreign writer may follow the paper. Three rules follow, each ours:
 2. **`attachGraph` checks it.** For each node type it requires `count == max(_graphArVertexIndex) + 1`
    (the vertex count file against the largest index in the chunks), and refuses a graph with a gap
    as `invalid`, before any view is made. A graph with bubbles is not read by the global-id
-   arithmetic, and is not silently misnumbered. This is graphar-duckdb's, a change to ship before F1.
+   arithmetic, and is not silently misnumbered. This ships in `@kanzo-tech/graphar-duckdb`
+   `0.1.0-alpha.1`.
 3. **`ordinal` is our rule.** The specification gives the order of `vertices:` in the graph document
    no meaning, and whether GraphAr's Java loader keeps it is not established (its `GraphInfo` constructor
    takes a `Map`).
@@ -962,11 +972,11 @@ No step leaves the walking skeleton red, and every one passes the WASM gate.
 
 | step | repository | content | gate |
 | --- | --- | --- | --- |
-| **R-a** | rudof fork | R0 + R1 + R2; tag `v0.3.5-kanzo.1` | rudof CI, with the new wasm32 checks |
-| **F0** | fossil | fossil on the fork at that tag (git, `allow-git`), **the format unchanged** but for one deliberate behaviour change, [the order of shapes](#the-order-of-shapes) (the document's order is replaced by an explicit key): SHACL through rudof's `ShaclParser`, `io.rdf` through `rudof_rdf`, [incremental](/docs/design/incremental)'s SHACL paragraph replaced. **Measure `fossil_wasm_bg.wasm` before and after** (D9) | `cargo xtask wasm-check`, `cargo deny check`, `fossil-hir`'s tests |
-| **G0, G1** | graphar | `graphar-info`; then `graphar-parquet`, `@kanzo-tech/graphar-duckdb` with its five relations, the check that refuses a gap in a type's indices, and conformance; published to crates.io and npm | its CI: wasm32, and the C++ and PySpark readers |
-| **R-b** | rudof fork | R3 `rml` + R4 `Mapping`; publish `@kanzo-tech/rudof-wasm` 0.5 | the KG-Construct RML-Core test cases (SQL subset), and `rml::sql::triples` against today's `triples` on fossil's conformance fixture, as a differential test |
-| **F1** | fossil | **the format PR, one alpha:** `layout`, `describe`, the writer through `graphar-parquet`, per-type ids, `mapping.ttl`, the footer statistics. `@fossil-lang/corpus`, `corpus.bnf`, `xtask corpus` and the manifest deleted; the integration tests move to `@fossil-lang/executor`; `walking_skeleton.rs` and `CLAUDE.md`'s invariant say "a GraphAr graph"; [the format](/docs/format), [the corpus](/docs/design/corpus) and [the corpus's own facts](/docs/design/facts) rewritten, and this page loses its `direction:` | the full chain, plus the million-vertex scale test |
+| **R-a**, **R-c** (merged) | rudof fork | R0 + R1 + R2 (tag `v0.3.5-kanzo.1`, with `rudof_iri`'s `reqwest` behind `fetch`, wasm32 CI including the tokio grep, and the `LexicalBNode` fix), then R-c (`extra()`, `sh:order`, `sh:name` and `sh:description` in the ASTs, a deterministic `ASTSchema`) | rudof CI, with the new wasm32 checks |
+| **F0** | fossil | fossil on the fork at the R-c merge commit `9ff79986` (git `rev`, `allow-git`), **the format unchanged** but for one deliberate behaviour change, [the order of shapes](#the-order-of-shapes) (the document's order is replaced by an explicit key): SHACL through rudof's `ShaclParser`, `io.rdf` through `rudof_rdf`, [incremental](/docs/design/incremental)'s SHACL paragraph replaced. **Measure `fossil_wasm_bg.wasm` before and after** (D9) | `cargo xtask wasm-check`, `cargo deny check`, `fossil-hir`'s tests |
+| **G0, G1** (shipped) | graphar | `graphar-info`; then `graphar-parquet`, `@kanzo-tech/graphar-duckdb` with its five relations, the check that refuses a gap in a type's indices, `Options` with `user_types`, and conformance; **published at `0.1.0-alpha.1`**, where the reference C++ reader is expected to refuse the `langString` graph and graphar's own conformance fails the day it opens it | its CI: wasm32, and the C++ and PySpark readers |
+| **R-b** (in progress) | rudof fork | R3 `rml` + R4 `Mapping`; publish `@kanzo-tech/rudof-wasm` 0.5 | the KG-Construct RML-Core test cases (SQL subset), and `rml::sql::triples` against today's `triples` on fossil's conformance fixture, as a differential test |
+| **F1** | fossil | **the format PR, one alpha:** `layout`, `describe`, the writer through `graphar-parquet`, per-type ids, `mapping.ttl`, the footer statistics. `@fossil-lang/corpus`, `corpus.bnf`, `xtask corpus`, the manifest and **`tests/wasm_parity`** deleted; the integration tests move to `@fossil-lang/executor`; `walking_skeleton.rs` and `CLAUDE.md`'s invariant say "a GraphAr graph"; [the format](/docs/format), [the corpus](/docs/design/corpus) and [the corpus's own facts](/docs/design/facts) rewritten, and this page loses its `direction:` | the full chain, plus the million-vertex scale test |
 | **U1** | kanzo-ui | `@kanzo-tech/graph` on GraphAr's relations and footers; datatypes and annotations from `Mapping.model()` after first paint, and the picker and Ask on names until R-b is wired. Can land after G1, in parallel with F1 | `pnpm verify` |
 | **K1** | keasy | the call sites above; the stored corpora written again | keasy CI |
 | **up** | graphar, rudof | after fossil runs on graphar: `dev@graphar.apache.org`; `gar:Graph` to KG-Construct; optionally, `rml` to upstream rudof | — |
@@ -983,7 +993,7 @@ The owner decided D2, D3, D4, D7 and the names; the rest are the recommendation,
 | **D4** | Datatypes such as `xsd:gYear`, and the annotations, are read from the mapping through rudof's `Mapping.model()`, **deferred after the first paint**; names until then | A first paint the deferred load measurably still hurts |
 | **D5** | The entry is the fixed name `fossil.graph.yml`, and the mapping the fixed name `mapping.ttl` beside it; no pointer in `extra_info`; `RunReport` unchanged | Two graphs under one location |
 | **D6** | `layout` and `describe` live in `fossil-df`, as the run's result | A host that needs the description without running |
-| **D7** | graphar is **published**: `graphar-info` and `graphar-parquet` on crates.io, `@kanzo-tech/graphar-duckdb` on npm. rudof is consumed **from our fork by git tag**, and `@kanzo-tech/rudof-wasm` on npm | A fossil crate published to crates.io, which cannot depend on a git source: then the fork publishes too |
+| **D7** | graphar is **published at `0.1.0-alpha.1`**: `graphar-info` and `graphar-parquet` on crates.io, `@kanzo-tech/graphar-duckdb` on npm (`alpha`), and fossil depends on the crates by version. rudof is consumed **from our fork by git `rev`** (a tag when a newer one exists), and `@kanzo-tech/rudof-wasm` on npm | A fossil crate published to crates.io, which cannot depend on a git source: then the fork publishes too |
 | **D8** | `rml` lives in the rudof fork | Upstream rudof declining it while a second consumer appears |
 | **D9** | The editor's wasm is measured in F0 and accepted unless the first paint gets appreciably worse | That measured regression; then the SHACL decode stays out of the editor's module |
 | names | Repository `Kanzo-Tech/graphar`; crates `graphar-info`, `graphar-parquet`; npm `@kanzo-tech/graphar-duckdb`; the graph is named `fossil` | Apache taking the code, under Apache's names |
@@ -994,6 +1004,17 @@ The owner decided D2, D3, D4, D7 and the names; the rest are the recommendation,
 | `fossil:stats` | A namespaced, versioned key whose value has the JSON Schema above | A Parquet field for each fact |
 | RML-Core | A Community Group draft, whose one formalisation ignores language tags; kept for the language map | A conformance case or formalisation that disagrees, or R2RML gaining a language map |
 | upstream | Offered to Apache GraphAr **after** fossil runs on graphar | Apache asking for the code before fossil runs on it |
+
+**`tests/wasm_parity` is deleted in F1.** It is the manual DuckDB-WASM cross-engine parity harness,
+and its baseline is written by `crates/fossil-df/tests/corpus_exec.rs` from the corpus writer that F1
+deletes. It is in no CI job, so nothing runs it, and a harness whose baseline is a deleted format
+cannot be kept without a replacement nobody asked for. **What would bring it back:** a native and a
+WASM run of the same program seen to diverge; then a parity check over a GraphAr graph, with its
+baseline written by the new writer. [Discarded](/docs/design/discarded#the-corpus-as-apache-graphar)
+has the row.
+
+There is no transition: F1 is one alpha, `fossil/1` corpora are not read after it, and stored ones are
+written again (K1).
 
 The rejected alternative of every row is on [discarded](/docs/design/discarded#the-corpus-as-apache-graphar),
 with what would bring it back; the sources are on [prior art](/docs/design/prior-art#the-corpus-as-apache-graphar).
