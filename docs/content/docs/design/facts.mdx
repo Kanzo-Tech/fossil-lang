@@ -177,14 +177,39 @@ that does not fit is `run/over-budget` like any operator, before anything is com
 refused**, and no corpus is written without its stats. The counts
 of a table are one aggregate over it; the commonest values are one `GROUP BY` per column, and only for
 a column whose `distinct_count` is below its non-null count, since a column with no repeat has none;
-an inclusion is one anti-join per pruned pair. **None of it is measured yet**: the figures it owes
-are `docs/programs/shop` and Vermont in the table the budget already has — the profile's time and
-its peak beside the write's.
+an inclusion is one anti-join per pruned pair.
 
-**What would reverse it:** that measurement. **No threshold is set before it**: whether the
-inclusions move to a query a reader runs on demand — they are the only quadratic part, so they are
-what would move first — is decided on the shop and Vermont figures, not on a share chosen in advance; if exact distinct counts push a corpus that
-fits over the budget, `distinct_count` becomes a sketch and `candidate_keys` the one exact count kept.
+**Measured natively**, release build, the run into memory, median of three interleaved with the
+same program on the writer without facts, on a shared four-core host (load 10 to 13). *Write* is
+`fossil_df::write` whole; *facts* is the part of it that is `count_written`, and the last column is
+how much of the facts time the inclusions took. The SNB, CORDIS and Nobel corpora are the keasy dev
+examples:
+
+| corpus | tables · rows written | run before | run after | write before → after | facts | of it, inclusions | `fossil.json` |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| shop, 60,000 · 180,000 | 3 · 395,854 | 0.98 s | 1.01 s | 57 → 221 ms | 166 ms | 4 asks, 148 ms | 2.6 → 6.5 KB |
+| shop, 200,000 · 600,000 | 3 · 1,313,992 | 3.30 s | 3.85 s | 163 → 798 ms | 610 ms | 4 asks, 379 ms | 2.6 → 6.6 KB |
+| Nobel laureates | 10 · 6,779 | 0.10 s | 0.21 s | 7 → 104 ms | 99 ms | 30 asks, 47 ms | 10.5 → 31.1 KB |
+| CORDIS (Horizon subset) | 8 · 523,395 | 2.26 s | 3.58 s | 241 → 1,418 ms | 1,221 ms | 78 asks, 1,043 ms | 13.0 → 44.6 KB |
+| LDBC SNB SF0.1 | 23 · 1,135,175 | 4.88 s | 10.80 s | 319 → 6,163 ms | 5,906 ms | 297 asks, 5,650 ms | 25.6 → 71.8 KB |
+
+The counts and the commonest values are cheap: at most 290 ms on any of them. **The inclusions are
+the cost** — 47 to 96 % of the facts, and on SNB they more than double the run — and they grow with
+the pairs the pruning keeps, not with the rows: SNB holds fewer rows per table than shop at 200,000
+and its inclusions cost fifteen times as much. **None of the five found an inclusion**: every reference of these
+programs is an edge, which is a declared column, and the 413 anti-joins were all between columns
+that turned out not to be contained. The peak did not move: the process's resident maximum was the
+same with and without facts on every row (51 to 291 MiB), because the counts read the batches the
+writer already holds. Vermont is not measured: it is not in this repository. The wasm writer's
+linear memory is not measured either; the native peak is the evidence that the profile reserves
+nothing the run had not already reached.
+
+**What would reverse it:** these figures say the inclusions should move to a query a reader runs on
+demand — they are the only part that grows with the schema rather than the data, and on the one
+corpus with many tables they are most of the run. **No threshold is set**: whether they move, or the
+pruning is narrowed to pairs a mapping can produce, is decided on these figures and Vermont's, not on
+a share chosen in advance; if exact distinct counts push a corpus that fits over the budget,
+`distinct_count` becomes a sketch and `candidate_keys` the one exact count kept.
 
 ## What a reader stops guessing
 
@@ -231,3 +256,4 @@ directly — Ask and the graph do, through kanzo-ui. Its assistant's source prof
 The user settled what this page left open: ten commonest values of at most 64 bytes each, longer
 values left out; the plan described as data and rendered to DuckDB SQL and to DataFusion plans; a run
 whose profile exceeds the budget refused; and no cost threshold until shop and Vermont are measured.
+Shop is measured above, beside three real corpora; Vermont is not.
