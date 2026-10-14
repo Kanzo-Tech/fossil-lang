@@ -114,9 +114,27 @@ What [Annotations and language-tagged strings](/docs/design/labels) takes, each 
 | --- | --- |
 | **SPARQL 1.1 Query Results JSON Format**, W3C Recommendation 2013, §3.2.2 | The names of an RDF term's parts — `type`, `value`, `datatype` and the language — that `triples` spells its columns with. |
 | **R2RML**, W3C Recommendation 2012 | The **natural mapping** of SQL types to XSD datatypes and lexical forms (§10.2) that [`triples`](/docs/format/reading/rdf) writes a literal in where the shape declares no term — every integer `xsd:integer`, every float `xsd:double` — and `rr:IRI` / `rr:Literal`, the IRIs `term_type` is spelled in. Its mapping language was taken and then dropped for the relation ([discarded](/docs/design/discarded#the-corpus-as-rdf)). |
-| **RML — RML-Core, RML-IO and RML-LV**, the W3C KG-Construct Community Group's drafts | The generalisation of R2RML that was not taken: its logical views state the join in RDF, but they are a draft with few implementations ([discarded](/docs/design/discarded#the-corpus-as-rdf)). |
+| **RML — RML-Core, RML-IO and RML-LV**, the W3C KG-Construct Community Group's drafts | RML-LV's logical views, which state the join in RDF, were not taken: a draft with few implementations ([discarded](/docs/design/discarded#the-corpus-as-rdf)). **RML-Core is taken** by [the corpus as Apache GraphAr](/docs/design/graphar): `rml:languageMap` reads a language tag from a column, which R2RML's constant `rr:language` cannot; its KG-Construct test cases, SQL subset, are the conformance of rudof's `rml` crate. |
 | **AlgeMapLoom**, an algebra for knowledge-graph construction mappings | The intermediate layer between the language and its consumers that was not taken: a research artefact and no standard ([discarded](/docs/design/discarded#the-corpus-as-rdf)). |
-| **Ontop** | The virtual-graph reading of the same idea: the triples produced at query time over tables that stay where they are. `triples` is that, as a view: the consumer runs it on its own engine and nothing is materialised. |
+| **Ontop**, and **Morph-RDB** | The virtual-graph reading of the same idea: the triples produced at query time over tables that stay where they are, by unfolding the mapping into SQL. `triples` is that, as a view: the consumer runs it on its own engine and nothing is materialised. Ontop also keeps the mapping beside the database and executes it in the RDF engine — the split [the corpus as Apache GraphAr](/docs/design/graphar) takes between fossil (the mapping's content) and rudof (its execution). |
+
+## The corpus as Apache GraphAr
+
+What [the corpus as Apache GraphAr](/docs/design/graphar) was read against. PROV-O and OpenLineage
+are under [the corpus](#the-corpus-and-how-a-format-ships); RML-Core and Ontop under [the corpus as
+RDF](#the-corpus-as-rdf).
+
+| source | what it settles |
+| --- | --- |
+| **Apache GraphAr** — the specification, the C++ library, the pure-Java `maven-projects/info` module and `incubator-graphar-testing`, at `06dddb1` and `8286724` | The layout: infos as YAML, an `int64` index per vertex type, `_graphArVertexIndex`, `_graphArSrcIndex` and `_graphArDstIndex`, chunk and count files, eight types and no unsigned one. The `info` module's split and names are `graphar-info`'s; the testing data is graphar's conformance. Also the gaps: paths, counts and the reserved columns live in code and not the specification, and `.vertex.yml` against `.vertex.yaml`. |
+| **rudof** — `shacl`'s `ShaclParser`, its SQL validator and `triples.rs`'s `COLUMNS`, `shex_ast`, `rudof_rdf`, `rudof_wasm` — through the fork `Kanzo-Tech/rudof` at `c727fcf` | That every parse, write and validation of RDF has an owner already, and that the SQL validator "knows no mapping language", so the mapping's renderer sits beside it, in a new `rml` crate. |
+| **Neo4j neosemantics (n10s)** | An RDF ↔ property-graph mapping kept in the RDF tool, not in the store — why graphar knows no RDF. |
+| **dbt** — `manifest.json` and `catalog.json` as artefacts of `dbt run` and `docs generate`; and **OpenLineage's** Spark and Airflow integrations | A run's description emitted by the run, with no component of its own — why there is no `fossil-rdf` crate and `describe` is `fossil-df`'s. |
+| **W3C Direct Mapping**, Recommendation 2012 | The standard that needs no mapping, not taken: it mints IRIs from table and column names. |
+| **PG-Schema**, and rudof's `pgschema` crate | Validation in the property graph's own model, not taken: the rules a user writes are SHACL. |
+| **Apache Parquet** `key_value_metadata`, and **Arrow**'s `ARROW:schema` entry in it | The slot for facts the footer has no field for — the distinct count and the commonest values, under `fossil:stats`. |
+| **DuckDB** `parquet_metadata` and `parquet_kv_metadata` | That a reader reads the footer statistics and the key-value pairs with no code of fossil's. |
+| **Vercel AI SDK** `createProviderRegistry` | The app owns the registry's names and a vendor package implements each — `fossil-hir`'s `providers` rows over rudof's parsers. |
 
 ## The backend
 
