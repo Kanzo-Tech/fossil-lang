@@ -124,13 +124,23 @@ One is still a crate of its own:
 The ShEx decode still resolves references and labels by hand; reading `shex_ast`'s compiled schema,
 `SchemaIR`, through a `TryFrom` is [the declared types' direction](/docs/design/declared).
 
-**SHACL stays fossil's own walk.** rudof's SHACL crates (`shacl_ast`, `shacl_ir`, `shacl_rdf`,
-measured at 0.2.9 on 2026-10-13) are on the 0.2 line while `shex_ast` is on 0.3, so their IRIs are
-another crate's type; and `shacl_ast` takes `iri_s` with its default features, which pull `reqwest`
-and with it `tokio` into the wasm closure — what the hard rule on `tokio` forbids. The walk over
-`oxrdf` is a few hundred lines that compile to wasm32 today. **What would reverse it:** a rudof
-SHACL release on the line `shex_ast` is on whose IRI crate builds for wasm32 without a network
-client.
+**SHACL is read by rudof's `ShaclParser`.** The graph is parsed by `rudof_rdf`'s in-memory store, the
+parser `io.rdf` reads with, and `shacl`'s AST is projected onto the shape vocabulary in
+`fossil_hir::shacl`. They are the fork's, Kanzo-Tech's rudof at the commit of its PR #33, which is on
+`shex_ast`'s line and shares its `IriS`, and whose `rudof_iri` `fetch` and `rudof_rdf` `sparql` features,
+the ones that bring `reqwest` and `tokio`, are off by default: the wasm closure has neither, and
+`cargo xtask wasm-check` fails the day it does. The fork adds what the walk read by hand: the
+non-`sh:` triples of a shape (`extra`), `sh:order`, `sh:name` and `sh:description`, and shapes held in an
+ordered map so that iterating them is the same on every run. The module editors load, `fossil_wasm_bg.wasm`,
+grew from 5,459,661 to 6,758,681 bytes (+1,299,020, +23.8%; 1,555,565 to 1,929,451 gzipped, +24.0%), and the
+executor's, `fossil_df_wasm_bg.wasm`, from 28,840,262 to 29,564,170 (+2.5%; 6,659,933 to 6,864,600 gzipped). Both are
+`wasm-bindgen --target web` output of `cargo build --release` and `--profile wasm-release`, before `wasm-opt`, on 2026-10-14.
+Of the editor's growth, 746,732 bytes are the graph (`rudof_rdf`'s in-memory store parses every RDF syntax it knows,
+and fossil asks for Turtle) and 552,288 are `shacl`'s parser, measured by building the decode with the parser stubbed out. 
+
+**What would reverse it:** a growth of that module that shows in first paint and that the fork
+cannot trim (a feature per RDF syntax on its store, say), or its additions not reaching an upstream
+release; the decode is then fossil's again, over a Turtle reader.
 
 **What would reverse it:** a module whose consumers are not the crate it sits in — a second reader
 of the corpus format in Rust, say, which would want `fossil_df::corpus` without DataFusion.

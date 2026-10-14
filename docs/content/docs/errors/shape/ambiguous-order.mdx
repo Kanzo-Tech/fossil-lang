@@ -1,0 +1,33 @@
+---
+title: Two shapes with no order between them
+description: "`shape/ambiguous-order` — two shapes of a document have no IRI and declare the same predicates, so the order of shapes cannot put one before the other, and fossil does not choose."
+---
+
+A shape document is a set of shapes, and fossil puts them in
+[an order of its own](/docs/design/shapes#the-order-of-shapes): by IRI, and shapes with no IRI after
+them, by the predicates they declare. Two SHACL shapes that are blank nodes, carry no
+`sh:targetClass` and declare the same predicates have the same place in that order:
+
+```turtle
+[ sh:property [ sh:path ex:name ] ] .
+[ sh:property [ sh:path ex:name ] ] .
+```
+
+Every mapping that reads the document is refused on its header, with both shapes' labels:
+
+```text
+`_:b1` and `_:b2` of `people.ttl` have no IRI and declare the same predicates, so nothing puts one before the other
+```
+
+## Why fossil refuses it
+
+The order reaches the output: the shapes an import that names none is told about, and the node types
+of the model. A blank node's label is not part of RDF's abstract syntax, so it cannot break the tie,
+and neither can the place the shape has in the file, because a shapes graph is a set and a rule that
+read the file's layout would make a program's output depend on how it was laid out.
+
+## How to repair it
+
+- **Give one of the shapes an IRI**, or an `sh:targetClass`: the type is then named, and it is the
+  name that orders it.
+- **Delete the one that repeats the other**, if it adds no constraint.

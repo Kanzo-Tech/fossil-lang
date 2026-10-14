@@ -86,7 +86,7 @@ What [Annotations and language-tagged strings](/docs/design/labels) takes, each 
 | source | what it settles |
 | --- | --- |
 | **RDF 1.2 Concepts §3.1**, and the Turtle 1.2 drafts | A triple term appears in object position only; a triple term has no identity of its own; `rdf:reifies` mediates. The concrete syntaxes are Working Drafts, which is why the design is written against the abstract model. |
-| **Oxigraph / `oxttl`** | The dependency trap: RDF 1.2 support sits behind a feature that was enabled here by a transitive dependency and never by us. Its changelog is also where the name change is recorded — *"RDF-star support is now dropped in favor of RDF 1.2."* |
+| **Oxigraph / `oxttl`** | The dependency trap: RDF 1.2 support sits behind a feature that was enabled here by a transitive dependency and never by us; it still is, now `rudof_rdf`'s own declaration. Its changelog is also where the name change is recorded — *"RDF-star support is now dropped in favor of RDF 1.2."* |
 | **MillenniumDB** | The reference for a discriminator in the identifier space: 8-byte identifiers whose first byte declares the class, with edge ids dense and consecutive by row position. |
 | **The Wikidata singleton-property study** | A distinct predicate per statement broke four of five engines. It is the first-principles argument against singleton property in a dictionary-encoded column. |
 | **StarBench** | Double nesting alone broke two of four engines, which is the evidence for an explicit nesting cap with a number rather than unbounded recursion. |

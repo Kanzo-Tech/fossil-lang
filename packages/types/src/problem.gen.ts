@@ -61,6 +61,7 @@ export type Code =
   | 'shape/unresolved-reference'
   | 'shape/not-in-document'
   | 'shape/ambiguous-import'
+  | 'shape/ambiguous-order'
   | 'shape/more-than-one-output'
   | 'document/not-registered'
   | 'document/unparseable'
@@ -172,6 +173,7 @@ export const CODES: readonly Code[] = [
   'shape/unresolved-reference',
   'shape/not-in-document',
   'shape/ambiguous-import',
+  'shape/ambiguous-order',
   'shape/more-than-one-output',
   'document/not-registered',
   'document/unparseable',
@@ -608,6 +610,15 @@ export interface ProblemData {
     document: string;
     first: string;
     name: string;
+    second: string;
+  };
+  /**
+   * Two shapes of a document the order of shapes cannot tell apart: neither has an IRI and they
+   * declare the same predicates. `first` and `second` are their labels.
+   */
+  'shape/ambiguous-order': {
+    document: string;
+    first: string;
     second: string;
   };
   /**
@@ -1064,6 +1075,7 @@ export const TITLES: { readonly [C in Code]: string } = {
   'shape/unresolved-reference': 'An unresolved shape reference',
   'shape/not-in-document': 'Not a shape the document declares',
   'shape/ambiguous-import': 'Two shapes share the imported name',
+  'shape/ambiguous-order': 'Two shapes with no order between them',
   'shape/more-than-one-output': 'More than one output shape',
   'document/not-registered': 'A document is not registered',
   'document/unparseable': 'A document does not parse',
@@ -1163,6 +1175,7 @@ export type DetailedCode =
   | 'shape/cyclic-reference'
   | 'shape/unresolved-reference'
   | 'shape/ambiguous-import'
+  | 'shape/ambiguous-order'
   | 'shape/more-than-one-output'
   | 'document/not-registered'
   | 'document/unread'
@@ -1252,6 +1265,7 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'shape/cyclic-reference': (d) => `cyclic shape graph not supported: ${d.path.join(' -> ')}`,
   'shape/unresolved-reference': (d) => `unresolved shape reference \`${d.reference}\` in shape \`${d.shape}\``,
   'shape/ambiguous-import': (d) => `\`${d.name}\` names two shapes of \`${d.document}\`: \`${d.first}\` and \`${d.second}\``,
+  'shape/ambiguous-order': (d) => `\`${d.first}\` and \`${d.second}\` of \`${d.document}\` have no IRI and declare the same predicates, so nothing puts one before the other`,
   'shape/more-than-one-output': (d) => `a program may declare only one output shape; found \`${d.first}\` and \`${d.second}\``,
   'document/not-registered': (d) => `the document \`${d.document}\` is not registered`,
   'document/unread': (d) => `${d.documents.length} document(s) could not be read: ${d.documents.join(', ')}`,

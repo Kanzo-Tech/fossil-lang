@@ -432,7 +432,7 @@ pub fn decoded_document(
 /// The message of the document's top-level failure, if it has one.
 ///
 /// [`Rejection::Malformed`] is the only rejection about the DOCUMENT — the
-/// other three are about one shape inside it, and a document that carries them
+/// other four are about shapes inside it, and a document that carries them
 /// still declares shapes worth reading.
 fn malformed_cause(shapes: &OutputShapes) -> Option<SmolStr> {
     shapes.rejections().iter().find_map(|r| match r {

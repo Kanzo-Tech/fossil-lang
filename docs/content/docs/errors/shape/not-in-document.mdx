@@ -15,7 +15,8 @@ type { Town } := io.shex("places.shex")
 `Town` is not a shape `places.shex` declares — it declares `Region`, `Place`
 ```
 
-The list is the document's, in the order it declares the shapes. The error is reported where the name
+The list is the document's shapes in [the order fossil gives them](/docs/design/shapes#the-order-of-shapes)
+— by IRI — and not the order the file wrote them in. The error is reported where the name
 is used — the mapping header that produces it, or the `from` that reads it on the source side
 (`{ Town } := io.rdf(…, schema = io.shex(…))`), where the same rule binds the same member list.
 

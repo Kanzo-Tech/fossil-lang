@@ -30,9 +30,10 @@ fossil-graph-schema = { path = "../fossil-graph-schema" }
 shex_ast = { workspace = true }
 rudof_iri = { workspace = true }
 prefixmap = { workspace = true }
-# SHACL is a shapes graph, walked with the Turtle reader `io.rdf` already uses
-# (`/docs/design/incremental` says why not rudof's SHACL crates).
-oxttl = { workspace = true }
+# SHACL is read by rudof's `ShaclParser` over `rudof_rdf`'s in-memory graph, whose Turtle
+# parser is the one `io.rdf` reads with (`/docs/design/incremental`).
+shacl = { workspace = true }
+rudof_rdf = { workspace = true }
 oxrdf = { workspace = true }
 oxilangtag = { workspace = true }
 salsa = { workspace = true }

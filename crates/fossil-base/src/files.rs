@@ -46,8 +46,8 @@ pub struct SourceFile {
 /// A `BTreeMap` rather than a `HashMap`: this value is compared by
 /// `PartialEq` on every write to decide whether anything actually changed, and
 /// it is small. Ordering it also means a future consumer that iterates gets the
-/// file order rather than the process's hash seed — the failure
-/// `crates/fossil-hir/examples/shex_declaration_order.rs` already measured once.
+/// path order rather than the process's hash seed — the failure a `HashMap` of
+/// shapes once showed, six parses of one document giving six orders.
 #[salsa::input(debug)]
 pub struct FileRegistry {
     #[returns(ref)]

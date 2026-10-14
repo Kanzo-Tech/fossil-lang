@@ -102,7 +102,7 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
 | wasm-bindgen | =0.2.120 | exact pin; CLI must match |
 | wasm-opt (binaryen) | 116 via `cargo install wasm-opt@0.116.1` | NOT apt (ubuntu ships binaryen 108, whose wasm-opt corrupts wasm-bindgen's externref table → `Table.grow(): failed to grow table` instantiating a wasm-bindgen module on Node 20, binaryen #4711; 116 fixes it). `packages/executor/scripts/build-wasm.sh` passes the six wasm32 default features (bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint, reference-types, multivalue — Rust 1.87/LLVM 20). NOT `-all` → no gc/typed-funcref, which break instantiation |
 | arrow + parquet | 58 | the corpus writer, `fossil_df::write` (through `datafusion`'s re-export) |
-| shex_ast + rudof_iri | 0.3 | ShEx target shapes; explicit features only — `default-features` drags in what wasm32 cannot build |
+| shex_ast, shacl, rudof_rdf, rudof_iri, prefixmap | Kanzo-Tech/rudof by `git` + `rev` (PR #33; the owner tags it later) | ShEx and SHACL shape documents, and the Turtle parser; one git source for all five, `default-features = false` — the defaults drag in `reqwest`/`tokio` and what wasm32 cannot build |
 | datafusion | 54, `default-features = false` | pinned in `crates/fossil-df/Cargo.toml`, not the workspace table — see the `zstd`/`arrow-ipc` note there |
 
 When bumping: update workspace `Cargo.toml` `[workspace.dependencies]`, run `cargo deny check`,
@@ -127,7 +127,7 @@ crates/
                            are `catalogue.bnf` and `stdlib/generated.rs` is what
                            `cargo xtask catalogue` makes of them. Adding a function is a
                            line in the `.bnf` and touches no Rust. And the shape-document
-                           decoders: `shex` over `shex_ast`, `shacl` over `oxrdf`, and
+                           decoders: `shex` over `shex_ast`, `shacl` over rudof's `ShaclParser`, and
                            `providers::PROVIDERS`, the registry a compiling host installs
   fossil-mir/              typed operator algebra; `src/op.rs` is the operator enum
   fossil-storage/          a vended `StorageCredential` (Iceberg REST's) → a scoped DuckDB secret,
