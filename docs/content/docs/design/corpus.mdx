@@ -142,8 +142,11 @@ its budget is 2 GiB, and a `shop` corpus of a million people and three million o
 width is not what stops a corpus. Past it the executor refuses by name, `run/too-large`, where it
 numbers the ids.
 
-The cost of the other choice is on the column every read takes: at a million vertices `dense_id` is
-**4.0 MB** on disk, so `uint64` spends the most-read bytes of the corpus on range nothing can reach.
+The cost of the other choice is on the column every read takes, and it is in memory more than on
+disk. Delta-encoded as the writer writes it, a 64-bit id costs 1–3% more on disk than a 32-bit one,
+but a reader that does not cast it back holds twice the Arrow: 32 MB instead of 16 MB for two million
+edges ([the corpus as Apache GraphAr](/docs/design/graphar) has the measurement). So `uint64` spends
+the most-read bytes in a reader's memory on range nothing can reach.
 
 ### The gapless `0..V−1`, and the price of keeping it
 
