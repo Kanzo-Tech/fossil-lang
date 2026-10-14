@@ -35,7 +35,7 @@ dated and says where it ran.
 
 ```mermaid
 flowchart LR
-  subgraph G["graphar-native (new repository, Apache-2.0)"]
+  subgraph G["Kanzo-Tech/graphar (new repository, Apache-2.0)"]
     info["graphar-info<br/>the YAML model"]
     pq["graphar-parquet<br/>chunks over arrow-rs + object_store"]
     js["graphar-duckdb (npm)<br/>YAML → DuckDB views"]
@@ -60,11 +60,11 @@ flowchart LR
   keasy --> dfw
 ```
 
-**The new repository is named `graphar-native` here, and the name is still open** (see the open
-questions at the end of this page). Two existing names rule out the obvious ones. The `graphar` crate
-on crates.io belongs to a third party: codeberg.org/nordisk/knut, 0.2.0, depending on `tokio` and
-`serde_yaml`. And `graphar-rs` is what Apache's own `rust/` directory, a `cxx` binding over the C++
-library, calls itself. The repository contains:
+**The new repository is `Kanzo-Tech/graphar`.** The repository's name is not a crate name, and two
+existing names rule out the obvious crate names. The `graphar` crate on crates.io belongs to a third
+party: codeberg.org/nordisk/knut, 0.2.0, depending on `tokio` and `serde_yaml`. And `graphar-rs` is
+what Apache's own `rust/` directory, a `cxx` binding over the C++ library, calls itself. So the crates
+are named by what each one does. The repository contains:
 
 | crate or package | what it is | what it follows |
 | --- | --- | --- |
@@ -831,9 +831,9 @@ implementation exists today.
 
 ## Open questions for the owner
 
-1. **Names.** The repository (`graphar-native`?), the crates (`graphar-info`, `graphar-parquet`),
-   and the npm package and its scope (`graphar-duckdb`, `@kanzo-tech/…` or unscoped). The graph's
-   own name, `fossil`, also fixes the entry point `fossil.graph.yml`.
+1. **Names.** The repository is `Kanzo-Tech/graphar`. Still open: the crates (`graphar-info`,
+   `graphar-parquet`), the npm package and its scope (`graphar-duckdb`, `@kanzo-tech/…` or
+   unscoped), and the graph's own name, `fossil`, which fixes the entry point `fossil.graph.yml`.
 2. **A property table as a vertex type with no primary key**, or as an edge to a value vertex type.
    The second is pure GraphAr, with no undeclared link, and costs a second table per property.
 3. **Sub-millisecond timestamps.** Refuse them as `write/unrepresentable`, or write them as `string`
