@@ -45,7 +45,7 @@ flowchart LR
   subgraph G["Kanzo-Tech/graphar (Apache-2.0) — no RDF"]
     info["graphar-info<br/>the YAML model"]
     pq["graphar-parquet<br/>chunks over arrow-rs + object_store"]
-    js["@kanzo-tech/graphar-duckdb<br/>attachGraph: views + 3 metadata relations"]
+    js["@kanzo-tech/graphar-duckdb<br/>attachGraph: views + metadata relations"]
   end
   subgraph R["Kanzo-Tech/rudof (fork)"]
     rdf["rudof_rdf"]
@@ -98,25 +98,36 @@ what each does, and they are **published**: `graphar-info` and `graphar-parquet`
 
 | crate or package | ≈ lines | public API (names) | what it follows |
 | --- | ---: | --- | --- |
-| `graphar-info` | 900 + 400 tests | `GraphInfo`, `VertexInfo`, `EdgeInfo`, `PropertyGroup`, `Property`, `DataType`, `AdjacentList`, `AdjListType`, `FileType`, `InfoVersion`, `GraphInfo::{load, dump}`, `validate`, `Error`. `extra_info` is carried and never interpreted | Apache's pure-Java `maven-projects/info` module: the same split, the same names |
-| `graphar-parquet` | 1,000 + 600 tests | `write_vertices`, `write_edges`, `write_info` (the commit, a separate step), `read_vertex_chunk`, `read_adj_list_chunk`, `read_offsets`, `read_count`, `paths::*`, `Error`. Takes `&dyn ObjectStore` and `WriterProperties` | C++ `VertexPropertyWriter`, `EdgeChunkWriter` and the Arrow chunk readers; `ParquetObjectWriter`'s own pair of arguments |
-| `@kanzo-tech/graphar-duckdb` | 330 + 250 tests | `attachGraph(engine, catalog, resolve, { entry, signal })` → `{ graph: GraphInfo, detach, [Symbol.asyncDispose] }` | DuckDB's `ATTACH … AS name` and `read_parquet` |
+| `graphar-info` | 900 + 400 tests | `GraphInfo` (`prefix: Option<String>`, `extra_info`), `VertexInfo`, `EdgeInfo`, `PropertyGroup`, `Property` (with `cardinality`), `Cardinality::{Single, List, Set}`, `DataType`, `AdjacentList`, `AdjListType`, `FileType`, `InfoVersion`, `GraphInfo::{load, load_file, dump, file_name, validate}`, `Error`. `dump` answers every document by file name, the graph document last. `extra_info` is carried and never interpreted | Apache's pure-Java `maven-projects/info` module: the same split, the same names |
+| `graphar-parquet` | 1,000 + 600 tests | `write_vertices(store, root, &VertexInfo, batches, &props)`, `write_edges(store, root, &EdgeInfo, adj_list_type, vertex_count, batches, &props)`, `write_info(store, root, &GraphInfo)` (the commit: every document, the graph document last), `read_vertex_chunk`, `read_adj_list_chunk`, `read_edge_property_chunk`, `read_offsets`, `read_count`, `paths::*`, `Error`. Takes `&dyn ObjectStore` and `&WriterProperties` | C++ `VertexPropertyWriter`, `EdgeChunkWriter` and the Arrow chunk readers; `ParquetObjectWriter`'s own pair of arguments |
+| `@kanzo-tech/graphar-duckdb` | 330 + 250 tests | `attachGraph(engine, catalog, resolve, { entry, signal })` → `GraphAttachment { catalog, graph: GraphInfo, detach, [Symbol.asyncDispose] }`; `resolve(paths) → names` is handed paths relative to the graph document and answers the names the engine reads them by; `GraphArError`, `VERTEX_INDEX_COL`, `SRC_INDEX_COL`, `DST_INDEX_COL`, `edgeName` | DuckDB's `ATTACH … AS name` and `read_parquet` |
 | `conformance/` | 300 | every `*.yml` of GraphAr's testing data loaded and dumped back; every chunk of `ldbc_sample/parquet` read; a graph fossil writes opened by GraphAr's own C++ and PySpark readers | `incubator-graphar-testing@8286724`, pinned as a submodule as GraphAr pins it |
 
 `attachGraph` creates **one view per logical table** — `"<c>"."<type>"` and
 `"<c>"."<src>_<edge>_<dst>"` with GraphAr's own columns (`_graphArVertexIndex`, `_graphArSrcIndex`,
-`_graphArDstIndex`) — and **three metadata relations in GraphAr's words**:
+`_graphArDstIndex`) — and **metadata relations in GraphAr's words**. Four are shipped; a fifth,
+`graphar_chunks`, is the next change in graphar:
 
 | relation | columns |
 | --- | --- |
 | `graphar_vertex_types` | `type`, `count`, `ordinal` |
 | `graphar_edge_types` | `name`, `src_type`, `edge_type`, `dst_type`, `count`, `directed`, `ordinal` |
 | `graphar_properties` | `type`, `property`, `data_type`, `is_primary`, `is_nullable`, `ordinal` |
+| `graphar_extra_info` | `key`, `value` — the graph document's `extra_info`, in order; fossil writes none, so it is empty |
+| `graphar_chunks` (next) | `type`, `kind`, `path` — the data file behind each chunk, as the engine names it, so a reader of a Parquet footer needs no path arithmetic of its own |
 
 `ordinal` is the order of the YAML lists, which is what makes the global id stable (below). The
 relations are a SQL projection of `GraphInfo`, so they are one fact and not a second document; they
 exist because kanzo-ui reads its catalog through mosaic's coordinator, with its cache and queue, and
 keasy's overview is SQL.
+
+**Two rules of the YAML that graphar-info settles, and the writer follows.** The graph document
+**omits `prefix`**: GraphAr's C++ library resolves a relative one such as `./` against the process's
+working directory, where `attachGraph` resolves it against the document, so a written `prefix` is a
+path two readers read differently; omitted, the data is under the document, which is GraphAr's default
+and the same for both. And block sequences are **indented under their key**, as `dump` writes them:
+C++'s mini-yaml reads them no other way. `graphar-info` refuses a key GraphAr does not define
+(`deny_unknown_fields`) rather than reading or dropping it.
 
 **The reader is DuckDB views plus a YAML parse, not a WASM module.** GraphAr's YAML has three document
 shapes of a dozen keys each; the views are `read_parquet` over the paths the YAML yields. A Rust
@@ -140,7 +151,7 @@ to upstream rudof is optional and later.
 | R1 | `rudof_iri`'s native `reqwest` becomes optional, behind `fetch`; `rudof_lib` and `rudof_cli` turn it on | 30 | blocking `reqwest` brings a tokio runtime into every native consumer; fossil already avoids `Schema::from_iri` for that reason |
 | R2 | wasm32 CI over `shex_ast`, `shacl` and `rml`, plus a `cargo tree --target wasm32-unknown-unknown -i tokio` that must find nothing | 15 | CI checks only `rudof_wasm` and `shacl`; `shex_ast` is unchecked |
 | R3 | **new crate `rml`**: the RML-Core AST (`Mapping`, `TriplesMap`, `LogicalSource`, `SubjectMap`, `PredicateObjectMap`, `TermMap`, `LanguageMap`, `RefObjectMap`); `rml::rdf::{parse, write}` over `rudof_rdf`; and feature `sql`: `rml::sql::triples`, a sqlparser query in the DuckDB dialect producing **exactly** the seven columns `shacl`'s SQL validator reads | 1,250 + 600 tests | parsing, writing and executing RDF is rudof's; the seven-column relation then has its producer and its consumer in one repository |
-| R4 | **`Mapping` on `rudof_wasm`**: `Mapping.parse(text, { base? })`, `mapping.triples({ engine, into, tables, signal })`, `mapping.model()` (per logical table: class; per column: predicate, term type, datatype, language column). Published as `@kanzo-tech/rudof-wasm` 0.5 | 200 | keasy's rules page already loads rudof lazily, and reads the mapping in the same load |
+| R4 | **`Mapping` on `rudof_wasm`**: `Mapping.parse(text, { base? })`, `mapping.triples({ engine, into, tables, signal })`, `mapping.model()` (per logical table: class and annotations; per column: predicate, term type, datatype, language column, annotations). Published as `@kanzo-tech/rudof-wasm` 0.5 | 200 | keasy's rules page already loads rudof lazily, and reads the mapping in the same load |
 
 **The `rml` crate lives in the fork** (D8), not a repository of its own: it shares `rudof_rdf`,
 `sqlparser`, the DuckDB dialect and the triples columns with `shacl::validator::sql`. It sits
@@ -171,9 +182,9 @@ directions.
 
 ### `@kanzo-tech/graph`, and keasy
 
-**`@kanzo-tech/graph` reads GraphAr directly.** Its `readCatalog` reads the three relations; the
+**`@kanzo-tech/graph` reads GraphAr directly.** Its `readCatalog` reads `graphar_vertex_types`, `graphar_edge_types`, `graphar_properties` and, for the statistics, `graphar_chunks`; the
 global id is its own arithmetic; an edge's label is GraphAr's `edge_type`, so the string surgery that
-cut it out of `<src>_<label>_<dst>` goes. A type with a primary key is a node type (D3). Nothing on the
+cut it out of `<src>_<label>_<dst>` goes. Every vertex type fossil writes has a primary key, so every one is a node (D3). Nothing on the
 graph page parses RDF before the first paint (D4).
 
 **keasy composes** what `attach` used to hide: `mount` for the credential, `attachGraph` for the
@@ -251,7 +262,6 @@ prototype's.
 ```yaml
 # fossil.graph.yml
 name: fossil
-prefix: ./
 vertices:
   - Person.vertex.yml
 version: gar/v1
@@ -305,13 +315,22 @@ through `attachGraph`'s view, and **is rewritten in the same PR as the writer**,
 | **Generate SHACL from `GraphSchema` through rudof** | every program, uniformly | — | feasible: rudof's `NodeShapeBuilder` and `PropertyShapeBuilder`, `IRSchema::compile` and `ShaclWriter` already exist |
 | **Emit nothing until a reader exists** | — | — | **taken** (D1) |
 
-No reader in kanzo-ui or keasy reads the annotations, the IRIs, `derived_from` or `candidate_keys`
-(a grep over both trees finds none). keasy's rules are the *user's* SHACL, not the program's, and
-validating a graph against the program's own structural shapes would be a tautology: the checker
-proved it.
+**The annotations are a different matter, and they are read.** kanzo-ui's `RelationPicker` and
+Ask's `typeWords` name a type, a column and a relation by `rdfs:label`, through `labelOf`, in the
+page's language; today the graph gets them from `fossil_annotations`. After this design they come
+**from the mapping and not from GraphAr**: GraphAr has no word for them, and `mapping.ttl` is where
+the program's IRIs already are. So the mapping document also carries the program's annotations as
+plain triples about the class and predicate IRIs it names (`<https://example.org/Person> rdfs:label
+"Person"@en`), written by the same `describe` with the same writer, and rudof's `Mapping.model()`
+answers them per table and per column beside the class, predicate and datatype. **Until R-b ships
+`Mapping.model()` and the host passes it, the picker and Ask fall back to the names** — the type's
+and the column's own — and nothing else changes. Nothing reads `derived_from`, `candidate_keys` or
+the program's structural shapes (a grep over kanzo-ui and keasy finds none), and keasy's rules are
+the *user's* SHACL, not the program's: validating a graph against the program's own shapes would be a
+tautology the checker already proved.
 
-**What would reverse it.** The first reader of the output's contract or its annotations — keasy
-seeding rules from the program's shapes, or the graph showing `sh:name` labels. Then `Description`
+**What would reverse it.** The first reader of the output's contract — keasy seeding rules from the
+program's shapes, or the graph showing `sh:name` labels — or of `derived_from`. Then `Description`
 gains `shapes`, **generated from `GraphSchema` with rudof's builder and writer, never passed
 through**, written as a fixed-name file beside `mapping.ttl`. Lineage follows the same rule: PROV-O's
 `prov:wasDerivedFrom` when an RDF reader appears, or an OpenLineage `RunEvent` if the reader is a
@@ -319,7 +338,7 @@ Marquez or a DataHub.
 
 ### Is the mapping needed?
 
-Yes. Its reader is keasy's rules validation, which hands rudof's SQL SHACL validator a seven-column
+Yes. It has two readers: kanzo-ui's labels and datatypes, through `Mapping.model()`, and keasy's rules validation, which hands rudof's SQL SHACL validator a seven-column
 `(s,p,o)` relation. The ways of getting that relation without a mapping are each worse:
 
 - **The W3C Direct Mapping** mints IRIs from table and column names, not the program's IRIs: the
@@ -438,29 +457,49 @@ version: gar/v1
 ```
 
 **Every chunk size is at least the table's row count, so every table is one chunk** — `fossil/1`'s
-"one file per table" in GraphAr's terms.
+"one file per table" in GraphAr's terms. The offset table follows the specification and not C++'s
+padding: its last chunk is **as long as its vertex chunk, plus one** (`write_edges` takes the
+`vertex_count` for it), the alignment `ldbc_sample/parquet` is written with.
 
-**A multi-valued or language-tagged property is a vertex type with no primary key** (D3):
-`Person_nickname`, with the properties `src` (`int64`, an index into `Person`), `value` and `lang`.
-The rule a reader keeps is one sentence: **a type with a primary key is a node type**; a type without
-one is a property table and is not drawn. The link to `Person` and the tag are stated by the mapping,
-because GraphAr has no foreign key and no language column:
+**A multi-valued property is a property of the vertex type that owns it, with GraphAr's
+`cardinality: list`** (D3): `nickname` is a column of `Person`, a Parquet list column, in `Person`'s
+property group and declared in `Person.vertex.yml`:
+
+```yaml
+      - name: nickname
+        data_type: string
+        cardinality: list
+```
+
+`graphar-info` already carries `Cardinality::{Single, List, Set}`, and a reader of the type sees the
+property where it belongs. The format still allows a vertex type with no primary key; **fossil does
+not emit one for a property**, so every vertex type a run writes has a primary key and is a node.
+
+A language tag is read per value, so it travels beside the values: `nickname_lang`, a `list<string>`
+property of the same type, position for position (a single-valued tagged property has a `string`
+`<property>_lang`). The mapping zips them, and states the link to the owner by being a query over the
+owner's own table:
 
 ```turtle
 <#Person_nickname> a rml:TriplesMap ;
   rml:logicalSource [ rml:referenceFormulation rml:SQL2008Query ;
-    rml:iterator "SELECT s.subject, p.value, p.lang FROM Person_nickname p JOIN Person s ON p.src = s._graphArVertexIndex" ] ;
+    rml:iterator "SELECT subject, unnest(nickname) AS value, unnest(nickname_lang) AS lang FROM Person" ] ;
   rml:subjectMap [ rml:reference "subject" ; rml:termType rml:IRI ] ;
   rml:predicateObjectMap [ rml:predicate <https://example.org/nickname> ;
     rml:objectMap [ rml:reference "value" ; rml:languageMap [ rml:reference "lang" ] ] ] .
 ```
 
-It is the only option that keeps both the tag and a first-normal-form table. An edge to a value
-vertex type costs a second table per property; GraphAr's `cardinality: list` is read by C++ only and
-loses the tag ([discarded](/docs/design/discarded#the-corpus-as-apache-graphar)).
+The unnest is the mapping's, in a SQL2008 query, and not the viewer's: the graph page draws a
+node's list as a list, and only the rules page asks for the `(s,p,o)` relation. This is the old
+design turned round. The first normal form that the standard mapping reads is no longer in the
+files; it is one `unnest` in the mapping, which DuckDB runs. What the files gain is the graph's: a
+table the graph reads is a node type, and there is no PK-less table whose owner only the mapping
+knows ([discarded](/docs/design/discarded#the-corpus-as-apache-graphar)).
 
-**What would reverse it.** GraphAr gaining a property table, or a list that every library reads
-together with a per-value tag.
+**What would reverse it.** A multi-valued property whose values carry more than a language tag — a
+value with properties of its own, or a tag the parallel list cannot align — which is a vertex type
+of its own again, linked by an edge. Or GraphAr's list cardinality read by one library and refused
+by another that fossil's users run.
 
 **What would reverse the edge layout.** Offsets measured as a cost on a write or a read that matters:
 then `ordered: false` (COO), and the `(src, dst)` sort is checked only by a test.
@@ -491,16 +530,18 @@ Parquet gives facts it has no field for, and the one Arrow itself uses (`ARROW:s
 truncates a bound at 64 bytes and marks it inexact, so a reader that keeps only exact bounds never
 shows a cut value — the rule [the corpus's own facts](/docs/design/facts) already states.
 
-A reader reads both halves with DuckDB's own table functions over the chunk paths `attachGraph`
-answered in `graph`, with no fossil code — measured on DuckDB-WASM 1.4.3 on 2026-10-14 over the hello
-chunk at 27 ms and 5 ms:
+**The graph reads them itself.** `@kanzo-tech/graph`'s `readCatalog` and `useFieldStats` take the
+counts from the footers with DuckDB's own table functions, over the paths `graphar_chunks(type, kind,
+path)` answers, with no fossil code and no `SUMMARIZE` — measured on DuckDB-WASM 1.4.3 on
+2026-10-14 over the hello chunk at 27 ms and 5 ms:
 
 ```sql
 SELECT path_in_schema, row_group_id, stats_null_count, stats_min_value, stats_max_value,
        min_is_exact, max_is_exact
-FROM parquet_metadata('…/vertex/Person/subject_name/chunk0');
+FROM parquet_metadata((SELECT list(path) FROM graphar_chunks WHERE type = 'Person' AND kind = 'vertex'));
 
-SELECT key::VARCHAR, decode(value) FROM parquet_kv_metadata('…/vertex/Person/subject_name/chunk0');
+SELECT key::VARCHAR, decode(value)
+FROM parquet_kv_metadata((SELECT list(path) FROM graphar_chunks WHERE type = 'Person' AND kind = 'vertex'));
 ```
 
 The candidate keys are not stored. A reader derives them: `is_primary`, plus every column with
@@ -514,20 +555,22 @@ they go.
 
 ## Datatypes GraphAr does not have
 
-GraphAr has eight types. `date` and `dateTime` are GraphAr's `date` and `timestamp`; a datatype beyond
-them — `xsd:gYear` over an `int32` — lives **only in the mapping**. kanzo-ui keeps its year axis by
-reading it from there (D4): the host loads rudof and passes the datatypes from `Mapping.model()` to
-the graph **after the first paint, never before**, so `rudof_wasm` (7.45 MB) never delays the page.
-Until it arrives, a year draws as a number. The graph itself never parses RDF.
+GraphAr's built-in types are `bool`, `int32`, `int64`, `float`, `double`, `string`, `date` (days since
+the epoch), `timestamp` (**milliseconds** since the epoch), `time` (milliseconds since midnight) and
+`list<T>`. A datatype beyond them — `xsd:gYear` over an `int32` — lives **only in the mapping**.
+kanzo-ui keeps its year axis by reading it from there (D4): the host loads rudof and passes the
+datatypes from `Mapping.model()` to the graph **after the first paint, never before**, so
+`rudof_wasm` (7.45 MB) never delays the page. Until it arrives, a year draws as a number. The graph
+itself never parses RDF.
 
 **What would reverse it.** A measured first paint that the deferred load still hurts; then a year is
 a number and nothing more. A copy of the datatypes in Arrow field metadata was not taken: it is a
 second document that can disagree with the mapping.
 
 Other widths: `int8`, `int16`, `uint8`, `uint16` and `uint32` widen without loss; `uint64` above
-`i64::MAX` is refused; `time` and `binary` become `string`, with `xsd:time` and `xsd:hexBinary` in the
-mapping. **A `timestamp` finer than a millisecond is refused, as `write/unrepresentable`**, because
-GraphAr C++ reads `timestamp(MILLI)` and a string would lose the type every other reader sees.
+`i64::MAX` is refused; `binary` becomes `string`, with `xsd:hexBinary` in the mapping. **A `timestamp`
+finer than a millisecond is refused, as `write/unrepresentable`**, because GraphAr's `timestamp` is
+milliseconds and a string would lose the type every other reader sees.
 **What would reverse it:** GraphAr gaining a finer timestamp.
 
 ## Where each fact of `fossil.json` goes
@@ -545,7 +588,8 @@ GraphAr C++ reads `timestamp(MILLI)` and a string would lose the type every othe
 | vertex, edge and column `iri`; `term_type`; `datatype`; role `language` | `rml:class`, `rml:predicate`, `rml:termType`, `rml:datatype`, `rml:languageMap` | RML-Core, `mapping.ttl` |
 | `stats.*` | footer `Statistics` and `key_value_metadata` `fossil:stats` | Parquet |
 | `candidate_keys` | derived by the reader from the counts | — |
-| `annotations`, `derived_from` | not emitted until a reader exists (D1) | — |
+| `annotations` | plain triples about the class and predicate IRIs, in the same document; read by `Mapping.model()` | RDF, `mapping.ttl` |
+| `derived_from` | not emitted until a reader exists (D1) | — |
 | a run's `dropped` | stays in the run's answer | — |
 
 ## Reading a graph, after
@@ -554,9 +598,9 @@ GraphAr C++ reads `timestamp(MILLI)` and a string would lose the type every othe
 
 | `@fossil-lang/corpus` | after |
 | --- | --- |
-| the views, `fossil_tables`, `fossil_columns` | `attachGraph`'s views and its three relations |
+| the views, `fossil_tables`, `fossil_columns` | `attachGraph`'s views and its relations |
 | `fossil_stats` | the footers, read by `parquet_metadata` and `parquet_kv_metadata` |
-| `fossil_annotations` | nothing until a reader (D1) |
+| `fossil_annotations` | the annotation triples of `mapping.ttl`, read by `Mapping.model()` after first paint; names until then |
 | `dense_id` | `@kanzo-tech/graph`'s arithmetic |
 | `triples` | rudof's `Mapping.triples`, over the mapping the run wrote, built only when rules are checked |
 | the credential | `@fossil-lang/storage`'s `mount`, called by the host |
@@ -571,8 +615,8 @@ import { Mapping } from "@kanzo-tech/rudof-wasm";        // 0.5, R-b
 
 const report = await run(program, { host, into: { job } });                      // unchanged
 const m = await mount(engine, host, { job }, "read", { signal });
-const g = await graphar.attachGraph(engine, job, (p) => m.files([m.prefixes[0] + p]), { entry: "fossil.graph.yml", signal });
-// the graph page: @kanzo-tech/graph reads graphar_vertex_types, graphar_edge_types, graphar_properties
+const g = await graphar.attachGraph(engine, job, (paths) => m.files(paths.map((p) => m.prefixes[0] + p)), { entry: "fossil.graph.yml", signal });
+// the graph page: @kanzo-tech/graph reads graphar_vertex_types, graphar_edge_types, graphar_properties, graphar_chunks
 // the rules page, on the first check only:
 const mapping = Mapping.parse(text);
 await mapping.triples({ engine, into: `"${job}".triples`, tables: (t) => `"${job}"."${t}"`, signal });
@@ -582,9 +626,9 @@ await mapping.triples({ engine, into: `"${job}".triples`, tables: (t) => `"${job
 | --- | --- | --- |
 | `corpusQuery` | `attach(graphId, { engine, host, signal })` | `mount` + `attachGraph`, ≈20 lines: the composition `attach` hid, made visible |
 | `useGraphKey` | a query on `fossil_columns WHERE role = 'address'` | the join graph's key: **one catalog query fewer per page** |
-| the overview | `fossil_tables` joined to `fossil_columns` | the three relations; "types with a primary key" replaces `kind <> 'property'` |
+| the overview | `fossil_tables` joined to `fossil_columns` | the GraphAr relations; every type is a node, so `kind <> 'property'` goes |
 | rules validation | `triples`, which `attach` built on **every** graph page | `Mapping.triples` on the first check: the graph page stops paying for it |
-| an in-memory preview | `registerFileBuffer`, then `attach(name, { url })` | `registerFileBuffer`, then `attachGraph(engine, name, (p) => prefix + p, …)` |
+| an in-memory preview | `registerFileBuffer`, then `attach(name, { url })` | `registerFileBuffer`, then `attachGraph(engine, name, (paths) => paths.map((p) => prefix + p), …)` |
 | stored corpora | — | **written again**: a `fossil/1` corpus is not read ([changed in place](/docs/design/corpus#one-format-changed-in-place)) |
 
 kanzo-ui's `@kanzo-tech/graph` changes ≈ +40 lines net (the id arithmetic, minus the label surgery and
@@ -620,13 +664,13 @@ Named here rather than hidden:
    [the format](/docs/format).
 3. **The commit** — the graph YAML written last. fossil's writer convention; GraphAr defines none.
 4. **The global id** — `@kanzo-tech/graph`'s arithmetic.
-5. **A property table's link to its owner** — only the mapping's join says it (D3).
+5. **A language tag per list value** — the parallel `<property>_lang` list is fossil's convention, stated in [the format](/docs/format); GraphAr has no tagged value (D3).
 6. **The seven-column triples relation** — its column names come from SPARQL 1.1 Results JSON; no
    standard defines a "triples table". rudof owns it: `shacl/src/validator/sql/triples.rs`, `COLUMNS`,
    which `rml::sql` must produce.
 7. **`fossil:stats`** — the slot is Parquet's; the key and its JSON are the writer's, stated in
    [the format](/docs/format).
-8. **Datatypes beyond GraphAr's eight** — only in the mapping (D4).
+8. **Datatypes beyond GraphAr's built-in types** — only in the mapping (D4).
 9. **Paths, chunk names and count files** — GraphAr conventions in its code and not its
    specification, already inconsistent: the specification names `<label>.vertex.yml` while C++
    `GraphInfo::Dump` writes `.vertex.yaml`.
@@ -639,8 +683,9 @@ Named here rather than hidden:
 - **No key GraphAr does not define.** The Java SDK's SnakeYAML with a typed `Constructor` would
   likely refuse an unknown key (inferred, not run), so the writer writes none — one more reason there
   is no fossil key in the YAML.
-- **Block-style YAML.** GraphAr C++ parses with mini-yaml and every test file is block style; the
-  writer emits block style and omits an empty `edges:`.
+- **Block-style, indented YAML.** GraphAr C++ parses with mini-yaml and every test file is block
+  style with sequences indented under their key; `graphar-info` dumps exactly that, omits an empty
+  `edges:`, and the graph document omits `prefix` (above).
 - **The WASM gate.** The closure gains `graphar-info`, `graphar-parquet`, `serde_yaml_ng` and rudof's
   `rml` (without `sql`). `cargo xtask wasm-check` decides it on the first PR that links them. `tokio`
   does not enter: `object_store` is in the closure without it, and R2 checks rudof's side.
@@ -662,10 +707,10 @@ No step leaves the walking skeleton red, and every one passes the WASM gate.
 | --- | --- | --- | --- |
 | **R-a** | rudof fork | R0 + R1 + R2; tag `v0.3.5-kanzo.1` | rudof CI, with the new wasm32 checks |
 | **F0** | fossil | fossil on the fork at that tag (git, `allow-git`), **the format unchanged**: SHACL through rudof's `ShaclParser`, `io.rdf` through `rudof_rdf`, [incremental](/docs/design/incremental)'s SHACL paragraph replaced. **Measure `fossil_wasm_bg.wasm` before and after** (D9) | `cargo xtask wasm-check`, `cargo deny check`, `fossil-hir`'s tests |
-| **G0, G1** | graphar | `graphar-info`; then `graphar-parquet`, `@kanzo-tech/graphar-duckdb` with the three relations, and conformance; published to crates.io and npm | its CI: wasm32, and the C++ and PySpark readers |
+| **G0, G1** | graphar | `graphar-info`; then `graphar-parquet`, `@kanzo-tech/graphar-duckdb` with its relations (four shipped, `graphar_chunks` next), and conformance; published to crates.io and npm | its CI: wasm32, and the C++ and PySpark readers |
 | **R-b** | rudof fork | R3 `rml` + R4 `Mapping`; publish `@kanzo-tech/rudof-wasm` 0.5 | the KG-Construct RML-Core test cases (SQL subset), and `rml::sql::triples` against today's `triples` on fossil's conformance fixture, as a differential test |
 | **F1** | fossil | **the format PR, one alpha:** `layout`, `describe`, the writer through `graphar-parquet`, per-type ids, `mapping.ttl`, the footer statistics. `@fossil-lang/corpus`, `corpus.bnf`, `xtask corpus` and the manifest deleted; the integration tests move to `@fossil-lang/executor`; `walking_skeleton.rs` and `CLAUDE.md`'s invariant say "a GraphAr graph"; [the format](/docs/format), [the corpus](/docs/design/corpus) and [the corpus's own facts](/docs/design/facts) rewritten, and this page loses its `direction:` | the full chain, plus the million-vertex scale test |
-| **U1** | kanzo-ui | `@kanzo-tech/graph` on GraphAr's relations; datatypes from `Mapping.model()` after first paint. Can land after G1, in parallel with F1 | `pnpm verify` |
+| **U1** | kanzo-ui | `@kanzo-tech/graph` on GraphAr's relations and footers; datatypes and annotations from `Mapping.model()` after first paint, and the picker and Ask on names until R-b is wired. Can land after G1, in parallel with F1 | `pnpm verify` |
 | **K1** | keasy | the call sites above; the stored corpora written again | keasy CI |
 | **up** | graphar, rudof | after fossil runs on graphar: `dev@graphar.apache.org`; `gar:Graph` to KG-Construct; optionally, `rml` to upstream rudof | — |
 
@@ -675,10 +720,10 @@ The owner decided D2, D3, D4, D7 and the names; the rest are the recommendation,
 
 | | decision | what would reverse it |
 | --- | --- | --- |
-| **D1** | The run describes its tables with the **mapping only**. Shapes and lineage are not emitted; when they are, shapes are generated from `GraphSchema` through rudof, never passed through | The first reader of the program's shapes, annotations or lineage |
-| **D2** | **Column statistics are kept**, counted once at write: Parquet footer `Statistics` (`null_count`, `min`, `max`) plus `key_value_metadata` (distinct count, most common values). kanzo-ui's `readCatalog` and `useFieldStats` read them | No reader left; or a Parquet field for each fact, which moves it there |
-| **D3** | A multi-valued or language-tagged property is a **vertex type with no primary key** (`Person_nickname`: `src`, `value`, `lang`); "a type with a primary key is a node type" | GraphAr gaining a property table or a tagged list |
-| **D4** | Datatypes such as `xsd:gYear` are read from the mapping through rudof's `Mapping.model()`, **deferred after the first paint** | A first paint the deferred load measurably still hurts |
+| **D1** | The run describes its tables with the **mapping only**, which carries the program's annotations as triples. Shapes and lineage are not emitted; when they are, shapes are generated from `GraphSchema` through rudof, never passed through | The first reader of the program's shapes or lineage; or an annotation reader that cannot take them from the mapping |
+| **D2** | **Column statistics are kept**, counted once at write: Parquet footer `Statistics` (`null_count`, `min`, `max`) plus `key_value_metadata` (distinct count, most common values). kanzo-ui's `readCatalog` and `useFieldStats` read them through `parquet_metadata` and `parquet_kv_metadata` over `graphar_chunks` paths | No reader left; or a Parquet field for each fact, which moves it there |
+| **D3** | A multi-valued property is a **property of its owner with `cardinality: list`** (`Person.nickname`, with `nickname_lang` beside it); the format allows a vertex type with no primary key, and fossil does not emit one for a property | A value with properties of its own, or a tag the parallel list cannot align; or a library fossil's users run refusing the list cardinality |
+| **D4** | Datatypes such as `xsd:gYear`, and the annotations, are read from the mapping through rudof's `Mapping.model()`, **deferred after the first paint**; names until then | A first paint the deferred load measurably still hurts |
 | **D5** | The entry is the fixed name `fossil.graph.yml`, and the mapping the fixed name `mapping.ttl` beside it; no pointer in `extra_info`; `RunReport` unchanged | Two graphs under one location |
 | **D6** | `layout` and `describe` live in `fossil-df`, as the run's result | A host that needs the description without running |
 | **D7** | graphar is **published**: `graphar-info` and `graphar-parquet` on crates.io, `@kanzo-tech/graphar-duckdb` on npm. rudof is consumed **from our fork by git tag**, and `@kanzo-tech/rudof-wasm` on npm | A fossil crate published to crates.io, which cannot depend on a git source: then the fork publishes too |
