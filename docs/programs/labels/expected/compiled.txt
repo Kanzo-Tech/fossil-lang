@@ -1,0 +1,31 @@
+── type bindings ──
+Laureate ← declared = https://schema.org/Person
+Prize ← declared = https://nobel.example/vocab/Prize
+
+── source bindings ──
+LaureateRow := io.csv(data/laureate.csv)
+NameRow := io.csv(data/laureate_name.csv)
+PrizeRow := io.csv(data/prize.csv)
+Laureates from LaureateRow.join(NameRow, on = LaureateRow.id == NameRow.laureate)
+Awards from LaureateRow.join(PrizeRow, on = LaureateRow.id == PrizeRow.laureate)
+
+── mappings ──
+Laureates: 3 written, 3 lowered
+    @subject
+    name
+    birthDate
+Awards: 3 written, 3 lowered
+    @subject
+    birthDate
+    awarded
+Prizes: 3 written, 3 lowered
+    @subject
+    category
+    motivation
+
+── run ──
+vertex Person (https://schema.org/Person) × 2 — dense_id, subject, birthDate
+vertex Prize (https://nobel.example/vocab/Prize) × 3 — dense_id, subject, category
+property Person_name × 3 — src, name, lang
+property Prize_motivation × 3 — src, motivation, lang
+edge Person_awarded_Prize × 3

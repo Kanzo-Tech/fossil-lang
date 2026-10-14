@@ -105,6 +105,11 @@ The remaining pages answer the questions that do not fit under a core.
     description="Why the output is Parquet files under a manifest written last rather than a server, one id space across the whole graph, and why write-once/read-many is what makes the whole-program checks available at all."
   />
   <Card
+    href="/docs/design/facts"
+    title="The corpus's own facts"
+    description="Every field of fossil.json as a column of a catalog view, and the writer's profile of what it wrote — nulls, distinct values, bounds, commonest values and their frequencies, and the keys they make, under Parquet's and pg_stats' names — so a reader guesses nothing the writer knew."
+  />
+  <Card
     href="/docs/design/one-door"
     title="One door"
     description="A corpus is attached to the host's engine by open and read with the host's SQL, and each thing the door does is done once, by one layer."
@@ -118,6 +123,11 @@ The remaining pages answer the questions that do not fit under a core.
     href="/docs/design/three-hosts"
     title="Three hosts"
     description="A command, a browser, and a product embedding it — one wasm build under all three — and why the code is cut by where it runs rather than by subject matter."
+  />
+  <Card
+    href="/docs/design/off-the-page"
+    title="A run off the page"
+    description="In a browser run runs in a worker the executor owns, with the host's calls and its failures crossing as messages; and attach reads a corpus a run answered in memory."
   />
   <Card
     href="/docs/design/later/backend"

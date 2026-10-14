@@ -91,7 +91,10 @@
 
 use std::collections::BTreeMap;
 
-use fossil_graph_schema::{Occurs, OutputShapes, PropertyConstraint, Rejection, Shape};
+use fossil_graph_schema::{
+    Annotation, AnnotationObject, ObjectLiteral, Occurs, OutputShapes, PropertyConstraint,
+    RDFS_COMMENT, RDFS_LABEL, Rejection, Shape,
+};
 use oxrdf::vocab::rdf;
 use oxrdf::{NamedOrBlankNode, Term};
 use oxttl::TurtleParser;
@@ -109,12 +112,22 @@ const SH_LITERAL: &str = "http://www.w3.org/ns/shacl#Literal";
 const SH_MIN_COUNT: &str = "http://www.w3.org/ns/shacl#minCount";
 const SH_MAX_COUNT: &str = "http://www.w3.org/ns/shacl#maxCount";
 const SH_OR: &str = "http://www.w3.org/ns/shacl#or";
+const SH_NAME: &str = "http://www.w3.org/ns/shacl#name";
+const SH_DESCRIPTION: &str = "http://www.w3.org/ns/shacl#description";
+const SH_LANGUAGE_IN: &str = "http://www.w3.org/ns/shacl#languageIn";
+/// SHACL's namespace: every predicate in it is SHACL's own, validating or not,
+/// and no other predicate is (§2.3.2).
+const SH: &str = "http://www.w3.org/ns/shacl#";
 
 /// One object of a triple: its lexical value plus whether it is a node (IRI or
 /// blank — i.e. follow-able as a subject) vs a literal.
 struct Obj {
     value: String,
     is_node: bool,
+    /// A literal's language tag.
+    language: Option<String>,
+    /// A literal's datatype IRI, when it is not a plain or a tagged string.
+    datatype: Option<String>,
 }
 
 /// A minimal in-memory triple store: `subject → predicate → objects`, plus the
@@ -151,6 +164,19 @@ impl Store {
                 .push(Obj {
                     value: value_of(&t.object),
                     is_node: is_node(&t.object),
+                    language: match &t.object {
+                        Term::Literal(l) => l.language().map(str::to_string),
+                        _ => None,
+                    },
+                    datatype: match &t.object {
+                        Term::Literal(l)
+                            if l.language().is_none()
+                                && l.datatype() != oxrdf::vocab::xsd::STRING =>
+                        {
+                            Some(l.datatype().as_str().to_string())
+                        }
+                        _ => None,
+                    },
                 });
         }
         Ok(Self { by_subject, order })
@@ -256,16 +282,71 @@ pub fn decode_shacl(_uri: &str, turtle: &str) -> Result<OutputShapes, Rejection>
                 // the one upstream change that reverses it. Every consumer
                 // already handles `None`, because `ShExJ` gives it too.
                 span: None,
+                annotations: property_annotations(&store, &psh.value),
+                languages: store
+                    .objects(&psh.value, SH_LANGUAGE_IN)
+                    .filter(|o| o.is_node)
+                    .flat_map(|head| store.rdf_list(&head.value))
+                    .collect(),
             });
         }
         shapes.push(Shape {
             iri,
             properties,
             span: None,
+            annotations: annotations_of(&store, subject, &[]),
         });
     }
 
     Ok(OutputShapes::new(shapes, Vec::new()))
+}
+
+/// A property shape's annotations: SHACL's own two, `sh:name` and
+/// `sh:description`, read as `rdfs:label` and `rdfs:comment` — one predicate
+/// for a label whichever document gave it — and first, as SHACL §2.3.2.1 says
+/// a tool prefers the locally specified label; then every non-SHACL triple.
+fn property_annotations(store: &Store, property_shape: &str) -> Vec<Annotation> {
+    let renamed = [(SH_NAME, RDFS_LABEL), (SH_DESCRIPTION, RDFS_COMMENT)];
+    renamed
+        .iter()
+        .flat_map(|(from, to)| {
+            store
+                .objects(property_shape, from)
+                .map(move |o| annotation(to, o))
+        })
+        .chain(annotations_of(store, property_shape, &[SH_PATH]))
+        .collect()
+}
+
+/// Every triple of `subject` whose predicate is outside SHACL's namespace and
+/// is not `rdf:type` — the non-validating properties §2.3.2 says a processor
+/// ignores — as an annotation, in the store's order.
+fn annotations_of(store: &Store, subject: &str, except: &[&str]) -> Vec<Annotation> {
+    store
+        .by_subject
+        .get(subject)
+        .into_iter()
+        .flatten()
+        .filter(|(p, _)| {
+            !p.starts_with(SH) && p.as_str() != rdf::TYPE.as_str() && !except.contains(&p.as_str())
+        })
+        .flat_map(|(p, objects)| objects.iter().map(move |o| annotation(p, o)))
+        .collect()
+}
+
+fn annotation(predicate: &str, o: &Obj) -> Annotation {
+    Annotation {
+        predicate: predicate.to_string(),
+        object: if o.is_node {
+            AnnotationObject::Iri(o.value.clone())
+        } else {
+            AnnotationObject::Literal(ObjectLiteral {
+                value: o.value.clone(),
+                language: o.language.clone(),
+                datatype: o.datatype.clone(),
+            })
+        },
+    }
 }
 
 /// The destination type IRIs a property shape points at: `sh:class`, the target
@@ -488,5 +569,56 @@ ex:Thing a sh:NodeShape ; sh:property [ sh:path ex:label ] .
     fn text_that_is_not_turtle_is_malformed() {
         let err = decode_shacl("broken.ttl", "{ this is not turtle").expect_err("must fail");
         assert!(matches!(err, Rejection::Malformed(_)), "got {err:?}");
+    }
+
+    /// `sh:name` and `sh:description` are read as `rdfs:label` and
+    /// `rdfs:comment`, ahead of any the property shape writes under those
+    /// predicates; every other non-SHACL triple is carried as itself; and a
+    /// `sh:datatype rdf:langString` with `sh:languageIn` is a `LangString`
+    /// whose tags are the list.
+    #[test]
+    fn sh_name_is_a_label_and_language_in_is_the_languages() {
+        use fossil_graph_schema::{Annotation, RDF_LANG_STRING, RDFS_COMMENT, RDFS_LABEL};
+        const LABELLED: &str = r#"
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix ex:   <https://ex.org/> .
+
+ex:PersonShape a sh:NodeShape ;
+    sh:targetClass ex:Person ;
+    rdfs:label "person"@en ;
+    sh:property [
+        sh:path ex:name ;
+        sh:datatype rdf:langString ;
+        sh:languageIn ( "en" "es" ) ;
+        sh:name "nombre"@es ;
+        sh:description "how they are called" ;
+        rdfs:label "name"@en ;
+    ] .
+"#;
+        let doc = decode_shacl("p.ttl", LABELLED).expect("parses");
+        let person = doc.lookup("https://ex.org/Person").expect("the shape");
+        assert_eq!(
+            person.annotations,
+            [Annotation::literal(RDFS_LABEL, "person", Some("en"))]
+        );
+        let name = &person.properties[0];
+        assert_eq!(
+            name.annotations,
+            [
+                Annotation::literal(RDFS_LABEL, "nombre", Some("es")),
+                Annotation::literal(RDFS_COMMENT, "how they are called", None),
+                Annotation::literal(RDFS_LABEL, "name", Some("en")),
+            ]
+        );
+        assert_eq!(name.datatype(), Some(Primitive::LangString));
+        assert_eq!(
+            name.term,
+            Some(fossil_graph_schema::Term::Literal(Some(
+                RDF_LANG_STRING.to_string()
+            )))
+        );
+        assert_eq!(name.languages, ["en", "es"]);
     }
 }

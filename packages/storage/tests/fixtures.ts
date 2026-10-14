@@ -47,6 +47,7 @@ export function recordingEngine(loaded = true) {
     async dropFiles(names) {
       dropped.push([...names]);
     },
+    async registerFileBuffer() {},
   };
   return { engine, sql, leases, dropped };
 }

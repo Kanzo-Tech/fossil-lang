@@ -72,7 +72,7 @@
    no TypeScript projection: `fossil.json` lists every column of every table in
    its `properties`, and each column the writer emits there carries its `role`
    from this file, so a reader takes both from there. The writer reads the role
-   off `generated.rs`; `fossil.schema.json` spells the five, and
+   off `generated.rs`; `fossil.schema.json` spells the four, and
    `@fossil-lang/corpus`'s `ColumnRole` is held against it.
    `crates/xtask/tests/corpus_generated.rs` runs that check, so `cargo test`
    catches an edit to this file that was not regenerated, and an edit to a
@@ -90,7 +90,10 @@
                 it. `/docs/design/identity` is the argument.
    identity     what a bookmark keys on and what survives a rebuild.
    endpoint     one end of a relation: a vertex's `dense_id`, which is global,
-                so an endpoint needs no type to be resolved. *)
+                so an endpoint needs no type to be resolved.
+   language     the BCP 47 tag of the language-tagged value beside it: with
+                that value, one `rdf:langString` literal (RDF 1.1 Concepts
+                §3.3). *)
 
 (* ------------------------------------------------------- the vertex payload *)
 (* In writer order: the two a writer emits, then the program's properties in
@@ -118,3 +121,11 @@ col dst = in edge ; type uint32 ; role endpoint ; aligns dst .
    set, sorted by `(src, value)`. *)
 
 col src = in property ; type uint32 ; role endpoint ; aligns src .
+
+(* A `LangString` property's table, and only one, has a third column AFTER the
+   value: its tag. A property table is where the tag has a fixed name — on a
+   vertex table it would need one minted from the property's — so a
+   language-tagged property is a property table whatever its cardinality, and
+   its rows sort by `(src, value, lang)`. `/docs/design/labels` is the argument. *)
+
+col lang = in property ; type string ; role language .

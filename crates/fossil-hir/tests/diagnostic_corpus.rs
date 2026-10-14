@@ -303,6 +303,8 @@ fn constraint(predicate: &str, datatype: Option<Primitive>, occurs: Occurs) -> P
         occurs,
         // A test fixture, not a document: no text to point into.
         span: None,
+        annotations: Vec::new(),
+        languages: Vec::new(),
     }
 }
 
@@ -311,6 +313,7 @@ fn shape(iri: &str, properties: Vec<PropertyConstraint>) -> Shape {
         iri: iri.to_string(),
         properties,
         span: None,
+        annotations: Vec::new(),
     }
 }
 

@@ -1,0 +1,33 @@
+---
+title: Two IRIs for one declaration
+description: "`syntax/duplicate-iri` — a declared type or a field written with two `@iri`s."
+---
+
+A declared type and each of its fields carry exactly one `@iri`. Stacking two is refused, naming the
+field:
+
+```fossil
+@iri("https://schema.org/Person")
+type Laureate
+    @iri("https://schema.org/name")
+    @iri("https://schema.org/alternateName")
+    name: Seq<LangString>
+```
+
+```text
+syntax/duplicate-iri
+  × `name` has two `@iri`s, and a declaration has one IRI
+  help: a type and a field each have one IRI. Keep the one that names the predicate or the class meant, and put anything else said about it in an `@annotation`.
+```
+
+## Why fossil refuses it
+
+A field is the one place its name is given a predicate: the corpus column it becomes carries one
+IRI, and its triples one predicate. Attributes stack so that a field can carry several
+`@annotation`s ([Types declared in the program](/docs/design/declared)); `@iri` stays one, and which
+of two was meant is not the parser's to guess.
+
+## How to repair it
+
+- **Keep one `@iri`.** Two predicates are two fields, each with its own name.
+- **Say the rest as an annotation**: `@annotation("http://www.w3.org/2004/02/skos/core#exactMatch", "…")`.

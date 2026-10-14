@@ -15,12 +15,32 @@ export interface ColumnRef {
 }
 
 /**
- * A column's counts, over the rows the profile read.
+ * A column's counts, over the rows the profile read — Parquet's `Statistics` names, which the
+ * corpus's `fossil.json` uses for the same facts.
  */
 export interface ColumnStats {
-  distinct: number;
+  /**
+   * Distinct non-null values.
+   */
+  distinct_count: number;
+  /**
+   * The greatest value, on the same terms.
+   */
+  max_value?: string;
+  /**
+   * The least value, as text; absent with no value, or one longer than `MAX_VALUE_BYTES`.
+   */
+  min_value?: string;
   name: string;
-  nulls: number;
+  /**
+   * Rows with no value.
+   */
+  null_count: number;
+  /**
+   * The commonest values that occur at least twice; absent when none repeats, or when one of them
+   * is longer than `MAX_VALUE_BYTES`.
+   */
+  top_values?: TopValue[];
 }
 
 /**
@@ -420,7 +440,7 @@ export interface Position {
  * `DataFusion` scalars, `DuckDB` column types) next to the materializer; only the xsd direction
  * lives here, because xsd is the RDF border every side reads.
  */
-export type Primitive = 'string' | 'integer' | 'float' | 'bool' | 'date' | 'date_time' | 'time' | 'g_year' | 'any_uri';
+export type Primitive = 'string' | 'integer' | 'float' | 'bool' | 'date' | 'date_time' | 'time' | 'g_year' | 'any_uri' | 'lang_string';
 
 /**
  * What the profiler found.
@@ -473,7 +493,7 @@ export interface ProfileOptions {
 }
 
 /**
- * One query for the host to run.
+ * One query for the host to run, as `DuckDB` SQL — `Ask::sql`.
  */
 export interface ProfileQuery {
   /**
@@ -579,15 +599,15 @@ export interface SemanticToken {
  * One source, profiled.
  */
 export interface SourceProfile {
+  /**
+   * The columns that are candidate keys: of a type a key can be, never null, never repeated.
+   */
+  candidate_keys: string[];
   columns: ColumnStats[];
   /**
    * Its columns and their types: what the compiler's cache takes.
    */
   descriptor: InferredDescriptor;
-  /**
-   * The columns that are candidate keys: never null, never repeated.
-   */
-  keys: string[];
   /**
    * The rows the counts read, and whether that was a sample.
    */
@@ -649,7 +669,15 @@ export interface Token {
  * One token, serialised as its variant name — the name a highlighter keys on. On the wire it is a
  * `Token`'s `kind`, so it is named `TokenKind` there.
  */
-export type TokenKind = 'Whitespace' | 'Newline' | 'Comment' | 'KwFrom' | 'KwAnd' | 'KwOr' | 'KwNot' | 'AtAttr' | 'True' | 'False' | 'Null' | 'Float' | 'Integer' | 'Ident' | 'String' | 'Define' | 'Eq' | 'Neq' | 'Le' | 'Ge' | 'Assign' | 'Dot' | 'Comma' | 'LParen' | 'RParen' | 'LBrace' | 'RBrace' | 'Lt' | 'Gt' | 'Plus' | 'Minus' | 'Star' | 'Slash' | 'Percent' | 'Question' | 'Colon';
+export type TokenKind = 'Whitespace' | 'Newline' | 'Comment' | 'KwFrom' | 'KwAnd' | 'KwOr' | 'KwNot' | 'AtAttr' | 'True' | 'False' | 'Null' | 'Float' | 'Integer' | 'Ident' | 'String' | 'LangString' | 'Define' | 'Eq' | 'Neq' | 'Le' | 'Ge' | 'Assign' | 'Dot' | 'Comma' | 'LParen' | 'RParen' | 'LBrace' | 'RBrace' | 'Lt' | 'Gt' | 'Plus' | 'Minus' | 'Star' | 'Slash' | 'Percent' | 'Question' | 'Colon';
+
+/**
+ * One of a column's commonest values, and how many rows hold it.
+ */
+export interface TopValue {
+  count: number;
+  value: string;
+}
 
 /**
  * What a mapping can name: what a host knows before the model writes anything.

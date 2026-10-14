@@ -49,6 +49,9 @@ syntax_kinds! {
     /// `null` — the absence of a value, `NULL := 'null'` (grammar.bnf).
     NULL,
     STRING,
+    /// `"birth date"@en` — `LANG_STRING := STRING LANGTAG` (grammar.bnf,
+    /// `LANG_STRING`): a constant `rdf:langString`, the tag touching the quote.
+    LANG_STRING,
     /// The opening `"` of an interpolated string.
     ///
     /// A string with no interpolation stays one `STRING` token: the carve
@@ -128,15 +131,18 @@ syntax_kinds! {
     /// `as` is contextual here as in [`SyntaxKind::ALIAS_ARG`]: an `IDENT`
     /// followed by a bare `IDENT`, which nothing else in a member list can be.
     IMPORT_MEMBER,
-    /// `@iri("…") type Person` and its indented fields — `TypeDecl := IriAttr
-    /// 'type' IDENT NEWLINE INDENT Field+ DEDENT` (grammar.bnf, `TypeDecl`).
+    /// `@iri("…") type Person` and its indented fields — `TypeDecl :=
+    /// DeclAttrs 'type' IDENT NEWLINE INDENT Field+ DEDENT` (grammar.bnf,
+    /// `TypeDecl`).
     ///
-    /// An output type written in the program. Its `IRI_ATTR` is a child, so a
-    /// declaration whose IRI is missing still has a node to hang the refusal
-    /// on, and the IRI travels with the type it names.
+    /// An output type written in the program. Its attributes — `IRI_ATTR` and
+    /// any `ANNOTATION_ATTR` — are children, so a declaration whose IRI is
+    /// missing still has a node to hang the refusal on, and the IRI travels
+    /// with the type it names.
     TYPE_DECL,
-    /// `@iri("https://schema.org/name") name: String` — `Field := IriAttr IDENT
-    /// SHAPE_SEP TypeExpr NEWLINE` (grammar.bnf, `Field`).
+    /// `@iri("https://schema.org/name") name: String` — `Field := DeclAttrs
+    /// IDENT SHAPE_SEP TypeExpr NEWLINE` (grammar.bnf, `Field`). Its attributes
+    /// are on its line or stacked on the lines above it.
     FIELD,
     /// `@iri("…")` — `IriAttr := AT_ATTR LPAREN STRING RPAREN` (grammar.bnf,
     /// `IriAttr`), above a `TYPE_DECL` and at the start of each `FIELD`.
@@ -144,6 +150,11 @@ syntax_kinds! {
     /// It shares its `AT_ATTR` token with `@subject` and POSITION tells them
     /// apart (disambiguation rule 6; grammar.bnf, § DISAMBIGUATION RULES).
     IRI_ATTR,
+    /// `@annotation("…rdf-schema#label", "birth date"@en)` — `AnnotationAttr
+    /// := AT_ATTR LPAREN STRING COMMA AnnotationObject RPAREN` (grammar.bnf,
+    /// `AnnotationAttr`): a `ShEx` annotation, a predicate and an object, above a
+    /// `TYPE_DECL` or a `FIELD`, any number of times.
+    ANNOTATION_ATTR,
     /// `String`, `Option<Date>`, `Seq<Ref<City>>` — `TypeExpr := IDENT (LT
     /// TypeExpr GT)?` (grammar.bnf, `TypeExpr`). The argument is a nested
     /// `TYPE_EXPR`; which names take one is the checker's.

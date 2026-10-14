@@ -1,0 +1,296 @@
+---
+title: The corpus's own facts
+description: "Every fact fossil.json holds reaches a reader as a relation — the edge's label, its endpoint keys, a column's term type, the annotations — and the writer counts what it wrote: per column what Parquet's statistics and PostgreSQL's pg_stats carry — nulls, distinct values, the least and greatest value, the commonest values and their frequencies — and per table the candidate keys those counts make, stored in fossil.json and read as fossil_stats. Inclusions between tables were measured and dropped."
+---
+
+A corpus is read by things that were not there when it was written — kanzo-ui's Ask, which turns a
+question into SQL, and `@kanzo-tech/graph`, which draws it. Both need to know what each table and
+column *is* before they read a row, and today both guess part of it. Ask runs `SUMMARIZE` on every
+table at every attach and decides by a name regex and a fifty-value threshold whether a column is an
+identifier; the graph reads an edge's label by splitting the table name `Order_placedBy_Person` on
+`_`; both take `src` and `dst` as given. Every one of those guesses has an exact answer in
+`fossil.json` or in the rows the writer just wrote.
+
+So this page does two things. **The views expose what the manifest has**, so a guess one column away
+from its answer stops being made. And **the writer counts what it wrote** — with the same plan
+`fossil-profile` runs over a source for the assistant ([Profile](/docs/design/profile)) — and stores the
+answer in `fossil.json`, so a reader reads the counts instead of taking them.
+
+## The views carry every field of the manifest
+
+`attach` makes the manifest into relations beside the tables' views
+(`packages/corpus/src/attach.ts, attach`), and each of them drops something the manifest says. They
+become:
+
+```
+fossil_tables(table_name, kind, label, iri, path, record_count, first_id,
+              source, source_key, destination, destination_key, candidate_keys, derived_from)
+fossil_columns(table_name, column_name, ordinal_position, data_type, role, iri, term_type,
+               datatype, is_nullable)
+fossil_annotations(table_name, column_name, predicate, o_type, o_value, o_datatype, o_lang)
+fossil_stats(table_name, column_name, null_count, distinct_count, min_value, max_value,
+             most_common_vals, most_common_freqs)
+```
+
+- **`label`** is the table's SQL/PGQ label: a vertex table's name, an edge table's `label` — the
+  field `fossil.json` has always written and the views never carried, which is why
+  `@kanzo-tech/graph` parses it back out of the name — and a property table's property, the name of
+  its value column. One column, so a reader never decides by `kind` where a label lives.
+- **`source_key`** and **`destination_key`** are an edge table's `source.key` and `destination.key`,
+  and a property table's `source.key`: the column holding each end's `dense_id`. A reader joins on
+  them instead of on `src` and `dst` it was told.
+- **`term_type`** is the column's `term_type`, R2RML's `rr:IRI` or `rr:Literal`, beside the
+  `datatype` that is already there. A column whose values are IRIs is an identifier by what the shape
+  declared, not by a regex over its name and a count of its values.
+- **`fossil_annotations`** is [Annotations and language-tagged strings](/docs/design/labels)' relation,
+  `column_name` null for a table's own.
+- **`candidate_keys`** and **`fossil_stats`** are the counts below.
+
+Nothing is renamed: the existing columns keep the names
+[the corpus](/docs/design/corpus#the-readers-relations-are-named-as-sql-already-names-them) chose for
+them, and the new ones take the same rule — `fossil.json`'s word where it has one, SQL's where it is
+SQL's. `fossil_stats` is a relation of its own, as PostgreSQL's
+`pg_stats` is beside `information_schema.columns`: a column's schema and its measurements are two
+facts, and a reader of the schema reads no counts.
+
+**What would reverse it:** a field of `fossil.json` that a reader needs and no view carries. The rule
+is that there is none, so the fix is the column, never a reader that opens `fossil.json` itself.
+
+## The writer counts what it wrote
+
+### The output, not the sources
+
+The assistant profiles a program's **sources**, before there is a program, to propose one
+([Profile](/docs/design/profile)). A reader of the corpus asks about something else: the types and
+fields the program made. «How many laureates have no birth date», «which prizes' `category` values
+are there», «is `Laureate.name` an identifier» are questions about a column of `vertex/Laureate.parquet`,
+which no source has — a join made it, a `parse.date` changed its type, a dedup merged its rows. A
+source profile stored in the corpus would describe columns the corpus does not have, under names the
+program renamed, and would leak the structure of sources the corpus exists not to expose
+(`derived_from` names a source and never its location, for the same reason). So **the writer profiles
+the tables it wrote**, and what it stores is about them.
+
+**What would reverse it:** a reader of a corpus that asks about a *source* — a lineage view that
+shows how many rows of `people.csv` became `Person`s. Then the source profile the run was checked
+against (`profiled`) is stored beside the corpus's, under `derived_from`'s keys, and it is a second
+section, never a replacement.
+
+### What it counts
+
+The same plan as a source's, `crates/fossil-profile/src/lib.rs, Profiler`, run over the written
+tables instead of the sources, **whole** — `Options::sample` `0`, so every count is exact over every
+row the corpus holds — and stopping at the counts: a plan over tables tests no inclusion. **What it
+keeps is what the references keep, under their names.** A column's statistics already have a shape
+three formats agree on, and fossil takes it rather than a fourth:
+
+| fact | where it goes | the reference that names it |
+| --- | --- | --- |
+| rows | `record_count`, already | Iceberg's `record_count` on a data file; `pg_class.reltuples` |
+| values | `record_count` − `null_count` | Iceberg's `value_counts`, which counts the nulls in; not stored twice |
+| nulls | `stats.null_count` on the column | Parquet `Statistics.null_count`, Iceberg `null_value_counts`; `pg_stats.null_frac` as a fraction |
+| distinct values | `stats.distinct_count`, exact | Parquet `Statistics.distinct_count`; `pg_stats.n_distinct` |
+| least and greatest value | `stats.min_value`, `stats.max_value` | Parquet `Statistics.min_value`, `max_value`; Iceberg `lower_bounds`, `upper_bounds`. Absent for a column with no value |
+| commonest values | `stats.most_common_vals`, `stats.most_common_freqs` | `pg_stats`' two arrays, which Parquet and Iceberg have no field for: the ten most frequent non-null values that occur at least twice, most frequent first and ties by value, so the same corpus writes the same list, and each one's share of the table's rows, nulls among them. Absent when no value repeats — a key has none |
+| candidate keys | `candidate_keys` on the table | derived from the counts, not counted: a column of a keyable type with `null_count` 0 and `distinct_count` equal to the rows — `pg_stats.n_distinct = -1` with no nulls |
+
+**Candidate keys are derived, and stored anyway.** No query computes them: the profiler reads them
+off the counts it already has, `crates/fossil-profile/src/lib.rs, Profiler`. They are kept in
+`fossil.json` because deriving them in the reader would be worse: the rule needs which types can be a
+key (not a float, not a boolean), and a reader would restate that table in TypeScript and every
+reader in another language would restate it again, where the list costs the writer one line and
+`fossil_tables.candidate_keys` hands it over. **What would reverse it:** a reader that derives keys
+under a different rule — a sampled count, a composite key — at which point the rule is the reader's
+and the list goes.
+
+**Every value is text, and it is the text `triples` writes for it**: the natural lexical form of the
+column's type, R2RML §10.2 ([Its RDF meaning, as triples](/docs/format/reading/rdf)). One spelling of
+a value across the corpus's relations, and the one a reader casts back with the column's `data_type`.
+**A value longer than 64 bytes** is left out, never cut: `min_value` or `max_value` is then absent,
+and a column with such a value among its ten commonest has no `most_common_vals`. Ten is more than the six
+Ask shows; 64 bytes holds a date, a number, a code or a short name, and not a description. A truncated value would be a value the column does not hold, which a
+reader would filter by and match nothing; Delta Lake truncates its string bounds because it only
+prunes with them, and a reader here shows them to a person and to a model.
+
+**Which columns.** Counts are taken on every column of every table, the writer's and the program's
+alike, so `null_count` and `distinct_count` need no exception; they cost a key nothing it was not
+already paying.
+
+**What is not stored: the sample rows.** A source's profile keeps its first rows because the source
+is somewhere a model cannot read. A corpus's rows are a `SELECT … LIMIT 5` away on the view.
+
+### `fossil.json`, beside the field it measures
+
+```jsonc
+"vertex_tables": [{
+  "name": "Laureate", "record_count": 1012, "candidate_keys": ["dense_id", "subject"],
+  "properties": [
+    { "name": "birthDate", "type": "date", "iri": "https://schema.org/birthDate", "nullable": true,
+      "stats": { "null_count": 31, "distinct_count": 975,
+                 "min_value": "1817-11-30", "max_value": "1997-07-12",
+                 "most_common_vals": ["1898-06-13"], "most_common_freqs": [0.001976] } }
+  ]
+}]
+```
+
+(The numbers are illustrative, not measured.) **It lives in `fossil.json`, not in a file beside it**,
+because `attach` reads `fossil.json` first and builds every catalog view from it before a byte of
+Parquet: a `stats.parquet` would be a second read at every attach for facts that are as small as the
+schema they describe. The size is bounded by the columns, not the rows — at most ten values of
+at most 64 bytes per column. That is Delta Lake's choice, per-file `stats` in the log a reader
+reads first, and not Iceberg's, whose distinct-value sketches live in Puffin files because a sketch
+is large. Parquet already carries `null_count`, `min_value` and `max_value` per row group in each
+footer; they stay, for the engine's pruning, and they are not the reader's answer — one footer per
+table to fetch, physical values (an `int32` where the shape said `xsd:gYear`), and no distinct count
+or common values at all.
+
+The names are Parquet's where Parquet has the field — `Statistics` has `null_count`,
+`distinct_count`, `min_value` and `max_value` — because the corpus is Parquet, and the profiler's own
+`nulls` and `distinct` were renamed to them, so a source's profile and a corpus's say the same thing in
+the same words. The commonest values are the one fact Parquet and Iceberg have no field for, and the
+names are PostgreSQL's, whose planner is the reader that has kept them longest: `most_common_vals`
+and `most_common_freqs`, two arrays in the same order, a frequency being the share of the table's
+rows. They were `top_values`, `[{ value, count }]`, a shape no reference has; a count is the frequency
+times `record_count`. The source profile of [Profile](/docs/design/profile) keeps its counts, because
+a sampled source has no table row count to divide by.
+
+**What would reverse it:** a `fossil.json` measured large enough that its read shows in an attach —
+a corpus of thousands of columns. Then the stats move to one Parquet file the manifest names, read by
+the views lazily, and `fossil.json` keeps the schema.
+
+### Where it runs, and what it costs
+
+**In the writer, after the last table is final and before `fossil.json`**, on the batches it already
+holds — the writer collects every batch to number the ids, so nothing is read back from storage. A
+run that cannot profile what it wrote writes no manifest and so no corpus: the profile is part of the
+commit, and a corpus never exists without its facts.
+
+**The plan runs on DataFusion, which has no SQL here.** `fossil-df` builds DataFusion with
+`default-features = false`, dropping its `sql` frontend from the wasm build, and the profiler's
+queries are SQL strings DuckDB runs. So the plan's queries become **data** — an `Ask`, one per kind
+(the counts of a table, the commonest values of a column) — and SQL is DuckDB's rendering of an
+`Ask`, kept in `fossil-profile` for the two hosts that profile sources, while `fossil-df` renders the
+same `Ask` as a DataFusion plan. Which queries to run and what a count means stay in one crate; only
+the rendering is per engine, which is the exit [Profile](/docs/design/profile) left itself: «a query
+only one host can run … is marked per host, and the module is still one». The wasm gate does not
+move: `fossil-profile` links no engine and is in the wasm closure already.
+
+**Under the run's budget.** Every query reserves against the same 2 GiB pool as the run
+([Three hosts](/docs/design/three-hosts#what-the-wasm-writer-holds-and-how-it-says-no)), so counts
+that do not fit are `run/over-budget` like any operator, before anything is committed: **the run is
+refused**, and no corpus is written without its stats. The counts of a table are one aggregate over
+it; the commonest values are one `GROUP BY` per column, and only for a column whose `distinct_count`
+is below its non-null count, since a column with no repeat has none.
+
+### Inclusions: measured, and dropped
+
+The writer used to test inclusions too — every value of one column a value of another table's
+candidate key or `subject`, the shape of an edge the program did not declare — and list them in
+`fossil.json` as `inclusions`, read as `fossil_inclusions`. They are gone from the writer, the
+manifest, the reader and the guards, for two reasons, one measured and one about references.
+
+**They were the cost.** Measured natively, release build, the run into memory, median of three
+interleaved with the same program on the writer without facts, on a shared four-core host (load 10
+to 13). *Write* is `fossil_df::write` whole; *facts* the part of it that counted; the SNB, CORDIS and
+Nobel corpora are the keasy dev examples:
+
+| corpus | tables · rows written | run before | run with inclusions | write before → with inclusions | facts | of it, inclusions | `fossil.json` |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| shop, 60,000 · 180,000 | 3 · 395,854 | 0.98 s | 1.01 s | 57 → 221 ms | 166 ms | 4 asks, 148 ms | 2.6 → 6.5 KB |
+| shop, 200,000 · 600,000 | 3 · 1,313,992 | 3.30 s | 3.85 s | 163 → 798 ms | 610 ms | 4 asks, 379 ms | 2.6 → 6.6 KB |
+| Nobel laureates | 10 · 6,779 | 0.10 s | 0.21 s | 7 → 104 ms | 99 ms | 30 asks, 47 ms | 10.5 → 31.1 KB |
+| CORDIS (Horizon subset) | 8 · 523,395 | 2.26 s | 3.58 s | 241 → 1,418 ms | 1,221 ms | 78 asks, 1,043 ms | 13.0 → 44.6 KB |
+| LDBC SNB SF0.1 | 23 · 1,135,175 | 4.88 s | 10.80 s | 319 → 6,163 ms | 5,906 ms | 297 asks, 5,650 ms | 25.6 → 71.8 KB |
+
+The counts and the commonest values were cheap — at most 290 ms on any of them — and **the
+inclusions were 47 to 96 % of the facts**: on SNB they more than doubled the run. They grow with the
+pairs the pruning keeps, not with the rows: SNB holds fewer rows per table than shop at 200,000 and its
+inclusions cost fifteen times as much. **None of the five found one**: every reference of these
+programs is an edge, which is declared, and the 413 anti-joins were all between columns that turned
+out not to be contained. The peak did not move with any of it (51 to 291 MiB resident, the same with
+and without facts), because the counts read the batches the writer already holds. Vermont was not
+measured; it is not in this repository.
+
+**Without them**, the same bench once more over the two corpora they cost most on, median of three,
+on the same host when it was otherwise idle (load under 5) — so the run times are not comparable to
+the table's, while the write and the counting inside it are what was asked of them. The CORDIS subset
+is derived from the current CORDIS dump, the archived one being unreachable that day: 0.4 to 0.7 % more
+rows per file.
+
+| corpus | write | of it, counting | run | `fossil.json` |
+| --- | --- | --- | --- | --- |
+| CORDIS (Horizon subset) | 384 ms | 179 ms | 3.63 s | 37.6 KB |
+| LDBC SNB SF0.1 | 519 ms | 277 ms | 6.23 s | 63.1 KB |
+
+The counting is what the counts and the commonest values cost before — about 180 and 250 ms — and the
+write is a third of what it was on CORDIS and a twelfth on SNB. The peak is unchanged (263 and
+289 MiB).
+
+**The source profile keeps them.** Between a program's *sources*, before there is a program, an
+inclusion is what keasy's assistant proposes an edge from: it offers an edge only where one was found
+([Profile](/docs/design/profile)). That is the discovery the paragraph below names, run on purpose by
+a caller that needs it, and it is a different question from what a written corpus holds.
+
+**No reference stores them.** Parquet's `Statistics`, Iceberg's column metrics and Puffin
+sketches, Delta Lake's file stats and PostgreSQL's `pg_stats` all describe one column at a time; none
+of them has a field for a dependency between two. Finding inclusion dependencies is a discovery
+problem with its own literature and tools — Metanome's profilers, SPIDER and BINDER among them
+([Prior art](/docs/design/prior-art)) — run on purpose over data someone is investigating, not a
+statistic a format keeps beside every file. A corpus carries what the references carry and is read
+by tools that know those references; a field none of them has is a field no tool reads.
+
+**What would bring them back:** a reader that needs them — a «join nobody declared» a person or a
+model acts on — together with a reference that stores them, so the field has a name and a reader
+outside fossil. Until both exist, a reader that wants one runs the anti-join on the attached views,
+which is one query and costs only the asker. Recorded in [Discarded](/docs/design/discarded).
+
+**What would reverse the rest:** if exact distinct counts push a corpus that fits over the budget,
+`distinct_count` becomes a sketch — Iceberg's Puffin `ndv` is the reference for that — and
+`candidate_keys` the one exact count kept.
+
+## What a reader stops guessing
+
+| a reader's guess today | the fact it reads instead |
+| --- | --- |
+| the edge label, split out of `Src_label_Dst` | `fossil_tables.label` |
+| `src` and `dst`, hard-coded | `fossil_tables.source_key`, `destination_key` |
+| «identifier», by a name regex and fifty distinct values | `role`, `term_type = rr:IRI`, `candidate_keys` |
+| «numeric measure» for a year stored as `int32` | `datatype` = `xsd:gYear` — already in `fossil_columns`, read by nobody |
+| `SUMMARIZE` over every table at attach | `fossil_stats`, with no scan |
+| the six commonest values, by a scan | `fossil_stats.most_common_vals`, `most_common_freqs` |
+| a column's word, from its identifier | `fossil_annotations` |
+
+## What it touches
+
+| Where | What changes |
+| --- | --- |
+| `fossil-profile` | `Ask` as the plan's queries, with `sql()` as DuckDB's rendering; `min_value`, `max_value` and `top_values` in the counts; `nulls` and `distinct` renamed to `null_count` and `distinct_count`; a source that is a table the host already holds, with no reader, counted and never tested for an inclusion; `candidate_keys` named as the manifest names them |
+| `fossil-df` | `fossil-profile` a dependency; `Ask` rendered on DataFusion; the counts run after the last table and before `fossil.json`, under the pool; `stats` (`null_count`, `distinct_count`, `min_value`, `max_value`, `most_common_vals`, `most_common_freqs`) and `candidate_keys` in `manifest.rs`, `fossil.schema.json` regenerated |
+| `fossil-df-wasm` | nothing of its own: the closure gains no crate it did not have through `fossil-wasm` |
+| `@fossil-lang/types` | the renamed profile wire types, generated |
+| `@fossil-lang/wasm` | `runProfiler` reads `query.sql` as before; the editor's profile carries the new counts |
+| `@fossil-lang/corpus` | `fossil_tables` gains `label`, `source_key`, `destination_key`, `candidate_keys`; `fossil_columns` gains `term_type`; `fossil_annotations`, `fossil_stats`; the reserved names grow by two, and `corpus/duplicate-table` refuses them as table names; a guard that recomputes every `stats` entry and every candidate key with `duckdb` over the Parquet and fails on a difference |
+| kanzo-ui | Ask's field statistics read `fossil_stats` instead of `SUMMARIZE`, its roles read `role`, `term_type`, `datatype` and `candidate_keys`; `@kanzo-tech/graph` reads `label` and the endpoint keys and drops `labelOf` |
+
+## The migration
+
+**fossil, 0.3.0-alpha.32**, which ships all four designs of this batch together. The views and the profile in one release with the writer that writes
+`stats`, so no reader of `fossil_stats` ever meets a corpus that has none — except one written before
+it, and there every row of `fossil_stats` is null and `candidate_keys` empty, which a reader handles
+as it handles any unknown, by asking the engine. The format stays `fossil/1`
+([the corpus](/docs/design/corpus#one-format-changed-in-place)).
+
+**keasy.** Re-run a corpus it keeps to give it stats; nothing else in keasy reads these relations
+directly — Ask and the graph do, through kanzo-ui. Its assistant's source profile changes words
+(`null_count`, `distinct_count`) where keasy reads it.
+
+**kanzo-ui**, after fossil: the reader changes in the table above, and the regex, the threshold and the
+`SUMMARIZE` at attach go.
+
+## Decided
+
+The user settled what this page left open: ten commonest values of at most 64 bytes each, longer
+values left out; the plan described as data and rendered to DuckDB SQL and to DataFusion plans; a run
+whose profile exceeds the budget refused; and no cost threshold until shop and Vermont are measured.
+Shop was measured, beside three real corpora, and on those figures the user took inclusions out
+entirely and gave the counts the references' names and shape: what the most references carry, and
+nothing they do not.

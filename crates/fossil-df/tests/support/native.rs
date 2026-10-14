@@ -356,7 +356,17 @@ async fn run_dir_async(
     let Ran::Memory { report, files } = exec
         .execute(&mut storage, &Output::Memory, None)
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(|e| {
+            // The message and every cause under it: «the query engine failed»
+            // alone says nothing a reader can act on.
+            let mut text = e.to_string();
+            let mut cause = std::error::Error::source(&e);
+            while let Some(c) = cause {
+                text = format!("{text}: {c}");
+                cause = c.source();
+            }
+            text
+        })?
     else {
         unreachable!("a run into memory answers its files")
     };

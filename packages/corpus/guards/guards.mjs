@@ -124,12 +124,33 @@ function fixedColumns(table) {
   return named.filter((c) => typeof c === "string");
 }
 
-/** The columns a table is ordered by: a vertex's key, a relation's two ends, a property's end and value. */
+/**
+ * The columns a table is ordered by: a vertex's key, a relation's two ends, a property's end and
+ * value — and, for a language-tagged value, its tag after them.
+ */
 function orderColumns(table) {
   if (table.kind !== "property") return fixedColumns(table).filter((c) => c !== table.entry.identity);
   const properties = Array.isArray(table.entry.properties) ? table.entry.properties : [];
-  return [...fixedColumns(table), ...properties.filter((p) => p.role === undefined).map((p) => p.name)];
+  return [
+    ...fixedColumns(table),
+    ...properties.filter((p) => p.role === undefined).map((p) => p.name),
+    ...properties.filter((p) => p.role === "language").map((p) => p.name),
+  ];
 }
+
+const RDF_LANG_STRING = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
+
+/**
+ * A well-formed BCP 47 tag's shape (RFC 5646 §2.1): subtags of one to eight letters and digits, the
+ * first letters only. The full grammar's registry checks are not this checker's.
+ */
+const LANGTAG = "[A-Za-z]{1,8}(-[A-Za-z0-9]{1,8})*";
+
+/** The longest value a writer's counts keep, in bytes (`/docs/design/facts`). */
+const MAX_VALUE_BYTES = 64;
+
+/** A manifest type a key can be: not a measurement, whose equality is exact. */
+const keyable = (type) => !["float", "double", "bool"].includes(type);
 
 export const GUARDS = [
   {
@@ -327,7 +348,8 @@ export const GUARDS = [
     title: "Every table is written in the order of its key",
     proves:
       "A vertex table's rows ascend strictly by `dense_id`, an edge table's by `(src, dst)` and a " +
-      "property table's by `(src, value)`, in file order — strictly, so a relation or a property " +
+      "property table's by `(src, value)` — `(src, value, lang)` for a language-tagged one — in file " +
+      "order, strictly, so a relation or a property " +
       "holds no row twice. That order is what lets DuckDB skip a row group from its footer " +
       "statistics: an id range, or a source range, is a few row groups rather than all of them.",
     cannotProve:
@@ -338,12 +360,15 @@ export const GUARDS = [
       for (const table of readable(corpus.tables)) {
         const keys = orderColumns(table);
         if (!keys.every((k) => table.columns.has(k))) continue;
-        const [a, b = a] = keys;
-        const lag = (c) => `lag(${ident(c)}) OVER (ORDER BY file_row_number)`;
-        const out = table.kind === "vertex" ? "a <= pa" : "a < pa OR (a = pa AND b <= pb)";
+        const [a, b = a, c = b] = keys;
+        const lag = (k) => `lag(${ident(k)}) OVER (ORDER BY file_row_number)`;
+        const out =
+          table.kind === "vertex"
+            ? "a <= pa"
+            : "a < pa OR (a = pa AND b < pb) OR (a = pa AND b = pb AND c <= pc)";
         const bad = scalar(
           `SELECT count(*) FROM (
-             SELECT ${ident(a)} AS a, ${ident(b)} AS b, ${lag(a)} AS pa, ${lag(b)} AS pb
+             SELECT ${ident(a)} AS a, ${ident(b)} AS b, ${ident(c)} AS c, ${lag(a)} AS pa, ${lag(b)} AS pb, ${lag(c)} AS pc
                FROM read_parquet('${lit(table.file)}', file_row_number = true))
             WHERE pa IS NOT NULL AND (${out})`,
         );
@@ -418,7 +443,9 @@ export const GUARDS = [
       "each value's natural lexical form (R2RML §10.2) is in the lexical space XSD gives that " +
       "datatype, so R2RML's datatype override (§10.3) makes a well-typed literal and never the " +
       "data error of §11. Under `term_type` `rr:IRI`, each value is an absolute IRI — it opens with " +
-      "a scheme. A shape that declares `xsd:gYear` over an integer column is answered here.",
+      "a scheme. Under `rdf:langString`, each value has a tag in its table's `language` column, " +
+      "shaped as BCP 47 shapes one. A shape that declares `xsd:gYear` over an integer column is " +
+      "answered here.",
     cannotProve:
       "That a value is in the datatype's *value* space beyond its lexical form: `2023-02-30` is a " +
       "valid `xsd:date` lexically and no date, and an `xsd:byte` past 127 passes. A datatype " +
@@ -433,6 +460,21 @@ export const GUARDS = [
           const sql = table.columns.get(p.name);
           if (sql === undefined || (p.datatype === undefined && p.term_type === undefined)) continue;
           const local = typeof p.datatype === "string" && p.datatype.startsWith(XSD) ? p.datatype.slice(XSD.length) : null;
+          if (p.datatype === RDF_LANG_STRING) {
+            // A language-tagged string: any text, and a tag in its table's `language` column that is
+            // a well-formed BCP 47 tag — RDF 1.1 Concepts §3.3 gives every one a non-empty tag.
+            const tag = properties.find((c) => c.role === "language");
+            if (tag === undefined || !table.columns.has(tag.name)) {
+              failures.push(`${table.name}.${p.name} is an rdf:langString and its table has no language column`);
+              continue;
+            }
+            const bad = scalar(
+              `SELECT count(*) FROM ${parquet(table.file)}
+                WHERE "${p.name}" IS NOT NULL AND (${ident(tag.name)} IS NULL OR NOT regexp_full_match(${ident(tag.name)}, '${lit(LANGTAG)}'))`,
+            );
+            failures.push(...violations(bad, `${table.name}.${p.name}: a value whose tag is no language tag`));
+            continue;
+          }
           const pattern = p.term_type === `${RR}IRI` ? "[A-Za-z][A-Za-z0-9+.-]*:.*" : LEXICAL[local];
           if (pattern === undefined) {
             notes.push(`${table.name}.${p.name}: no lexical space known for ${p.datatype}`);
@@ -450,6 +492,77 @@ export const GUARDS = [
     },
   },
 
+
+  {
+    id: "counted",
+    title: "The writer's counts are the rows' counts",
+    proves:
+      "Every column's `stats` — `null_count`, `distinct_count`, `min_value`, `max_value`, " +
+      "`most_common_vals` and `most_common_freqs` — is what SQL counts over the column's file, each " +
+      "value the column's natural lexical form and one longer than 64 bytes left out rather than " +
+      "cut, each frequency the value's count over the table's rows; and every table's " +
+      "`candidate_keys` is exactly its columns of a keyable type never null and never repeated. A " +
+      "reader reads these instead of counting (`/docs/design/facts`), so a count that is wrong is an " +
+      "answer that is wrong.",
+    cannotProve:
+      "That a frequency gives its count back exactly to a reader that multiplies it out: it is a " +
+      "double, as `pg_stats`' is, and this guard compares it to the same division. A corpus " +
+      "written before the writer counted carries no `stats`, and is reported and not failed.",
+    run(corpus) {
+      const failures = [];
+      const notes = [];
+      let counted = 0;
+      for (const table of readable(corpus.tables)) {
+        const properties = Array.isArray(table.entry.properties) ? table.entry.properties : [];
+        const keys = [];
+        for (const p of properties) {
+          const sql = table.columns.get(p.name);
+          if (sql === undefined) continue;
+          const column = ident(p.name);
+          const text = natural(column, sql);
+          const row = query(
+            `SELECT count(*) AS n, count(*) FILTER (${column} IS NULL) AS nulls, count(DISTINCT ${column}) AS distinct_n,
+                    ${natural(`min(${column})`, sql)} AS lo, ${natural(`max(${column})`, sql)} AS hi
+               FROM ${parquet(table.file)}`,
+          )[0];
+          if (keyable(p.type) && Number(row.n) > 0 && Number(row.nulls) === 0 && Number(row.distinct_n) === Number(row.n)) {
+            keys.push(p.name);
+          }
+          const stats = p.stats;
+          if (stats === undefined) continue;
+          counted += 1;
+          const kept = (v) => (v === null || Buffer.byteLength(String(v)) > MAX_VALUE_BYTES ? undefined : String(v));
+          const tops = query(
+            `SELECT ${text} AS v, count(*) AS n FROM ${parquet(table.file)} WHERE ${column} IS NOT NULL
+              GROUP BY ${column} HAVING count(*) >= 2 ORDER BY count(*) DESC, v LIMIT 10`,
+          );
+          const top = tops.every((t) => kept(t.v) !== undefined) ? tops : [];
+          const want = {
+            null_count: Number(row.nulls), distinct_count: Number(row.distinct_n),
+            min_value: kept(row.lo), max_value: kept(row.hi),
+            most_common_vals: top.map((t) => String(t.v)),
+            most_common_freqs: top.map((t) => Number(t.n) / Number(row.n)),
+          };
+          const have = { ...stats, most_common_vals: stats.most_common_vals ?? [], most_common_freqs: stats.most_common_freqs ?? [] };
+          for (const field of Object.keys(want)) {
+            if (JSON.stringify(have[field]) !== JSON.stringify(want[field])) {
+              failures.push(
+                `${table.name}.${p.name}: stats.${field} is ${JSON.stringify(have[field])} and the rows say ${JSON.stringify(want[field])}`,
+              );
+            }
+          }
+        }
+        if (Array.isArray(table.entry.candidate_keys)) {
+          const declared = [...table.entry.candidate_keys].sort();
+          if (JSON.stringify(declared) !== JSON.stringify([...keys].sort())) {
+            failures.push(`${table.name}: candidate_keys is ${JSON.stringify(declared)} and the rows say ${JSON.stringify(keys.sort())}`);
+          }
+        }
+      }
+      if (counted === 0) notes.push("no column carries stats: a corpus written before the writer counted");
+      return result(failures, notes);
+    },
+  },
 ];
 
 /** Run every guard, or the subset whose ids are given. */

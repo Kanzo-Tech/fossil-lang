@@ -8,7 +8,7 @@
  * reaches SQL text, an error message, a query-cache key or a view definition, and it rotates under
  * a view that stays. `registerFiles` and `dropFiles`, named for DuckDB-WASM's `registerFileURL` and
  * `dropFiles`, are for what a secret cannot reach — an Azure file, which
- * DuckDB-WASM has no extension for, and bytes the page already holds.
+ * DuckDB-WASM has no extension for — and `registerFileBuffer` for bytes the page already holds.
  *
  * **A host should cache Parquet metadata** — `SET parquet_metadata_cache = true`, once, when it
  * boots. A corpus's payload is one file per type with a row group per tile, so its footer lists
@@ -45,6 +45,21 @@ export interface Engine {
   registerFiles(files: Record<string, string>): Promise<void>;
   /** Forget the names. A name the engine does not hold is ignored. */
   dropFiles(names: readonly string[]): Promise<void>;
+  /**
+   * Make a copy of `bytes` readable under `name`, replacing whatever was there. A copy, because
+   * DuckDB-WASM's `registerFileBuffer` transfers the buffer to its worker and would detach the
+   * caller's: the same bytes can then be registered twice. How `attach` reads a corpus a run answered
+   * in memory (`/docs/design/off-the-page`); {@link dropFiles} forgets it.
+   */
+  registerFileBuffer(name: string, bytes: Uint8Array): Promise<void>;
+}
+
+/** One file of a corpus: its path under the corpus's root, and its bytes — what a run into memory
+ *  answers and what `attach` reads with `{ files }`. */
+export interface CorpusFile {
+  /** `fossil.json`, `vertex/<Type>.parquet`, `edge/<Src>_<label>_<Dst>.parquet`, … */
+  path: string;
+  bytes: Uint8Array;
 }
 
 /**

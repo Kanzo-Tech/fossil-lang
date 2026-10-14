@@ -77,10 +77,36 @@ thirteen years of unwithdrawable files and a reference implementation that becam
 anyone deciding it.
 
 <Callout type="warn" title="One clock, running one way">
-**If a corpus reaches a third party before the format is settled, the option is gone.** Nothing is
-published, which is what made a cut like `fossil/1` cheap exactly once. Within `fossil/1` a field is
-only ever added, optional and ignorable; changing what a fixed column or a byte means is `fossil/2`.
+**If a corpus reaches a reader outside the release that wrote it, the option is gone.** Until then
+`fossil/1` changes in place, as the next section says; the day a third party reads a corpus, the
+format string starts to mean a contract and the next change is `fossil/2`.
 </Callout>
+
+## One format, changed in place
+
+`format` stays `fossil/1`, and **the format changes in place: a writer and the reader that reads what
+it writes ship in one release**, and no reader branches on which writer wrote a corpus. Annotations, the
+language column and its role, `rdf:langString` as a column's datatype, and the statistics of
+[the corpus's own facts](/docs/design/facts) are all such changes, and none of them is a version.
+
+The reason is who reads a corpus. Every reader of one is `@fossil-lang/corpus` or the guards beside it,
+released from this repository with `@fossil-lang/executor`, and the one host — keasy — takes both
+together. A second format string would be a branch in every reader to protect a reader that does not
+exist, and a `fossil/1` reader kept alive beside a `fossil/2` one is the backwards compatibility the
+products built on fossil have ruled out. The format string still does the one job it can do: a reader
+refuses a `format` it does not know before it reads a byte of Parquet, so a JSON file that is not a
+corpus is stopped rather than misread.
+
+A change that only adds — an optional field, a column on a table whose columns are listed — leaves
+every corpus already written readable by the new reader, and this batch is all of that kind. A change
+that would make an older corpus unreadable is paid for by **writing the corpora a host keeps again**,
+which costs a run because a corpus is a function of its program and its sources, and never by a
+reader that knows two layouts.
+
+**What would reverse it:** a reader outside the release train — a third party's, or a corpus kept and
+read by a reader older than the writer that wrote it — that must keep reading every corpus. Then the
+version rule is Delta Lake's ([discarded](/docs/design/discarded) carries it): a field a reader may
+ignore stays in the version, anything else raises it, for the corpora that use it.
 
 ## The vocabulary is SQL/PGQ's, declared and not executed
 
@@ -247,6 +273,10 @@ makes for no fact it lacks.
 **What would reverse it.** A consumer whose engine fixes other names for the same facts and cannot
 alias a column — then that consumer's names are the argument, and these move with it. Brevity does
 not: it is what the old names had, and it was the only thing.
+
+What the relations carry beyond these — the edge's `label` and its endpoint keys, a column's
+`term_type`, the annotations, and the counts the writer takes of what it wrote — is
+[the corpus's own facts](/docs/design/facts).
 
 ## What a corpus can carry, and where the format lives
 

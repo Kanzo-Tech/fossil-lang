@@ -14,9 +14,12 @@
 //! TypeDef       := 'type' LBRACE ImportMember (COMMA ImportMember)* RBRACE
 //!                  DEFINE Expression
 //! ImportMember  := IDENT ('as' IDENT)?
-//! TypeDecl      := IriAttr 'type' IDENT NEWLINE INDENT Field+ DEDENT
-//! Field         := IriAttr IDENT SHAPE_SEP TypeExpr NEWLINE
+//! TypeDecl      := DeclAttrs 'type' IDENT NEWLINE INDENT Field+ DEDENT
+//! Field         := DeclAttrs IDENT SHAPE_SEP TypeExpr NEWLINE
+//! DeclAttrs     := DeclAttr+ (NEWLINE DeclAttr+)* NEWLINE?
+//! DeclAttr      := IriAttr | AnnotationAttr
 //! IriAttr       := AT_ATTR LPAREN STRING RPAREN
+//! AnnotationAttr:= AT_ATTR LPAREN STRING COMMA (STRING | LANG_STRING) RPAREN
 //! TypeExpr      := IDENT (LT TypeExpr GT)?
 //! Mapping       := MappingHeader INDENT MappingBody DEDENT
 //! MappingHeader := IDENT SHAPE_SEP ShapeExpr KW_FROM Expression

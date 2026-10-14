@@ -205,8 +205,8 @@ duckdb string    = "*" .
 
    `+` is one-or-more, `?` is zero-or-one, and bare is exactly one.
 
-   Twelve type spellings: seven scalars — String Integer Float Bool Date
-   DateTime SeqString — and five whose meaning depends on the RECEIVER, which is
+   Fourteen type spellings: nine scalars — String Integer Float Bool Date
+   DateTime GYear LangString SeqString — and five whose meaning depends on the RECEIVER, which is
    why they are not scalars: Rows (the relation a verb is a verb of), Predicate
    (a condition over its rows), Column and Binding (positions that NAME rather
    than evaluate), and Aggregate (whose argument names are the PROGRAM's).
@@ -235,7 +235,8 @@ duckdb string    = "*" .
 (* ------------------------------------------------------------------- core/ *)
 (* Empty. It held RDF term constructors no program called, `core.require`,
    which no engine can raise from, and `core.lang`, which dropped its tag
-   because a corpus has nowhere to put one (`/docs/design/declared`). *)
+   because a corpus had nowhere to put one. Its place is `str.lang` below,
+   now that a corpus has a column for the tag (`/docs/design/labels`). *)
 
 (* -------------------------------------------------------------------- seq/ *)
 (* The relation verbs, and a new verb is a ROW rather than a grammar rule —
@@ -292,6 +293,17 @@ fn str.split       = (text: String, separator: String) -> SeqString
 fn str.trim        = (text: String) -> String                   ; expr "trim(%0)" .
 fn str.lower       = (text: String) -> String                   ; expr "lower(%0)" .
 fn str.upper       = (text: String) -> String                   ; expr "upper(%0)" .
+(* `lang` is R2RML's `rr:language` when the tag is a constant and RML's
+   `rml:languageMap` when it is a column — one row, because a tag is an
+   ordinary argument (`/docs/design/labels`). The name is SPARQL's `STRLANG`
+   (§17.4.2.11), and in this language `str.` already is the `STR`.
+   It lowers to a two-field struct, the lexical form then the tag, which the
+   writer splits into a property table's value and `lang` columns. `row` is
+   DuckDB's unnamed struct and DataFusion's `struct`, whose fields are by
+   position; the writer reads them by position. A constant string with a
+   constant tag is the literal `"x"@en`, and the checker refuses the call
+   naming it. *)
+fn str.lang        = (text: String, tag: String) -> LangString  ; expr "row(%0, %1)" .
 
 (* `str.slug` replaced the `fossil_slug` UDF, and THE TEMPLATE IT WAS SPECIFIED
    WITH MATCHED NEITHER RUST IMPLEMENTATION — measurement is the only reason we

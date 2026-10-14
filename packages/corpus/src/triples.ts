@@ -14,12 +14,14 @@ import { ident, lit } from './sql.js';
 const RDF_TYPE = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type';
 const RR_IRI = 'http://www.w3.org/ns/r2rml#IRI';
 const XSD = 'http://www.w3.org/2001/XMLSchema#';
+const RDF_LANG_STRING = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#langString';
 
 /**
  * The columns of the relation, in order, named as SPARQL 1.1 Query Results JSON names a term's
  * members (§3.2.2): the subject's type (`I`) and value (its IRI), the predicate IRI, then the
  * object's type (`I` or `L`), value (IRI or lexical form), datatype IRI (`''` for an IRI) and
- * language tag (`''`; a corpus states none).
+ * language tag — a language-tagged value's, from its property table's `lang`, and `''` for every
+ * other term.
  */
 export const TRIPLES_COLUMNS = ['s_type', 's_value', 'p', 'o_type', 'o_value', 'o_datatype', 'o_lang'] as const;
 
@@ -54,9 +56,13 @@ function lexical(value: string, type: string): string {
   return `${value}::VARCHAR`;
 }
 
-/** The object columns of a value, as the term its column declares. */
-function object(value: string, p: Property): string {
+/**
+ * The object columns of a value, as the term its column declares. `lang` is the SQL of its tag, for
+ * a value beside a `language` column: an `rdf:langString`, the one literal with a tag.
+ */
+function object(value: string, p: Property, lang?: string): string {
   if (p.term_type === RR_IRI) return `'I', ${value}::VARCHAR, '', ''`;
+  if (lang !== undefined) return `'L', ${value}::VARCHAR, ${lit(p.datatype ?? RDF_LANG_STRING)}, ${lang}::VARCHAR`;
   return `'L', ${lexical(value, p.type)}, ${lit(p.datatype ?? natural(p.type))}, ''`;
 }
 
@@ -94,8 +100,10 @@ export function triplesOf(manifest: Manifest, relation: (table: string) => strin
     const from = vertices.get(t.source.references);
     if (p === undefined || from === undefined) continue;
     const value = `e.${ident(p.name)}`;
+    const tag = t.properties.find((c) => c.role === 'language');
+    const lang = tag === undefined ? undefined : `e.${ident(tag.name)}`;
     branches.push(
-      `SELECT 'I', s.${ident(from.identity)}, ${lit(p.iri!)}, ${object(value, p)} ` +
+      `SELECT 'I', s.${ident(from.identity)}, ${lit(p.iri!)}, ${object(value, p, lang)} ` +
         `FROM ${relation(t.name)} AS e ` +
         `JOIN ${relation(from.name)} AS s ON e.${ident(t.source.key)} = s.${ident(from.key)} ` +
         `WHERE ${value} IS NOT NULL`,

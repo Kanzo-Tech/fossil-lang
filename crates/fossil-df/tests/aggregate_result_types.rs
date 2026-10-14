@@ -312,5 +312,7 @@ const fn matches(declared: ScalarTy, actual: &DataType) -> bool {
         // A year is stored as its integer (`/docs/format`).
         ScalarTy::GYear => matches!(actual, DataType::Int32 | DataType::Int64),
         ScalarTy::SeqString => matches!(actual, DataType::List(_) | DataType::LargeList(_)),
+        // `str.lang`'s two-field struct, split by the writer.
+        ScalarTy::LangString => matches!(actual, DataType::Struct(_)),
     }
 }

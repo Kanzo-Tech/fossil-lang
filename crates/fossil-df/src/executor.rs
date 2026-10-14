@@ -280,9 +280,17 @@ impl Executor {
         let graph = crate::execute_graph(&ctx, db, file, &descriptor)
             .await
             .map_err(|e| engine_failure(e, budget.refusal(), db, file))?;
-        drop(ctx);
 
-        let written = crate::write(&graph, storage, &dest).await?;
+        // The writer counts what it wrote on the same session, under the same
+        // pool: a profile that does not fit is refused as any operator is,
+        // before `fossil.json`.
+        let written = crate::write(&graph, &ctx, storage, &dest)
+            .await
+            .map_err(|e| match e {
+                crate::WriteError::Engine(e) => engine_failure(e, budget.refusal(), db, file),
+                other => other.into(),
+            })?;
+        drop(ctx);
         let report = RunReport {
             location: dest,
             dropped: written.dropped,

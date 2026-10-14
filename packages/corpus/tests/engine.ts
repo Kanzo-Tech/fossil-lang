@@ -71,7 +71,11 @@ export async function duckdb(spill?: string): Promise<{
         return arrow.tableFromIPC(bytes);
       }),
     registerFiles: async () => {},
-    dropFiles: async () => {},
+    dropFiles: async (names) => {
+      for (const name of names) db.dropFile(name);
+    },
+    // A copy: DuckDB-WASM takes the buffer, and the caller keeps its own.
+    registerFileBuffer: async (name, bytes) => db.registerFileBuffer(name, bytes.slice()),
   };
   const query = async (sql: string): Promise<Record<string, unknown>[]> =>
     conn.query(sql).toArray().map((row: { toJSON(): Record<string, unknown> }) => row.toJSON());

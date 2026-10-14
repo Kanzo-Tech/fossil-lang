@@ -14,63 +14,22 @@
  * - **`limit`** reads at most that many rows from each source scan, before any join; an edge whose
  *   endpoint fell outside the sample is dropped and counted in `report.dropped`.
  *
+ * **Where it runs is the platform's** (`/docs/design/off-the-page`): in a module worker the
+ * executor starts where `globalThis.Worker` is a constructor — a browser, Deno, Bun — so the page
+ * keeps painting and its Stop can be pressed; in this thread in Node. One worker per run, ended
+ * with it: a wasm instance's memory never shrinks.
+ *
  * **Reporting the outcome is the host's.** A run answers or throws its `FossilError`; what the host
  * records about a job — and how long it keeps trying to — is its own lifecycle.
  */
-import { FossilExecutor } from '../pkg/fossil_df_wasm.js';
-import { resolveDocuments } from '@fossil-lang/storage';
-import { FossilError, isFossilError, type Host, type Profiled, type RunReport } from '@fossil-lang/types';
-import { until, type MissingDocument, type Related, type UnreadDocument } from '@fossil-lang/types/internal';
+import { type RunReport } from '@fossil-lang/types';
+import { until } from '@fossil-lang/types/internal';
 
-import { initFossilExecutor } from './load.js';
+import { failingAsFossil, intoOf, runHere, type FilesRun, type HostRun, type InMemoryRun, type RunOptions } from './here.js';
+import { compiledExecutor, hasWorker } from './load.js';
+import { drive, type Request } from './protocol.js';
 
-/** One file of the written corpus: a path relative to its root + its encoded bytes. */
-export interface CorpusFile {
-  /** `fossil.json`, `vertex/<Type>.parquet` or `edge/<Src>_<label>_<Dst>.parquet`. */
-  path: string;
-  bytes: Uint8Array;
-}
-
-/** What every run takes, whichever way it reads and writes. */
-interface Common {
-  /** At most this many rows read from each source scan, before any join. An edge whose endpoint
-   *  fell outside the sample is dropped and counted in `report.dropped`. */
-  limit?: number;
-  /** What the editor's `FossilProgram.describe` answered, so the run checks the program against
-   *  the columns the editor checked it against.
-   *  Without it every source is an open row. */
-  profiled?: Profiled;
-  /** Stops the run; it rejects with the signal's reason. */
-  signal?: AbortSignal;
-}
-
-/** A run that reads through a host. */
-export interface HostRun extends Common {
-  /** The host that vends the credentials of every read, and of the write into a job. */
-  host: Host;
-  /** `{ job }` — the job's storage, through the `write` credential vended on it; `'memory'` — an
-   *  `InMemory`, answered as `{ report, files }`, with no `write` asked for. */
-  into: { job: string } | 'memory';
-}
-
-/** A run over bytes in hand: there is no host to vend a write, so it writes into memory. */
-export interface FilesRun extends Common {
-  /** Every document and source the program reads, as bytes, by its location. */
-  files: Readonly<Record<string, Uint8Array>>;
-  /** Where the program lives — a URL such as `https://corpus.invalid/hello.fossil` — so the
-   *  relative documents and sources it names resolve beside it. */
-  path: string;
-  into?: 'memory';
-}
-
-/** Where a run reads, where it writes, and how much. */
-export type RunOptions = HostRun | FilesRun;
-
-/** What a run into memory answers: the report and every file of the corpus. */
-export interface InMemoryRun {
-  report: RunReport;
-  files: CorpusFile[];
-}
+export type { FilesRun, HostRun, InMemoryRun, RunOptions } from './here.js';
 
 /**
  * Run a fossil mapping and write its corpus: the report — where it wrote, what the edge joins
@@ -79,98 +38,43 @@ export interface InMemoryRun {
  * Rejects with a `FossilError`: `api/invalid-argument` for `{ files, into: { job } }` or a `limit`
  * that is not a whole number; `document/unread` for a document that could not be read;
  * `run/over-budget` for a run that needed more than the executor's 2 GiB, decided while the graph
- * executes, so nothing has been written; `internal/bug` for a failure fossil did not raise — a
- * panic — the original kept as its cause. A stopped run rejects with the signal's reason, and
- * since `fossil.json` is written last it leaves no corpus.
+ * executes, so nothing has been written; `module/unreachable` for an executor — its module, or its
+ * worker — that could not be loaded; `internal/bug` for a failure fossil did not raise — a panic, a
+ * worker that died — the original kept as its cause. A stopped run rejects with the signal's reason,
+ * and since `fossil.json` is written last it leaves no corpus; in a worker, the worker is ended at
+ * once.
  */
 export function run(program: string, options: HostRun & { into: { job: string } }): Promise<RunReport>;
 export function run(program: string, options: (HostRun & { into: 'memory' }) | FilesRun): Promise<InMemoryRun>;
 export function run(program: string, options: RunOptions): Promise<RunReport | InMemoryRun>;
 export async function run(program: string, options: RunOptions): Promise<RunReport | InMemoryRun> {
-  const { profiled, signal, limit } = options;
-  try {
-    // With a host `into` has no default: a host that wrote `{ host, job }` is refused by the
-    // executor as `api/invalid-argument`, not run into memory.
-    const into = 'files' in options ? (options.into ?? 'memory') : options.into;
-    if ('files' in options && into !== 'memory') {
-      throw FossilError.of('api/invalid-argument', {
-        argument: 'into',
-        expected: "'memory' for a run over files, which has no host to vend a write",
-      });
-    }
-    await until(initFossilExecutor(), signal);
-    const exec = new FossilExecutor(program, 'files' in options ? options.path : undefined);
-    try {
-      if (profiled !== undefined) describedAs(exec, profiled);
-      if ('host' in options) {
-        const { unread } = await resolveDocuments(exec, options.host, { signal });
-        if (unread.length > 0) throw unreadable(unread);
-      } else {
-        const unread = registerFrom(exec, options.files);
-        if (unread.length > 0) throw unreadable(unread);
-      }
-      const reads = 'host' in options ? { host: options.host } : { files: options.files };
-      return (await exec.run(reads, into, limit, signal)) as RunReport | InMemoryRun;
-    } finally {
-      exec.free();
-    }
-  } catch (e) {
-    if (signal?.aborted && e === signal.reason) throw e;
-    if (isFossilError(e)) throw e;
-    throw FossilError.of('internal/bug', { what: 'the run failed outside fossil' }, { cause: e });
-  }
-}
-
-/** What `FossilProgram.describe` gave the editor's checker, into the run's database. */
-function describedAs(exec: FossilExecutor, { descriptors, undescribed }: Profiled): void {
-  for (const descriptor of descriptors) exec.registerInferredDescriptor(JSON.stringify(descriptor));
-  for (const { source, problem } of undescribed) exec.registerUndescribed(source.key, JSON.stringify(problem));
-}
-
-/** `resolveDocuments` over bytes in hand: every document the program names, read from `files`
- *  until nothing new is missing, and the ones `files` does not hold. */
-function registerFrom(exec: FossilExecutor, files: Readonly<Record<string, Uint8Array>>): UnreadDocument[] {
-  const decoder = new TextDecoder();
-  const unread: UnreadDocument[] = [];
-  for (;;) {
-    const missing = (exec.missingDocuments() as MissingDocument[]).filter(
-      (d) => !unread.some((u) => u.key === d.key),
-    );
-    if (missing.length === 0) return unread;
-    for (const d of missing) {
-      const bytes = files[d.location];
-      if (bytes === undefined) {
-        unread.push({ ...d, problem: FossilError.of('source/not-found', { location: d.location }).problem });
-      } else {
-        exec.registerDocument(d.key, decoder.decode(bytes));
-      }
-    }
-  }
-}
-
-/**
- * `document/unread`, every document's problem kept. One is the cause. Several are an
- * `AggregateError` of their `FossilError`s, and each is a `related` entry — its code, data and
- * detail — on the wire, where a problem carries one cause.
- */
-function unreadable(unread: readonly UnreadDocument[]): FossilError<'document/unread'> {
-  const documents = unread.map((d) => d.key);
-  if (unread.length === 1) return FossilError.of('document/unread', { documents }, { cause: unread[0]!.problem });
-  return FossilError.of('document/unread', { documents }, {
-    cause: new AggregateError(
-      unread.map((d) => FossilError.from(d.problem)),
-      `${unread.length} documents could not be read`,
-    ),
-    related: unread.map(
-      ({ problem }) =>
-        ({
-          code: problem.code,
-          data: problem.data,
-          title: problem.title,
-          detail: problem.detail,
-          severity: problem.severity,
-          ...(problem.help === undefined ? {} : { help: problem.help }),
-        }) as Related,
-    ),
+  if (!hasWorker()) return runHere(program, options);
+  const { signal, limit, profiled } = options;
+  return failingAsFossil(signal, async () => {
+    const into = intoOf(options);
+    const module = await until(compiledExecutor(), signal);
+    const request: Request = {
+      type: 'run',
+      module,
+      program,
+      into,
+      limit,
+      profiled,
+      host: 'host' in options,
+      ...('files' in options ? { files: options.files, path: options.path } : {}),
+    };
+    const worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
+    return (await drive(worker, request, {
+      host: 'host' in options ? options.host : undefined,
+      signal,
+      terminate: () => worker.terminate(),
+      crashes: (listener) =>
+        worker.addEventListener('error', (event) => {
+          event.preventDefault();
+          listener(event.message || 'the worker raised an error');
+        }),
+    })) as RunReport | InMemoryRun;
   });
 }
+
+

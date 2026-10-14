@@ -351,6 +351,97 @@
       "x-detail": "\"a quoted member names a column, and a name is a constant: it cannot interpolate\""
     },
     {
+      "description": "A language tag that is not well-formed BCP 47 (RFC 5646 §2.2.9), which RDF 1.1 Concepts §3.3 requires of every language-tagged string.",
+      "properties": {
+        "code": {
+          "enum": [
+            "syntax/invalid-language-tag"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "tag": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "tag"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "Not a language tag",
+      "type": "object",
+      "x-detail": "\"`{tag}` is not a well-formed BCP 47 language tag\""
+    },
+    {
+      "description": "An IRI written as a prefixed name — `\"rdfs:label\"` — whose scheme is a prefix of the `RDFa` Core Initial Context. There are no prefixes, so it would be an IRI whose scheme is `rdfs`; `expands_to` is the IRI meant.",
+      "properties": {
+        "code": {
+          "enum": [
+            "syntax/prefixed-iri"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "expands_to": {
+              "type": "string"
+            },
+            "written": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "expands_to",
+            "written"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "A prefixed name where an IRI belongs",
+      "type": "object",
+      "x-detail": "\"`{written}` is a prefixed name, and an IRI is written whole: `{expands_to}`\""
+    },
+    {
+      "description": "A declared type or a field with two `@iri`s; `name` is the type's or the field's.",
+      "properties": {
+        "code": {
+          "enum": [
+            "syntax/duplicate-iri"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "Two IRIs for one declaration",
+      "type": "object",
+      "x-detail": "\"`{name}` has two `@iri`s, and a declaration has one IRI\""
+    },
+    {
       "description": "A call whose callee is not a name.",
       "properties": {
         "code": {
@@ -1238,6 +1329,79 @@
       "title": "Branches of different types",
       "type": "object",
       "x-detail": "\"the branches of `? :` have different types: {then} and {otherwise}\""
+    },
+    {
+      "description": "A constant language tag outside the languages the property's shape admits (`sh:languageIn`, a `ShEx` language value set).",
+      "properties": {
+        "code": {
+          "enum": [
+            "type/language-not-allowed"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "languages": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "property": {
+              "type": "string"
+            },
+            "tag": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "languages",
+            "property",
+            "tag"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "A language the shape does not admit",
+      "type": "object",
+      "x-detail": "\"`{property}` admits {}, and `{tag}` is not one of them\",\ncode_list(.languages)"
+    },
+    {
+      "description": "`\"x\".lang(\"en\")` — a constant string given a constant tag, which is the literal `\"x\"@en` written a second way.",
+      "properties": {
+        "code": {
+          "enum": [
+            "type/needless-lang"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "call": {
+              "type": "string"
+            },
+            "literal": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "call",
+            "literal"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "A language-tagged literal written as a call",
+      "type": "object",
+      "x-detail": "\"`{call}` is the literal `{literal}`, and a constant is written as one\""
     },
     {
       "description": "A field's type the shape vocabulary cannot carry — `Option<Seq<T>>`, `Ref<String>`, `Option` alone. `reason` says which rule it breaks.",
@@ -2748,6 +2912,79 @@
       "title": "A corpus file could not be written",
       "type": "object",
       "x-detail": "\"`{path}` could not be written\""
+    },
+    {
+      "description": "A row's language tag, read from the data, that is not well-formed BCP 47. The run writes no corpus rather than an `rdf:langString` with no valid tag.",
+      "properties": {
+        "code": {
+          "enum": [
+            "write/invalid-language-tag"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "property": {
+              "type": "string"
+            },
+            "tag": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "property",
+            "tag"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "A value's language tag is not well-formed",
+      "type": "object",
+      "x-detail": "\"`{property}` has a value tagged `{tag}`, which is not a well-formed BCP 47 language tag\""
+    },
+    {
+      "description": "A row's language tag outside the languages the property's shape admits.",
+      "properties": {
+        "code": {
+          "enum": [
+            "write/language-not-allowed"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "languages": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "property": {
+              "type": "string"
+            },
+            "tag": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "languages",
+            "property",
+            "tag"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "A value in a language the shape does not admit",
+      "type": "object",
+      "x-detail": "\"`{property}` admits {}, and a value is tagged `{tag}`\", code_list(.languages)"
     },
     {
       "description": "More vertices than a `u32` `dense_id` can number.",

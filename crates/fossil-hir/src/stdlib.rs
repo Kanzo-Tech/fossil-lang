@@ -557,6 +557,8 @@ pub enum ScalarTy {
     DateTime,
     /// `xsd:gYear`.
     GYear,
+    /// `rdf:langString` — a string and its language tag.
+    LangString,
     /// `Seq<String>` — the one repeated shape v0.1 needs (`str.split`).
     SeqString,
 }
@@ -572,6 +574,7 @@ impl ScalarTy {
             Self::Date => Primitive::Date,
             Self::DateTime => Primitive::DateTime,
             Self::GYear => Primitive::GYear,
+            Self::LangString => Primitive::LangString,
         }
     }
 

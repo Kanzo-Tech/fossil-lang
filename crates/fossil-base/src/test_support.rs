@@ -136,6 +136,7 @@ pub fn decode_lines(_uri: &str, text: &str) -> Result<OutputShapes, Rejection> {
                 iri: tokens.next().unwrap_or_default().to_string(),
                 properties: Vec::new(),
                 span: None,
+                annotations: Vec::new(),
             }),
             Some("prop") => {
                 let Some(shape) = shapes.last_mut() else {
@@ -170,6 +171,8 @@ pub fn decode_lines(_uri: &str, text: &str) -> Result<OutputShapes, Rejection> {
                     // the same answer a `ShExJ` document gives, and consumers
                     // are required to handle it.
                     span: None,
+                    annotations: Vec::new(),
+                    languages: Vec::new(),
                 });
             }
             _ => return Err(Rejection::Malformed(format!("unknown line `{line}`"))),

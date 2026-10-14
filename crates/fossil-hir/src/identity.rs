@@ -385,6 +385,7 @@ fn identity_form(e: &HirExpr) -> String {
         HirExpr::ColumnRef { column, .. } => format!(".{}", fossil_syntax::name::spell(column)),
         HirExpr::FieldRef(name) => format!(".{name}"),
         HirExpr::StringLit(s) => format!("{s:?}"),
+        HirExpr::LangStringLit { value, tag } => format!("{value:?}@{tag}"),
         HirExpr::NullLit => "null".to_string(),
         HirExpr::Interpolation(parts) => {
             let body: String = parts

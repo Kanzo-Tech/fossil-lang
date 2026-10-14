@@ -22,6 +22,9 @@ export type Code =
   | 'syntax/uncalled-function'
   | 'syntax/needless-quotes'
   | 'syntax/hole-in-member-name'
+  | 'syntax/invalid-language-tag'
+  | 'syntax/prefixed-iri'
+  | 'syntax/duplicate-iri'
   | 'syntax/invalid-callee'
   | 'name/unknown-shape'
   | 'name/unknown-property'
@@ -47,6 +50,8 @@ export type Code =
   | 'type/expected-number'
   | 'type/incomparable'
   | 'type/branch-mismatch'
+  | 'type/language-not-allowed'
+  | 'type/needless-lang'
   | 'type/invalid-field-type'
   | 'shape/no-document'
   | 'shape/name-collision'
@@ -91,6 +96,8 @@ export type Code =
   | 'source/unparseable'
   | 'engine/failed'
   | 'write/failed'
+  | 'write/invalid-language-tag'
+  | 'write/language-not-allowed'
   | 'run/too-large'
   | 'storage/no-credential'
   | 'storage/ambiguous-prefix'
@@ -126,6 +133,9 @@ export const CODES: readonly Code[] = [
   'syntax/uncalled-function',
   'syntax/needless-quotes',
   'syntax/hole-in-member-name',
+  'syntax/invalid-language-tag',
+  'syntax/prefixed-iri',
+  'syntax/duplicate-iri',
   'syntax/invalid-callee',
   'name/unknown-shape',
   'name/unknown-property',
@@ -151,6 +161,8 @@ export const CODES: readonly Code[] = [
   'type/expected-number',
   'type/incomparable',
   'type/branch-mismatch',
+  'type/language-not-allowed',
+  'type/needless-lang',
   'type/invalid-field-type',
   'shape/no-document',
   'shape/name-collision',
@@ -195,6 +207,8 @@ export const CODES: readonly Code[] = [
   'source/unparseable',
   'engine/failed',
   'write/failed',
+  'write/invalid-language-tag',
+  'write/language-not-allowed',
   'run/too-large',
   'storage/no-credential',
   'storage/ambiguous-prefix',
@@ -294,6 +308,28 @@ export interface ProblemData {
    * A quoted member with an interpolation hole. A member's name is a constant.
    */
   'syntax/hole-in-member-name': Record<string, never>;
+  /**
+   * A language tag that is not well-formed BCP 47 (RFC 5646 §2.2.9), which RDF 1.1 Concepts §3.3
+   * requires of every language-tagged string.
+   */
+  'syntax/invalid-language-tag': {
+    tag: string;
+  };
+  /**
+   * An IRI written as a prefixed name — `"rdfs:label"` — whose scheme is a prefix of the `RDFa`
+   * Core Initial Context. There are no prefixes, so it would be an IRI whose scheme is `rdfs`;
+   * `expands_to` is the IRI meant.
+   */
+  'syntax/prefixed-iri': {
+    expands_to: string;
+    written: string;
+  };
+  /**
+   * A declared type or a field with two `@iri`s; `name` is the type's or the field's.
+   */
+  'syntax/duplicate-iri': {
+    name: string;
+  };
   /**
    * A call whose callee is not a name.
    */
@@ -484,6 +520,23 @@ export interface ProblemData {
   'type/branch-mismatch': {
     otherwise: string;
     then: string;
+  };
+  /**
+   * A constant language tag outside the languages the property's shape admits (`sh:languageIn`, a
+   * `ShEx` language value set).
+   */
+  'type/language-not-allowed': {
+    languages: string[];
+    property: string;
+    tag: string;
+  };
+  /**
+   * `"x".lang("en")` — a constant string given a constant tag, which is the literal `"x"@en`
+   * written a second way.
+   */
+  'type/needless-lang': {
+    call: string;
+    literal: string;
   };
   /**
    * A field's type the shape vocabulary cannot carry — `Option<Seq<T>>`, `Ref<String>`, `Option`
@@ -810,6 +863,22 @@ export interface ProblemData {
     path: string;
   };
   /**
+   * A row's language tag, read from the data, that is not well-formed BCP 47. The run writes no
+   * corpus rather than an `rdf:langString` with no valid tag.
+   */
+  'write/invalid-language-tag': {
+    property: string;
+    tag: string;
+  };
+  /**
+   * A row's language tag outside the languages the property's shape admits.
+   */
+  'write/language-not-allowed': {
+    languages: string[];
+    property: string;
+    tag: string;
+  };
+  /**
    * More vertices than a `u32` `dense_id` can number.
    */
   'run/too-large': {
@@ -956,6 +1025,9 @@ export const TITLES: { readonly [C in Code]: string } = {
   'syntax/uncalled-function': 'A function named and not called',
   'syntax/needless-quotes': 'Quotes around an identifier',
   'syntax/hole-in-member-name': 'A hole in a member\'s name',
+  'syntax/invalid-language-tag': 'Not a language tag',
+  'syntax/prefixed-iri': 'A prefixed name where an IRI belongs',
+  'syntax/duplicate-iri': 'Two IRIs for one declaration',
   'syntax/invalid-callee': 'Not a function name',
   'name/unknown-shape': 'Not a shape this program declares',
   'name/unknown-property': 'Not a property the shape declares',
@@ -981,6 +1053,8 @@ export const TITLES: { readonly [C in Code]: string } = {
   'type/expected-number': 'Not a number',
   'type/incomparable': 'Values that cannot be compared',
   'type/branch-mismatch': 'Branches of different types',
+  'type/language-not-allowed': 'A language the shape does not admit',
+  'type/needless-lang': 'A language-tagged literal written as a call',
   'type/invalid-field-type': 'Not a field type',
   'shape/no-document': 'No shape document',
   'shape/name-collision': 'Two predicates share a name',
@@ -1025,6 +1099,8 @@ export const TITLES: { readonly [C in Code]: string } = {
   'source/unparseable': 'A source does not parse',
   'engine/failed': 'The query engine failed',
   'write/failed': 'A corpus file could not be written',
+  'write/invalid-language-tag': 'A value\'s language tag is not well-formed',
+  'write/language-not-allowed': 'A value in a language the shape does not admit',
   'run/too-large': 'The graph has too many vertices',
   'storage/no-credential': 'No credential was vended',
   'storage/ambiguous-prefix': 'More than one prefix was vended',
@@ -1060,6 +1136,9 @@ export type DetailedCode =
   | 'syntax/uncalled-function'
   | 'syntax/needless-quotes'
   | 'syntax/hole-in-member-name'
+  | 'syntax/invalid-language-tag'
+  | 'syntax/prefixed-iri'
+  | 'syntax/duplicate-iri'
   | 'syntax/invalid-callee'
   | 'name/unknown-shape'
   | 'name/unknown-field'
@@ -1076,6 +1155,7 @@ export type DetailedCode =
   | 'type/expected-number'
   | 'type/incomparable'
   | 'type/branch-mismatch'
+  | 'type/needless-lang'
   | 'type/invalid-field-type'
   | 'shape/name-collision'
   | 'shape/missing-required-property'
@@ -1110,6 +1190,7 @@ export type DetailedCode =
   | 'source/unparseable'
   | 'engine/failed'
   | 'write/failed'
+  | 'write/invalid-language-tag'
   | 'run/too-large'
   | 'storage/no-credential'
   | 'storage/ambiguous-prefix'
@@ -1144,6 +1225,9 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'syntax/uncalled-function': (d) => `\`${d.function}\` names a function but does not call it; fossil has no function values`,
   'syntax/needless-quotes': (d) => `\`"${d.name}"\` is an identifier, so it is written bare: \`.${d.name}\``,
   'syntax/hole-in-member-name': (_) => `a quoted member names a column, and a name is a constant: it cannot interpolate`,
+  'syntax/invalid-language-tag': (d) => `\`${d.tag}\` is not a well-formed BCP 47 language tag`,
+  'syntax/prefixed-iri': (d) => `\`${d.written}\` is a prefixed name, and an IRI is written whole: \`${d.expands_to}\``,
+  'syntax/duplicate-iri': (d) => `\`${d.name}\` has two \`@iri\`s, and a declaration has one IRI`,
   'syntax/invalid-callee': (d) => `\`${d.callee}\` calls something that is not a function name; only a catalogued name may be called`,
   'name/unknown-shape': (d) => `\`${d.shape}\` is not a shape this program declares`,
   'name/unknown-field': (d) => `\`${d.field}\` is not a field of \`${d.relation}\``,
@@ -1160,6 +1244,7 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'type/expected-number': (d) => `${d.operand} must be a number, and it is ${d.actual}`,
   'type/incomparable': (d) => `cannot compare ${d.left} with ${d.right} using \`${d.operator}\``,
   'type/branch-mismatch': (d) => `the branches of \`? :\` have different types: ${d.then} and ${d.otherwise}`,
+  'type/needless-lang': (d) => `\`${d.call}\` is the literal \`${d.literal}\`, and a constant is written as one`,
   'type/invalid-field-type': (d) => `\`${d.written}\` is not a field type: ${d.reason}`,
   'shape/name-collision': (d) => `two predicates of ${d.shape} are both called \`${d.name}\``,
   'shape/missing-required-property': (d) => `\`${d.mapping}\` never writes \`${d.property}\`, and ${d.shape} requires it`,
@@ -1194,6 +1279,7 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'source/unparseable': (d) => `the source \`${d.location}\` does not parse`,
   'engine/failed': (_) => `the query engine failed`,
   'write/failed': (d) => `\`${d.path}\` could not be written`,
+  'write/invalid-language-tag': (d) => `\`${d.property}\` has a value tagged \`${d.tag}\`, which is not a well-formed BCP 47 language tag`,
   'run/too-large': (d) => `the graph has ${d.vertices} vertices; a \`dense_id\` is a u32`,
   'storage/no-credential': (d) => `the host vended no ${d.access} credential for ${d.scope}`,
   'storage/ambiguous-prefix': (d) => `${d.scope} vends ${d.count} prefixes, and one was expected`,

@@ -190,11 +190,31 @@ LBRACE, RBRACE := '{' '}'
    `@`+ALPHA for the same reason: a user's keys are arbitrary and you cannot
    appropriate `id`.
 
-   Two names are accepted, by two productions, and the position tells them
-   apart: `@iri` above a type declaration and before each of its fields,
-   `@subject` as the first line of a mapping body. Any other name is an
-   error. *)
+   Three names are accepted, by three productions, and the position tells
+   them apart: `@iri` and `@annotation` above a type declaration and before each
+   of its fields, `@subject` as the first line of a mapping body. Any other
+   name is an error. *)
 AT_ATTR        := '@' IDENT
+
+(* A language-tagged string: a STRING with no hole, and a language tag
+   written against its closing quote. It is Turtle's and SPARQL's and ShExC's
+   spelling of the same RDF literal (SPARQL 1.1 [145] LANGTAG, ShExC's
+   LANGTAG), and the tag's lexical rule is theirs. `"birth date"@en`.
+
+   ONE token, and the `@` must touch the quote: `"a" @en` is a STRING and an
+   AT_ATTR, which is an error in every position. That is Rust's rule for a
+   literal's suffix — part of the literal, never a token beside it — and it
+   is what keeps `@en-US` from lexing as `@en`, MINUS, `US`: the run is read
+   by the literal's own rule, and AT_ATTR never sees it.
+
+   That the tag is WELL-FORMED, which LANGTAG's lexical rule does not say
+   (`@abcdefghi` passes it), is the checker's: BCP 47 §2.2.9, as RDF 1.1
+   Concepts §3.3 requires of a literal's tag.
+
+   `docs/programs/labels` spells it, and `/docs/design/labels` is the
+   argument and says what it costs. *)
+LANG_STRING    := STRING LANGTAG
+LANGTAG        := '@' LETTER+ ('-' (LETTER | DIGIT)+)*
 
 
 (* ═══ GRAMMAR ═══ *)
@@ -209,7 +229,7 @@ TopLevel            := SourceDef
                      | TypeDecl
                      | Mapping
 
-(* `TypeDecl` starts with `AT_ATTR` (its `@iri`), and LL(1) survives it:
+(* `TypeDecl` starts with `AT_ATTR` (its attributes), and LL(1) survives it:
    `AT_ATTR` has exactly one derivation at top level. `SubjectAssign` and a
    `Field`'s `IriAttr`, the other things that lex as one, sit inside a body
    reachable only through an `INDENT`. That is disambiguation rule 6 — one
@@ -306,13 +326,65 @@ ImportMember        := IDENT ('as' IDENT)?
    A declared type and an imported one are the same thing below the parser:
    both lower to the neutral shape vocabulary the checker reads, and the
    checker never learns which one it got. *)
-TypeDecl            := IriAttr 'type' IDENT NEWLINE INDENT Field+ DEDENT
-Field               := IriAttr IDENT SHAPE_SEP TypeExpr NEWLINE
+TypeDecl            := DeclAttrs 'type' IDENT NEWLINE INDENT Field+ DEDENT
+Field               := DeclAttrs IDENT SHAPE_SEP TypeExpr NEWLINE
+
+(* A type's and a field's attributes: on the line of the field, as above, or
+   STACKED on the lines above it, one or more per line, when there are
+   several — F#'s attribute on its own line, the form the field's line
+   already cites:
+
+       @iri("https://schema.org/Person")
+       type Laureate
+           @iri("https://schema.org/name")
+           name: Seq<LangString>
+
+           @iri("https://schema.org/birthDate")
+           @annotation("http://www.w3.org/2000/01/rdf-schema#label", "birth date"@en)
+           @annotation("http://www.w3.org/2000/01/rdf-schema#label", "fecha de nacimiento"@es)
+           birthDate: Date
+
+   The NEWLINE that ends an attribute line is the only new token in a body,
+   and it is optional exactly once: before the field's name. A stacked
+   attribute starts its line at the field's column, so it opens no block and
+   closes none. The blank line between two fields is the lexical layer's
+   (a blank line touches no indentation and is no NEWLINE), so a body may
+   space its fields without a production saying so.
+
+   `@iri` is still exactly one per type and per field, and `@annotation` any
+   number. The parser counts them as it reads the run — a missing `@iri` is
+   `syntax/missing-iri`, a second `syntax/duplicate-iri` — and the grammar
+   admits attributes, because their arity is a fact of the name. *)
+DeclAttrs           := DeclAttr+ (NEWLINE DeclAttr+)* NEWLINE?
+DeclAttr            := IriAttr | AnnotationAttr
 IriAttr             := AT_ATTR LPAREN STRING RPAREN
+
+(* An annotation: a predicate and an RDF object, ShEx 2.1's Annotation
+   (§5.9, `{ predicate, object }`) and ShExC's `// predicate object` (its
+   production [58]), in this language's attribute and its strings.
+
+   The predicate is a whole IRI in a string, as `@iri`'s is: there is no
+   PrefixDecl for `rdfs:label` to expand through, and the checker refuses a
+   string whose scheme is a prefix of the RDFa Core Initial Context
+   (`rdfs:`, `skos:`, `schema:`, …), naming the IRI it abbreviates, because
+   `"rdfs:label"` is otherwise a well-formed absolute IRI whose scheme is
+   `rdfs` and nothing would say it was a mistake.
+
+   The object is a literal: a STRING, `xsd:string`, or a LANG_STRING. Neither
+   carries a hole, for the reason a Member's STRING carries none: an
+   attribute's argument is a constant (JLS §9.7.1's rule, the one `@subject`
+   left the attribute form over). An IRI as the object, and a typed literal,
+   are not spelled; `/docs/design/discarded` says what brings each back.
+
+   The token's text decides the production, as rule 6 says: `@iri` takes one
+   argument and `@annotation` two. *)
+AnnotationAttr      := AT_ATTR LPAREN STRING COMMA AnnotationObject RPAREN
+AnnotationObject    := STRING | LANG_STRING
 
 (* The type of a field, in the names the checker already prints: a primitive
    (`String`, `Integer`, `Float`, `Bool`, `Date`, `DateTime`, `Time`, `GYear`,
-   `AnyUri`), and three constructors — `Option<T>` zero or one, `Seq<T>` zero or
+   `AnyUri`, and `LangString` — `rdf:langString`, a string and its language
+   tag), and three constructors — `Option<T>` zero or one, `Seq<T>` zero or
    more, `Ref<T>` a reference to a node of the declared or imported type `T`,
    which is an edge. A bare `T` is exactly one. Which names are valid in which
    position is the checker's: `Ref<String>` parses and is refused.
@@ -549,7 +621,17 @@ PrimaryExpr         := Literal
 (* ─── Literals ─── *)
 
 Literal             := INTEGER | FLOAT | STRING | BOOL | NULL
+                     | LANG_STRING
                      | InterpolatedString
+
+(* A LANG_STRING in an expression is a CONSTANT `LangString`, the same token
+   an annotation's object is. A per-row value takes its tag from a call,
+   `NameRow.name.lang(NameRow.lang)` (R2RML's `rr:language` when the tag is
+   a constant, RML's `rml:languageMap` when it is a column), and the call is
+   refused on a constant string with a constant tag, naming the literal: one
+   spelling per term, the rule a quoted Member already follows. There is no
+   tag on an InterpolatedString: a string with a hole is not a constant, and
+   its tag is the call's. *)
 
 (* A string with at least one hole. One spelling, one node. *)
 InterpolatedString  := STRING_OPEN (STRING_TEXT | Interpolation)* STRING_CLOSE
@@ -608,12 +690,18 @@ Interpolation       := INTERP_OPEN Expression RBRACE
 (*       `type`.  One token of lookahead, and the word stays available as  *)
 (*       a column name.                                                    *)
 (*                                                                         *)
-(*  6. `@iri` vs `@subject`                                                *)
-(*     - Both lex as AT_ATTR; position decides. At top level, above a      *)
+(*  6. `@iri` and `@annotation` vs `@subject`                              *)
+(*     - All three lex as AT_ATTR; position decides. At top level, above a *)
 (*       `type IDENT`, and at the start of a line inside a declaration's   *)
-(*       body → IriAttr. As the first line inside a mapping body →         *)
-(*       SubjectAssign. Neither name is valid in the other's position, and *)
-(*       no third name is valid anywhere.                                  *)
+(*       body → DeclAttr, and the token's text picks IriAttr or            *)
+(*       AnnotationAttr. As the first line inside a mapping body →         *)
+(*       SubjectAssign. No name is valid in another's position, and no     *)
+(*       fourth name is valid anywhere.                                    *)
+(*     - Inside a declaration's body, a line that starts with AT_ATTR is   *)
+(*       attributes, and the field they belong to is the first line that   *)
+(*       does not: one token of lookahead at each line start.              *)
+(*     - `@` touching a string's closing quote is not AT_ATTR at all: it   *)
+(*       is the LANGTAG of a LANG_STRING, read by the lexer.               *)
 (*                                                                         *)
 (*  7. `as`                                                                *)
 (*     - Contextual, in exactly two places: `IDENT as IDENT` in an import  *)

@@ -95,6 +95,11 @@ pub struct ShapeConstraint<'db> {
     /// [`fossil_graph_schema::PropertyConstraint::span`]. Paired with
     /// [`ResolvedShape::document`], it is a label in the `.shex`.
     pub span: Option<Span>,
+    /// The language ranges a tagged value must match —
+    /// [`PropertyConstraint::languages`]. Empty is any.
+    pub languages: Vec<String>,
+    /// The field's annotations — [`PropertyConstraint::annotations`].
+    pub annotations: Vec<fossil_graph_schema::Annotation>,
 }
 
 /// One predicate of a mapping's target shape, by the short name a body writes —
@@ -177,6 +182,8 @@ impl<'db> ResolvedShape<'db> {
                 term: c.term.clone(),
                 occurs: c.occurs,
                 span: c.span,
+                languages: c.languages.clone(),
+                annotations: c.annotations.clone(),
             })
             .collect();
         Self {
@@ -597,6 +604,8 @@ mod tests {
             occurs: Occurs::ONE,
             // A test fixture, not a document: no text to point into.
             span: None,
+            annotations: Vec::new(),
+            languages: Vec::new(),
         }
     }
 

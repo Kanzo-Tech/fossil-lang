@@ -371,6 +371,7 @@ fn parse_primary(p: &mut Parser) {
             | SyntaxKind::BOOL
             | SyntaxKind::NULL
             | SyntaxKind::STRING
+            | SyntaxKind::LANG_STRING
             | SyntaxKind::IDENT,
         ) => {
             p.start(SyntaxKind::LITERAL_EXPR);

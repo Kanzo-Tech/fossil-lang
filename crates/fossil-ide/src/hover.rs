@@ -89,9 +89,11 @@ pub fn hover(
 
     // Target-side: resolve the mapping's ShEx shape against the host descriptor
     // and find the constraint matching the hovered property's predicate IRI.
+    let mut annotations = Vec::new();
     let target_block = resolved.predicate_iri.as_deref().and_then(|pred| {
         let shape = resolve_target_shape(db, resolved.mapping)?;
         let constraint = shape.constraint_for(pred)?;
+        annotations.clone_from(&constraint.annotations);
         // `value_ty == None` means "any value" (no datatype narrowing) — render
         // it as `Iri` (the constraint's default node type), consistent with the
         // checker's `unwrap_or_else(|| Iri)` in `check_property`.
@@ -101,7 +103,8 @@ pub fn hover(
         Some(ty_str)
     });
 
-    let markdown = render_markdown(db, &entry, target_block.as_deref());
+    let mut markdown = render_markdown(db, &entry, target_block.as_deref());
+    markdown.push_str(&render_annotations(&annotations));
     Some(HoverInfo {
         markdown,
         range: resolved.range,
@@ -251,6 +254,36 @@ pub fn render_markdown(
     }
 }
 
+/// A field's annotations, one line each: the predicate's local name and the
+/// object as Turtle writes it — `label "fecha de nacimiento"@es`. Nothing when
+/// it has none.
+#[must_use]
+pub fn render_annotations(annotations: &[fossil_graph_schema::Annotation]) -> String {
+    use fossil_graph_schema::AnnotationObject;
+    let lines: Vec<String> = annotations
+        .iter()
+        .map(|a| {
+            let object = match &a.object {
+                AnnotationObject::Iri(iri) => format!("<{iri}>"),
+                AnnotationObject::Literal(l) => match (&l.language, &l.datatype) {
+                    (Some(tag), _) => format!("{:?}@{tag}", l.value),
+                    (None, Some(datatype)) => format!("{:?}^^<{datatype}>", l.value),
+                    (None, None) => format!("{:?}", l.value),
+                },
+            };
+            format!(
+                "- `{}` {object}",
+                fossil_graph_schema::local_name(&a.predicate)
+            )
+        })
+        .collect();
+    if lines.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n{}", lines.join("\n"))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -338,6 +371,19 @@ User : Person from users
 
     /// A `FieldRef` resolved against a source row carries `InputDescriptor`
     /// provenance + the field's type, and `render_markdown` surfaces that type.
+    #[test]
+    fn a_fields_annotations_are_one_line_each() {
+        use fossil_graph_schema::{Annotation, RDFS_LABEL};
+        assert_eq!(render_annotations(&[]), "");
+        assert_eq!(
+            render_annotations(&[
+                Annotation::literal(RDFS_LABEL, "birth date", Some("en")),
+                Annotation::literal(RDFS_LABEL, "nacimiento", None),
+            ]),
+            "\n\n- `label` \"birth date\"@en\n- `label` \"nacimiento\""
+        );
+    }
+
     #[test]
     fn render_markdown_for_fieldref_with_forward_propagation() {
         let db = bare_db();

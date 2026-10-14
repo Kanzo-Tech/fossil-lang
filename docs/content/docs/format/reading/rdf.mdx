@@ -22,7 +22,7 @@ await engine.query(`SELECT * FROM "${job}".triples`);   // what a SHACL engine v
 | `o_type` | the object's type: `I` for an IRI, `L` for a literal |
 | `o_value` | the object's IRI, or its lexical form |
 | `o_datatype` | a literal's datatype IRI, and `''` for an IRI |
-| `o_lang` | a literal's language tag, and `''`: a corpus states none |
+| `o_lang` | a language-tagged literal's tag, from its property table's `lang` column, and `''` for every other term |
 
 The suffixes are SPARQL 1.1 Query Results JSON's names for a term's parts (§3.2.2): `type`,
 `value`, `datatype` and the language.
@@ -62,6 +62,13 @@ column's is.
   the view writes both. Nothing is derived from the column's `type` then: a shape that says
   `xsd:gYear` over an `int32` column makes `xsd:gYear` literals. The `declared-term` guard holds every
   stored value to the term its column declares, so the literal is always well-typed.
+- **A language-tagged value is an `rdf:langString`.** A column whose `datatype` is `rdf:langString`
+  lives in a property table beside a `lang` column, and each row is the literal whose lexical form is
+  the value and whose tag is `lang` — `"Maria Skłodowska-Curie"@pl` — with `o_datatype`
+  `rdf:langString`, as RDF 1.1 Concepts §3.3 gives every language-tagged string. Tags compare without
+  case (RFC 5646 §2.1.1), so a reader that matches them lower-cases both sides.
+- **Annotations make no triple.** A table's or a column's `annotations` describe the schema, and a
+  local label stated about a predicate IRI would become a global one.
 - **Where the shape declared no term, the literal is the column's natural one** — the natural
   mapping of SQL types to XSD of [R2RML §10.2](https://www.w3.org/TR/r2rml/#natural-mapping), the W3C
   Recommendation for relational data as RDF:

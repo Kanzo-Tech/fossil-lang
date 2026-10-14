@@ -78,6 +78,7 @@ User : Person from users
         vec![
             "contains",
             "ends_with",
+            "lang",
             "length",
             "lower",
             "replace",

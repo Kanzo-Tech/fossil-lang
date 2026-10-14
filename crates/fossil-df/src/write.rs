@@ -29,21 +29,29 @@ use datafusion::parquet::schema::types::ColumnPath;
 use fossil_graph_schema::{Cardinality, Failure, NodeType, Problem, Term};
 use fossil_storage::{Storage, StorageError};
 
+use datafusion::arrow::array::{Array, StringArray};
+use datafusion::error::DataFusionError;
+use datafusion::prelude::SessionContext;
+use fossil_base::sources::InferredColumn;
+use fossil_graph_schema::Primitive;
+
 use crate::corpus::generated::{
     ColumnRole, EDGE_COLUMNS, ENDPOINT_DST, ENDPOINT_SRC, PAYLOAD_ADDRESS, PAYLOAD_COLUMNS,
-    PAYLOAD_IDENTITY, PROPERTY_COLUMNS, WriterColumn,
+    PAYLOAD_IDENTITY, PROPERTY_COLUMNS, PROPERTY_LANGUAGE, WriterColumn,
 };
 use crate::corpus::manifest::{
     EdgeTable as EdgeEntry, Endpoint, Format, MANIFEST_FILE, Manifest, Property,
-    PropertyTable as PropertyEntry, ROW_GROUP_ROWS, RR_IRI, RR_LITERAL, VertexTable as VertexEntry,
-    data_type_name, edge_path, edge_table_name, property_path, property_table_name, vertex_path,
+    PropertyTable as PropertyEntry, ROW_GROUP_ROWS, RR_IRI, RR_LITERAL, Stats,
+    VertexTable as VertexEntry, data_type_name, edge_path, edge_table_name, property_path,
+    property_table_name, vertex_path,
 };
+use crate::facts::{self, Written as Counted};
 use crate::report::EdgeDrops;
 use crate::{EdgeTable, Graph};
 
 /// What [`write`](fn@write) answers: the manifest it wrote, and what the edge join
 /// discarded — the one fact the corpus cannot hold about itself.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Written {
     /// `fossil.json`, as written.
     pub manifest: Manifest,
@@ -77,6 +85,21 @@ pub enum WriteError {
     /// table name, so the corpus would hold one of them and lose the other.
     #[error("the corpus would declare `{table}` twice")]
     DuplicateTable { table: String },
+    /// A row of a language-tagged property whose tag, read from the data, is
+    /// not well-formed BCP 47.
+    #[error("`{property}` has a value tagged `{tag}`, which is not BCP 47")]
+    InvalidLanguageTag { property: String, tag: String },
+    /// A row's tag outside the languages the property's shape admits.
+    #[error("`{property}` has a value tagged `{tag}`, outside {languages:?}")]
+    LanguageNotAllowed {
+        property: String,
+        tag: String,
+        languages: Vec<String>,
+    },
+    /// Counting what was written: the engine's refusal, `run/over-budget`
+    /// among them, which the executor reads off its pool.
+    #[error("counting the corpus: {0}")]
+    Engine(#[from] DataFusionError),
     /// Putting a file into the store; the store's refusal, kept whole.
     #[error("write `{path}`: {source}")]
     Store {
@@ -102,6 +125,19 @@ impl From<WriteError> for Failure {
                 Self::new(Problem::WriteFailed { path }).caused_by(Self::from(source))
             }
             WriteError::DuplicateTable { table } => Self::new(Problem::DuplicateTable { table }),
+            WriteError::InvalidLanguageTag { property, tag } => {
+                Self::new(Problem::WriteInvalidLanguageTag { property, tag })
+            }
+            WriteError::LanguageNotAllowed {
+                property,
+                tag,
+                languages,
+            } => Self::new(Problem::WriteLanguageNotAllowed {
+                property,
+                tag,
+                languages,
+            }),
+            WriteError::Engine(e) => Self::new(Problem::EngineFailed {}).caused_by(e),
             e @ WriteError::UnknownType { .. } => {
                 bug("a relation names a vertex type with no table").caused_by(e)
             }
@@ -112,20 +148,32 @@ impl From<WriteError> for Failure {
     }
 }
 
-/// Write `graph` under `dest`, a prefix ending in `/` that `storage` covers.
+/// Write `graph` under `dest`, a prefix ending in `/` that `storage` covers,
+/// counting what it wrote on `ctx`, the run's session, under its pool.
 ///
 /// Vertex types, relations and multi-valued properties are written in the
 /// order the compiled schema lists them, which is the order `fossil.json` lists
 /// them in. The rows are the executor's, as they are: a vertex type sorted by
-/// `dense_id`, a relation by `(src, dst)`, a property by `(src, value)`.
+/// `dense_id`, a relation by `(src, dst)`, a property by `(src, value)` — and
+/// `lang` after them for a language-tagged one.
+///
+/// **The writer counts what it wrote** after the last table is final and
+/// before `fossil.json` ([`crate::facts`]): the counts are part of the commit,
+/// and a corpus never exists without them (`/docs/design/facts`).
 ///
 /// # Errors
 ///
 /// [`WriteError`] on the first failure. Nothing is written after it, and
 /// `fossil.json` never is; two tables under one name are refused before
-/// anything is.
+/// anything is, and a tag a language-tagged value carries is held to BCP 47 and
+/// to the shape's languages before its table is.
 #[tracing::instrument(skip_all, fields(dest = %dest))]
-pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Written, WriteError> {
+pub async fn write(
+    graph: &Graph,
+    ctx: &SessionContext,
+    storage: &Storage,
+    dest: &str,
+) -> Result<Written, WriteError> {
     let empty: Vec<RecordBatch> = Vec::new();
     let multi = |node: &'_ NodeType| {
         node.properties
@@ -155,21 +203,28 @@ pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Writt
         }
     }
 
+    // What is counted once every table is written, in manifest order: the
+    // vertex tables, the property tables, the edge tables.
+    let mut counted_vertices = Vec::new();
+    let mut counted_properties = Vec::new();
     let mut vertex_tables = Vec::with_capacity(graph.schema.nodes.len());
     let mut property_tables = Vec::new();
     for node in &graph.schema.nodes {
         let vertex = graph.vertices.iter().find(|v| v.label == node.label);
         let batches = vertex.map_or(empty.as_slice(), |v| v.batches.as_slice());
         let path = vertex_path(&node.label);
-        let (bytes, properties) = vertex_parquet(node, batches)?;
+        let (bytes, properties, laid) = vertex_parquet(node, batches)?;
         put(storage, dest, &path, bytes).await?;
+        counted_vertices.push(counted(&node.label, laid, &properties, node));
         vertex_tables.push(VertexEntry {
             name: node.label.clone(),
             iri: node.iri.clone().filter(|i| !i.is_empty()),
+            annotations: node.annotations.clone(),
             path,
             key: PAYLOAD_ADDRESS.to_string(),
             identity: PAYLOAD_IDENTITY.to_string(),
             record_count: rows(batches),
+            candidate_keys: Vec::new(),
             derived_from: vertex.map(|v| v.derived_from.clone()).unwrap_or_default(),
             properties,
         });
@@ -179,8 +234,10 @@ pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Writt
             let batches = values.map_or(empty.as_slice(), |p| p.batches.as_slice());
             let name = property_table_name(&node.label, &property);
             let path = property_path(&name);
-            let (bytes, value) = property_parquet(node, &property, batches)?;
+            hold_tags(node, &property, batches)?;
+            let (bytes, properties, laid) = property_parquet(node, &property, batches)?;
             put(storage, dest, &path, bytes).await?;
+            counted_properties.push(counted(&name, laid, &properties, node));
             property_tables.push(PropertyEntry {
                 name,
                 path,
@@ -189,16 +246,14 @@ pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Writt
                     references: node.label.clone(),
                 },
                 record_count: rows(batches),
+                candidate_keys: Vec::new(),
                 derived_from: values.map(|p| p.derived_from.clone()).unwrap_or_default(),
-                properties: PROPERTY_COLUMNS
-                    .iter()
-                    .map(fixed)
-                    .chain(std::iter::once(value))
-                    .collect(),
+                properties,
             });
         }
     }
 
+    let mut counted_edges = Vec::new();
     let mut edge_tables = Vec::with_capacity(graph.schema.edges.len());
     let mut dropped = Vec::with_capacity(graph.schema.edges.len());
     for edge in &graph.schema.edges {
@@ -216,11 +271,20 @@ pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Writt
         });
         let batches = table.map_or(empty.as_slice(), |t| t.batches.as_slice());
         let path = edge_path(&name);
-        put(storage, dest, &path, edge_parquet(batches)?).await?;
+        let (bytes, laid) = edge_parquet(batches)?;
+        put(storage, dest, &path, bytes).await?;
+        let properties: Vec<Property> = EDGE_COLUMNS.iter().map(fixed).collect();
+        counted_edges.push(Counted {
+            name: name.clone(),
+            schema: laid.0,
+            batches: laid.1,
+            columns: properties.iter().map(writer_column).collect(),
+        });
         edge_tables.push(EdgeEntry {
             name: name.clone(),
             label: edge.label.clone(),
             iri: edge.iri.clone().filter(|i| !i.is_empty()),
+            annotations: edge.annotations.clone(),
             path,
             source: Endpoint {
                 key: ENDPOINT_SRC.to_string(),
@@ -231,13 +295,56 @@ pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Writt
                 references: edge.destination.clone(),
             },
             record_count: rows(batches),
+            candidate_keys: Vec::new(),
             derived_from: table.map(|t| t.derived_from.clone()).unwrap_or_default(),
-            properties: EDGE_COLUMNS.iter().map(fixed).collect(),
+            properties,
         });
         dropped.push(EdgeDrops {
             table: name,
             dropped: table.map_or(0, |t| t.dropped),
         });
+    }
+
+    let counted: Vec<Counted> = counted_vertices
+        .into_iter()
+        .chain(counted_properties)
+        .chain(counted_edges)
+        .collect();
+    let facts = facts::count_written(ctx, &counted).await?;
+    let tables = vertex_tables
+        .iter_mut()
+        .map(|t| (t.record_count, &mut t.candidate_keys, &mut t.properties))
+        .chain(
+            property_tables
+                .iter_mut()
+                .map(|t| (t.record_count, &mut t.candidate_keys, &mut t.properties)),
+        )
+        .chain(
+            edge_tables
+                .iter_mut()
+                .map(|t| (t.record_count, &mut t.candidate_keys, &mut t.properties)),
+        );
+    for ((rows, keys, properties), (candidate_keys, stats)) in tables.zip(facts.tables) {
+        *keys = candidate_keys;
+        for (property, s) in properties.iter_mut().zip(stats) {
+            // `pg_stats`' frequency: the share of the table's rows, nulls
+            // among them, that hold the value.
+            #[allow(clippy::cast_precision_loss)]
+            let freq = |count: u64| count as f64 / rows.max(1) as f64;
+            let (vals, freqs) = s
+                .top_values
+                .into_iter()
+                .map(|t| (t.value, freq(t.count)))
+                .unzip();
+            property.stats = Some(Stats {
+                null_count: s.null_count,
+                distinct_count: s.distinct_count,
+                min_value: s.min_value,
+                max_value: s.max_value,
+                most_common_vals: vals,
+                most_common_freqs: freqs,
+            });
+        }
     }
 
     let manifest = Manifest {
@@ -254,6 +361,99 @@ pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Writt
     )
     .await?;
     Ok(Written { manifest, dropped })
+}
+
+/// A table as it is counted: its laid-out rows, and each column's primitive —
+/// read off the manifest entry, so the counts and the document cannot describe
+/// two different tables.
+fn counted(
+    name: &str,
+    (schema, batches): (SchemaRef, Vec<RecordBatch>),
+    properties: &[Property],
+    node: &NodeType,
+) -> Counted {
+    Counted {
+        name: name.to_string(),
+        schema,
+        batches,
+        columns: properties
+            .iter()
+            .map(|p| {
+                if p.role.is_some() {
+                    return writer_column(p);
+                }
+                let primitive = node.properties.iter().find(|d| d.name == p.name).map_or(
+                    Primitive::String,
+                    |d| match d.datatype {
+                        // The tag is beside it: the column holds the form.
+                        Primitive::LangString => Primitive::String,
+                        other => other,
+                    },
+                );
+                InferredColumn {
+                    name: p.name.as_str().into(),
+                    primitive: if p.term_type.as_deref() == Some(RR_IRI) {
+                        Primitive::AnyUri
+                    } else {
+                        primitive
+                    },
+                }
+            })
+            .collect(),
+    }
+}
+
+/// A column the writer emits, as the counts see it: an identity holds IRIs, a
+/// tag text, and every other role an integer.
+fn writer_column(p: &Property) -> InferredColumn {
+    let primitive = match p.role {
+        Some(ColumnRole::Identity) => Primitive::AnyUri,
+        Some(ColumnRole::Language) => Primitive::String,
+        _ => Primitive::Integer,
+    };
+    InferredColumn {
+        name: p.name.as_str().into(),
+        primitive,
+    }
+}
+
+/// Every tag of a language-tagged property's rows, held to BCP 47 (RFC 5646
+/// §2.2.9) and to the languages its shape admits. A tag read from the data is
+/// only seen by the run, and a bad one refuses it: RML's fallback would write
+/// an untagged string into an `rdf:langString` column (`/docs/design/labels`).
+fn hold_tags(node: &NodeType, property: &str, batches: &[RecordBatch]) -> Result<(), WriteError> {
+    let languages = node
+        .properties
+        .iter()
+        .find(|p| p.name == property)
+        .map(|p| p.languages.clone())
+        .unwrap_or_default();
+    for batch in batches {
+        let Some(tags) = batch.column_by_name(PROPERTY_LANGUAGE) else {
+            return Ok(());
+        };
+        let tags = datafusion::arrow::compute::cast(tags, &DataType::Utf8)?;
+        let Some(tags) = tags.as_any().downcast_ref::<StringArray>() else {
+            continue;
+        };
+        for i in 0..tags.len() {
+            let tag = if tags.is_null(i) { "" } else { tags.value(i) };
+            if !fossil_hir::terms::well_formed_language_tag(tag) {
+                return Err(WriteError::InvalidLanguageTag {
+                    property: property.to_string(),
+                    tag: tag.to_string(),
+                });
+            }
+            if !fossil_graph_schema::language_matches(tag, &languages) {
+                return Err(WriteError::LanguageNotAllowed {
+                    property: property.to_string(),
+                    tag: tag.to_string(),
+                    languages,
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 fn rows(batches: &[RecordBatch]) -> u64 {
@@ -281,6 +481,8 @@ fn fixed(column: &WriterColumn) -> Property {
         datatype: None,
         nullable: false,
         role: Some(column.role),
+        annotations: Vec::new(),
+        stats: None,
     }
 }
 
@@ -289,7 +491,7 @@ fn fixed(column: &WriterColumn) -> Property {
 /// this is a size/time trade, not a format decision. Level 3 is zstd's own
 /// default. Measured 2026-09-30 on `docs/programs/shop` over 60,000 generated
 /// people and 180,000 orders, through the wasm executor: 13.47 MB uncompressed,
-/// 2.31 MB here, and no measurable change in the run's time. DuckDB-WASM reads
+/// 2.31 MB here, and no measurable change in the run's time. `DuckDB`-WASM reads
 /// it: `packages/corpus/integration/round-trip.test.ts` opens what this writes.
 const ZSTD_LEVEL: i32 = 3;
 
@@ -313,22 +515,30 @@ fn properties(delta: &[&str]) -> WriterProperties {
     builder.build()
 }
 
+/// A table's rows laid out as it is written: `schema` over each batch's
+/// columns, which only renames and sets nullability.
+type Laid = (SchemaRef, Vec<RecordBatch>);
+
 /// Encode `batches` as one Parquet of `schema` under [`properties`], a row
-/// group per [`ROW_GROUP_ROWS`]. Each batch is taken column for column: the
-/// schema only renames and sets nullability.
+/// group per [`ROW_GROUP_ROWS`], and answer the rows as laid out — what the
+/// writer counts once every table is written.
 fn encode(
     schema: &SchemaRef,
     batches: &[RecordBatch],
     delta: &[&str],
-) -> Result<Bytes, WriteError> {
+) -> Result<(Bytes, Laid), WriteError> {
+    let laid: Vec<RecordBatch> = batches
+        .iter()
+        .map(|b| RecordBatch::try_new(Arc::clone(schema), b.columns().to_vec()))
+        .collect::<Result<_, _>>()?;
     let mut writer = ArrowWriter::try_new(Vec::new(), Arc::clone(schema), Some(properties(delta)))?;
-    for batch in batches {
-        writer.write(&RecordBatch::try_new(
-            Arc::clone(schema),
-            batch.columns().to_vec(),
-        )?)?;
+    for batch in &laid {
+        writer.write(batch)?;
     }
-    Ok(Bytes::from(writer.into_inner()?))
+    Ok((
+        Bytes::from(writer.into_inner()?),
+        (Arc::clone(schema), laid),
+    ))
 }
 
 /// One vertex type's table: the executor's rows as they are — `dense_id`,
@@ -337,7 +547,7 @@ fn encode(
 fn vertex_parquet(
     node: &NodeType,
     batches: &[RecordBatch],
-) -> Result<(Bytes, Vec<Property>), WriteError> {
+) -> Result<(Bytes, Vec<Property>, Laid), WriteError> {
     let mut properties: Vec<Property> = PAYLOAD_COLUMNS.iter().map(fixed).collect();
 
     let Some(first) = batches.first() else {
@@ -362,8 +572,8 @@ fn vertex_parquet(
             fields.push(Field::new(&p.name, DataType::Utf8, true));
             properties.push(program(node, &p.name, &DataType::Utf8, true));
         }
-        let bytes = encode(&Arc::new(Schema::new(fields)), &[], &[PAYLOAD_ADDRESS])?;
-        return Ok((bytes, properties));
+        let (bytes, laid) = encode(&Arc::new(Schema::new(fields)), &[], &[PAYLOAD_ADDRESS])?;
+        return Ok((bytes, properties, laid));
     };
 
     let input = first.schema();
@@ -380,15 +590,15 @@ fn vertex_parquet(
             }
         })
         .collect();
-    let bytes = encode(&Arc::new(Schema::new(fields)), batches, &[PAYLOAD_ADDRESS])?;
-    Ok((bytes, properties))
+    let (bytes, laid) = encode(&Arc::new(Schema::new(fields)), batches, &[PAYLOAD_ADDRESS])?;
+    Ok((bytes, properties, laid))
 }
 
 /// A program's column of `node`, as the manifest lists it. The type is the
 /// column's, as written: `properties` describes the file a reader opens, and
 /// the checker's belief about a column the executor never introspected is not
-/// what the bytes hold. The IRI and the term are the shape's, copied as it
-/// declared them.
+/// what the bytes hold. The IRI, the term and the annotations are the shape's,
+/// copied as it declared them.
 fn program(node: &NodeType, name: &str, arrow: &DataType, nullable: bool) -> Property {
     let declared = node.properties.iter().find(|p| p.name == name);
     let term = declared.and_then(|p| p.term.as_ref());
@@ -406,32 +616,58 @@ fn program(node: &NodeType, name: &str, arrow: &DataType, nullable: bool) -> Pro
         }),
         nullable,
         role: None,
+        annotations: declared.map(|p| p.annotations.clone()).unwrap_or_default(),
+        stats: None,
     }
 }
 
 /// One multi-valued property's table: `src`, then the value under the
 /// property's name, a row per value and none for an absent one — the
-/// executor's rows, sorted by both.
+/// executor's rows, sorted by both — and, for a language-tagged value, its
+/// tag under `lang` (`corpus.bnf`).
 fn property_parquet(
     node: &NodeType,
     property: &str,
     batches: &[RecordBatch],
-) -> Result<(Bytes, Property), WriteError> {
+) -> Result<(Bytes, Vec<Property>, Laid), WriteError> {
+    let endpoints: Vec<&WriterColumn> = PROPERTY_COLUMNS
+        .iter()
+        .filter(|c| c.role == ColumnRole::Endpoint)
+        .collect();
+    let tagged = node
+        .properties
+        .iter()
+        .any(|p| p.name == property && p.datatype == fossil_graph_schema::Primitive::LangString);
     let value = batches.first().map_or(DataType::Utf8, |b| {
-        b.schema().field(PROPERTY_COLUMNS.len()).data_type().clone()
+        b.schema().field(endpoints.len()).data_type().clone()
     });
-    let fields: Vec<Field> = PROPERTY_COLUMNS
+    let trailing: Vec<&WriterColumn> = PROPERTY_COLUMNS
+        .iter()
+        .filter(|c| tagged && c.role == ColumnRole::Language)
+        .collect();
+    let fields: Vec<Field> = endpoints
         .iter()
         .map(|c| Field::new(c.name, DataType::UInt32, false))
         .chain(std::iter::once(Field::new(property, value.clone(), false)))
+        .chain(
+            trailing
+                .iter()
+                .map(|c| Field::new(c.name, DataType::Utf8, false)),
+        )
         .collect();
-    let bytes = encode(&Arc::new(Schema::new(fields)), batches, &[ENDPOINT_SRC])?;
-    Ok((bytes, program(node, property, &value, false)))
+    let (bytes, laid) = encode(&Arc::new(Schema::new(fields)), batches, &[ENDPOINT_SRC])?;
+    let properties = endpoints
+        .iter()
+        .map(|c| fixed(c))
+        .chain(std::iter::once(program(node, property, &value, false)))
+        .chain(trailing.iter().map(|c| fixed(c)))
+        .collect();
+    Ok((bytes, properties, laid))
 }
 
 /// One relation's table: `src`, `dst`, sorted by both — the executor's
 /// `src_dense`/`dst_dense`, which are global `dense_id`s, renamed.
-fn edge_parquet(batches: &[RecordBatch]) -> Result<Bytes, WriteError> {
+fn edge_parquet(batches: &[RecordBatch]) -> Result<(Bytes, Laid), WriteError> {
     let schema: SchemaRef = Arc::new(Schema::new(
         EDGE_COLUMNS
             .iter()

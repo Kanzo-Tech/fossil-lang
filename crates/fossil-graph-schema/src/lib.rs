@@ -57,7 +57,8 @@ pub mod span;
 
 pub use problem::{CODES, Failure, Foreign, Problem, Related, Severity, TEMPLATES};
 pub use shapes::{
-    Occurs, OutputShapes, PropertyConstraint, Rejection, SUBJECT_COLUMN, Shape, local_name,
+    Occurs, OutputShapes, PropertyConstraint, Rejection, SUBJECT_COLUMN, Shape, language_matches,
+    local_name,
 };
 pub use span::Span;
 
@@ -85,6 +86,9 @@ pub struct NodeType {
     /// The literal-valued properties. The key (subject IRI) is implicit and
     /// uniform — it is not listed here.
     pub properties: Vec<Property>,
+    /// The type's annotations, as its shape or its declaration carries them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<Annotation>,
 }
 
 /// One literal property column of a node type.
@@ -106,6 +110,14 @@ pub struct Property {
     pub term: Option<Term>,
     /// Single- vs multi-valued (drives dedup vs keep-all in a materializer).
     pub cardinality: Cardinality,
+    /// The field's annotations.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<Annotation>,
+    /// For a [`Primitive::LangString`], the basic language ranges a value's
+    /// tag must match (RFC 4647 §3.3.1) — SHACL's `sh:languageIn`, a `ShEx`
+    /// language value set. Empty is any tag.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub languages: Vec<String>,
 }
 
 /// One edge type — a predicate that references one node type from another
@@ -124,6 +136,9 @@ pub struct EdgeType {
     pub destination: String,
     /// Single- vs multi-valued (at most one edge per source vs keep-all).
     pub cardinality: Cardinality,
+    /// The relation's annotations — those of the `Ref` field that declares it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annotations: Vec<Annotation>,
 }
 
 /// The RDF term a shape document declares for a property's values, **as the
@@ -175,6 +190,12 @@ pub enum Primitive {
     Time,
     GYear,
     AnyUri,
+    /// `rdf:langString` — a string and its BCP 47 language tag, RDF 1.1
+    /// Concepts §3.3. Named for the datatype's local name, as [`Self::AnyUri`]
+    /// and [`Self::GYear`] are for theirs (`/docs/design/labels`). A property of
+    /// this type is always a property table with a `lang` column, whatever its
+    /// cardinality ([`OutputShapes::to_graph_schema`]).
+    LangString,
 }
 
 /// Cardinality of a property or edge — the only distinction a materializer
@@ -203,7 +224,7 @@ impl std::fmt::Display for Primitive {
 impl Primitive {
     /// The lattice, in declaration order — what a declared field's type is
     /// read against ([`Self::from_name`]).
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 10] = [
         Self::String,
         Self::Integer,
         Self::Float,
@@ -213,6 +234,7 @@ impl Primitive {
         Self::Time,
         Self::GYear,
         Self::AnyUri,
+        Self::LangString,
     ];
 
     /// The primitive a program writes as `name` — `String`, `GYear`, `AnyUri`:
@@ -246,6 +268,9 @@ impl Primitive {
             "time" => Self::Time,
             "gYear" => Self::GYear,
             "anyURI" => Self::AnyUri,
+            // RDF's, not XSD's: the one datatype of the lattice outside the
+            // `xsd:` namespace, read by its local name like the rest.
+            "langString" => Self::LangString,
             _ => return None,
         })
     }
@@ -267,6 +292,71 @@ impl Primitive {
             Self::Time => "http://www.w3.org/2001/XMLSchema#time",
             Self::GYear => "http://www.w3.org/2001/XMLSchema#gYear",
             Self::AnyUri => "http://www.w3.org/2001/XMLSchema#anyURI",
+            Self::LangString => RDF_LANG_STRING,
+        }
+    }
+}
+
+/// `rdf:langString`, the datatype of every language-tagged string (RDF 1.1
+/// Concepts §3.3) — what [`Primitive::LangString`] is written as.
+pub const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
+
+/// `rdfs:label` — the one predicate a label has in a corpus, whichever document
+/// gave it (`/docs/design/labels`).
+pub const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
+
+/// `rdfs:comment` — the one predicate a description has in a corpus.
+pub const RDFS_COMMENT: &str = "http://www.w3.org/2000/01/rdf-schema#comment";
+
+/// A `ShEx` 2.1 `Annotation` (§5.9): a predicate and an RDF object, about a
+/// type, a field or a relation — never about the data. `ShExJ`'s shape, with one
+/// word changed: a literal's datatype IRI is `datatype`, the word a corpus
+/// column already uses for it, where `ShExJ` writes `type`
+/// (`/docs/design/labels`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct Annotation {
+    /// The predicate, a whole IRI.
+    pub predicate: String,
+    /// `ShExJ`'s `objectValue`: an IRI as a bare string, or a literal.
+    pub object: AnnotationObject,
+}
+
+/// An annotation's object — `ShExJ`'s `objectValue`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(untagged)]
+pub enum AnnotationObject {
+    /// An IRI, written as a bare string.
+    Iri(String),
+    /// A literal: `ShExJ`'s `ObjectLiteral`.
+    Literal(ObjectLiteral),
+}
+
+/// A literal object: its lexical form, and a language tag or a datatype IRI.
+/// A plain string carries neither.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct ObjectLiteral {
+    /// The lexical form.
+    pub value: String,
+    /// The BCP 47 tag of a language-tagged string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    /// The datatype IRI of a typed literal; `ShExJ`'s `type`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub datatype: Option<String>,
+}
+
+impl Annotation {
+    /// A string-valued annotation, language-tagged when `language` is given —
+    /// the two forms a program's `@annotation` writes.
+    #[must_use]
+    pub fn literal(predicate: &str, value: &str, language: Option<&str>) -> Self {
+        Self {
+            predicate: predicate.to_string(),
+            object: AnnotationObject::Literal(ObjectLiteral {
+                value: value.to_string(),
+                language: language.map(str::to_string),
+                datatype: None,
+            }),
         }
     }
 }
@@ -335,7 +425,10 @@ mod tests {
                         iri: Some("https://example.org/name".into()),
                         term: None,
                         cardinality: Cardinality::Single,
+                        annotations: Vec::new(),
+                        languages: Vec::new(),
                     }],
+                    annotations: Vec::new(),
                 },
                 NodeType {
                     label: "Order".into(),
@@ -346,7 +439,10 @@ mod tests {
                         iri: Some("https://example.org/total".into()),
                         term: None,
                         cardinality: Cardinality::Single,
+                        annotations: Vec::new(),
+                        languages: Vec::new(),
                     }],
+                    annotations: Vec::new(),
                 },
             ],
             edges: vec![EdgeType {
@@ -355,6 +451,7 @@ mod tests {
                 source: "Order".into(),
                 destination: "Person".into(),
                 cardinality: Cardinality::Single,
+                annotations: Vec::new(),
             }],
         }
     }

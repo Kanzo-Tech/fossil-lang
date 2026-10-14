@@ -90,6 +90,8 @@ pub enum Role {
     Identity,
     /// One end of a relation: a vertex's global `dense_id`.
     Endpoint,
+    /// A language-tagged value's BCP 47 tag.
+    Language,
 }
 
 impl Role {
@@ -98,6 +100,7 @@ impl Role {
             "address" => Some(Self::Address),
             "identity" => Some(Self::Identity),
             "endpoint" => Some(Self::Endpoint),
+            "language" => Some(Self::Language),
             _ => None,
         }
     }
@@ -108,6 +111,7 @@ impl Role {
             Self::Address => "Address",
             Self::Identity => "Identity",
             Self::Endpoint => "Endpoint",
+            Self::Language => "Language",
         }
     }
 
@@ -117,6 +121,7 @@ impl Role {
             Self::Address => "ADDRESS",
             Self::Identity => "IDENTITY",
             Self::Endpoint => "ENDPOINT",
+            Self::Language => "LANGUAGE",
         }
     }
 }
@@ -370,6 +375,7 @@ const fn role_doc(role: Role) -> &'static str {
         Role::Address => "the row's rank in the ordering, which a new subject renumbers",
         Role::Identity => "what a bookmark keys on, and what survives a rebuild",
         Role::Endpoint => "one end of a relation, a vertex's global `dense_id`",
+        Role::Language => "the BCP 47 tag of a language-tagged value, beside it",
     }
 }
 

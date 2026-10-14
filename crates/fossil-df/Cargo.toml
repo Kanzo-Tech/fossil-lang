@@ -33,6 +33,10 @@ doctest = false
 tracing = { workspace = true }
 fossil-base = { path = "../fossil-base" }
 fossil-hir = { path = "../fossil-hir" }
+# The writer counts what it wrote with the profiler's plan, rendered on
+# DataFusion (`facts`). It links no engine and is in the wasm closure already,
+# through `fossil-wasm`, so the gate gains no crate (`/docs/design/facts`).
+fossil-profile = { path = "../fossil-profile" }
 fossil-mir = { path = "../fossil-mir" }
 # The one IO path of a run: sources read and the corpus written through
 # `object_store` stores built from vended credentials. `object-store` only — the
@@ -126,11 +130,6 @@ tempfile = { workspace = true }
 # `.fossil` reaches yet — so it spells `SmolStr` directly.
 smol_str = { workspace = true }
 fossil-graph-schema = { path = "../fossil-graph-schema" }
-# `tests/support/native.rs` is the native test host the deleted `fossil` binary
-# was: its check half describes each source before the compile
-# (`tests/support/profile.rs`, the profiler's plan on `duckdb`), and the
-# executor never does.
-fossil-profile = { path = "../fossil-profile" }
 # `tests/census` counts `PROPERTY` nodes in the CST.
 fossil-syntax = { path = "../fossil-syntax" }
 # `tests/programs.rs` renders each diagnostic as `fossil check` rendered it —

@@ -79,6 +79,11 @@ prefixmap = "0.3"
 # here is a no-op for today's graph and the guard for tomorrow's.
 oxttl = { version = "0.2", features = ["rdf-12"] }
 oxrdf = { version = "0.3", features = ["rdf-12"] }
+# BCP 47 well-formedness (RFC 5646 §2.2.9) for a language tag the checker and
+# the writer hold to it, as RDF 1.1 Concepts §3.3 requires of a literal's tag.
+# Already in the lock through `oxrdf`, which validates its own tags with it, so
+# naming it adds no crate to the graph or the wasm closure.
+oxilangtag = "0.1"
 
 # === Did-you-mean diagnostics ===
 strsim = "0.11"

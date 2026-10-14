@@ -287,6 +287,14 @@ fn lower_mapping<'db>(
                 term: term.clone(),
                 single_valued: true,
             }),
+            HirExpr::LangStringLit { .. } => props.push(VProp {
+                name: pred_local,
+                value: lower_property_value(db, sink, &prop.value, &m.source_binding, None),
+                ty: Ty::new(db, TyKind::Primitive(Primitive::LangString)),
+                rdf_uri: iri.clone(),
+                term: term.clone(),
+                single_valued: true,
+            }),
             HirExpr::IntLit(_) => props.push(VProp {
                 name: pred_local,
                 value: lower_property_value(db, sink, &prop.value, &m.source_binding, None),
@@ -987,6 +995,7 @@ fn operator_ty<'db>(
         },
         HirExpr::ColumnRef { column, .. } | HirExpr::FieldRef(column) => field_ty(column.as_str()),
         HirExpr::FloatLit(_) => prim(Primitive::Float),
+        HirExpr::LangStringLit { .. } => prim(Primitive::LangString),
         HirExpr::IntLit(_) => prim(Primitive::Integer),
         HirExpr::BoolLit(_) => prim(Primitive::Bool),
         // A row whose return is not a scalar is a VERB of the algebra, and no
@@ -1028,6 +1037,7 @@ fn contains_edge(e: &HirExpr) -> bool {
         }),
         HirExpr::NullLit
         | HirExpr::StringLit(_)
+        | HirExpr::LangStringLit { .. }
         | HirExpr::IntLit(_)
         | HirExpr::FloatLit(_)
         | HirExpr::BoolLit(_)
@@ -1097,6 +1107,7 @@ fn substitute_edges<'db>(
         HirExpr::FieldRef(_)
         | HirExpr::ColumnRef { .. }
         | HirExpr::StringLit(_)
+        | HirExpr::LangStringLit { .. }
         | HirExpr::NullLit
         | HirExpr::IntLit(_)
         | HirExpr::FloatLit(_)
@@ -1153,6 +1164,14 @@ fn lower_property_value<'db>(
             column: field.clone(),
         },
         HirExpr::StringLit(s) => Expr::LitString(s.clone()),
+        // A constant `rdf:langString` is built as a per-row one is: the
+        // `str.lang` row over two constants, so the engine has one rendering
+        // of a tagged string and the writer one shape to split.
+        HirExpr::LangStringLit { value, tag } => Expr::Call {
+            func: SmolStr::new_static("str.lang"),
+            args: vec![Expr::LitString(value.clone()), Expr::LitString(tag.clone())],
+            ty: Ty::new(db, TyKind::Primitive(Primitive::LangString)),
+        },
         HirExpr::Interpolation(parts) => {
             lower_interpolation(db, sink, parts, source_binding, assert_line)
         }
@@ -1375,6 +1394,7 @@ fn is_per_row(e: &HirExpr) -> bool {
         // A literal is the same for every row, and `null` is a literal.
         HirExpr::NullLit
         | HirExpr::StringLit(_)
+        | HirExpr::LangStringLit { .. }
         | HirExpr::IntLit(_)
         | HirExpr::FloatLit(_)
         | HirExpr::BoolLit(_) => false,

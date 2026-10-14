@@ -135,6 +135,17 @@ pub enum Token {
     #[token("\"", string_end)]
     String,
 
+    // A language-tagged string — `LANG_STRING := STRING LANGTAG` (grammar.bnf,
+    // LANG_STRING): a string with no hole and a tag written against its
+    // closing quote, `"birth date"@en`. ONE token, so `@en-US` is read by the
+    // tag's own rule and never as `AtAttr`, `Minus`, `Ident`; `"a" @en`, with
+    // a space, is a `String` and an `AtAttr`. Longest match picks this over
+    // `String` exactly when the tag touches the quote. No `{` inside: a string
+    // with a hole is not a constant and takes no tag, so `"{x}"@en` stays a
+    // string the parser refuses beside a stray attribute.
+    #[regex(r#""([^"\\{\n]|\\[^\n])*"@[A-Za-z]+(-[A-Za-z0-9]+)*"#)]
+    LangString,
+
     // No `<https://…>` IRI token: a constant IRI is written as a STRING, so `<`
     // and `>` have one reading each and this lexer never guesses between a
     // comparison and the start of an IRI.
@@ -512,6 +523,28 @@ mod tests {
             ]
         );
         assert_eq!(just_kinds("a#b"), vec![Token::Ident, Token::Ident]);
+    }
+
+    #[test]
+    fn a_tag_touching_the_quote_is_one_lang_string() {
+        assert_eq!(just_kinds(r#""birth date"@en"#), vec![Token::LangString]);
+        assert_eq!(
+            just_kinds(r#""Straße"@de-CH-1996"#),
+            vec![Token::LangString]
+        );
+        // A space between is a string and an attribute, which no production
+        // takes.
+        assert_eq!(
+            just_kinds(r#""a" @en"#),
+            vec![Token::String, Token::Whitespace, Token::AtAttr]
+        );
+        // A string with a hole takes no tag.
+        assert_eq!(
+            just_kinds(r#""{x}"@en"#),
+            vec![Token::String, Token::AtAttr]
+        );
+        // And a plain string is still a string.
+        assert_eq!(just_kinds(r#""en""#), vec![Token::String]);
     }
 
     #[test]

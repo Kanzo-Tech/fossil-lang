@@ -27,7 +27,7 @@ export const TAG_BY_NAME: Readonly<Partial<Record<TokenKind, Tag>>> = {
   KwOr: tags.logicOperator,
   KwNot: tags.logicOperator,
 
-  // `@subject`, `@iri` — a marker naming what the line is for. Not
+  // `@subject`, `@iri`, `@annotation` — a marker naming what the line is for. Not
   // `annotation`: themes draw that as faint, comment-adjacent text, and these
   // are the most load-bearing words in a mapping.
   AtAttr: tags.special(tags.variableName),
@@ -41,6 +41,8 @@ export const TAG_BY_NAME: Readonly<Partial<Record<TokenKind, Tag>>> = {
   Float: tags.float,
   Integer: tags.integer,
   String: tags.string,
+  // `"birth date"@en` — a string whose tag is part of it, so one colour.
+  LangString: tags.string,
 
   // `Ident` — see the header. No tag, on purpose.
 

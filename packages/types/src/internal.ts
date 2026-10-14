@@ -11,3 +11,4 @@ export type { GrantPlan, LocationName, MissingDocument } from './wire.gen.js';
 export { RENEW_BEFORE_MS } from './wire.gen.js';
 export { attachCause, type Related } from './error.js';
 export { MODULE_MS, boot, loader, until, within } from './deadline.js';
+export { failureOf, rebuilt, type Failed } from './failure.js';

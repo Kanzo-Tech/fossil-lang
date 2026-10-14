@@ -64,6 +64,9 @@ beforeAll(async () => {
     async dropFiles(names) {
       for (const name of names) if (lent.delete(name)) db.dropFile(name);
     },
+    async registerFileBuffer(name, bytes) {
+      db.registerFileBuffer(name, bytes.slice());
+    },
   };
 }, 60_000);
 

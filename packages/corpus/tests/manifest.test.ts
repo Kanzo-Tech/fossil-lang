@@ -17,6 +17,7 @@ const SCHEMA = JSON.parse(
 ) as object;
 const validate = new Ajv({ strict: true, allErrors: true, allowUnionTypes: true })
   .addFormat('uint64', { type: 'number', validate: (n: number) => Number.isSafeInteger(n) && n >= 0 })
+  .addFormat('double', { type: 'number', validate: (n: number) => Number.isFinite(n) })
   .compile(SCHEMA);
 /** The instance paths `v` fails at. */
 const errors = (v: unknown): string[] =>

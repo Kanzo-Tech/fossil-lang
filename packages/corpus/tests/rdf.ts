@@ -15,23 +15,28 @@ export type Triple = string;
 export const nt = {
   iri: (value: string): string => `<${value}>`,
   literal: (value: string, datatype: string): string => `${JSON.stringify(value)}^^<${datatype}>`,
+  tagged: (value: string, tag: string): string => `${JSON.stringify(value)}@${tag}`,
 };
+
+const RDF_LANG_STRING = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#langString';
 
 type Rows = (sql: string) => Promise<Record<string, unknown>[]>;
 
 /**
  * The rows of a `triples` relation, as N-Triples. A row that is not a triple this format can make — a
- * subject that is not an IRI, an object kind other than `I` and `L`, a datatype on an IRI or a
- * language on anything — is refused by name rather than spelled.
+ * subject that is not an IRI, an object kind other than `I` and `L`, a datatype on an IRI, or a
+ * language on anything but an `rdf:langString` — is refused by name rather than spelled.
  */
 export async function read(relation: string, query: Rows): Promise<Set<Triple>> {
   const out = new Set<Triple>();
   for (const r of await query(`SELECT * FROM ${relation}`)) {
     const [sk, s, p, ok, o, od, ol] = ['s_type', 's_value', 'p', 'o_type', 'o_value', 'o_datatype', 'o_lang'].map((c) => String(r[c]));
-    if (sk !== 'I' || ol !== '' || !((ok === 'I' && od === '') || (ok === 'L' && od !== ''))) {
+    const tagged = ok === 'L' && od === RDF_LANG_STRING;
+    if (sk !== 'I' || (ol !== '') !== tagged || !((ok === 'I' && od === '') || (ok === 'L' && od !== ''))) {
       throw new Error(`not a triple of a corpus: ${JSON.stringify(r)}`);
     }
-    out.add(`${nt.iri(s!)} ${nt.iri(p!)} ${ok === 'I' ? nt.iri(o!) : nt.literal(o!, od!)}`);
+    const object = ok === 'I' ? nt.iri(o!) : tagged ? nt.tagged(o!, ol!) : nt.literal(o!, od!);
+    out.add(`${nt.iri(s!)} ${nt.iri(p!)} ${object}`);
   }
   return out;
 }

@@ -581,6 +581,8 @@ Contact : Person from users
                     // A hand-built table, not a decoded document: there is no
                     // `.shex` for a range to point into.
                     span: None,
+                    languages: Vec::new(),
+                    annotations: Vec::new(),
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("personas.shex"),
@@ -653,6 +655,8 @@ Orders : Order from Purchase
                     // A hand-built table, not a decoded document: there is no
                     // `.shex` for a range to point into.
                     span: None,
+                    languages: Vec::new(),
+                    annotations: Vec::new(),
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("personas.shex"),
@@ -742,6 +746,8 @@ Orders : Order from Purchase
                     occurs: Occurs::ONE,
                     // What the decoder found — see `crate::shex::spans`.
                     span: Some(fossil_graph_schema::Span::new(60, 70)),
+                    languages: Vec::new(),
+                    annotations: Vec::new(),
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("shape.shex"),
@@ -847,6 +853,8 @@ Orders : Order from Purchase
                     term: None,
                     occurs: Occurs::ONE,
                     span: None,
+                    languages: Vec::new(),
+                    annotations: Vec::new(),
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("shape.shex"),
@@ -907,6 +915,8 @@ fn a_wrong_type_with_no_repair_says_nothing() {
                     term: None,
                     occurs: Occurs::ONE,
                     span: None,
+                    languages: Vec::new(),
+                    annotations: Vec::new(),
                 }],
                 rejections: Vec::new(),
                 document: smol_str::SmolStr::from("personas.shex"),

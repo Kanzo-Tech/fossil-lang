@@ -82,6 +82,7 @@ pub mod spans;
 /// how it compiles. It lives here because the checker resolves a call against
 /// it, and the checker cannot depend on a crate that depends on the checker.
 pub mod stdlib;
+pub mod terms;
 pub mod ty;
 
 // Type re-exports only; the query functions are intentionally kept under their

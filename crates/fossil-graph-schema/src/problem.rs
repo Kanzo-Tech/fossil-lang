@@ -357,6 +357,25 @@ catalogue! {
     #[error("a quoted member names a column, and a name is a constant: it cannot interpolate")]
     HoleInMemberName {},
 
+    /// A language tag that is not well-formed BCP 47 (RFC 5646 §2.2.9), which
+    /// RDF 1.1 Concepts §3.3 requires of every language-tagged string.
+    "syntax/invalid-language-tag", "Not a language tag",
+    #[error("`{tag}` is not a well-formed BCP 47 language tag")]
+    InvalidLanguageTag { tag: String },
+
+    /// An IRI written as a prefixed name — `"rdfs:label"` — whose scheme is a
+    /// prefix of the `RDFa` Core Initial Context. There are no prefixes, so it
+    /// would be an IRI whose scheme is `rdfs`; `expands_to` is the IRI meant.
+    "syntax/prefixed-iri", "A prefixed name where an IRI belongs",
+    #[error("`{written}` is a prefixed name, and an IRI is written whole: `{expands_to}`")]
+    PrefixedIri { written: String, expands_to: String },
+
+    /// A declared type or a field with two `@iri`s; `name` is the type's or
+    /// the field's.
+    "syntax/duplicate-iri", "Two IRIs for one declaration",
+    #[error("`{name}` has two `@iri`s, and a declaration has one IRI")]
+    DuplicateIri { name: String },
+
     /// A call whose callee is not a name.
     "syntax/invalid-callee", "Not a function name",
     #[error("`{callee}` calls something that is not a function name; only a catalogued name may be called")]
@@ -511,6 +530,18 @@ catalogue! {
     "type/branch-mismatch", "Branches of different types",
     #[error("the branches of `? :` have different types: {then} and {otherwise}")]
     BranchMismatch { then: String, otherwise: String },
+
+    /// A constant language tag outside the languages the property's shape
+    /// admits (`sh:languageIn`, a `ShEx` language value set).
+    "type/language-not-allowed", "A language the shape does not admit",
+    #[error("`{property}` admits {}, and `{tag}` is not one of them", code_list(.languages))]
+    LanguageNotAllowed { property: String, tag: String, languages: Vec<String> },
+
+    /// `"x".lang("en")` — a constant string given a constant tag, which is the
+    /// literal `"x"@en` written a second way.
+    "type/needless-lang", "A language-tagged literal written as a call",
+    #[error("`{call}` is the literal `{literal}`, and a constant is written as one")]
+    NeedlessLang { call: String, literal: String },
 
     /// A field's type the shape vocabulary cannot carry — `Option<Seq<T>>`,
     /// `Ref<String>`, `Option` alone. `reason` says which rule it breaks.
@@ -790,6 +821,18 @@ catalogue! {
     "write/failed", "A corpus file could not be written",
     #[error("`{path}` could not be written")]
     WriteFailed { path: String },
+
+    /// A row's language tag, read from the data, that is not well-formed BCP
+    /// 47. The run writes no corpus rather than an `rdf:langString` with no
+    /// valid tag.
+    "write/invalid-language-tag", "A value's language tag is not well-formed",
+    #[error("`{property}` has a value tagged `{tag}`, which is not a well-formed BCP 47 language tag")]
+    WriteInvalidLanguageTag { property: String, tag: String },
+
+    /// A row's language tag outside the languages the property's shape admits.
+    "write/language-not-allowed", "A value in a language the shape does not admit",
+    #[error("`{property}` admits {}, and a value is tagged `{tag}`", code_list(.languages))]
+    WriteLanguageNotAllowed { property: String, tag: String, languages: Vec<String> },
 
     /// More vertices than a `u32` `dense_id` can number.
     "run/too-large", "The graph has too many vertices",

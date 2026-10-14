@@ -195,6 +195,8 @@ fn kb_schema() -> GraphSchema {
         iri: Some(iri.to_string()),
         term: None,
         cardinality,
+        annotations: Vec::new(),
+        languages: Vec::new(),
     };
     GraphSchema {
         nodes: vec![
@@ -206,6 +208,7 @@ fn kb_schema() -> GraphSchema {
                     "https://ex.org/label",
                     Cardinality::Single,
                 )],
+                annotations: Vec::new(),
             },
             NodeType {
                 label: "Project".to_string(),
@@ -215,6 +218,7 @@ fn kb_schema() -> GraphSchema {
                     "https://ex.org/title",
                     Cardinality::Single,
                 )],
+                annotations: Vec::new(),
             },
         ],
         edges: vec![EdgeType {
@@ -223,6 +227,7 @@ fn kb_schema() -> GraphSchema {
             source: "KB".to_string(),
             destination: "Project".to_string(),
             cardinality: Cardinality::Multi,
+            annotations: Vec::new(),
         }],
     }
 }

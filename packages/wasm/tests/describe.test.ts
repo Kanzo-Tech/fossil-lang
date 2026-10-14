@@ -70,6 +70,7 @@ describe("profile", () => {
         },
         registerFiles: async () => {},
         dropFiles: async () => {},
+        registerFileBuffer: async () => {},
       },
       options: { depth: "types" },
       ...overrides,

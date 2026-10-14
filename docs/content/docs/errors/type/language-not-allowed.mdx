@@ -1,0 +1,35 @@
+---
+title: A language the shape does not admit
+description: "`type/language-not-allowed` — a constant language tag outside the languages the property's shape admits."
+---
+
+A shape can say which languages a language-tagged property admits — SHACL's `sh:languageIn`, a ShEx
+value set of languages such as `[@en @es]`. A constant tag outside them is refused:
+
+```fossil
+// `laureate.ttl` gives `name` sh:languageIn ( "en" "es" )
+type { Laureate } := io.shacl("laureate.ttl")
+
+Laureates : Laureate from LaureateRow
+    @subject = "https://nobel.example/laureate/{LaureateRow.id}"
+    name     = LaureateRow.name.lang("pl")
+```
+
+```text
+type/language-not-allowed
+  × `name` admits `en`, `es`, and `pl` is not one of them
+```
+
+## Why fossil refuses it
+
+A tag the program writes as a constant is known before a row is read, so it is checked where it is
+written. A range matches by RFC 4647's basic filtering, which `sh:languageIn` and a ShEx language
+stem share: `en` admits `en-GB`, and tags compare without case
+([Annotations and language-tagged strings](/docs/design/labels)). A tag read from a column is the
+run's to check: [`write/language-not-allowed`](/docs/errors/write/language-not-allowed).
+
+## How to repair it
+
+- **Tag the value in a language the shape admits**, or read the tag from the data with
+  `str.lang(Row.name, Row.lang)`.
+- If the shape is wrong, change `sh:languageIn` in the shape document.

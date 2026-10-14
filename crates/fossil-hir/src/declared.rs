@@ -36,9 +36,10 @@
 
 use fossil_base::{Diagnostic, Diagnostics};
 use fossil_graph_schema::{
-    Occurs, OutputShapes, Primitive, Problem, PropertyConstraint, Severity, Shape, Span, Term,
+    Annotation, Occurs, OutputShapes, Primitive, Problem, PropertyConstraint, Severity, Shape,
+    Span, Term,
 };
-use fossil_syntax::ast::{Field, ImportMember, TypeDecl, TypeExpr};
+use fossil_syntax::ast::{AnnotationAttr, Field, ImportMember, IriAttr, TypeDecl, TypeExpr};
 use fossil_syntax::{SyntaxKind, SyntaxNode};
 use smol_str::SmolStr;
 
@@ -77,9 +78,15 @@ fn lower_decl(
     decl: &TypeDecl,
 ) -> Option<Shape> {
     let type_name = decl.name()?;
-    let iri = decl.iri_attr()?.iri()?;
+    let iri_attr = decl.iri_attr()?;
+    refuse_prefixed_iri(&iri_attr, sink);
+    let iri = iri_attr.iri()?;
     let mut properties: Vec<PropertyConstraint> = Vec::new();
     for field in decl.fields() {
+        if let Some(attr) = field.iri_attr() {
+            refuse_prefixed_iri(&attr, sink);
+        }
+        let annotations = lower_annotations(field.annotations(), sink);
         let (Some(name), Some(predicate)) = (field.name(), field.iri_attr().and_then(|a| a.iri()))
         else {
             continue;
@@ -113,13 +120,96 @@ fn lower_decl(
             targets,
             occurs,
             span: Some(field_name_span(&field)),
+            annotations,
+            languages: Vec::new(),
         });
     }
     Some(Shape {
         iri: iri.to_string(),
         properties,
         span: decl_name_span(decl),
+        annotations: lower_annotations(decl.annotations(), sink),
     })
+}
+
+/// A declaration's `@annotation`s as the vocabulary carries them — `ShEx`'s
+/// Annotation, the object a plain or a language-tagged string. A predicate
+/// written as a prefixed name and a tag that is not BCP 47 are refused, and
+/// the annotation is left out: it would carry an IRI nobody meant, or a
+/// literal RDF forbids.
+fn lower_annotations(
+    attrs: impl Iterator<Item = AnnotationAttr>,
+    sink: &mut Diagnostics,
+) -> Vec<Annotation> {
+    let mut out = Vec::new();
+    for attr in attrs {
+        let (Some(predicate), Some((value, tag))) = (attr.predicate_text(), attr.object_value())
+        else {
+            // A missing argument is the parser's to refuse.
+            continue;
+        };
+        if let Some(expands_to) = crate::terms::prefixed_name(&predicate) {
+            let at = attr
+                .predicate()
+                .map_or_else(|| node_span(attr.syntax()), |t| token_span(&t));
+            emit(
+                sink,
+                at,
+                Problem::PrefixedIri {
+                    written: predicate.to_string(),
+                    expands_to: expands_to.clone(),
+                },
+                Some(prefixed_help(&expands_to)),
+            );
+            continue;
+        }
+        if let Some(tag) = tag.as_deref()
+            && !crate::terms::well_formed_language_tag(tag)
+        {
+            let at = attr
+                .object()
+                .map_or_else(|| node_span(attr.syntax()), |t| token_span(&t));
+            emit(
+                sink,
+                at,
+                Problem::InvalidLanguageTag {
+                    tag: tag.to_string(),
+                },
+                Some(LANGUAGE_TAG_HELP.to_string()),
+            );
+            continue;
+        }
+        out.push(Annotation::literal(&predicate, &value, tag.as_deref()));
+    }
+    out
+}
+
+/// What a refused language tag's help says.
+pub(crate) const LANGUAGE_TAG_HELP: &str = "a language tag is BCP 47: a language, then optional \
+     script, region and variants joined by `-` — `en`, `en-US`, `zh-Hant`, `de-CH-1996`";
+
+/// What a refused prefixed name's help says.
+fn prefixed_help(expands_to: &str) -> String {
+    format!(
+        "there are no prefixes, so a name nobody wrote never becomes an IRI: write it whole, \
+         `\"{expands_to}\"`"
+    )
+}
+
+/// `@iri("rdfs:Class")` is the same mistake as an annotation's predicate.
+fn refuse_prefixed_iri(attr: &IriAttr, sink: &mut Diagnostics) {
+    let Some(iri) = attr.iri() else { return };
+    if let Some(expands_to) = crate::terms::prefixed_name(&iri) {
+        emit(
+            sink,
+            node_span(attr.syntax()),
+            Problem::PrefixedIri {
+                written: iri.to_string(),
+                expands_to: expands_to.clone(),
+            },
+            Some(prefixed_help(&expands_to)),
+        );
+    }
 }
 
 /// The occurrence a refused field lowers with: any count, so nothing else is

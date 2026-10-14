@@ -138,6 +138,20 @@ try {
       manifest(dir, (m) => (property(m, "birth_year").datatype = "http://www.w3.org/2001/XMLSchema#date"))],
     ["declared-term", "a postcode column declared an IRI", (dir) =>
       manifest(dir, (m) => (property(m, "postcode").term_type = "http://www.w3.org/ns/r2rml#IRI"))],
+    ["declared-term", "a language-tagged value whose tag is no language tag", (dir) => {
+      rewrite(nickname(dir), "SELECT *, 'not a tag' AS lang FROM m ORDER BY src, nickname");
+      manifest(dir, (m) => {
+        const table = m.property_tables.find((t) => t.name === "Person_nickname");
+        table.properties.find((p) => p.name === "nickname").datatype = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
+        table.properties.push({ name: "lang", type: "string", role: "language" });
+      });
+    }],
+    ["counted", "a null count the rows do not have", (dir) =>
+      manifest(dir, (m) => (property(m, "postcode").stats = { null_count: 1_000_000, distinct_count: 0 }))],
+    ["counted", "a candidate key that repeats", (dir) =>
+      manifest(dir, (m) => (m.vertex_tables.find((t) => t.name === "Person").candidate_keys = ["dense_id", "subject", "postcode"]))],
+    ["counted", "a commonest value with a share of the rows it does not have", (dir) =>
+      manifest(dir, (m) => (m.edge_tables[0].properties[0].stats = { null_count: 0, distinct_count: 0, most_common_vals: ["0"], most_common_freqs: [2] }))],
   ];
 
   for (const [id, what, mutate] of MUTATIONS) {
