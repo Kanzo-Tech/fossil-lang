@@ -50,10 +50,10 @@ bytes = { workspace = true }
 # The canonical graph-schema contract — the metadata fossil-df produces and the
 # manifest materializes from (the universal substrate's single source).
 fossil-graph-schema = { path = "../fossil-graph-schema" }
-# RDF input seam: Turtle parsing for `io.rdf` sources → Arrow rows. Pure Rust,
-# WASM-clean (the oxigraph parsers rudof's ShEx already pulls) — RDF is decoded
-# at the I/O border, same as in the browser.
-oxttl = { workspace = true }
+# RDF input seam: Turtle parsing for `io.rdf` sources → Arrow rows, through
+# `rudof_rdf`'s in-memory graph. Pure Rust, WASM-clean — RDF is decoded at the
+# I/O border, same as in the browser.
+rudof_rdf = { workspace = true }
 oxrdf = { workspace = true }
 # `default-features = false` drops datafusion's `sql` frontend (we build plans
 # via the DataFrame/LogicalPlan API, not `ctx.sql()`) and its own `compression`

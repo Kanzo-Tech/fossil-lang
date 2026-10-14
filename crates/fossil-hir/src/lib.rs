@@ -31,7 +31,7 @@
 //!   rationale as the provenance side table).
 //! - The shape-document decoders a host installs: [`providers::PROVIDERS`],
 //!   whose type-reading rows are [`shex`] over `shex_ast` and [`shacl`] over
-//!   `oxrdf`. A document becomes the same [`fossil_graph_schema::OutputShapes`]
+//!   `shacl`'s `ShaclParser`. A document becomes the same [`fossil_graph_schema::OutputShapes`]
 //!   a declared type lowers to.
 //!
 //! # The locked surface

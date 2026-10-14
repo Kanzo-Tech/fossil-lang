@@ -66,7 +66,7 @@ pub struct TypeckOutput<'db> {
     pub source_row: Option<Ty<'db>>,
     /// The target shape's predicates by the short name a body writes —
     /// `name` for `http://xmlns.com/foaf/0.1/name` — with the RDF term the
-    /// document declares, in declaration order.
+    /// document declares, in the order of the shape's properties.
     ///
     /// **This is how `fossil-mir` gets its IRI.** A bare key carries none, and
     /// the document is the only thing that knows. MIR already reads
@@ -693,6 +693,17 @@ impl Checker<'_> {
                     );
                     self.expr.record_error(eg);
                 }
+                Rejection::AmbiguousOrder { first, second } => {
+                    let eg = self.expr.sink.report(
+                        header_span,
+                        Problem::AmbiguousOrder {
+                            document: document.clone(),
+                            first: first.clone(),
+                            second: second.clone(),
+                        },
+                    );
+                    self.expr.record_error(eg);
+                }
                 Rejection::Malformed(m) => {
                     let eg = self.expr.sink.report(
                         header_span,
@@ -925,8 +936,8 @@ pub fn compatible<'db>(
 /// hash seed. An unsorted `first` would put a different function in the message
 /// on different runs of the same compiler — and this text is committed as a
 /// conformance artefact, so it would be a golden that fails at random.
-/// `crates/fossil-hir/examples/shex_declaration_order.rs` measured this exact class
-/// of bug once already: six parses, six orders.
+/// A `HashMap` of shapes once handed back six orders in six parses of one
+/// document: the same class of bug.
 fn repair_for<'db>(
     cx: &Expr<'db>,
     actual: Ty<'db>,

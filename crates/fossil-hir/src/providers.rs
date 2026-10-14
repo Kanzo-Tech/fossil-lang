@@ -12,7 +12,7 @@
 //!
 //! The decoders are this crate's because a shape document becomes a type, and
 //! the type system is here (`/docs/design/incremental`): [`crate::shex`] over
-//! `shex_ast`, [`crate::shacl`] over `oxrdf`.
+//! `shex_ast`, [`crate::shacl`] over `shacl`'s parser.
 
 mod generated;
 

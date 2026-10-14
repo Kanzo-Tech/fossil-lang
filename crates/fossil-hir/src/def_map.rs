@@ -87,7 +87,7 @@ pub enum ShapeBindError {
     /// it. The problem is `crate::shapes::decoded_document`'s, kept typed.
     Document(fossil_graph_schema::Problem),
     /// The member names a local name no shape of the document has. `declared`
-    /// is the local names it does have, in declaration order — the list the
+    /// is the local names it does have, in the order of shapes — the list the
     /// author picks from.
     NotInDocument {
         shape: SmolStr,
@@ -1569,7 +1569,8 @@ b := io.parquet(\"b.parquet\")
     }
 
     /// A member naming no shape the document declares carries the ones it
-    /// does, in the document's order.
+    /// does, in the order of shapes — `Alpha` before `Zeta`, though the document
+    /// declares `Zeta` first.
     #[test]
     fn a_member_the_document_does_not_declare_carries_the_ones_it_does() {
         let src = "{ Omega } := io.rdf(\"g.ttl\", schema = io.shex(\"two_shapes.shex\"))\n";
@@ -1580,7 +1581,7 @@ b := io.parquet(\"b.parquet\")
             dm.lookup_source_shape_error(&db, "Omega"),
             Some(ShapeBindError::NotInDocument {
                 shape: "Omega".into(),
-                declared: vec!["Zeta".into(), "Alpha".into()],
+                declared: vec!["Alpha".into(), "Zeta".into()],
             })
         );
     }

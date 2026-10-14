@@ -595,6 +595,16 @@ catalogue! {
     #[error("`{name}` names two shapes of `{document}`: `{first}` and `{second}`")]
     AmbiguousImport { name: String, document: String, first: String, second: String },
 
+    /// Two shapes of a document the order of shapes cannot tell apart: neither
+    /// has an IRI and they declare the same predicates. `first` and `second`
+    /// are their labels.
+    "shape/ambiguous-order", "Two shapes with no order between them",
+    #[error(
+        "`{first}` and `{second}` of `{document}` have no IRI and declare the same predicates, so \
+         nothing puts one before the other"
+    )]
+    AmbiguousOrder { document: String, first: String, second: String },
+
     /// A program whose sources declare two different output shapes; one
     /// program writes one.
     "shape/more-than-one-output", "More than one output shape",

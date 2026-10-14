@@ -389,13 +389,12 @@ pub struct SuggestionSeed {
 #[derive(Debug)]
 pub struct ShExDescriptor {
     schema: Schema,
-    /// In the order the document declares them, and not a `HashMap`:
-    /// `crates/fossil-hir/examples/shex_declaration_order.rs` measures what
-    /// that costs — `values()` hands back a different order per parse, because
-    /// Rust seeds its hasher per process, and anything downstream that iterates
-    /// ([`Self::to_graph_schema`] builds `nodes`/`edges` from this) would be
-    /// non-deterministic across runs. rudof preserves the order for both
-    /// `ShExC` and `ShExJ`.
+    /// A `Vec` and not a `HashMap`: `values()` hands back a different order per
+    /// parse, because Rust seeds its hasher per process (six parses of one
+    /// document gave six orders), and anything downstream that iterates would
+    /// be non-deterministic across runs. The order is the schema's, and no
+    /// output reads it: [`Self::to_output_shapes`] puts the shapes in the
+    /// order of shapes.
     shapes: Vec<ShapeBinding>,
     /// Resolved IRI → index into `shapes`. Lookup only; never iterated.
     index: HashMap<String, usize>,
@@ -450,9 +449,10 @@ impl ShExDescriptor {
     /// decoded document the middle of the compiler reads instead of a schema
     /// language. No `shex_ast` or `rudof_iri` type survives the crossing.
     ///
-    /// Shapes keep the document's declaration order. Every lowering error
-    /// becomes a [`Rejection`]; the shapes that DID lower are still there, which
-    /// is what the `ShEx`-typed original did too.
+    /// The shapes are in [the order `OutputShapes::new` gives them](OutputShapes::new):
+    /// by IRI, and not the order the document declared them in. Every lowering
+    /// error becomes a [`Rejection`]; the shapes that DID lower are still there,
+    /// which is what the `ShEx`-typed original did too.
     #[must_use]
     pub fn to_output_shapes(&self) -> OutputShapes {
         let prefixmap = self.schema.prefixmap().unwrap_or_default();
@@ -521,9 +521,7 @@ impl ShExDescriptor {
         let mut index: HashMap<String, usize> = HashMap::new();
         let mut errors: Vec<ShExLoweringError> = Vec::new();
 
-        // Declaration order, because the caller may bind by position. A repeated
-        // IRI keeps its FIRST declaration and its first slot. Last-one-wins is
-        // as arbitrary, but only first-one-wins leaves the order alone.
+        // A repeated IRI keeps its FIRST declaration.
         for decl in schema.shapes().into_iter().flatten() {
             if let Some(binding) = lower_shape_decl(&decl, &prefixmap, &mut errors) {
                 let iri = binding.iri.to_string();
@@ -567,8 +565,8 @@ impl ShExDescriptor {
         self.index.get(iri).map(|&i| &self.shapes[i])
     }
 
-    /// Iterator over every resolved shape binding, **in declaration order**.
-    /// Callers may rely on that.
+    /// Iterator over every resolved shape binding, in the schema's order. That
+    /// order is not an output: [`Self::to_output_shapes`] sorts.
     pub fn shapes(&self) -> impl Iterator<Item = &ShapeBinding> {
         self.shapes.iter()
     }
@@ -1450,18 +1448,39 @@ ex:Person {
             .to_output_shapes()
     }
 
-    /// The document's declaration order: what keeps the output model's node
-    /// order the document's.
+    /// The order of shapes: by IRI, and not the order the document declares
+    /// them in, which is what the output model's node order follows.
     #[test]
-    fn output_shapes_keep_declaration_order() {
+    fn output_shapes_come_out_by_iri_not_by_declaration() {
         let doc = order_shapes();
         let order: Vec<&str> = doc.shapes().map(|s| s.iri.as_str()).collect();
         assert_eq!(
             order,
             ["http://example.org/Order", "http://example.org/Person"],
-            "declaration order, not hash order"
+            "by IRI, whichever the document declared first"
         );
         assert!(doc.rejections().is_empty());
+
+        // Declared Zeta first: the same document with its shapes swapped is the
+        // same value.
+        let decode = |src: &str| {
+            ShExDescriptor::from_shex_source(src)
+                .expect("schema parses")
+                .to_output_shapes()
+        };
+        let zeta_first =
+            decode("PREFIX ex: <https://example.org/>\nex:Zeta { ex:a . }\nex:Alpha { ex:b . }\n");
+        let alpha_first =
+            decode("PREFIX ex: <https://example.org/>\nex:Alpha { ex:b . }\nex:Zeta { ex:a . }\n");
+        let order: Vec<&str> = zeta_first.shapes().map(|s| s.iri.as_str()).collect();
+        assert_eq!(
+            order,
+            ["https://example.org/Alpha", "https://example.org/Zeta"]
+        );
+        assert_eq!(
+            zeta_first.shapes().map(|s| &s.iri).collect::<Vec<_>>(),
+            alpha_first.shapes().map(|s| &s.iri).collect::<Vec<_>>()
+        );
     }
 
     /// `datatype` says what the DOCUMENT narrowed the value to. `None` is not

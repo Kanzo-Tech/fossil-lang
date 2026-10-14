@@ -10,11 +10,12 @@
 //!
 //! A column is scalar or multi-valued: a `ShEx` `*`/`+` cardinality pivots into an
 //! Arrow `List<Utf8>` of every object, a single-valued one into a `Utf8` cell.
-//! `oxttl`/`oxrdf` are pure Rust, so this compiles to wasm and decodes RDF in the
-//! browser too.
+//! `rudof_rdf`'s graph parses the Turtle, over `oxttl`/`oxrdf`, which are pure
+//! Rust, so this compiles to wasm and decodes RDF in the browser too.
 //!
-//! **RDF 1.2.** The parser is an RDF 1.2 one (`oxttl`'s `rdf-12` feature, turned
-//! on in the workspace manifest with the measurement behind it). Nothing in RDF
+//! **RDF 1.2.** The parser is an RDF 1.2 one (`oxttl`'s `rdf-12` feature, which
+//! `rudof_rdf` turns on; the two tests below fail at parse time if it stops).
+//! Nothing in RDF
 //! 1.2 is a Recommendation and every concrete syntax is still a Working Draft, so
 //! what we lean on is the abstract model, not the spelling: a triple term reaches
 //! [`term_value`] as `Term::Triple` and a base direction as
@@ -28,9 +29,9 @@ use datafusion::arrow::array::{ArrayRef, ListBuilder, StringArray, StringBuilder
 use datafusion::arrow::datatypes::{DataType, Field, Schema};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::error::DataFusionError;
-use fossil_hir::shacl::subject_value;
-use oxrdf::{Literal, Term};
-use oxttl::TurtleParser;
+use oxrdf::{Literal, NamedOrBlankNode, Term};
+use rudof_rdf::RDFFormat;
+use rudof_rdf::backend::{OxigraphInMemory, ReaderMode};
 
 /// The `rdf:type` predicate — the sole subject selector: a shape's rows are the
 /// subjects typed with the shape's IRI.
@@ -66,9 +67,8 @@ pub fn rdf_to_batch(
     let mut rows: BTreeMap<String, BTreeMap<String, Vec<String>>> = BTreeMap::new();
     let mut typed: BTreeSet<String> = BTreeSet::new();
 
-    let mut parser = TurtleParser::new().for_reader(turtle.as_bytes());
-    for triple in parser.by_ref() {
-        let t = triple.map_err(|e| DataFusionError::Execution(format!("parse RDF: {e}")))?;
+    let graph = parse_turtle(turtle)?;
+    for t in graph.quads() {
         let subject = subject_value(&t.subject);
         let predicate = t.predicate.as_str();
         if let Term::Literal(l) = &t.object
@@ -138,6 +138,24 @@ pub fn rdf_to_batch(
     }
 
     RecordBatch::try_new(Arc::new(Schema::new(fields)), arrays).map_err(Into::into)
+}
+
+/// The graph `rudof_rdf` parses `turtle` into. Its anonymous blank nodes are
+/// numbered in the order the document first mentions them, the same on every
+/// parse.
+fn parse_turtle(turtle: &str) -> datafusion::error::Result<OxigraphInMemory> {
+    OxigraphInMemory::from_str(turtle, &RDFFormat::Turtle, None, &ReaderMode::Strict)
+        .map_err(|e| DataFusionError::Execution(format!("parse RDF: {e}")))
+}
+
+/// The bare IRI / blank-node label of a triple subject (`as_str`, not the `<>`
+/// `Display` form): an IRI keyed as `<http://…>` matches nothing keyed as
+/// `http://…`.
+fn subject_value(subject: &NamedOrBlankNode) -> String {
+    match subject {
+        NamedOrBlankNode::NamedNode(n) => n.as_str().to_string(),
+        NamedOrBlankNode::BlankNode(b) => b.to_string(),
+    }
 }
 
 /// The lexical value of an RDF object term: a literal's lexical form, or a
@@ -298,9 +316,10 @@ mod tests {
         ";
 
         // The object-position-only rule of Concepts §3.1, as the parser enforces it.
-        let terms: Vec<Term> = TurtleParser::new()
-            .for_reader(TTL.as_bytes())
-            .map(|t| t.expect("RDF 1.2 Turtle parses").object)
+        let terms: Vec<Term> = parse_turtle(TTL)
+            .expect("RDF 1.2 Turtle parses")
+            .quads()
+            .map(|t| t.object)
             .collect();
         let quoted = terms
             .iter()
@@ -327,9 +346,10 @@ mod tests {
 
         // It survives the parser intact, with the disjoint datatype RDF 1.2 gives
         // it: a direction means rdf:dirLangString, its absence rdf:langString.
-        let object = TurtleParser::new()
-            .for_reader(TTL.as_bytes())
-            .map(|t| t.expect("RDF 1.2 Turtle parses").object)
+        let object = parse_turtle(TTL)
+            .expect("RDF 1.2 Turtle parses")
+            .quads()
+            .map(|t| t.object)
             .find_map(|t| match t {
                 Term::Literal(l) => Some(l),
                 _ => None,

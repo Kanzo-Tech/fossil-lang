@@ -1725,6 +1725,43 @@
       "x-detail": "\"`{name}` names two shapes of `{document}`: `{first}` and `{second}`\""
     },
     {
+      "description": "Two shapes of a document the order of shapes cannot tell apart: neither has an IRI and they declare the same predicates. `first` and `second` are their labels.",
+      "properties": {
+        "code": {
+          "enum": [
+            "shape/ambiguous-order"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "document": {
+              "type": "string"
+            },
+            "first": {
+              "type": "string"
+            },
+            "second": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "document",
+            "first",
+            "second"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "Two shapes with no order between them",
+      "type": "object",
+      "x-detail": "\"`{first}` and `{second}` of `{document}` have no IRI and declare the same predicates, so \\\n         nothing puts one before the other\""
+    },
+    {
       "description": "A program whose sources declare two different output shapes; one program writes one.",
       "properties": {
         "code": {

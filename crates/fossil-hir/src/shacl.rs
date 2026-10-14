@@ -1,10 +1,9 @@
 //! SHACL shapes graph → [`OutputShapes`] — the SHACL row's decode.
 //!
-//! SHACL **is** RDF: a shapes graph is a set of triples. So rather than pull in
-//! the `shacl_ast`/`srdf` stack (generic over an RDF backend, heavy,
-//! WASM-awkward), the graph is walked with the same pure-Rust `oxttl`/`oxrdf`
-//! reader the `io.rdf` provider already uses (WASM-clean) and the SHACL Core
-//! structural vocabulary is projected onto the neutral vocabulary:
+//! SHACL **is** RDF: a shapes graph is a set of triples. It is read in two
+//! steps, both rudof's: `rudof_rdf`'s in-memory graph parses the Turtle (the
+//! reader `io.rdf` reads with), and `shacl`'s `ShaclParser` turns the graph into
+//! its AST. This module projects that AST onto the neutral vocabulary:
 //!
 //! - `sh:NodeShape` + `sh:targetClass T`   → a [`Shape`] whose `iri` is `T`.
 //! - `sh:property [ sh:path p ; sh:datatype D ]`         → a literal constraint.
@@ -15,14 +14,40 @@
 //!   model, identical to `ShEx`'s `@<A> OR @<B>`).
 //! - `sh:minCount` / `sh:maxCount` → [`Occurs`]; absent means SHACL's own
 //!   defaults, `0` and unbounded.
+//! - `sh:name` / `sh:description` → `rdfs:label` / `rdfs:comment`, and every
+//!   triple of a shape outside SHACL's namespace (the AST's `extra`) → itself.
 //!
 //! Constraint features outside the graph's *shape* (`sh:pattern`, `sh:sparql`,
 //! severities, …) are validation concerns and intentionally ignored here — this
 //! lowering only needs the node/edge/property structure. **What a language
 //! expresses and the neutral vocabulary does not carry is the ROW's to
 //! diagnose**, and today this row carries no [`Rejection`] but the parse
-//! failure: everything above is either lowered or is a validation constraint the
-//! output model has no place for.
+//! failure and the order's tie ([`Rejection::AmbiguousOrder`]): everything above
+//! is either lowered or is a validation constraint the output model has no place
+//! for.
+//!
+//! # Where `ShaclParser` is stricter, or reads more, than the walk it replaced
+//!
+//! - **A node shape is what fossil says it is, and the AST says more.** The AST
+//!   has a node shape for every IRI or blank node that is a shape by SHACL's
+//!   syntax rules (Appendix A), among them every member of an `sh:or` list. fossil
+//!   types a document by the ones that declare something: a subject typed
+//!   `sh:NodeShape`, or with an `sh:targetClass`, or with an `sh:property`. The
+//!   typing is read from the graph, because the AST does not keep `rdf:type`;
+//!   a typed shape that is a blank node is not read, which only matters if it
+//!   declares nothing else.
+//! - **A subject that is only the subject of `sh:property` is not a shape.** With
+//!   no type and no target, SHACL's syntax rules do not make it one and the
+//!   parser does not return it; the walk it replaced read it as a node shape. A
+//!   shape reached by `sh:node` is a shape whatever it declares, and is typed
+//!   as before.
+//! - **A property shape whose path is not a single predicate is skipped**, as a
+//!   `sh:property` with no `sh:path` is. The walk it replaced read a path
+//!   expression's blank node as if it were a predicate.
+//! - **A malformed constraint is the parser's error**, a [`Rejection::Malformed`]
+//!   for the whole document, where the walk ignored a count it could not read.
+//! - **`sh:name` and `sh:description` are one value per language**, as the AST
+//!   holds them.
 //!
 //! # Why it produces `OutputShapes` and not a `GraphSchema`
 //!
@@ -77,157 +102,42 @@
 //! program is clean, so nothing today would render such a label even if it
 //! existed. That is why this is written down rather than built.
 //!
-//! # Declaration order is load-bearing
+//! # Order
 //!
-//! `type { A, B } := io.shacl("shapes.ttl")` binds by local name, but the
-//! order shapes come out in still reaches a person and a corpus: the shapes an
-//! import naming none is told about, the first and second of two that share a
-//! name, and the node types the output model lists. So it is the order the
-//! document declares them: first appearance as a subject in the Turtle. A
-//! `BTreeMap` iterates alphabetically by subject IRI; with two shapes that is a
-//! different answer from the document's.
-//! `crates/fossil-hir/examples/shex_declaration_order.rs` measures the same
-//! class of bug on the `ShEx` side.
+//! A shapes graph is a set, so nothing here reads the order a document wrote
+//! its triples in. The shapes' order is [`OutputShapes::new`]'s. What this
+//! decoder orders is what the AST holds as a list or leaves to the graph:
+//!
+//! - a shape's properties, by `sh:order` ascending (a property shape with none
+//!   after every one with), then the predicate's IRI, then the rest of the
+//!   constraint;
+//! - the targets of a property, its languages: sorted, without duplicates, since
+//!   the order of an `sh:or` or `sh:languageIn` list does not change what the
+//!   shape validates;
+//! - of several shapes with one `sh:targetClass`, the first is the one with an
+//!   IRI, the smallest, and two that are blank nodes are a
+//!   [`Rejection::AmbiguousOrder`];
+//! - of several `sh:targetClass` values of one shape, the smallest names the type.
 
-use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::collections::HashMap;
 
 use fossil_graph_schema::{
     Annotation, AnnotationObject, ObjectLiteral, Occurs, OutputShapes, PropertyConstraint,
     RDFS_COMMENT, RDFS_LABEL, Rejection, Shape,
 };
-use oxrdf::vocab::rdf;
-use oxrdf::{NamedOrBlankNode, Term};
-use oxttl::TurtleParser;
+use oxrdf::NamedOrBlankNode;
+use oxrdf::vocab::{rdf, xsd};
+use rudof_rdf::RDFFormat;
+use rudof_rdf::SHACLPath;
+use rudof_rdf::backend::{OxigraphInMemory, ReaderMode};
+use rudof_rdf::term::Object;
+use rudof_rdf::term::literal::NumericLiteral;
+use shacl::ast::{ASTComponent, ASTNodeShape, ASTPropertyShape, ASTSchema, ASTShape};
+use shacl::rdf::ShaclParser;
+use shacl::types::{MessageMap, NodeKind, Target};
 
 const SH_NODE_SHAPE: &str = "http://www.w3.org/ns/shacl#NodeShape";
-const SH_TARGET_CLASS: &str = "http://www.w3.org/ns/shacl#targetClass";
-const SH_PROPERTY: &str = "http://www.w3.org/ns/shacl#property";
-const SH_PATH: &str = "http://www.w3.org/ns/shacl#path";
-const SH_CLASS: &str = "http://www.w3.org/ns/shacl#class";
-const SH_NODE: &str = "http://www.w3.org/ns/shacl#node";
-const SH_DATATYPE: &str = "http://www.w3.org/ns/shacl#datatype";
-const SH_NODE_KIND: &str = "http://www.w3.org/ns/shacl#nodeKind";
-const SH_IRI: &str = "http://www.w3.org/ns/shacl#IRI";
-const SH_LITERAL: &str = "http://www.w3.org/ns/shacl#Literal";
-const SH_MIN_COUNT: &str = "http://www.w3.org/ns/shacl#minCount";
-const SH_MAX_COUNT: &str = "http://www.w3.org/ns/shacl#maxCount";
-const SH_OR: &str = "http://www.w3.org/ns/shacl#or";
-const SH_NAME: &str = "http://www.w3.org/ns/shacl#name";
-const SH_DESCRIPTION: &str = "http://www.w3.org/ns/shacl#description";
-const SH_LANGUAGE_IN: &str = "http://www.w3.org/ns/shacl#languageIn";
-/// SHACL's namespace: every predicate in it is SHACL's own, validating or not,
-/// and no other predicate is (§2.3.2).
-const SH: &str = "http://www.w3.org/ns/shacl#";
-
-/// One object of a triple: its lexical value plus whether it is a node (IRI or
-/// blank — i.e. follow-able as a subject) vs a literal.
-struct Obj {
-    value: String,
-    is_node: bool,
-    /// A literal's language tag.
-    language: Option<String>,
-    /// A literal's datatype IRI, when it is not a plain or a tagged string.
-    datatype: Option<String>,
-}
-
-/// A minimal in-memory triple store: `subject → predicate → objects`, plus the
-/// order subjects first appeared. Enough to walk SHACL's shape/property/list
-/// structure without an RDF database.
-///
-/// Not `oxrdf::Graph`: its indexes are sorted sets, so the objects of
-/// `sh:property` come back ordered by blank-node id — which the parser
-/// randomises — and a shape's predicates would change order from run to run.
-/// Both orders here are the document's.
-struct Store {
-    by_subject: BTreeMap<String, BTreeMap<String, Vec<Obj>>>,
-    /// Subjects in first-appearance order — see the module docs on why the map's
-    /// own order is not usable.
-    order: Vec<String>,
-}
-
-impl Store {
-    fn parse(turtle: &str) -> Result<Self, String> {
-        let mut by_subject: BTreeMap<String, BTreeMap<String, Vec<Obj>>> = BTreeMap::new();
-        let mut order: Vec<String> = Vec::new();
-        let mut parser = TurtleParser::new().for_reader(turtle.as_bytes());
-        for triple in parser.by_ref() {
-            let t = triple.map_err(|e| format!("parse SHACL turtle: {e}"))?;
-            let subject = subject_value(&t.subject);
-            if !by_subject.contains_key(&subject) {
-                order.push(subject.clone());
-            }
-            by_subject
-                .entry(subject)
-                .or_default()
-                .entry(t.predicate.as_str().to_string())
-                .or_default()
-                .push(Obj {
-                    value: value_of(&t.object),
-                    is_node: is_node(&t.object),
-                    language: match &t.object {
-                        Term::Literal(l) => l.language().map(str::to_string),
-                        _ => None,
-                    },
-                    datatype: match &t.object {
-                        Term::Literal(l)
-                            if l.language().is_none()
-                                && l.datatype() != oxrdf::vocab::xsd::STRING =>
-                        {
-                            Some(l.datatype().as_str().to_string())
-                        }
-                        _ => None,
-                    },
-                });
-        }
-        Ok(Self { by_subject, order })
-    }
-
-    /// All object values of `(subject, predicate)`.
-    fn objects<'a>(&'a self, subject: &str, predicate: &str) -> impl Iterator<Item = &'a Obj> {
-        self.by_subject
-            .get(subject)
-            .and_then(|p| p.get(predicate))
-            .into_iter()
-            .flatten()
-    }
-
-    /// The first object value of `(subject, predicate)`, if any.
-    fn first(&self, subject: &str, predicate: &str) -> Option<&str> {
-        self.objects(subject, predicate)
-            .next()
-            .map(|o| o.value.as_str())
-    }
-
-    /// Follow an RDF list (`rdf:first`/`rdf:rest` … `rdf:nil`) from `head`,
-    /// returning each member's node value. Bounded by the store size to avoid a
-    /// cyclic-list infinite loop in malformed input.
-    fn rdf_list(&self, head: &str) -> Vec<String> {
-        let mut out = Vec::new();
-        let mut cur = head.to_string();
-        let mut guard = 0;
-        while cur != rdf::NIL.as_str() && guard <= self.by_subject.len() {
-            guard += 1;
-            // Clone out of each borrow before reassigning `cur`, so the iterator
-            // temporary (which borrows `cur`) is dropped first (E0506).
-            if let Some(first) = self
-                .objects(&cur, rdf::FIRST.as_str())
-                .next()
-                .map(|o| o.value.clone())
-            {
-                out.push(first);
-            }
-            let Some(rest) = self
-                .objects(&cur, rdf::REST.as_str())
-                .next()
-                .map(|o| o.value.clone())
-            else {
-                break;
-            };
-            cur = rest;
-        }
-        out
-    }
-}
 
 /// Decode a SHACL shapes graph — the SHACL row's `decode`.
 ///
@@ -237,162 +147,216 @@ impl Store {
 ///
 /// # Errors
 ///
-/// [`Rejection::Malformed`] when the Turtle does not parse. A document that
-/// parses and declares no node shape is **not** an error: it decodes to zero
-/// shapes, and the binding that named it reports its own arity failure.
+/// [`Rejection::Malformed`] when the Turtle does not parse, or `ShaclParser`
+/// refuses the graph. A document that parses and declares no node shape is
+/// **not** an error: it decodes to zero shapes, and the binding that named it
+/// reports its own arity failure.
 pub fn decode_shacl(_uri: &str, turtle: &str) -> Result<OutputShapes, Rejection> {
-    let store = Store::parse(turtle).map_err(Rejection::Malformed)?;
-    let mut shapes: Vec<Shape> = Vec::new();
+    let graph = OxigraphInMemory::from_str(turtle, &RDFFormat::Turtle, None, &ReaderMode::Strict)
+        .map_err(|e| Rejection::Malformed(format!("parse SHACL turtle: {e}")))?;
+    let typed = typed_node_shapes(&graph);
+    let schema = ShaclParser::new(graph)
+        .parse()
+        .map_err(|e| Rejection::Malformed(format!("read SHACL shapes: {e}")))?;
 
-    for subject in &store.order {
-        let Some(preds) = store.by_subject.get(subject) else {
+    let mut shapes: Vec<Shape> = Vec::new();
+    let mut rejections: Vec<Rejection> = Vec::new();
+    // The own label of the blank-node shape that took each type IRI, for a tie.
+    let mut blank_owner: HashMap<String, String> = HashMap::new();
+    // The schema iterates IRIs before blank nodes, each by its string: a
+    // function of the graph, so the first of several shapes of one type is too.
+    for (id, shape) in schema.iter() {
+        let ASTShape::NodeShape(node) = shape else {
             continue;
         };
-        let is_node_shape = store
-            .objects(subject, rdf::TYPE.as_str())
-            .any(|o| o.value == SH_NODE_SHAPE)
-            || preds.contains_key(SH_TARGET_CLASS)
-            || preds.contains_key(SH_PROPERTY);
-        if !is_node_shape {
+        if !declares_a_type(node, id, &typed) {
             continue;
         }
-        // The subject's rdf:type is its `sh:targetClass`; absent that, the
-        // shape's own IRI is the type (a common self-typed convention). That
-        // choice is what makes `shop:ProductShape` with `sh:targetClass
-        // shop:Product` produce a `Product` node type and not a `ProductShape`
-        // one.
-        let iri = store
-            .first(subject, SH_TARGET_CLASS)
-            .unwrap_or(subject)
-            .to_string();
-
-        let mut properties = Vec::new();
-        for psh in store.objects(subject, SH_PROPERTY).filter(|o| o.is_node) {
-            let Some(path) = store.first(&psh.value, SH_PATH) else {
-                continue;
-            };
-            properties.push(PropertyConstraint {
-                name: fossil_graph_schema::local_name(path).to_string(),
-                predicate: path.to_string(),
-                term: term_of(&store, &psh.value),
-                targets: edge_targets(&store, &psh.value),
-                occurs: occurs_of(&store, &psh.value),
-                // **SHACL declares no position, and this is a decision** — see
-                // the module's «Positions» section for the measurement and for
-                // the one upstream change that reverses it. Every consumer
-                // already handles `None`, because `ShExJ` gives it too.
-                span: None,
-                annotations: property_annotations(&store, &psh.value),
-                languages: store
-                    .objects(&psh.value, SH_LANGUAGE_IN)
-                    .filter(|o| o.is_node)
-                    .flat_map(|head| store.rdf_list(&head.value))
-                    .collect(),
-            });
+        // The shape's type is its `sh:targetClass`; absent that, the shape's own
+        // IRI is the type (a common self-typed convention). That choice is what
+        // makes `shop:ProductShape` with `sh:targetClass shop:Product` produce a
+        // `Product` node type and not a `ProductShape` one.
+        let iri = node_type(node);
+        if let Some(first) = blank_owner.get(&iri) {
+            if is_blank(id) {
+                rejections.push(Rejection::AmbiguousOrder {
+                    first: first.clone(),
+                    second: label_of(id),
+                });
+            }
+            continue;
+        }
+        if is_blank(id) {
+            blank_owner.insert(iri.clone(), label_of(id));
         }
         shapes.push(Shape {
             iri,
-            properties,
+            properties: properties_of(&schema, node),
+            // **SHACL declares no position, and this is a decision** — see the
+            // module's «Positions» section for the measurement and for the one
+            // upstream change that reverses it. Every consumer already handles
+            // `None`, because `ShExJ` gives it too.
             span: None,
-            annotations: annotations_of(&store, subject, &[]),
+            annotations: extra_annotations(node.extra()),
         });
     }
-
-    Ok(OutputShapes::new(shapes, Vec::new()))
+    Ok(OutputShapes::new(shapes, rejections))
 }
 
-/// A property shape's annotations: SHACL's own two, `sh:name` and
-/// `sh:description`, read as `rdfs:label` and `rdfs:comment` — one predicate
-/// for a label whichever document gave it — and first, as SHACL §2.3.2.1 says
-/// a tool prefers the locally specified label; then every non-SHACL triple.
-fn property_annotations(store: &Store, property_shape: &str) -> Vec<Annotation> {
-    let renamed = [(SH_NAME, RDFS_LABEL), (SH_DESCRIPTION, RDFS_COMMENT)];
-    renamed
+/// The IRIs the graph types `sh:NodeShape`: the one thing about a shape the AST
+/// does not keep.
+fn typed_node_shapes(graph: &OxigraphInMemory) -> BTreeSet<String> {
+    graph
+        .quads()
+        .filter(|q| {
+            q.predicate.as_ref() == rdf::TYPE
+                && matches!(&q.object, oxrdf::Term::NamedNode(n) if n.as_str() == SH_NODE_SHAPE)
+        })
+        .filter_map(|q| match q.subject {
+            NamedOrBlankNode::NamedNode(n) => Some(n.into_string()),
+            NamedOrBlankNode::BlankNode(_) => None,
+        })
+        .collect()
+}
+
+/// Does this node shape declare something fossil types a document by: it is
+/// typed `sh:NodeShape`, or has an `sh:targetClass`, or an `sh:property`.
+fn declares_a_type(node: &ASTNodeShape, id: &Object, typed: &BTreeSet<String>) -> bool {
+    matches!(id, Object::Iri(iri) if typed.contains(iri.as_str()))
+        || !target_classes(node).is_empty()
+        || !node.property_shapes().is_empty()
+}
+
+/// The IRIs of a shape's `sh:targetClass` values, smallest first.
+fn target_classes(node: &ASTNodeShape) -> Vec<&str> {
+    let mut classes: Vec<&str> = node
+        .targets()
         .iter()
-        .flat_map(|(from, to)| {
-            store
-                .objects(property_shape, from)
-                .map(move |o| annotation(to, o))
+        .filter_map(|t| match t {
+            Target::Class(Object::Iri(iri)) => Some(iri.as_str()),
+            _ => None,
         })
-        .chain(annotations_of(store, property_shape, &[SH_PATH]))
-        .collect()
+        .collect();
+    classes.sort_unstable();
+    classes.dedup();
+    classes
 }
 
-/// Every triple of `subject` whose predicate is outside SHACL's namespace and
-/// is not `rdf:type` — the non-validating properties §2.3.2 says a processor
-/// ignores — as an annotation, in the store's order.
-fn annotations_of(store: &Store, subject: &str, except: &[&str]) -> Vec<Annotation> {
-    store
-        .by_subject
-        .get(subject)
-        .into_iter()
-        .flatten()
-        .filter(|(p, _)| {
-            !p.starts_with(SH) && p.as_str() != rdf::TYPE.as_str() && !except.contains(&p.as_str())
-        })
-        .flat_map(|(p, objects)| objects.iter().map(move |o| annotation(p, o)))
-        .collect()
+fn node_type(node: &ASTNodeShape) -> String {
+    target_classes(node)
+        .first()
+        .map_or_else(|| label_of(node.id()), |c| (*c).to_string())
 }
 
-fn annotation(predicate: &str, o: &Obj) -> Annotation {
-    Annotation {
-        predicate: predicate.to_string(),
-        object: if o.is_node {
-            AnnotationObject::Iri(o.value.clone())
-        } else {
-            AnnotationObject::Literal(ObjectLiteral {
-                value: o.value.clone(),
-                language: o.language.clone(),
-                datatype: o.datatype.clone(),
-            })
-        },
+/// A shape's own IRI, or a blank node's `_:label`.
+fn label_of(id: &Object) -> String {
+    match id {
+        Object::Iri(iri) => iri.as_str().to_string(),
+        Object::BlankNode(label) => format!("_:{label}"),
+        other => other.to_string(),
     }
 }
 
-/// The destination type IRIs a property shape points at: `sh:class`, the target
-/// class of any `sh:node` shape, and every alternative inside an `sh:or` list.
-/// Empty ⇒ the property is a literal / opaque-IRI value, not an edge.
-fn edge_targets(store: &Store, property_shape: &str) -> Vec<String> {
+const fn is_blank(id: &Object) -> bool {
+    matches!(id, Object::BlankNode(_))
+}
+
+/// A node shape's property shapes as constraints, in the decoder's order — see
+/// the module's «Order» section.
+fn properties_of(schema: &ASTSchema, node: &ASTNodeShape) -> Vec<PropertyConstraint> {
+    let mut properties = Vec::new();
+    for reference in node.property_shapes() {
+        let Some(ASTShape::PropertyShape(property)) = schema.get_shape(reference) else {
+            continue;
+        };
+        let SHACLPath::Predicate { pred } = property.path() else {
+            continue;
+        };
+        let order = property.order().and_then(NumericLiteral::to_decimal);
+        let constraint = property_constraint(schema, property, pred.as_str());
+        properties.push((order, constraint));
+    }
+    properties.sort_by(|(oa, a), (ob, b)| {
+        oa.is_none()
+            .cmp(&ob.is_none())
+            .then_with(|| oa.cmp(ob))
+            .then_with(|| a.predicate.cmp(&b.predicate))
+            .then_with(|| a.targets.cmp(&b.targets))
+            .then_with(|| format!("{:?}", a.term).cmp(&format!("{:?}", b.term)))
+            .then_with(|| (a.occurs.min, a.occurs.max).cmp(&(b.occurs.min, b.occurs.max)))
+    });
+    properties.into_iter().map(|(_, c)| c).collect()
+}
+
+fn property_constraint(
+    schema: &ASTSchema,
+    property: &ASTPropertyShape,
+    predicate: &str,
+) -> PropertyConstraint {
+    let components = property.components();
     let mut targets = Vec::new();
-    for c in store.objects(property_shape, SH_CLASS) {
-        targets.push(c.value.clone());
-    }
-    for n in store.objects(property_shape, SH_NODE).filter(|o| o.is_node) {
-        targets.push(node_target(store, &n.value));
-    }
-    for or_head in store.objects(property_shape, SH_OR).filter(|o| o.is_node) {
-        for member in store.rdf_list(&or_head.value) {
-            for c in store.objects(&member, SH_CLASS) {
-                targets.push(c.value.clone());
+    let mut languages: Vec<String> = Vec::new();
+    let mut occurs = Occurs { min: 0, max: None };
+    for component in components {
+        match component {
+            ASTComponent::MinCount(n) => occurs.min = u32::try_from(*n).unwrap_or(0),
+            ASTComponent::MaxCount(n) => occurs.max = u32::try_from(*n).ok(),
+            ASTComponent::LanguageIn(tags) => {
+                languages.extend(tags.iter().map(ToString::to_string));
             }
-            for n in store.objects(&member, SH_NODE).filter(|o| o.is_node) {
-                targets.push(node_target(store, &n.value));
-            }
+            other => targets_of(schema, other, &mut targets),
         }
     }
-    targets
+    targets.sort();
+    targets.dedup();
+    languages.sort();
+    languages.dedup();
+    PropertyConstraint {
+        name: fossil_graph_schema::local_name(predicate).to_string(),
+        predicate: predicate.to_string(),
+        term: term_of(components),
+        targets,
+        occurs,
+        span: None,
+        annotations: property_annotations(property),
+        languages,
+    }
+}
+
+/// The destination type IRIs one component points at: `sh:class`, the type of an
+/// `sh:node` shape, and every alternative inside an `sh:or` list.
+fn targets_of(schema: &ASTSchema, component: &ASTComponent, out: &mut Vec<String>) {
+    match component {
+        ASTComponent::Class(classes) => {
+            out.extend(
+                classes
+                    .iter()
+                    .filter_map(|c| c.get_iri().ok())
+                    .map(|i| i.as_str().to_string()),
+            );
+        }
+        ASTComponent::Node(shape) => out.push(node_target(schema, shape)),
+        ASTComponent::Or(members) => {
+            for member in members {
+                if let Some(shape) = schema.get_shape(member) {
+                    for inner in shape.components() {
+                        if matches!(inner, ASTComponent::Class(_) | ASTComponent::Node(_)) {
+                            targets_of(schema, inner, out);
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 /// A `sh:node`-referenced shape's destination type: its `sh:targetClass`, or the
 /// referenced shape's own IRI when it declares none.
-fn node_target(store: &Store, node_shape: &str) -> String {
-    store
-        .first(node_shape, SH_TARGET_CLASS)
-        .unwrap_or(node_shape)
-        .to_string()
-}
-
-/// How many values the property may carry. SHACL's own defaults: no `sh:minCount`
-/// is `0` (optional) and no `sh:maxCount` is unbounded.
-fn occurs_of(store: &Store, property_shape: &str) -> Occurs {
-    let count = |p: &str| {
-        store
-            .first(property_shape, p)
-            .and_then(|v| v.parse::<u32>().ok())
-    };
-    Occurs {
-        min: count(SH_MIN_COUNT).unwrap_or(0),
-        max: count(SH_MAX_COUNT),
+fn node_target(schema: &ASTSchema, node_shape: &Object) -> String {
+    match schema.get_shape(node_shape) {
+        Some(ASTShape::NodeShape(node)) => node_type(node),
+        _ => label_of(node_shape),
     }
 }
 
@@ -401,48 +365,91 @@ fn occurs_of(store: &Store, property_shape: &str) -> Occurs {
 /// as written, `sh:nodeKind sh:Literal` a literal with none, and
 /// `sh:nodeKind sh:IRI` an IRI — with no `sh:class`, an **opaque IRI column**,
 /// not an edge.
-fn term_of(store: &Store, property_shape: &str) -> Option<fossil_graph_schema::Term> {
+fn term_of(components: &[ASTComponent]) -> Option<fossil_graph_schema::Term> {
     use fossil_graph_schema::Term;
-    if let Some(dt) = store.first(property_shape, SH_DATATYPE) {
+    let datatype = components
+        .iter()
+        .filter_map(|c| match c {
+            ASTComponent::Datatype(datatypes) => Some(datatypes),
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|d| d.get_iri().ok())
+        .map(rudof_iri::IriS::as_str)
+        .min();
+    if let Some(dt) = datatype {
         return Some(Term::Literal(Some(dt.to_string())));
     }
-    match store.first(property_shape, SH_NODE_KIND) {
-        Some(SH_IRI) => Some(Term::Iri),
-        Some(SH_LITERAL) => Some(Term::Literal(None)),
+    let node_kind = components.iter().find_map(|c| match c {
+        ASTComponent::NodeKind(kinds) => kinds.first(),
+        _ => None,
+    });
+    match node_kind {
+        Some(NodeKind::Iri) => Some(Term::Iri),
+        Some(NodeKind::Lit) => Some(Term::Literal(None)),
         _ => None,
     }
 }
 
-/// The bare IRI / blank-node label of a triple subject (`as_str`, not the `<>`
-/// `Display` form).
-///
-/// `pub` and re-exported from the crate root because `fossil-df`'s RDF pivot
-/// carried a byte-identical copy of it under the same name, and `fossil-df`
-/// already depends on this crate. The `<>` distinction is the whole content of
-/// the function and it is the kind that is right in one copy and wrong in the
-/// other: an IRI keyed as `<http://…>` matches nothing keyed as `http://…`.
-#[must_use]
-pub fn subject_value(subject: &NamedOrBlankNode) -> String {
-    match subject {
-        NamedOrBlankNode::NamedNode(n) => n.as_str().to_string(),
-        NamedOrBlankNode::BlankNode(b) => b.to_string(),
-    }
+/// A property shape's annotations: SHACL's own two, `sh:name` and
+/// `sh:description`, read as `rdfs:label` and `rdfs:comment` — one predicate
+/// for a label whichever document gave it — and first, as SHACL §2.3.2.1 says
+/// a tool prefers the locally specified label; then every non-SHACL triple.
+fn property_annotations(property: &ASTPropertyShape) -> Vec<Annotation> {
+    messages(RDFS_LABEL, property.name())
+        .chain(messages(RDFS_COMMENT, property.description()))
+        .chain(extra_annotations(property.extra()))
+        .collect()
 }
 
-/// An object term's lexical value.
-fn value_of(term: &Term) -> String {
-    match term {
-        Term::NamedNode(n) => n.as_str().to_string(),
-        Term::BlankNode(b) => b.to_string(),
-        Term::Literal(l) => l.value().to_string(),
-        Term::Triple(_) => term.to_string(),
-    }
+fn messages<'a>(predicate: &'a str, map: &'a MessageMap) -> impl Iterator<Item = Annotation> + 'a {
+    map.iter().map(move |(language, value)| {
+        Annotation::literal(
+            predicate,
+            value,
+            language.as_ref().map(ToString::to_string).as_deref(),
+        )
+    })
 }
 
-/// Is this object a node (IRI/blank, follow-able as a subject) rather than a
-/// literal?
-const fn is_node(term: &Term) -> bool {
-    matches!(term, Term::NamedNode(_) | Term::BlankNode(_))
+/// Every triple of a shape outside SHACL's namespace and not `rdf:type` — the
+/// non-validating properties §2.3.2 says a processor ignores — as an
+/// annotation, in the AST's order (predicate, then value).
+fn extra_annotations(extra: &[(rudof_iri::IriS, Object)]) -> Vec<Annotation> {
+    extra
+        .iter()
+        .map(|(predicate, object)| Annotation {
+            predicate: predicate.as_str().to_string(),
+            object: match object {
+                Object::Iri(_) | Object::BlankNode(_) => AnnotationObject::Iri(label_of(object)),
+                Object::Literal(literal) => {
+                    let language = literal.lang().map(|l| l.to_string());
+                    // A tagged string has `rdf:langString` for a datatype and a
+                    // plain one `xsd:string`; neither is written beside the value.
+                    let datatype = if language.is_some() {
+                        None
+                    } else {
+                        literal
+                            .datatype()
+                            .get_iri()
+                            .ok()
+                            .map(|d| d.as_str().to_string())
+                            .filter(|d| d != xsd::STRING.as_str())
+                    };
+                    AnnotationObject::Literal(ObjectLiteral {
+                        value: literal.lexical_form(),
+                        language,
+                        datatype,
+                    })
+                }
+                Object::Triple { .. } => AnnotationObject::Literal(ObjectLiteral {
+                    value: object.to_string(),
+                    language: None,
+                    datatype: None,
+                }),
+            },
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -499,8 +506,9 @@ ex:PersonShape a sh:NodeShape ;
         assert_eq!(by("knows").targets, ["https://ex.org/Person"]);
         assert_eq!(
             by("contact").targets,
-            ["https://ex.org/Person", "https://ex.org/Org"],
-            "`sh:or` is one constraint with two destinations"
+            ["https://ex.org/Org", "https://ex.org/Person"],
+            "`sh:or` is one constraint with two destinations, sorted: the order \
+             of an `sh:or` list does not change what the shape validates"
         );
     }
 
@@ -520,9 +528,13 @@ ex:PersonShape a sh:NodeShape ;
             .iter()
             .map(|p| p.name.as_str())
             .collect();
-        assert_eq!(names, ["name", "homepage"], "edges are not properties");
-        assert_eq!(gs.nodes[0].properties[0].cardinality, Cardinality::Single);
-        assert_eq!(gs.nodes[0].properties[1].cardinality, Cardinality::Multi);
+        assert_eq!(
+            names,
+            ["homepage", "name"],
+            "edges are not properties; the rest are by predicate, the document's order unread"
+        );
+        assert_eq!(gs.nodes[0].properties[0].cardinality, Cardinality::Multi);
+        assert_eq!(gs.nodes[0].properties[1].cardinality, Cardinality::Single);
 
         let mut contact: Vec<&EdgeType> =
             gs.edges.iter().filter(|e| e.label == "contact").collect();
@@ -533,21 +545,109 @@ ex:PersonShape a sh:NodeShape ;
         assert!(contact.iter().all(|e| e.source == "Person"));
     }
 
-    /// Shapes come out in DECLARATION order. Alphabetically
-    /// `ex:A…` sorts before `ex:Z…`; the document declares Z first, and a
-    /// `BTreeMap` would swap them.
+    /// Shapes come out by the type's IRI, whichever way the document lists them:
+    /// the same two shapes written in either order decode to one document.
     #[test]
-    fn shapes_come_out_in_declaration_order_not_alphabetical() {
-        const TWO: &str = r"
+    fn shapes_come_out_by_iri_whichever_way_the_document_lists_them() {
+        const PREFIXES: &str = r"
 @prefix sh: <http://www.w3.org/ns/shacl#> .
 @prefix ex: <https://ex.org/> .
-
-ex:ZetaShape  a sh:NodeShape ; sh:targetClass ex:Zeta .
-ex:AlphaShape a sh:NodeShape ; sh:targetClass ex:Alpha .
 ";
-        let doc = decode_shacl("two.ttl", TWO).expect("parses");
-        let order: Vec<&str> = doc.shapes().map(|s| s.iri.as_str()).collect();
-        assert_eq!(order, ["https://ex.org/Zeta", "https://ex.org/Alpha"]);
+        const ZETA: &str = "ex:ZetaShape  a sh:NodeShape ; sh:targetClass ex:Zeta .\n";
+        const ALPHA: &str = "ex:AlphaShape a sh:NodeShape ; sh:targetClass ex:Alpha .\n";
+        let decode = |body: String| decode_shacl("two.ttl", &body).expect("parses");
+        let zeta_first = decode(format!("{PREFIXES}{ZETA}{ALPHA}"));
+        let alpha_first = decode(format!("{PREFIXES}{ALPHA}{ZETA}"));
+        let order: Vec<&str> = zeta_first.shapes().map(|s| s.iri.as_str()).collect();
+        assert_eq!(order, ["https://ex.org/Alpha", "https://ex.org/Zeta"]);
+        assert_eq!(zeta_first, alpha_first, "the document's order is not read");
+    }
+
+    /// A property shape with `sh:order` comes before one without, ascending, and
+    /// the rest by the predicate's IRI — in any order the document lists them.
+    #[test]
+    fn properties_come_out_by_sh_order_then_predicate() {
+        const A: &str = "[ sh:path ex:alpha ; sh:datatype xsd:string ]";
+        const B: &str = "[ sh:path ex:beta ; sh:datatype xsd:string ; sh:order 1 ]";
+        const C: &str = "[ sh:path ex:gamma ; sh:datatype xsd:string ; sh:order 0 ]";
+        const D: &str = "[ sh:path ex:delta ; sh:datatype xsd:string ]";
+        let decode = |properties: [&str; 4]| {
+            let property = properties
+                .map(|p| format!("sh:property {p}"))
+                .join(" ;\n    ");
+            let doc = format!(
+                r"@prefix sh:  <http://www.w3.org/ns/shacl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix ex:  <https://ex.org/> .
+ex:PersonShape a sh:NodeShape ; sh:targetClass ex:Person ;
+    {property} ."
+            );
+            let doc = decode_shacl("p.ttl", &doc).expect("parses");
+            let person = doc.lookup("https://ex.org/Person").expect("shape");
+            person
+                .properties
+                .iter()
+                .map(|c| c.name.clone())
+                .collect::<Vec<_>>()
+        };
+        let expected = ["gamma", "beta", "alpha", "delta"];
+        assert_eq!(decode([A, B, C, D]), expected);
+        assert_eq!(decode([D, C, B, A]), expected, "the listing is not read");
+    }
+
+    /// Blank-node shapes with no `sh:targetClass` have no IRI: they follow the
+    /// shapes that have one, by their predicates, and two the key cannot tell
+    /// apart are the error `shape/ambiguous-order`.
+    #[test]
+    fn shapes_that_are_blank_nodes_follow_and_a_tie_is_a_rejection() {
+        const HEAD: &str = r"
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix ex: <https://ex.org/> .
+ex:Zeta a sh:NodeShape ; sh:targetClass ex:Zeta .
+";
+        let one = |path: &str| format!("[] a sh:NodeShape ; sh:property [ sh:path ex:{path} ] .\n");
+        let doc =
+            decode_shacl("b.ttl", &format!("{HEAD}{}{}", one("b"), one("a"))).expect("parses");
+        let first_predicate: Vec<&str> = doc
+            .shapes()
+            .map(|s| s.properties.first().map_or("", |p| p.name.as_str()))
+            .collect();
+        assert_eq!(first_predicate, ["", "a", "b"], "Zeta, then by predicate");
+        assert!(doc.rejections().is_empty());
+
+        let tied =
+            decode_shacl("b.ttl", &format!("{HEAD}{}{}", one("a"), one("a"))).expect("parses");
+        assert!(
+            matches!(tied.rejections(), [Rejection::AmbiguousOrder { .. }]),
+            "got {:?}",
+            tied.rejections()
+        );
+    }
+
+    /// What fossil types a document by is not what the AST holds as a shape: the
+    /// members of an `sh:or` list are shapes to SHACL and not to fossil, a bare
+    /// `sh:NodeShape` is both, and a shape with several `sh:targetClass` is named
+    /// by the smallest.
+    #[test]
+    fn a_node_shape_is_one_that_declares_a_type() {
+        const DOC: &str = r"
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix ex: <https://ex.org/> .
+ex:Bare a sh:NodeShape .
+ex:OnlyComponents sh:class ex:Thing .
+ex:Two sh:targetClass ex:Zed, ex:Aye .
+ex:Holder a sh:NodeShape ; sh:property [ sh:path ex:p ; sh:or ( [ sh:class ex:A ] ex:OnlyComponents ) ] .
+";
+        let doc = decode_shacl("n.ttl", DOC).expect("parses");
+        let iris: Vec<&str> = doc.shapes().map(|s| s.iri.as_str()).collect();
+        assert_eq!(
+            iris,
+            [
+                "https://ex.org/Aye",
+                "https://ex.org/Bare",
+                "https://ex.org/Holder"
+            ]
+        );
     }
 
     /// A shape with no `sh:targetClass` is typed by its own IRI.

@@ -17,8 +17,9 @@
 //!
 //! # The two contracts, and which is which
 //!
-//! - [`OutputShapes`] is the **decoded document**: shapes in declaration order,
-//!   each with its predicates, plus what the decoder could not lower.
+//! - [`OutputShapes`] is the **decoded document**: shapes in [the order fossil
+//!   defines](OutputShapes::new), each with its predicates, plus what the decoder
+//!   could not lower.
 //! - [`GraphSchema`] is the **output model**: what gets written.
 //!
 //! [`OutputShapes::to_graph_schema`] is the one function between them, and it is
@@ -33,7 +34,7 @@
 //! `PartialEq + Eq`, and none of them may ever grow a field that compares by
 //! address.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -70,7 +71,7 @@ pub fn local_name(iri: &str) -> &str {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(from = "OutputShapesRepr", into = "OutputShapesRepr")]
 pub struct OutputShapes {
-    /// In the order the document declares them. See [`OutputShapes::shapes`].
+    /// In fossil's order of shapes. See [`OutputShapes::new`].
     shapes: Vec<Shape>,
     /// Shape IRI → index into `shapes`. Lookup only; never iterated, so its
     /// hash order can never reach an output.
@@ -80,8 +81,8 @@ pub struct OutputShapes {
 
 /// The wire form of [`OutputShapes`]: the index is derived, so it is not
 /// serialized — deserializing runs [`OutputShapes::new`] again, which means a
-/// round-trip re-applies the first-declaration-wins rule rather than trusting a
-/// possibly-stale index someone else wrote.
+/// round-trip re-applies the rules there rather than trusting a possibly-stale
+/// index or order someone else wrote.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct OutputShapesRepr {
     shapes: Vec<Shape>,
@@ -123,7 +124,9 @@ pub struct Shape {
     /// The shape's IRI, fully resolved — the key the output model is addressed
     /// by (`NodeType::iri`).
     pub iri: String,
-    /// The predicates, in the order the document lists them.
+    /// The predicates, in the order the decoder gives them: a `ShEx` shape's, as
+    /// the triple expression lists them; a SHACL shape's, by `sh:order` and then
+    /// the predicate's IRI.
     pub properties: Vec<PropertyConstraint>,
     /// Where the DOCUMENT declares this shape — its label — as a byte range
     /// into that document's text. `None` on the same terms as
@@ -330,30 +333,81 @@ pub enum Rejection {
     CyclicRef { path: Vec<String> },
     /// A reference to a label the document never declares.
     UnresolvedRef { label: String, in_shape: String },
+    /// Two shapes the order of shapes cannot tell apart: neither has an IRI,
+    /// and they declare the same predicates. `first` and `second` are their
+    /// labels.
+    AmbiguousOrder { first: String, second: String },
     /// The document did not parse, or its top-level structure is unsupported.
     Malformed(String),
 }
 
+/// The label prefix of a blank node: a shape whose `iri` starts with it has no
+/// IRI.
+const BLANK_PREFIX: &str = "_:";
+
+/// A shape's place in [the order of shapes](OutputShapes::new): shapes with an
+/// IRI first, by it; then shapes without one, by their sorted predicates.
+fn order_key(shape: &Shape) -> (bool, &str, Vec<&str>) {
+    if shape.iri.starts_with(BLANK_PREFIX) {
+        let mut predicates: Vec<&str> = shape
+            .properties
+            .iter()
+            .map(|c| c.predicate.as_str())
+            .collect();
+        predicates.sort_unstable();
+        (true, "", predicates)
+    } else {
+        (false, shape.iri.as_str(), Vec::new())
+    }
+}
+
 impl OutputShapes {
-    /// Build from shapes in **declaration order** plus whatever the decoder
-    /// rejected, deriving the lookup index.
+    /// Build from shapes plus whatever the decoder rejected, putting the shapes
+    /// in **fossil's order** and deriving the lookup index.
     ///
-    /// **A repeated IRI keeps its FIRST declaration and its first slot.** The
-    /// alternative — last one wins — is what a `HashMap::insert` does for free,
-    /// and either rule is arbitrary, but only one of them leaves the order
-    /// alone, and the order is what a diagnostic lists the shapes in. So the
-    /// duplicate is dropped entirely, not merged and not appended.
+    /// No order among shapes comes from the standards: a shapes graph is an RDF
+    /// graph, and an RDF graph is a set. So the document's order is not read,
+    /// here or in a decoder; the order is a key of the shape, compared in turn:
+    ///
+    /// 1. A shape with an IRI goes before one without, and shapes with an IRI are
+    ///    compared by it, as the string it is, code point by code point. The IRI
+    ///    is the one the shape is known by: a `ShEx` label, a SHACL
+    ///    `sh:targetClass` (its own IRI when it has none), a declared type's
+    ///    `@iri`.
+    /// 2. A shape with none (a blank node, whose label is not part of RDF's
+    ///    abstract syntax) is compared by the IRIs of its predicates, sorted.
+    /// 3. A tie that survives is [`Rejection::AmbiguousOrder`], and not a choice.
+    ///
+    /// **A repeated IRI keeps its FIRST declaration**, in the order the caller
+    /// gave: a program's declared types come before the documents it imports,
+    /// and that is how a declaration overrides a document. The duplicate is
+    /// dropped entirely, not merged and not appended.
     #[must_use]
-    pub fn new(shapes: Vec<Shape>, rejections: Vec<Rejection>) -> Self {
+    pub fn new(shapes: Vec<Shape>, mut rejections: Vec<Rejection>) -> Self {
         let mut kept: Vec<Shape> = Vec::with_capacity(shapes.len());
-        let mut index: HashMap<String, usize> = HashMap::with_capacity(shapes.len());
+        let mut seen: HashSet<String> = HashSet::with_capacity(shapes.len());
         for shape in shapes {
-            if index.contains_key(&shape.iri) {
-                continue;
+            if seen.insert(shape.iri.clone()) {
+                kept.push(shape);
             }
-            index.insert(shape.iri.clone(), kept.len());
-            kept.push(shape);
         }
+        kept.sort_by(|a, b| order_key(a).cmp(&order_key(b)));
+        for pair in kept.windows(2) {
+            if order_key(&pair[0]) == order_key(&pair[1]) {
+                let tie = Rejection::AmbiguousOrder {
+                    first: pair[0].iri.clone(),
+                    second: pair[1].iri.clone(),
+                };
+                if !rejections.contains(&tie) {
+                    rejections.push(tie);
+                }
+            }
+        }
+        let index = kept
+            .iter()
+            .enumerate()
+            .map(|(i, shape)| (shape.iri.clone(), i))
+            .collect();
         Self {
             shapes: kept,
             index,
@@ -368,14 +422,12 @@ impl OutputShapes {
         Self::new(Vec::new(), vec![rejection])
     }
 
-    /// Every shape, **in declaration order**. An import binds by local name and
-    /// not by position, but the order still reaches a person: an import naming
-    /// no shape lists the ones the document declares, and two shapes sharing a
-    /// local name are named first-then-second. A `HashMap` lived where this
-    /// `Vec` is until `crates/fossil-hir/examples/shex_declaration_order.rs`
-    /// measured what it cost — six parses of one document handed back six
-    /// different orders, because Rust seeds its hasher per process. The order
-    /// is the document's; it is not ours to choose.
+    /// Every shape, **in fossil's order** ([`Self::new`]). An import binds by
+    /// local name and not by position, but the order still reaches a person: an
+    /// import naming no shape lists the ones the document declares, two shapes
+    /// sharing a local name are named first-then-second, and the node types of
+    /// the output model follow it. It is a function of the shapes and never of
+    /// how the document was laid out.
     pub fn shapes(&self) -> impl Iterator<Item = &Shape> {
         self.shapes.iter()
     }
@@ -503,37 +555,103 @@ mod tests {
         }
     }
 
-    // -- declaration order + first declaration wins ------------------------
+    // -- the order of shapes + first declaration wins ----------------------
 
-    /// The order is the document's. Nothing sorts, nothing hashes on the way
-    /// out.
+    /// The order is a function of the shapes: the IRI, code point by code point.
+    /// The caller's order is not read, so no two arrangements of the same shapes
+    /// can give two answers.
     #[test]
-    fn shapes_iterate_in_declaration_order() {
+    fn shapes_come_out_by_iri_whatever_order_they_were_given_in() {
+        let given = [
+            "https://example.org/Zeta",
+            "https://example.org/Alpha",
+            "https://example.org/Mu",
+        ];
+        for rotation in 0..given.len() {
+            let mut shapes: Vec<Shape> = given.iter().map(|iri| shape(iri, vec![])).collect();
+            shapes.rotate_left(rotation);
+            let doc = OutputShapes::new(shapes, vec![]);
+            let order: Vec<&str> = doc.shapes().map(|s| s.iri.as_str()).collect();
+            assert_eq!(
+                order,
+                [
+                    "https://example.org/Alpha",
+                    "https://example.org/Mu",
+                    "https://example.org/Zeta"
+                ],
+                "rotation {rotation}"
+            );
+        }
+        let upper_first = OutputShapes::new(
+            vec![
+                shape("https://example.org/a", vec![]),
+                shape("https://example.org/B", vec![]),
+            ],
+            vec![],
+        );
+        assert_eq!(
+            upper_first
+                .shapes()
+                .map(|s| s.iri.as_str())
+                .collect::<Vec<_>>(),
+            ["https://example.org/B", "https://example.org/a"],
+            "code points, so `B` (U+0042) is before `a` (U+0061)"
+        );
+    }
+
+    /// A shape without an IRI goes after every shape with one, by its sorted
+    /// predicates; two the key cannot tell apart are a rejection that names both.
+    #[test]
+    fn shapes_without_an_iri_follow_by_their_predicates_and_a_tie_is_a_rejection() {
+        let anonymous = |label: &str, predicates: &[&str]| {
+            shape(
+                label,
+                predicates
+                    .iter()
+                    .map(|p| prop(p, Some(Primitive::String), Occurs::ONE))
+                    .collect(),
+            )
+        };
         let doc = OutputShapes::new(
             vec![
+                anonymous("_:b7", &["https://example.org/b", "https://example.org/a"]),
                 shape("https://example.org/Zeta", vec![]),
-                shape("https://example.org/Alpha", vec![]),
-                shape("https://example.org/Mu", vec![]),
+                anonymous("_:b3", &["https://example.org/a", "https://example.org/c"]),
             ],
             vec![],
         );
         let order: Vec<&str> = doc.shapes().map(|s| s.iri.as_str()).collect();
-        assert_eq!(
-            order,
-            [
-                "https://example.org/Zeta",
-                "https://example.org/Alpha",
-                "https://example.org/Mu"
+        assert_eq!(order, ["https://example.org/Zeta", "_:b7", "_:b3"]);
+        assert!(doc.rejections().is_empty());
+
+        let tied = OutputShapes::new(
+            vec![
+                anonymous("_:b1", &["https://example.org/a"]),
+                anonymous("_:b2", &["https://example.org/a"]),
             ],
-            "declaration order, not alphabetical and not hash order"
+            vec![],
+        );
+        assert_eq!(
+            tied.rejections(),
+            [Rejection::AmbiguousOrder {
+                first: "_:b1".into(),
+                second: "_:b2".into()
+            }]
+        );
+        let again: OutputShapes =
+            serde_json::from_str(&serde_json::to_string(&tied).expect("serializes"))
+                .expect("deserializes");
+        assert_eq!(
+            again, tied,
+            "a round trip neither repeats nor loses the tie"
         );
     }
 
-    /// A repeated IRI keeps its FIRST declaration and its first slot. Both
-    /// halves matter: the surviving shape is the first one's *content*, and it
-    /// is still at index 0 — a last-one-wins rule would have moved `Beta` up.
+    /// A repeated IRI keeps its FIRST declaration, as the caller gave them: the
+    /// surviving shape is the first one's *content*, and it stands where the
+    /// order of shapes puts it, once.
     #[test]
-    fn a_repeated_iri_keeps_its_first_declaration_and_its_first_slot() {
+    fn a_repeated_iri_keeps_its_first_declaration() {
         let doc = OutputShapes::new(
             vec![
                 shape(
@@ -560,7 +678,7 @@ mod tests {
         let order: Vec<&str> = doc.shapes().map(|s| s.iri.as_str()).collect();
         assert_eq!(
             order,
-            ["https://example.org/Person", "https://example.org/Beta"],
+            ["https://example.org/Beta", "https://example.org/Person"],
             "the duplicate is dropped, not appended and not merged"
         );
         let person = doc.lookup("https://example.org/Person").expect("Person");
@@ -784,7 +902,7 @@ mod tests {
         assert_eq!(
             g.nodes.len(),
             2,
-            "one node type per shape, in declaration order"
+            "one node type per shape, in the order of shapes"
         );
         assert_eq!(g.nodes[0].label, "Order");
         assert_eq!(

@@ -99,3 +99,44 @@ and reordering the shapes inside a document rebound the program; that cost, and 
 A type is also what gives a program its property names, so the output type is not optional the way
 an annotation is: a program with no type, imported or declared, has no way to spell a property at
 all.
+
+## The order of shapes
+
+No order among shapes comes from the standards. A SHACL shapes graph is an RDF graph, and an RDF graph
+is a set; `sh:order` is the only ordering SHACL has, in its non-normative section, for property shapes
+and groups, "for purposes such as form building", and it "is not used for validation purposes". The
+members of an `sh:or` or `sh:languageIn` list are in an order that does not change what the shape
+validates, and ShEx annotations "do not affect whether a node conforms". A document therefore has no
+declaration order that means anything, and a rule that read one would make a program's output depend
+on how a file was laid out. fossil does not read it. Three things take their order from what it
+defines instead:
+
+- **The shapes** — which ones an import that names none is told about, which of two sharing a local
+  name is named first, and the order of the node types of the output model — are ordered by the IRI
+  the shape is known by, compared as the string it is, code point by code point: a ShEx label, a
+  SHACL shape's `sh:targetClass` (the smallest when there are several, the shape's own IRI when there
+  is none), a declared type's `@iri`. A shape with no IRI, a blank node with no `sh:targetClass`, goes
+  after every shape that has one, by the sorted IRIs of its predicates. A tie that survives is not
+  broken: it is [`shape/ambiguous-order`](/docs/errors/shape/ambiguous-order).
+- **A SHACL shape's properties** are ordered by `sh:order` ascending, a property shape without one after
+  every one with, then by the predicate's IRI.
+- **The targets of a property** (`sh:class`, `sh:node` and the members of `sh:or`) and its
+  `sh:languageIn` tags are sorted and deduplicated.
+
+Two things are where they were: a ShEx shape's properties keep the order the triple expression lists
+them in, and a repeated IRI keeps the first declaration the caller gave, so a type declared in the
+program overrides the same IRI in a document it imports.
+
+`sh:order` on a *node* shape is not read: the SHACL AST `ShaclParser` produces keeps it only on
+property shapes, and a node shape's own IRI orders it instead.
+
+**What would reverse it.** A standard giving node shapes an order that validation or construction may
+rely on (a SHACL revision making `sh:order` normative for them), at which point it is the first term
+of the key; or a program for which an author-chosen order of types is data, which then states the
+order in the program and not in a document.
+
+## Held by
+
+`crates/fossil-graph-schema/src/shapes.rs` asserts the order on shapes given in every rotation and the
+rejection of a tie; `crates/fossil-hir/src/shacl.rs` asserts that a document listed either way decodes
+to one value, and the order of properties by `sh:order`.
