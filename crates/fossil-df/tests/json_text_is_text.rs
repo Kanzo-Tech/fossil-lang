@@ -64,17 +64,11 @@ fn parse_date_over_it_checks_and_writes_a_date() {
 
     let dir = dir(&program);
     let corpus = native::run_dir(dir.path(), "person.fossil", &[]).expect("the program runs");
-    let person = corpus
-        .manifest()
-        .vertex_tables
-        .iter()
-        .find(|v| v.name == "Person")
-        .expect("Person")
-        .clone();
-    let birthday = person
+    let person = corpus.vertex("Person");
+    let birthday = person.property_groups[0]
         .properties
         .iter()
         .find(|p| p.name == "birthday")
         .expect("birthday");
-    assert_eq!(birthday.data_type, "date");
+    assert_eq!(birthday.data_type.to_string(), "date");
 }

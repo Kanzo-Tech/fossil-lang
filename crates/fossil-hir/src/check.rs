@@ -72,8 +72,8 @@ pub struct TypeckOutput<'db> {
     /// the document is the only thing that knows. MIR already reads
     /// `typecheck_mapping` for the source row, so the IRI arrives through a
     /// seam that exists — no descriptor, and no schema language in
-    /// `fossil-mir`. The term rides along for the writer, which copies it into
-    /// `fossil.json`.
+    /// `fossil-mir`. The term rides along for `describe`, which writes it into
+    /// the mapping.
     #[returns(ref)]
     pub predicates: Vec<Predicate>,
     /// What the check found, the refusals among them.

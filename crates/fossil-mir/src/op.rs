@@ -149,7 +149,7 @@ pub enum Op<'db> {
     /// `EmitVertex(input, type_name, rdf_type?, id, dedup, props)` — project rows
     /// to a typed property-graph VERTEX. The property-graph-canonical model: one
     /// `EmitVertex` per shape carrying ALL its columns (map-only wide-row). The
-    /// backend assigns the dense vertex id and writes the `fossil/1` corpus; the PG model
+    /// backend assigns the dense vertex id and writes the `GraphAr` graph; the PG model
     /// lives here, not in triples. `id` is the subject IRI expression (typically a
     /// `Concat` template); `dedup` collapses duplicate ids (single-valued shape).
     EmitVertex {
@@ -317,8 +317,8 @@ pub struct VProp<'db> {
     pub value: Expr<'db>,
     pub ty: Ty<'db>,
     pub rdf_uri: Option<SmolStr>,
-    /// The RDF term the target shape declares for the values, which the writer
-    /// copies into `fossil.json`.
+    /// The RDF term the target shape declares for the values, which `describe`
+    /// writes into the mapping.
     pub term: Option<Term>,
     pub single_valued: bool,
 }
@@ -359,7 +359,7 @@ pub enum SourceFormat {
     Provider { name: SmolStr },
 }
 
-/// Sink references. `Corpus` is the `fossil/1` corpus, the only sink built;
+/// Sink references. `Corpus` is the `GraphAr` graph, the only sink built;
 /// `Turtle`, `JsonLd` and `NQuads` are the serialisations this enum is shaped
 /// to take next.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::SalsaValue)]

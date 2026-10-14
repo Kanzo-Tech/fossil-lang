@@ -1,10 +1,10 @@
 ---
 title: A value's language tag is not well-formed
-description: "`write/invalid-language-tag` — a language tag read from the data that is not well-formed BCP 47, so no corpus is written."
+description: "`write/invalid-language-tag` — a language tag read from the data that is not well-formed BCP 47, empty or NULL, so no graph is written."
 ---
 
 A language-tagged value whose tag comes from a column — `str.lang(Row.name, Row.lang)` — is checked
-as the run writes its property table. One tag that is not well-formed BCP 47 refuses the run:
+as the run lays its graph out. One tag that is not well-formed BCP 47, empty or NULL refuses the run:
 
 ```text
 write/invalid-language-tag
@@ -15,11 +15,12 @@ write/invalid-language-tag
 
 ## Why fossil refuses it
 
-RDF 1.1 Concepts §3.3 gives every language-tagged string a well-formed tag, and the corpus's
-`declared-term` guard holds every value to the term its column declares. RML's precedence — a
-language map that yields no valid tag falls back to no language — would write an untagged string
-into a column whose datatype is `rdf:langString`. So the run is refused, before `fossil.json`, and
-there is no corpus ([Annotations and language-tagged strings](/docs/design/labels)). A constant tag
+RDF 1.1 Concepts §3.3 gives every language-tagged string a well-formed tag. RML's precedence — a
+language map that yields no valid tag falls back to no language, and a query cannot raise RML-Core's
+data error — would make an untagged string, or no triple, of a value in a column whose datatype is
+`rdf:langString`. So the writer, the only place that sees the data, refuses the run before
+`fossil.graph.yml`, and there is no graph ([Annotations and language-tagged strings](/docs/design/labels)).
+The tag it writes is lower-cased. A constant tag
 is the checker's: [`syntax/invalid-language-tag`](/docs/errors/syntax/invalid-language-tag).
 
 ## How to repair it

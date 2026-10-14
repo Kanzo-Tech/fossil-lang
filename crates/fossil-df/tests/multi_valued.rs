@@ -1,15 +1,16 @@
 // `{PersonRow.id}` is fossil's interpolation hole, not a Rust format argument.
 #![allow(clippy::literal_string_with_formatting_args)]
 
-//! **A multi-valued property is a table of its own**, a row per value, and every
-//! value is in it — through the whole native host, read back with `DuckDB`.
+//! **A multi-valued property is a set** on its vertex type, every value in it —
+//! through the whole native host, read back with `DuckDB`.
 //!
 //! A relational source spells `*` as repeated rows, and a vertex merge that
 //! kept the first of them would give a person with three nicknames one. The
 //! RDF pivot spells it as a list, which no R2RML term map reads. Both are the
-//! same table — `src`, the value — and the vertex row carries neither.
+//! same column: a `LIST` of the value, `cardinality: set` in the information
+//! file.
 
-use fossil_df::corpus::manifest::{Manifest, PropertyTable};
+use graphar_info::{Cardinality, DataType};
 
 #[path = "support/native.rs"]
 mod native;
@@ -45,11 +46,22 @@ Nicknamed : Person from PersonRow.join(NickRow, on = PersonRow.id == NickRow.id)
     nickname = NickRow.nickname
 "#;
 
-fn property<'m>(m: &'m Manifest, name: &str) -> &'m PropertyTable {
-    m.property_tables
-        .iter()
-        .find(|t| t.name == name)
-        .unwrap_or_else(|| panic!("no {name} property table: {m:?}"))
+/// Each vertex's nicknames, joined, and `∅` for a vertex that has none.
+fn nicknames(corpus: &native::Corpus) -> Vec<(String, String)> {
+    let root = corpus.materialise();
+    native::rows(&format!(
+        "SELECT subject, coalesce(array_to_string(list_sort(nickname), ','), '∅') \
+         FROM read_parquet({}) ORDER BY 1",
+        native::at(root.path(), &corpus.chunk("Person")),
+    ))
+    .into_iter()
+    .map(|r| {
+        (
+            r[0].clone().expect("a subject"),
+            r[1].clone().expect("a list"),
+        )
+    })
+    .collect()
 }
 
 #[test]
@@ -61,41 +73,55 @@ fn every_value_of_a_relational_source_is_kept() {
         ("people.fossil", PROGRAM),
     ]);
     let corpus = native::run_dir(dir.path(), "people.fossil", &[]).expect("the program runs");
-    let m = corpus.manifest();
 
-    let person = &m.vertex_tables[0];
-    assert_eq!(person.record_count, 3);
-    let columns: Vec<_> = person.properties.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(corpus.vertex_count("Person"), 3);
+    let person = corpus.vertex("Person");
+    assert_eq!(
+        person.property_groups.len(),
+        1,
+        "the nickname is in the group of its vertex type"
+    );
+    let columns: Vec<_> = person.property_groups[0]
+        .properties
+        .iter()
+        .map(|p| (p.name.as_str(), p.cardinality))
+        .collect();
     assert_eq!(
         columns,
-        ["dense_id", "subject", "name"],
-        "the vertex row carries no nickname"
+        [
+            ("subject", Cardinality::Single),
+            ("name", Cardinality::Single),
+            ("nickname", Cardinality::Set),
+        ],
+        "subject first, then the single-valued, then the sets"
     );
+    let nickname = &person.property_groups[0].properties[2];
+    assert_eq!(nickname.data_type, DataType::String);
+    assert!(nickname.is_nullable, "Grace has none");
 
-    let nickname = property(&m, "Person_nickname");
-    assert_eq!(nickname.path, "property/Person_nickname.parquet");
-    assert_eq!(nickname.source.references, "Person");
+    // Ada holds two, and the repeated `Countess` once; Linus one; Grace none.
     assert_eq!(
-        nickname.record_count, 3,
-        "three distinct nicknames, the repeat once"
+        nicknames(&corpus),
+        [
+            (
+                "https://example.org/person/1".to_string(),
+                "Countess,Enchantress".to_string()
+            ),
+            (
+                "https://example.org/person/2".to_string(),
+                "Penguin".to_string()
+            ),
+            ("https://example.org/person/3".to_string(), "∅".to_string()),
+        ]
     );
-    let value = &nickname.properties[1];
-    assert_eq!(value.iri.as_deref(), Some("https://example.org/nickname"));
     assert_eq!(
-        value.datatype.as_deref(),
-        Some("http://www.w3.org/2001/XMLSchema#string")
-    );
-
-    let root = corpus.materialise();
-    assert_eq!(
-        native::column(root.path(), &nickname.path, "nickname"),
-        ["Countess", "Enchantress", "Penguin"]
-    );
-    // Ada is `dense_id` 0 and Linus 1: subjects in order, and every value is
-    // the vertex it belongs to.
-    assert_eq!(
-        native::column(root.path(), &nickname.path, "src"),
-        ["0", "0", "1"]
+        corpus
+            .files
+            .keys()
+            .filter(|p| p.contains("nickname"))
+            .count(),
+        1,
+        "the group's chunk, and no table of the property's own"
     );
 }
 
@@ -129,56 +155,27 @@ fn an_rdf_list_is_a_row_per_value() {
         ("people.fossil", RDF_PROGRAM),
     ]);
     let corpus = native::run_dir(dir.path(), "people.fossil", &[]).expect("the program runs");
-    let m = corpus.manifest();
 
-    let columns: Vec<_> = m.vertex_tables[0]
+    assert_eq!(corpus.vertex_count("Person"), 2);
+    let person = corpus.vertex("Person");
+    let nickname = person.property_groups[0]
         .properties
         .iter()
-        .map(|p| p.name.as_str())
-        .collect();
-    assert_eq!(columns, ["dense_id", "subject", "name"]);
-    let nickname = property(&m, "Person_nickname");
+        .find(|p| p.name == "nickname")
+        .expect("nickname");
     assert_eq!(
-        nickname.properties[1].data_type, "string",
-        "a value, not a list"
+        (nickname.data_type.clone(), nickname.cardinality),
+        (DataType::String, Cardinality::Set),
+        "a value, in a list"
     );
-    let root = corpus.materialise();
     assert_eq!(
-        native::column(root.path(), &nickname.path, "nickname"),
-        ["Countess", "Enchantress"]
+        nicknames(&corpus),
+        [
+            (
+                "https://ex.org/person/1".to_string(),
+                "Countess,Enchantress".to_string()
+            ),
+            ("https://ex.org/person/2".to_string(), "∅".to_string()),
+        ]
     );
-}
-
-const CLASH_SHEX: &str = "\
-PREFIX ex: <https://example.org/>
-PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
-
-ex:Person {
-  ex:knows        @ex:Person * ;
-  ex:knows_Person xsd:string *
-}
-";
-
-const CLASH_PROGRAM: &str = r#"type { Person } := io.shex("people.shex")
-
-PersonRow := io.csv("person.csv", delimiter = "|")
-
-People : Person from PersonRow
-    @subject     = "https://example.org/person/{PersonRow.id}"
-    knows        = Person(PersonRow.id)
-    knows_Person = PersonRow.name
-"#;
-
-/// `Person`'s `knows_Person` and the relation `Person_knows_Person` are one
-/// table name, and a reader attaches one view per name: the run is refused
-/// before a byte is written rather than leaving one of them unreadable.
-#[test]
-fn two_tables_under_one_name_are_refused() {
-    let dir = native::write_dir(&[
-        ("people.shex", CLASH_SHEX),
-        ("person.csv", PEOPLE),
-        ("people.fossil", CLASH_PROGRAM),
-    ]);
-    let refused = native::run_dir(dir.path(), "people.fossil", &[]).expect_err("refused");
-    assert!(refused.contains("Person_knows_Person"), "{refused}");
 }

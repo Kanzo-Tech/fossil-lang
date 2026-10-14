@@ -1,5 +1,5 @@
 //! The run a host drives: one compiled program, the documents it names, the
-//! sources it reads, and the corpus it writes.
+//! sources it reads, and the graph it writes.
 //!
 //! An [`Executor`] holds one compiled program and is a document workspace: it
 //! reports the documents the program names and does not hold
@@ -10,7 +10,7 @@
 //! workspace takes it ([`Executor::register_inferred_descriptor`],
 //! [`Executor::register_undescribed`]), so the run checks the program against
 //! the columns the editor checked it against. [`Executor::execute`] builds a `DataFusion` plan
-//! (`lower_to_mir_pg` → `execute_graph`), writes the corpus into its
+//! (`lower_to_mir_pg` → `execute_graph`), writes the `GraphAr` graph into its
 //! [`Output`] with [`crate::write()`], and answers what it [`Ran`].
 //!
 //! ## Storage seam
@@ -23,7 +23,7 @@
 //!
 //! ## Two axes and a limit
 //! Where a run reads is the [`Storage`](fossil_storage::Storage) it is handed; where it writes is its
-//! [`Output`], one-to-one with the store the corpus goes into — the job's, by
+//! [`Output`], one-to-one with the store the graph goes into — the job's, by
 //! the `write` credential vended on it, or an `InMemory`, for which no write
 //! credential is asked. `limit` caps the rows read from each source scan, at
 //! the scan, so an edge to a vertex outside the sample is dropped and counted
@@ -31,7 +31,7 @@
 //!
 //! ## One host
 //! `fossil-df-wasm` is a `wasm-bindgen` shell over this, in the browser and in
-//! Node, and it is the only host that writes a corpus. This is target-agnostic:
+//! Node, and it is the only host that writes a graph. This is target-agnostic:
 //! native tests drive it on a current-thread runtime, the browser on its own
 //! event loop.
 
@@ -55,7 +55,7 @@ use object_store::{ObjectStore, ObjectStoreExt};
 use crate::RunReport;
 use crate::memory::{BUDGET, Budget, Refusal};
 
-/// Where a run writes its corpus — one value per `object_store` store it can
+/// Where a run writes its graph — one value per `object_store` store it can
 /// go into.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Output {
@@ -63,7 +63,7 @@ pub enum Output {
     /// files ([`Ran::Memory`]) and asks the host for no `write` credential.
     Memory,
     /// The cloud store the host vends `write` on for `job` — exactly one
-    /// prefix — and the corpus is written under it ([`Ran::Storage`]).
+    /// prefix — and the graph is written under it ([`Ran::Storage`]).
     Storage {
         /// The scope the `write` credential is vended on.
         job: String,
@@ -86,7 +86,7 @@ pub enum Ran {
 }
 
 impl Ran {
-    /// The report, whichever store the corpus went into.
+    /// The report, whichever store the graph went into.
     #[must_use]
     pub const fn report(&self) -> &RunReport {
         match self {
@@ -95,10 +95,11 @@ impl Ran {
     }
 }
 
-/// One file of a corpus written into memory.
+/// One file of a graph written into memory.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CorpusFile {
-    /// Relative to the corpus root: `fossil.json`, `vertex/<Type>.parquet`, …
+    /// Relative to the graph's root: `fossil.graph.yml`,
+    /// `vertex/<Type>/vertex_count`, `vertex/<Type>/<group>/chunk0`, …
     pub path: String,
     pub bytes: Bytes,
 }
@@ -225,7 +226,7 @@ impl Executor {
     }
 
     /// Run the program on `DataFusion`, reading through `storage`, and write
-    /// the corpus into `output`: route each source — through its connection's
+    /// the graph into `output`: route each source — through its connection's
     /// credential, or as a public URL — register the stores, execute the graph
     /// with at most `limit` rows read from each source scan, and
     /// [`crate::write()`] it.
@@ -281,9 +282,9 @@ impl Executor {
             .await
             .map_err(|e| engine_failure(e, budget.refusal(), db, file))?;
 
-        // The writer counts what it wrote on the same session, under the same
+        // The writer counts what it writes on the same session, under the same
         // pool: a profile that does not fit is refused as any operator is,
-        // before `fossil.json`.
+        // before the chunk it is the footer of.
         let written = crate::write(&graph, &ctx, storage, &dest)
             .await
             .map_err(|e| match e {
@@ -318,7 +319,7 @@ async fn granted(storage: &mut Storage, job: &str) -> Result<String, Failure> {
     }
 }
 
-/// Every file of the corpus written into `memory`, by its path under
+/// Every file of the graph written into `memory`, by its path under
 /// [`MEMORY`] — which is the store's root, so a key is the path.
 async fn held(memory: &InMemory) -> Result<Vec<CorpusFile>, Failure> {
     let unreadable = |e: object_store::Error| {

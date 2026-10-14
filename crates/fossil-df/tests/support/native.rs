@@ -35,9 +35,10 @@ use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
 use fossil_base::{Diagnostic, FossilDb, SourceFile, System, file_at};
-use fossil_df::corpus::manifest::Manifest;
 use fossil_df::{Executor, Output, Ran, RunReport};
 use fossil_hir::documents::{documents_named, register_missing_documents, registry_key};
+use graphar_info::{EdgeInfo, GraphInfo, VertexInfo};
+use graphar_parquet::paths;
 use miette::{GraphicalReportHandler, GraphicalTheme, LabeledSpan, NamedSource, SourceSpan};
 use object_store::memory::InMemory;
 use object_store::{ObjectStore, ObjectStoreExt};
@@ -248,14 +249,96 @@ pub(crate) struct Corpus {
 }
 
 impl Corpus {
-    /// `fossil.json`, parsed into the format's own structs.
-    pub(crate) fn manifest(&self) -> Manifest {
-        serde_json::from_slice(
-            self.files
-                .get("fossil.json")
-                .expect("the run wrote fossil.json"),
-        )
-        .expect("fossil.json is the manifest")
+    fn read(&self) -> impl Fn(&str) -> Option<Vec<u8>> + '_ {
+        |path| self.files.get(path).cloned()
+    }
+
+    /// `fossil.graph.yml` and the documents it names, parsed into `GraphAr`'s own
+    /// model by `graphar-info`.
+    pub(crate) fn graph(&self) -> GraphInfo {
+        crate::support::graph(&self.read())
+    }
+
+    /// The vertex type `ty`.
+    pub(crate) fn vertex(&self, ty: &str) -> VertexInfo {
+        self.graph()
+            .vertices
+            .into_iter()
+            .find(|v| v.r#type == ty)
+            .unwrap_or_else(|| panic!("the graph has no vertex type `{ty}`"))
+    }
+
+    /// The edge type `Src_label_Dst`.
+    pub(crate) fn edge(&self, triple: &str) -> EdgeInfo {
+        self.graph()
+            .edges
+            .into_iter()
+            .find(|e| e.triple() == triple)
+            .unwrap_or_else(|| panic!("the graph has no edge type `{triple}`"))
+    }
+
+    /// The names of the vertex types, in the order the graph lists them.
+    pub(crate) fn vertex_types(&self) -> Vec<String> {
+        self.graph()
+            .vertices
+            .into_iter()
+            .map(|v| v.r#type)
+            .collect()
+    }
+
+    /// The names of the edge types, in the order the graph lists them.
+    pub(crate) fn edge_types(&self) -> Vec<String> {
+        self.graph().edges.iter().map(EdgeInfo::triple).collect()
+    }
+
+    /// The vertices of `ty`, from its `vertex_count` file.
+    pub(crate) fn vertex_count(&self, ty: &str) -> u64 {
+        crate::support::vertex_count(&self.read(), &self.graph(), ty)
+    }
+
+    /// The edges of `triple`, from its `edge_count` files.
+    pub(crate) fn edge_count(&self, triple: &str) -> u64 {
+        crate::support::edge_count(&self.read(), &self.graph(), triple)
+    }
+
+    /// The path of the one chunk of `ty`'s one property group.
+    pub(crate) fn chunk(&self, ty: &str) -> String {
+        let info = self.vertex(ty);
+        paths::vertex_chunk(&info, &info.property_groups[0], 0)
+    }
+
+    /// The path of the one chunk of `triple`'s adjacency list.
+    pub(crate) fn adjacency(&self, triple: &str) -> String {
+        let info = self.edge(triple);
+        paths::adj_list_chunk(&info, &info.adj_lists[0], 0, 0)
+    }
+
+    /// The `(source subject, destination subject)` pairs of `triple`, read back
+    /// through the indices by `DuckDB`, sorted.
+    pub(crate) fn pairs(&self, root: &Path, triple: &str) -> Vec<(String, String)> {
+        let info = self.edge(triple);
+        let conn = duckdb::Connection::open_in_memory().expect("duckdb");
+        let at = |relative: String| {
+            root.join(relative)
+                .display()
+                .to_string()
+                .replace('\'', "''")
+        };
+        let mut stmt = conn
+            .prepare(&format!(
+                "SELECT s.subject, d.subject FROM read_parquet('{e}') e \
+                 JOIN read_parquet('{s}') s ON s._graphArVertexIndex = e._graphArSrcIndex \
+                 JOIN read_parquet('{d}') d ON d._graphArVertexIndex = e._graphArDstIndex \
+                 ORDER BY 1, 2",
+                e = at(self.adjacency(triple)),
+                s = at(self.chunk(&info.src_type)),
+                d = at(self.chunk(&info.dst_type)),
+            ))
+            .expect("prepare");
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .expect("query")
+            .collect::<Result<_, _>>()
+            .expect("rows")
     }
 
     /// The corpus copied into a fresh directory, so `DuckDB` can read it.
@@ -402,4 +485,33 @@ pub(crate) fn column(root: &Path, table: &str, column: &str) -> Vec<String> {
         .expect("query")
         .collect::<Result<Vec<_>, _>>()
         .expect("rows")
+}
+
+/// `root/relative`, as a `DuckDB` string literal.
+pub(crate) fn at(root: &Path, relative: &str) -> String {
+    format!(
+        "'{}'",
+        root.join(relative)
+            .display()
+            .to_string()
+            .replace('\'', "''")
+    )
+}
+
+/// The rows `sql` answers on `DuckDB`, each value as text and `None` for NULL:
+/// the caller casts what is not text.
+pub(crate) fn rows(sql: &str) -> Vec<Vec<Option<String>>> {
+    let conn = duckdb::Connection::open_in_memory().expect("duckdb");
+    let mut stmt = conn.prepare(sql).unwrap_or_else(|e| panic!("{sql}: {e}"));
+    let mut result = stmt.query([]).unwrap_or_else(|e| panic!("{sql}: {e}"));
+    let width = result.as_ref().expect("a statement").column_count();
+    let mut out = Vec::new();
+    while let Some(row) = result.next().unwrap_or_else(|e| panic!("{sql}: {e}")) {
+        out.push(
+            (0..width)
+                .map(|i| row.get::<_, Option<String>>(i).expect("a text cell"))
+                .collect(),
+        );
+    }
+    out
 }

@@ -645,13 +645,12 @@ const ROUTE_TREES: ReadonlyArray<readonly [dir: string, exts: readonly string[]]
   ["packages", [".ts", ".tsx", ".mjs", ".md", ".json"]],
 ];
 
-/** The three data files and the prose at the root, which are in no tree and cite routes anyway. */
+/** The two data files and the prose at the root, which are in no tree and cite routes anyway. */
 const ROUTE_ROOT_FILES = [
   "README.md",
   "CLAUDE.md",
   "CONTRIBUTING.md",
   "grammar.bnf",
-  "corpus.bnf",
   "catalogue.bnf",
 ];
 

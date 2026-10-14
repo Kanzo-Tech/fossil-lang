@@ -844,6 +844,28 @@ catalogue! {
     #[error("`{property}` admits {}, and a value is tagged `{tag}`", code_list(.languages))]
     WriteLanguageNotAllowed { property: String, tag: String, languages: Vec<String> },
 
+    /// A value that must be unique in the graph, and is written twice: a subject
+    /// repeated within a type or across two types (admissibility A1), an
+    /// element repeated in a multi-valued property, which `GraphAr` holds as a set
+    /// (A4), or a relation's `(source, destination)` pair repeated (A5).
+    "write/duplicate-value", "A value appears twice where it must be unique",
+    #[error("`{at}` holds `{value}` twice")]
+    WriteDuplicateValue { at: String, value: String },
+
+    /// A vertex whose `subject` is null or not an absolute IRI (admissibility
+    /// A1): the identity of a vertex is its IRI, and a graph without one for a
+    /// vertex has no vertex to name.
+    "write/invalid-subject", "A vertex has no absolute IRI as its subject",
+    #[error("a `{vertex_type}` vertex has the subject {subject}, which is not an absolute IRI")]
+    WriteInvalidSubject { vertex_type: String, subject: String },
+
+    /// A value `GraphAr`'s property types cannot hold: an unsigned 64-bit
+    /// integer above `i64::MAX`, a timestamp finer than a millisecond, or a
+    /// column of a type `GraphAr` has no word for.
+    "write/unrepresentable", "A value GraphAr cannot hold",
+    #[error("`{property}` holds `{value}`, of type {datatype}, which GraphAr cannot hold")]
+    WriteUnrepresentable { property: String, datatype: String, value: String },
+
     /// More vertices than a `u32` `dense_id` can number.
     "run/too-large", "The graph has too many vertices",
     #[error("the graph has {vertices} vertices; a `dense_id` is a u32")]

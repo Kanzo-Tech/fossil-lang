@@ -2,8 +2,8 @@
 //!
 //! The executor is `fossil-df`'s: compile, register the documents a program
 //! names, read its sources through a [`Storage`], execute on `DataFusion`, and
-//! write the `fossil/1` corpus. This crate only marshals JS values around it,
-//! and it is the one host that writes a corpus — in the browser, and in Node
+//! write the Apache `GraphAr` graph. This crate only marshals JS values around it,
+//! and it is the one host that writes a graph — in the browser, and in Node
 //! through `@fossil-lang/executor`.
 
 // The executor is single-threaded by construction (the browser has no threads),
@@ -151,7 +151,7 @@ impl FossilExecutor {
     /// - `reads` is `{ host }` — every source read through the credentials
     ///   `host` vends — or `{ files }`, each location the program reads mapped
     ///   to its bytes, for a host with no storage.
-    /// - `into` is `{ job }` — the corpus written under the one prefix `host`
+    /// - `into` is `{ job }` — the graph written under the one prefix `host`
     ///   vends `write` on for `job`, answering the [`fossil_df::RunReport`] —
     ///   or `"memory"`, answering `{ report, files: [{ path, bytes }] }` and
     ///   asking for no `write` credential.
@@ -163,9 +163,9 @@ impl FossilExecutor {
     /// which is raised before anything is written.
     ///
     /// `signal`, an `AbortSignal`, stops the run: it rejects with the signal's
-    /// reason and the run is dropped where it stands. `fossil.json` is written
-    /// last, so a stopped run leaves no corpus — only the files it had already
-    /// written under the prefix.
+    /// reason and the run is dropped where it stands. `fossil.graph.yml` is
+    /// written last, so a stopped run leaves no graph — only the files it had
+    /// already written under the prefix.
     // The shared borrow is held across the run on purpose: it is what makes a
     // `registerDocument` issued mid-run fail instead of changing the program
     // under it.

@@ -1,5 +1,5 @@
 //! `DataFusion` backend for the property-graph MIR, and the one writer of a
-//! `fossil/1` corpus.
+//! fossil graph: an Apache `GraphAr` graph.
 //!
 //! Consumes a [`fossil_mir::lower_to_mir_pg`] graph and materialises each
 //! vertex type on `DataFusion`: read the source, project `id AS subject` + each
@@ -10,8 +10,8 @@
 //! memory (the hard barrier: vertices before edges), and an edge's endpoints
 //! come out global too.
 //!
-//! [`write()`] writes the corpus — one Parquet per vertex type and per
-//! relation, `fossil.json` last — and [`Executor`] is the
+//! [`write()`] writes the graph — a vertex type's chunk and a relation's
+//! adjacency list through `graphar-parquet`, `fossil.graph.yml` last — and [`Executor`] is the
 //! whole run a host drives: compile, register documents, read sources through
 //! a [`fossil_storage::Storage`], execute, write. `fossil-df-wasm` is a
 //! `wasm-bindgen` shell over it, and it is the only write host.
@@ -35,7 +35,6 @@
 // boxing it would put `Box<Failure>` in every signature a host reads.
 #![allow(clippy::result_large_err)]
 
-pub mod corpus;
 /// The output descriptor a program names, decoded from the document the
 /// checker read — the one resolution every host runs with.
 pub mod descriptor;
@@ -43,6 +42,7 @@ pub mod descriptor;
 /// and the corpus it writes.
 pub mod executor;
 mod facts;
+mod layout;
 /// What a run's operators may reserve, and the compaction that keeps
 /// `DataFusion`'s count of it true.
 pub mod memory;
@@ -59,7 +59,7 @@ pub mod session;
 /// The catalog rendered for this engine: which `DataFusion` function each
 /// stdlib entry becomes, and which rows this engine cannot render.
 pub mod stdlib;
-/// The corpus, written: one Parquet per table, `fossil.json` last.
+/// The graph, written: `GraphAr`'s chunks, `fossil.graph.yml` last.
 pub mod write;
 
 pub use descriptor::output_descriptor;
@@ -96,9 +96,20 @@ use fossil_hir::shapes::inner_primitive;
 use fossil_hir::{MappingLoc, def_map::def_map};
 use fossil_mir::{Expr, Op, SourceFormat, VProp, apply_output_shape, lower_to_mir_pg};
 
-use crate::corpus::generated::{
-    ENDPOINT_SRC, PAYLOAD_ADDRESS, PAYLOAD_IDENTITY, PROPERTY_LANGUAGE,
-};
+/// The columns of the tables the engine holds between the executor and the
+/// writer. They are not the graph's: the writer numbers the rows within their
+/// type, names the identity `subject` as a property, and turns the rest into
+/// `GraphAr`'s columns.
+///
+/// The rank of a vertex in the whole graph, `u32`: the types in schema order,
+/// each one a contiguous range of it.
+const PAYLOAD_ADDRESS: &str = "dense_id";
+/// What a vertex is: its IRI.
+const PAYLOAD_IDENTITY: &str = "subject";
+/// The `dense_id` of the vertex a multi-valued property's value belongs to.
+const ENDPOINT_SRC: &str = "src";
+/// The BCP 47 tag of a language-tagged value, beside it.
+const PROPERTY_LANGUAGE: &str = "lang";
 
 /// The materialised graph for a program: the canonical [`GraphSchema`] (the
 /// single source of all type/predicate/cardinality metadata) plus the relation
@@ -629,7 +640,7 @@ async fn finalize_vertex(
 
 /// A language-tagged value is `str.lang`'s two-field struct; its property
 /// table has it as two columns, the lexical form under the property's name and
-/// the tag under `lang` (`corpus.bnf`). A struct whose form is null is no value.
+/// the tag under `lang`. A struct whose form is null is no value.
 /// Any other value passes through as the one column it is.
 ///
 /// It is split on the collected batches and not in the plan: `DataFusion` 54's
@@ -758,11 +769,11 @@ fn vertex_projection(
 /// batch order. The batches arrive sorted by `subject` (the plan sorts before
 /// collect) and `first` is the rows of every type before this one, so the id is
 /// global and a type is one contiguous range of it — the numbering the edge
-/// phase joins against, and the one the corpus is written in.
+/// phase joins against, and the one the writer subtracts the type's first from.
 ///
 /// # Errors
-/// `run/too-large` when the graph outgrows a `u32` `dense_id`, which is the
-/// width `corpus.bnf` declares.
+/// `run/too-large` when the graph outgrows a `u32` `dense_id`: at most
+/// 4,294,967,295 vertices in all, so a reader's global id always fits a `UINTEGER`.
 fn prepend_dense_id(
     batches: Vec<RecordBatch>,
     first: u64,
@@ -896,9 +907,8 @@ async fn execute_edges<'db>(
 /// `candidates − resolved`: the extra `count()` is one more pass over the edge's
 /// input relation, which the run already scans twice (once per orientation).
 ///
-/// There is one writer, and [`crate::corpus`] is the manifest model and nothing
-/// else, so THIS is where an edge becomes CSR/CSC. Both ends are
-/// already the global `dense_id`, and `crate::write()` writes the pair as it is.
+/// Both ends are already the global `dense_id`, and `crate::write()` subtracts
+/// the first of each end's type to write the pair as indices within the types.
 async fn execute_edge(
     ctx: &SessionContext,
     rows: DataFrame,
@@ -953,8 +963,8 @@ async fn execute_edge(
     // `saturating_sub` because the subtraction is only exact while a subject
     // identifies at most one vertex: a type materialised without dedup can hold
     // two rows with the same `subject`, and then one candidate resolves to two
-    // edges. That corpus already violates `identity-is-the-subject`
-    // (`packages/corpus/guards/guards.mjs`), which is the guard that catches it.
+    // edges. That graph violates admissibility A1, which the writer refuses as
+    // `write/duplicate-value` (`/docs/format/round-trip`).
     //
     // **Against `matched` and not against what was written**, because the
     // dedup in [`finalize_edge`] makes them different numbers.

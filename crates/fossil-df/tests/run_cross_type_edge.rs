@@ -59,49 +59,47 @@ fn a_type_call_writes_a_cross_type_edge_from_two_mappings() {
         ),
     ]);
     let corpus = native::run_dir(dir.path(), "prog.fossil", &[]).expect("the program runs");
-    let m = corpus.manifest();
 
-    let order = m
-        .vertex_tables
-        .iter()
-        .find(|v| v.name == "Order")
-        .expect("Order");
-    let person = m
-        .vertex_tables
-        .iter()
-        .find(|v| v.name == "Person")
-        .expect("Person");
-    assert_eq!((person.record_count, order.record_count), (3, 3));
+    let order = corpus.vertex("Order");
+    let person = corpus.vertex("Person");
+    assert_eq!(
+        (corpus.vertex_count("Person"), corpus.vertex_count("Order")),
+        (3, 3)
+    );
 
     // Three orders, each naming a real person: three edges, none dropped —
     // stated rather than omitted, because «no key» and «nothing dropped» are
     // not the same answer.
-    let placed_by = m
-        .edge_tables
+    let graph = corpus.graph();
+    let placed_by = graph
+        .edges
         .iter()
-        .find(|e| e.source.references == "Order" && e.destination.references == "Person")
-        .unwrap_or_else(|| panic!("no Order→Person edge: {m:?}"));
-    assert_eq!(placed_by.label, "placedBy");
-    assert_eq!(placed_by.record_count, 3);
+        .find(|e| e.src_type == "Order" && e.dst_type == "Person")
+        .unwrap_or_else(|| panic!("no Order→Person edge: {graph:?}"));
+    assert_eq!(placed_by.edge_type, "placedBy");
+    assert_eq!(corpus.edge_count(&placed_by.triple()), 3);
     let drops = corpus
         .report
         .dropped
         .iter()
-        .find(|d| d.table == placed_by.name)
+        .find(|d| d.table == placed_by.triple())
         .expect("a drop count for the edge");
     assert_eq!(drops.dropped, 0);
 
     // The literal `ex:amount` stayed a property on Order; `ex:placedBy` did not.
-    let order_columns: Vec<&str> = order.properties.iter().map(|p| p.name.as_str()).collect();
+    let order_columns: Vec<&str> = order.property_groups[0]
+        .properties
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
     assert!(order_columns.contains(&"amount"), "{order_columns:?}");
     assert!(!order_columns.contains(&"placedBy"), "{order_columns:?}");
 
-    // The type IRI, and a property's storage type.
-    assert_eq!(person.iri.as_deref(), Some("https://example.org/Person"));
-    let name = person
+    // A property's storage type. (The type's IRI is the mapping's, not the YAML's.)
+    let name = person.property_groups[0]
         .properties
         .iter()
         .find(|p| p.name == "name")
         .expect("name on Person");
-    assert_eq!(name.data_type, "string");
+    assert_eq!(name.data_type.to_string(), "string");
 }

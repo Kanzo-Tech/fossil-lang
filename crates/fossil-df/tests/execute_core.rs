@@ -1,6 +1,6 @@
 //! Native gate for the executor: a CSV program read through a [`Storage`] of
-//! in-memory stores runs end-to-end on `DataFusion`, writes the `fossil/1`
-//! corpus into memory, and answers a `RunReport` and the files. Where it
+//! in-memory stores runs end-to-end on `DataFusion`, writes the `GraphAr`
+//! graph into memory, and answers a `RunReport` and the files. Where it
 //! writes (`Output`) and how much it reads (`limit`) are held here too.
 //! `packages/executor/tests/execute.test.ts` drives the same core through the
 //! `#[wasm_bindgen]` wrapper under Node, which is where wasm-bindgen-futures is
@@ -9,9 +9,9 @@
 //! The shape document reaches the executor the way it reaches the checker —
 //! reported by `missing_documents`, registered under its key — and the run's
 //! output descriptor is decoded from that registration. The assertion on the
-//! vertex table's `iri` is the guard that the document was READ: a bare header
-//! name is bound by name against it, and a run that skipped it writes no
-//! type IRI.
+//! vertex type's `name` property is the guard that the document was READ: a
+//! property key is the last segment of a predicate IRI the document declares, and
+//! a run that skipped it writes no property at all.
 
 // The executor is single-threaded, so its futures are not `Send` and need not be.
 #![allow(clippy::literal_string_with_formatting_args, clippy::future_not_send)]
@@ -19,7 +19,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use fossil_df::corpus::manifest::Manifest;
 use fossil_df::executor::MEMORY;
 use fossil_df::{Executor, Output, Ran, RunReport};
 use fossil_storage::{Access, Host, Scope, Storage};
@@ -102,10 +101,14 @@ Person : Person from users
     name = users.name
 ";
 
-/// `fossil.json`, parsed out of what the run wrote.
-fn manifest(files: &HashMap<String, Vec<u8>>) -> Manifest {
-    serde_json::from_slice(files.get("fossil.json").expect("the run wrote fossil.json"))
-        .expect("fossil.json is the manifest")
+/// `fossil.graph.yml`, parsed out of what the run wrote.
+fn graph(files: &HashMap<String, Vec<u8>>) -> graphar_info::GraphInfo {
+    support::graph(&|path| files.get(path).cloned())
+}
+
+/// The vertices of `ty`, from its count file.
+fn vertices(files: &HashMap<String, Vec<u8>>, ty: &str) -> u64 {
+    support::vertex_count(&|path| files.get(path).cloned(), &graph(files), ty)
 }
 
 #[tokio::test]
@@ -114,34 +117,43 @@ async fn csv_program_runs_through_the_storage_seam() {
     let (report, files) =
         into_memory(&executor(PROGRAM, BTreeMap::new()), &mut storage, None).await;
 
-    // One table per vertex type and the manifest over it; nothing else.
+    // One vertex type: its chunk, its count, its information file, and the graph
+    // document over them; nothing else.
     let mut paths: Vec<&str> = files.keys().map(String::as_str).collect();
     paths.sort_unstable();
-    assert_eq!(paths, ["fossil.json", "vertex/Person.parquet"]);
-    assert!(!files["vertex/Person.parquet"].is_empty());
+    assert_eq!(
+        paths,
+        [
+            "Person.vertex.yml",
+            "fossil.graph.yml",
+            "vertex/Person/subject_name/chunk0",
+            "vertex/Person/vertex_count",
+        ]
+    );
+    assert!(!files["vertex/Person/subject_name/chunk0"].is_empty());
 
     assert_eq!(report.location, MEMORY);
     assert!(report.dropped.is_empty(), "no relation, nothing to drop");
 
     // 3 users → 3 vertices.
-    let m = manifest(&files);
-    assert_eq!(m.vertex_tables.len(), 1);
-    let v = &m.vertex_tables[0];
-    assert_eq!(v.name, "Person");
-    assert_eq!(v.record_count, 3);
+    let g = graph(&files);
+    assert_eq!(g.vertices.len(), 1);
+    let v = &g.vertices[0];
+    assert_eq!(v.r#type, "Person");
+    assert_eq!(vertices(&files, "Person"), 3);
 
-    // The document was READ, not merely named: a bare header name is bound
-    // by name against the shape document, so this IRI exists only if
+    // The document was READ, not merely named: a property key is the last
+    // segment of a predicate IRI the shape declares, so `name` exists only if
     // `executor.shex` reached the checker.
+    let properties: Vec<&str> = v.property_groups[0]
+        .properties
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
     assert_eq!(
-        v.iri.as_deref(),
-        Some("https://example.org/Person"),
-        "the vertex's type IRI comes from the registered document"
-    );
-    assert!(
-        v.properties.iter().any(|p| p.name == "name"),
-        "Person carries the name column: {:?}",
-        v.properties,
+        properties,
+        ["subject", "name"],
+        "Person carries the name property, after its subject"
     );
 }
 
@@ -175,7 +187,7 @@ fn inputs_list_each_distinct_source_with_its_format() {
 }
 
 /// **The report is where the run wrote and what the join dropped** — and the
-/// manifest is not in it: it is `fossil.json`, beside the tables it names.
+/// graph is not in it: it is `fossil.graph.yml`, beside the tables it names.
 #[tokio::test]
 async fn the_report_names_the_destination_and_the_drops() {
     let mut storage = two_sources().await;
@@ -185,25 +197,25 @@ async fn the_report_names_the_destination_and_the_drops() {
         None,
     )
     .await;
-    let m = manifest(&files);
+    let g = graph(&files);
 
     assert_eq!(report.location, MEMORY);
-    let tables: Vec<&str> = m.edge_tables.iter().map(|e| e.name.as_str()).collect();
+    let tables: Vec<String> = g.edges.iter().map(graphar_info::EdgeInfo::triple).collect();
     let dropped: Vec<&str> = report.dropped.iter().map(|d| d.table.as_str()).collect();
     assert_eq!(
         tables, dropped,
-        "one drop count per edge table, in its order"
+        "one drop count per edge type, in its order"
     );
     assert_eq!(tables, ["Order_placedBy_Person"]);
-    for table in m
-        .vertex_tables
+    for document in g
+        .vertices
         .iter()
-        .map(|v| &v.path)
-        .chain(m.edge_tables.iter().map(|e| &e.path))
+        .map(graphar_info::VertexInfo::file_name)
+        .chain(g.edges.iter().map(graphar_info::EdgeInfo::file_name))
     {
         assert!(
-            files.contains_key(table),
-            "`{table}` is named and was not written"
+            files.contains_key(&document),
+            "`{document}` is named and was not written"
         );
     }
 }
@@ -238,10 +250,10 @@ async fn a_limit_reads_at_most_that_many_rows_of_each_source() {
         Some(2),
     )
     .await;
-    let counts: Vec<(String, u64)> = manifest(&files)
-        .vertex_tables
+    let counts: Vec<(String, u64)> = graph(&files)
+        .vertices
         .iter()
-        .map(|v| (v.name.clone(), v.record_count))
+        .map(|v| (v.r#type.clone(), vertices(&files, &v.r#type)))
         .collect();
     assert_eq!(
         counts,
@@ -269,13 +281,15 @@ async fn an_edge_to_a_vertex_outside_the_sample_is_dropped_and_counted() {
             dropped: 1,
         }]
     );
-    let m = manifest(&files);
-    let edge = m
-        .edge_tables
-        .iter()
-        .find(|e| e.name == "Order_placedBy_Person")
-        .expect("the relation");
-    assert_eq!(edge.record_count, 1, "only the order by user 1 is an edge");
+    assert_eq!(
+        support::edge_count(
+            &|path| files.get(path).cloned(),
+            &graph(&files),
+            "Order_placedBy_Person"
+        ),
+        1,
+        "only the order by user 1 is an edge"
+    );
 }
 
 /// **Into memory, a run asks its host for no `write`.** The sources are read
@@ -297,7 +311,7 @@ async fn a_run_into_memory_asks_the_host_for_no_write() {
     let (report, files) =
         into_memory(&executor(PROGRAM, BTreeMap::new()), &mut storage, None).await;
     assert_eq!(report.location, MEMORY);
-    assert!(files.contains_key("fossil.json"));
+    assert!(files.contains_key("fossil.graph.yml"));
     assert!(
         host.asked()
             .iter()
@@ -434,9 +448,7 @@ async fn at_conn_source_alias_resolves_through_the_ref_map() {
 
     let mut storage = storage(&[(listed[0].location.as_str(), "users.csv")]).await;
     let (_, files) = into_memory(&exec, &mut storage, None).await;
-    let m = manifest(&files);
-    let person = m.vertex_tables.iter().find(|v| v.name == "Person");
-    assert_eq!(person.map(|v| v.record_count), Some(3));
+    assert_eq!(vertices(&files, "Person"), 3);
 }
 
 const CONN_DOCUMENT_PROGRAM: &str = "\
@@ -501,6 +513,6 @@ fn a_union_of_two_mappings_runs_with_no_tokio_runtime() {
             None,
         )
         .await;
-        assert_eq!(manifest(&files).vertex_tables[0].record_count, 3);
+        assert_eq!(vertices(&files, "Person"), 3);
     });
 }

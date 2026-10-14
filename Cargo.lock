@@ -596,7 +596,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "65c35e4b699c7e15ccbe7ee35c005e4fc0a278d22238a2857e6ce2dadeda1b06"
 dependencies = [
  "cfg-if",
- "cpufeatures 0.3.1",
+ "cpufeatures",
  "rand_core 0.10.1",
 ]
 
@@ -716,15 +716,6 @@ name = "countme"
 version = "3.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7704b5fdd17b18ae31c4c1da5a2e0305a2bf17b5249300a9ee9ed7b72114c636"
-
-[[package]]
-name = "cpufeatures"
-version = "0.2.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
-dependencies = [
- "libc",
-]
 
 [[package]]
 name = "cpufeatures"
@@ -1694,6 +1685,8 @@ dependencies = [
  "fossil-storage",
  "fossil-syntax",
  "futures",
+ "graphar-info",
+ "graphar-parquet",
  "miette",
  "object_store",
  "oxrdf",
@@ -1702,7 +1695,6 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "sha2",
  "slug",
  "smol_str",
  "tempfile",
@@ -2058,6 +2050,33 @@ name = "glob"
 version = "0.3.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
+
+[[package]]
+name = "graphar-info"
+version = "0.1.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0c70a63755dd7977e052c6dc575c6492b5764fdd974fcb8d2666635a1af1d72"
+dependencies = [
+ "serde",
+ "serde_yaml_ng",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "graphar-parquet"
+version = "0.1.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61900315edb744a95ad56ee5067693a11bae9629c4330dea37a2e50327e23f8a"
+dependencies = [
+ "arrow-array",
+ "arrow-schema",
+ "arrow-select",
+ "bytes",
+ "graphar-info",
+ "object_store",
+ "parquet",
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "h2"
@@ -4090,14 +4109,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "sha2"
-version = "0.10.9"
+name = "serde_yaml_ng"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
+checksum = "7b4db627b98b36d4203a7b458cf3573730f2bb591b28871d916dfa9efabfd41f"
 dependencies = [
- "cfg-if",
- "cpufeatures 0.2.17",
- "digest",
+ "indexmap",
+ "itoa",
+ "ryu",
+ "serde",
+ "unsafe-libyaml",
 ]
 
 [[package]]
@@ -4800,6 +4821,12 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
+name = "unsafe-libyaml"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
 
 [[package]]
 name = "untrusted"

@@ -8,18 +8,13 @@ Keep it under 200 lines, rules-not-context.
 - `grammar.bnf` — the syntax, normative, and ahead of the parser on purpose. A production
   written here and absent from `crates/fossil-syntax` is work outstanding, not an error in
   the file.
-- `corpus.bnf` — WHAT A CORPUS IS MADE OF: the columns the writer emits and what each
-  one IS. The third data file, and the newest. A reader that needs «the writer's columns»
-  names the ROLES it means rather than the names — two readers used to write the names and
-  meant different questions by them. `cargo xtask corpus` generates the Rust projection;
-  `crates/xtask/tests/corpus_generated.rs` is the `--check` as a test.
 - `catalogue.bnf` — WHICH NAMES EXIST, both halves: the `io.` constructors and every stdlib
   function with its signature and lowering, plus the DuckDB type table both profiling
   hosts read. Generated from, not compared against — `cargo xtask catalogue` writes every
   projection and no Rust or TS states a row a second time. Adding a function is a line here.
   `CONTRIBUTING.md` has the list and the round-trip guard.
 - `docs/` — the whole of the documentation, and there is no second site.
-  `/docs/book/getting-started` teaches the language and `/docs/format` specifies the corpus;
+  `/docs/book/getting-started` teaches the language and `/docs/format` specifies the graph;
   behind a maintainers' divider,
   `/docs/design` is where an argument lives, with `design/discarded` for every rejected
   alternative and what would bring it back, and `design/prior-art` for every source named.
@@ -84,8 +79,9 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
   timeline means breaks are inevitable, and without the ritual the third one leaves the codebase
   opaque to its own author.
 - **Walking-skeleton invariant:** `examples/hello.fossil`, run through the executor
-  (`fossil_df::Executor`, the one write host), must keep producing a readable `fossil/1`
-  corpus — 5 `Person` vertices, asserted by content read back with DuckDB, not existence.
+  (`fossil_df::Executor`, the one write host), must keep producing a readable Apache GraphAr
+  graph — 5 `Person` vertices, asserted by content read back with DuckDB through the
+  information files, not existence.
   `crates/fossil-df/tests/walking_skeleton.rs` is the test that goes red. A refactor that
   breaks it for >3 days is reverted and broken into smaller steps.
 
@@ -101,7 +97,8 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
 | duckdb | 1.10502 (`features = ["bundled"]`) | native execution |
 | wasm-bindgen | =0.2.120 | exact pin; CLI must match |
 | wasm-opt (binaryen) | 116 via `cargo install wasm-opt@0.116.1` | NOT apt (ubuntu ships binaryen 108, whose wasm-opt corrupts wasm-bindgen's externref table → `Table.grow(): failed to grow table` instantiating a wasm-bindgen module on Node 20, binaryen #4711; 116 fixes it). `packages/executor/scripts/build-wasm.sh` passes the six wasm32 default features (bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint, reference-types, multivalue — Rust 1.87/LLVM 20). NOT `-all` → no gc/typed-funcref, which break instantiation |
-| arrow + parquet | 58 | the corpus writer, `fossil_df::write` (through `datafusion`'s re-export) |
+| arrow + parquet | 58 | the graph writer, `fossil_df::write` (through `datafusion`'s re-export) and `graphar-parquet` |
+| graphar-info, graphar-parquet | 0.1.0-alpha.1, crates.io | the Apache GraphAr YAML model and chunk writers (Kanzo-Tech/graphar); no `tokio`, builds for wasm32; `serde_yaml_ng`, never `serde_yml` |
 | shex_ast, shacl, rudof_rdf, rudof_iri, prefixmap | Kanzo-Tech/rudof by `git` + `rev` (PR #33; the owner tags it later) | ShEx and SHACL shape documents, and the Turtle parser; one git source for all five, `default-features = false` — the defaults drag in `reqwest`/`tokio` and what wasm32 cannot build |
 | datafusion | 54, `default-features = false` | pinned in `crates/fossil-df/Cargo.toml`, not the workspace table — see the `zstd`/`arrow-ipc` note there |
 
@@ -136,13 +133,13 @@ crates/
                            of DataFusion and of every byte fossil reads or writes. `js`: a JS
                            `Host` as its `Host`. The one renderer of a `CREATE SECRET`
   fossil-storage-wasm/     that, exposed to JS for `@fossil-lang/storage`
-  fossil-df/               DataFusion backend for the property-graph MIR, the one corpus
-                           writer (`write`: a Parquet per table, `fossil.json`
-                           last), and `Executor` — the whole run a host drives, under the
-                           2 GiB pool in `memory.rs` that refuses as `run/over-budget`.
-                           `corpus` is the `fossil/1` format: `fossil.json`'s structs, with
-                           `fossil.schema.json` beside them for a reader in another language,
-                           and `generated.rs`, the writer's column table from `corpus.bnf`
+  fossil-df/               DataFusion backend for the property-graph MIR, the one graph
+                           writer (`write`: `layout` lays the tables out as Apache GraphAr's
+                           and holds them to what an RDF reader can recover, `graphar-parquet`
+                           writes the chunks, `fossil.graph.yml` last), and `Executor` — the
+                           whole run a host drives, under the 2 GiB pool in `memory.rs` that
+                           refuses as `run/over-budget`. `facts` counts what the footers hold
+                           (`fossil:stats`)
   fossil-profile/          what a source is — columns and types, counts, candidate keys, the
                            inclusions between sources, a sample — planned as queries and read
                            from their answers, running NOTHING (sans-IO, `run(sources, options,
@@ -160,14 +157,14 @@ crates/
                            the one name resolver, and the checker; no index of its own
   fossil-wasm/             WASM host shim (the workspace under `openProgram` + the tokenizer)
   fossil-df-wasm/          `fossil_df::Executor` exposed to JS — the only host that writes a
-                           corpus, in the browser and in Node. There is no native CLI: it
+                           graph, in the browser and in Node. There is no native CLI: it
                            was deleted on 2026-09-30 (`/docs/design/discarded` says what
                            brings it back)
-  xtask/                   repo automation. Three commands: `wasm-check` derives the wasm32
-                           subset from the cdylib closure, and `catalogue [--check]` and
-                           `corpus [--check]` regenerate every projection of their `.bnf`.
-                           What is generated from a Rust TYPE — the error catalogue, the
-                           manifest schema and every wire type in `@fossil-lang/types` — is
+  xtask/                   repo automation. Two commands: `wasm-check` derives the wasm32
+                           subset from the cdylib closure, and `catalogue [--check]`
+                           regenerates every projection of `catalogue.bnf`.
+                           What is generated from a Rust TYPE — the error catalogue and every
+                           wire type in `@fossil-lang/types` — is
                            the expect test `tests/wire.rs` (`UPDATE_EXPECT=1`), because the
                            binary must not link the crates `catalogue` generates into
 
@@ -235,11 +232,6 @@ grammar.bnf                the syntax, normative, and ahead of the parser on pur
 catalogue.bnf              which names exist — the `io.` rows, the stdlib rows and the
                            DuckDB type table. Every projection is generated; no Rust or TS
                            states a row twice
-corpus.bnf                 what a corpus is made of — the vertex and edge columns the writer
-                           emits and the ROLE of each. The source of one generated file,
-                           `fossil-df/src/corpus/generated.rs`. File names are NOT here: they
-                           are `fossil.json`'s `path`, and `fossil_df::corpus::manifest` owns them
-tests/wasm_parity/         the manual DuckDB-WASM cross-engine parity harness
 ```
 
 The `ui/ viewer/ editor/` React family moved to `@kanzo-tech/*`; commit `873cbc0` deleted

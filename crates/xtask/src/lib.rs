@@ -8,7 +8,6 @@
 //! and the guards in `tests/` read.
 
 pub mod catalogue;
-pub mod corpus;
 pub mod depgraph;
 pub mod problem;
 pub mod reference;

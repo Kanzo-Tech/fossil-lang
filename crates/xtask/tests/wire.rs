@@ -31,20 +31,6 @@ fn the_error_catalogue() {
     ));
 }
 
-/// `fossil.json`: `fossil.schema.json`, and the reader's declarations of it.
-#[test]
-fn the_manifest() {
-    use fossil_df::corpus::manifest::Manifest;
-    let text = Manifest::json_schema();
-    expect_file![at("crates/fossil-df/src/corpus/fossil.schema.json")].assert_eq(&text);
-    let schema: Value = serde_json::from_str(&text).expect("the schema is JSON");
-    expect_file![at("packages/corpus/src/manifest.gen.ts")].assert_eq(&format!(
-        "{}{}",
-        ts::header("`fossil_df::corpus::manifest::Manifest`"),
-        ts::declarations(&schema)
-    ));
-}
-
 /// What crosses `wasm-bindgen` and the `Host` contract, declared once in
 /// `@fossil-lang/types`.
 #[test]

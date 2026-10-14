@@ -8,7 +8,7 @@
 //! relations (Arrow tables); the *graph* is an interpretation that declares:
 //! which relations are node types, what identifies a node (its **key** — here,
 //! the subject IRI), and which predicates **reference** another node type (the
-//! edges). RDF, the `fossil/1` corpus (`dense_id`, `src`/`dst`), edge-lists,
+//! edges). RDF, the `GraphAr` graph (`_graphArVertexIndex`, `_graphArSrcIndex`/`_graphArDstIndex`), edge-lists,
 //! traversal, DCAT are
 //! then all **views or materializers** over this single schema + the relations.
 //!
@@ -97,7 +97,7 @@ pub struct Property {
     /// Column / predicate local name, e.g. `"name"`.
     pub name: String,
     /// The canonical (format-neutral) datatype. A materializer derives its own
-    /// spelling from this (`fossil.json` `int64`, xsd `…#integer`, …).
+    /// spelling from this (`GraphAr` `int64`, xsd `…#integer`, …).
     pub datatype: Primitive,
     /// The full RDF predicate IRI (e.g. `https://example.org/name`) — RDF-border
     /// metadata. `None` for a non-RDF graph.
@@ -175,7 +175,7 @@ impl Term {
 /// the schema, the checker and the descriptors all speak it, and a lattice that
 /// crosses a crate boundary as a string is a lattice with no single definition.
 ///
-/// Materializers map it to their own vocabulary (`fossil.json` `string/int64/double/…`,
+/// Materializers map it to their own vocabulary (`GraphAr` `string/int64/double/…`,
 /// `DataFusion` scalars, `DuckDB` column types) next to the materializer; only the
 /// xsd direction lives here, because xsd is the RDF border every side reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]

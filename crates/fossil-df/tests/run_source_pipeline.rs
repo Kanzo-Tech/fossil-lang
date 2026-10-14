@@ -65,7 +65,7 @@ User : Person from adultos
     name = users.name
 ");
     assert_eq!(
-        native::column(root.path(), "vertex/Person.parquet", "subject"),
+        native::column(root.path(), "vertex/Person/subject_name/chunk0", "subject"),
         [
             "https://example.org/user/1",
             "https://example.org/user/3",
@@ -92,7 +92,11 @@ User : Person from localizados
     city = ciudades.ciudad
 ");
     assert_eq!(
-        native::column(root.path(), "vertex/Person.parquet", "subject"),
+        native::column(
+            root.path(),
+            "vertex/Person/subject_name_city/chunk0",
+            "subject"
+        ),
         ["https://example.org/user/1", "https://example.org/user/3"]
     );
 
@@ -101,7 +105,9 @@ User : Person from localizados
         .query_row(
             &format!(
                 "SELECT string_agg(city, ',' ORDER BY subject) FROM read_parquet('{}')",
-                root.path().join("vertex/Person.parquet").display()
+                root.path()
+                    .join("vertex/Person/subject_name_city/chunk0")
+                    .display()
             ),
             [],
             |r| r.get(0),

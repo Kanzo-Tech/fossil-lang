@@ -39,10 +39,11 @@ url = "2"                               # the WHATWG URL Standard — every URI 
 # codegen depends on the 0.8 JSON Schema draft-07 dialect for
 # openapi-typescript interop.
 schemars = { version = "0.8" }
-# Pure-Rust SHA-256 for the cross-engine parity digest
-# (`fossil-df/tests/corpus_exec.rs`). Already a transitive dep via
-# duckdb/parquet; only a native dev-dependency.
-sha2 = "0.10"
+# === The graph: Apache GraphAr, through Kanzo-Tech/graphar (crates.io, `/docs/design/graphar`) ===
+# `graphar-info` is the YAML model and `graphar-parquet` the chunk writers, over arrow-rs and
+# `object_store` at the majors fossil links. Both build for wasm32 and reach no `tokio`.
+graphar-info = "0.1.0-alpha.1"
+graphar-parquet = "0.1.0-alpha.1"
 # `fossil-storage`'s IO half: a vended credential as a store `DataFusion`
 # reads through and fossil writes through. `aws` + `azure` are the stores a
 # host vends for, `http` the public URLs no credential covers. Its cloud client

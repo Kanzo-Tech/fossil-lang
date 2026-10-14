@@ -3024,6 +3024,109 @@
       "x-detail": "\"`{property}` admits {}, and a value is tagged `{tag}`\", code_list(.languages)"
     },
     {
+      "description": "A value that must be unique in the graph, and is written twice: a subject repeated within a type or across two types (admissibility A1), an element repeated in a multi-valued property, which `GraphAr` holds as a set (A4), or a relation's `(source, destination)` pair repeated (A5).",
+      "properties": {
+        "code": {
+          "enum": [
+            "write/duplicate-value"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "at": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "at",
+            "value"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "A value appears twice where it must be unique",
+      "type": "object",
+      "x-detail": "\"`{at}` holds `{value}` twice\""
+    },
+    {
+      "description": "A vertex whose `subject` is null or not an absolute IRI (admissibility A1): the identity of a vertex is its IRI, and a graph without one for a vertex has no vertex to name.",
+      "properties": {
+        "code": {
+          "enum": [
+            "write/invalid-subject"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "subject": {
+              "type": "string"
+            },
+            "vertex_type": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "subject",
+            "vertex_type"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "A vertex has no absolute IRI as its subject",
+      "type": "object",
+      "x-detail": "\"a `{vertex_type}` vertex has the subject {subject}, which is not an absolute IRI\""
+    },
+    {
+      "description": "A value `GraphAr`'s property types cannot hold: an unsigned 64-bit integer above `i64::MAX`, a timestamp finer than a millisecond, or a column of a type `GraphAr` has no word for.",
+      "properties": {
+        "code": {
+          "enum": [
+            "write/unrepresentable"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "datatype": {
+              "type": "string"
+            },
+            "property": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "datatype",
+            "property",
+            "value"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "A value GraphAr cannot hold",
+      "type": "object",
+      "x-detail": "\"`{property}` holds `{value}`, of type {datatype}, which GraphAr cannot hold\""
+    },
+    {
       "description": "More vertices than a `u32` `dense_id` can number.",
       "properties": {
         "code": {

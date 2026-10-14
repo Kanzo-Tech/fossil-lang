@@ -99,6 +99,9 @@ export type Code =
   | 'write/failed'
   | 'write/invalid-language-tag'
   | 'write/language-not-allowed'
+  | 'write/duplicate-value'
+  | 'write/invalid-subject'
+  | 'write/unrepresentable'
   | 'run/too-large'
   | 'storage/no-credential'
   | 'storage/ambiguous-prefix'
@@ -211,6 +214,9 @@ export const CODES: readonly Code[] = [
   'write/failed',
   'write/invalid-language-tag',
   'write/language-not-allowed',
+  'write/duplicate-value',
+  'write/invalid-subject',
+  'write/unrepresentable',
   'run/too-large',
   'storage/no-credential',
   'storage/ambiguous-prefix',
@@ -890,6 +896,33 @@ export interface ProblemData {
     tag: string;
   };
   /**
+   * A value that must be unique in the graph, and is written twice: a subject repeated within a
+   * type or across two types (admissibility A1), an element repeated in a multi-valued property,
+   * which `GraphAr` holds as a set (A4), or a relation's `(source, destination)` pair repeated
+   * (A5).
+   */
+  'write/duplicate-value': {
+    at: string;
+    value: string;
+  };
+  /**
+   * A vertex whose `subject` is null or not an absolute IRI (admissibility A1): the identity of a
+   * vertex is its IRI, and a graph without one for a vertex has no vertex to name.
+   */
+  'write/invalid-subject': {
+    subject: string;
+    vertex_type: string;
+  };
+  /**
+   * A value `GraphAr`'s property types cannot hold: an unsigned 64-bit integer above `i64::MAX`, a
+   * timestamp finer than a millisecond, or a column of a type `GraphAr` has no word for.
+   */
+  'write/unrepresentable': {
+    datatype: string;
+    property: string;
+    value: string;
+  };
+  /**
    * More vertices than a `u32` `dense_id` can number.
    */
   'run/too-large': {
@@ -1113,6 +1146,9 @@ export const TITLES: { readonly [C in Code]: string } = {
   'write/failed': 'A corpus file could not be written',
   'write/invalid-language-tag': 'A value\'s language tag is not well-formed',
   'write/language-not-allowed': 'A value in a language the shape does not admit',
+  'write/duplicate-value': 'A value appears twice where it must be unique',
+  'write/invalid-subject': 'A vertex has no absolute IRI as its subject',
+  'write/unrepresentable': 'A value GraphAr cannot hold',
   'run/too-large': 'The graph has too many vertices',
   'storage/no-credential': 'No credential was vended',
   'storage/ambiguous-prefix': 'More than one prefix was vended',
@@ -1204,6 +1240,9 @@ export type DetailedCode =
   | 'engine/failed'
   | 'write/failed'
   | 'write/invalid-language-tag'
+  | 'write/duplicate-value'
+  | 'write/invalid-subject'
+  | 'write/unrepresentable'
   | 'run/too-large'
   | 'storage/no-credential'
   | 'storage/ambiguous-prefix'
@@ -1294,6 +1333,9 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'engine/failed': (_) => `the query engine failed`,
   'write/failed': (d) => `\`${d.path}\` could not be written`,
   'write/invalid-language-tag': (d) => `\`${d.property}\` has a value tagged \`${d.tag}\`, which is not a well-formed BCP 47 language tag`,
+  'write/duplicate-value': (d) => `\`${d.at}\` holds \`${d.value}\` twice`,
+  'write/invalid-subject': (d) => `a \`${d.vertex_type}\` vertex has the subject ${d.subject}, which is not an absolute IRI`,
+  'write/unrepresentable': (d) => `\`${d.property}\` holds \`${d.value}\`, of type ${d.datatype}, which GraphAr cannot hold`,
   'run/too-large': (d) => `the graph has ${d.vertices} vertices; a \`dense_id\` is a u32`,
   'storage/no-credential': (d) => `the host vended no ${d.access} credential for ${d.scope}`,
   'storage/ambiguous-prefix': (d) => `${d.scope} vends ${d.count} prefixes, and one was expected`,

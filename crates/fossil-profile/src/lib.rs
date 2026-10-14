@@ -288,7 +288,7 @@ impl Ask {
 }
 
 /// A column's counts, over the rows the profile read — Parquet's `Statistics`
-/// names, which the corpus's `fossil.json` uses for the same facts.
+/// names, which the graph's chunk footers use for the same facts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct ColumnStats {
     #[schemars(with = "String")]

@@ -24,8 +24,6 @@ Prizes: 3 written, 3 lowered
     motivation
 
 ── run ──
-vertex Person (https://schema.org/Person) × 2 — dense_id, subject, birthDate
-vertex Prize (https://nobel.example/vocab/Prize) × 3 — dense_id, subject, category
-property Person_name × 3 — src, name, lang
-property Prize_motivation × 3 — src, motivation, lang
+vertex Person × 2 — subject, birthDate, name [set]
+vertex Prize × 3 — subject, category, motivation [set]
 edge Person_awarded_Prize × 3
