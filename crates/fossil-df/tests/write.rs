@@ -655,7 +655,11 @@ async fn the_graph_keeps_the_promises_it_makes_to_a_stranger() {
         .expect("tables were written");
     let first_info = puts
         .iter()
-        .position(|p| p.ends_with(".yml"))
+        .position(|p| {
+            std::path::Path::new(p)
+                .extension()
+                .is_some_and(|e| e == "yml")
+        })
         .expect("information files were written");
     assert!(
         last_table < mapping && mapping < first_info,
