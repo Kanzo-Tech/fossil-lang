@@ -153,7 +153,7 @@ describe("profile", () => {
     const { io, sql } = fakeIO(async () => [{ column_name: "id", column_type: "BIGINT" }], { options: undefined });
     const { profile: profiled } = await profile([users], io);
     expect(sql.some((s) => s.startsWith("SELECT CAST(count(*) AS VARCHAR)"))).toBe(true);
-    expect(profiled.sources.map((s) => s.descriptor.key)).toEqual(["@w/users.csv"]);
+    expect(profiled.sources.map((s) => [s.binding, s.descriptor.key])).toEqual([["users", "@w/users.csv"]]);
   });
 
   it("asks the host for an etag per source", async () => {

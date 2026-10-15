@@ -1,7 +1,7 @@
 //! E2E: an expression in a property position produces its column.
 //!
 //! Dropped anywhere between the CST and the engine, `slug = str.slug(users.name)`
-//! would compile, report success, and leave the column out of the corpus. What
+//! would compile, report success, and leave the column out of the graph. What
 //! is asserted here is the whole chain — the form in the HIR, the arm in the
 //! checker, the lowering to MIR, and the render on this engine — by the only
 //! evidence that cannot be faked: the values.

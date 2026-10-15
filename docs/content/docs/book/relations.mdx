@@ -48,8 +48,8 @@ hold of every conjunct, and each is a distinct refusal:
 
 **It is an equality between two columns.** `on = A.date > B.since` is refused, and so is
 `on = A.k == B.k or A.j == B.j`, and so is `on = str.lower(A.k) == B.k`. None of the three leaves a
-key to plan against, so what each would run as is a nested loop over the product of two corpora —
-and a corpus is the size at which that is not a slow program but a hung one.
+key to plan against, so what each would run as is a nested loop over the product of two graphs —
+and a graph is the size at which that is not a slow program but a hung one.
 
 **The two columns are one from each side.** `on = Purchase.id == Purchase.user_id` is well-typed,
 names columns that exist, and never mentions `User` — so it holds or fails for whole relations

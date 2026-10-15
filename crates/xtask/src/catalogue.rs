@@ -1101,9 +1101,11 @@ fn ts_header(body: &str) -> String {
 }
 
 /// `@fossil-lang/wasm`'s `profile`: the constructors a host can `DESCRIBE`, so it asks
-/// for no credential to read a source it has nothing to describe with. What a
-/// `DESCRIBE` means is `fossil-profile`'s, in the wasm module, and not stated
-/// here a second time.
+/// for no credential to read a source it has nothing to describe with, and the
+/// `duckdb` table, so a host that stands in for an engine (a test double that
+/// answers a `DESCRIBE`) says a type in the words the table does and states no row
+/// of it. What a `DESCRIBE` *means* is `fossil-profile`'s, in the wasm module,
+/// from the same table, and the matching is not written a second time here.
 ///
 /// A materialised row (`io.rdf`) is absent on purpose and not by omission —
 /// there is no table function to `DESCRIBE` it with, which is what
@@ -1114,8 +1116,10 @@ pub fn emit_ts_profile(cat: &Catalogue) -> String {
     let mut out = ts_header(
         "// The `io.` constructors that read through a native DuckDB table function. A\n\
          // materialised row (`io.rdf`) has no reader to DESCRIBE through and is\n\
-         // deliberately absent.",
+         // deliberately absent. And the `duckdb` table: what a `DESCRIBE` column type\n\
+         // means on the lattice.",
     );
+    out.push_str("import type { Primitive } from \"@fossil-lang/types\";\n\n");
     out.push_str("/** The constructors a host can DESCRIBE, in catalogue order. */\n");
     let names: Vec<String> = native.iter().map(|(n, _)| format!("{n:?}")).collect();
     let _ = writeln!(
@@ -1124,7 +1128,33 @@ pub fn emit_ts_profile(cat: &Catalogue) -> String {
         names.join(", ")
     );
     out.push_str("/** One `io.` constructor that reads through a native reader. */\n");
-    out.push_str("export type NativeRow = (typeof NATIVE_ROWS)[number];\n");
+    out.push_str("export type NativeRow = (typeof NATIVE_ROWS)[number];\n\n");
+    out.push_str(
+        "/**\n * One line of the `duckdb` table: a `Primitive`, and the `DESCRIBE` column types that mean it.\n \
+         * A spelling is matched case-blind and whole; `\"X*\"` matches every spelling that starts with\n \
+         * `X`, and `\"*\"` matches anything.\n */\n\
+         export interface DuckdbType {\n  primitive: Primitive;\n  spellings: readonly string[];\n}\n\n\
+         /** The `duckdb` table, in file order — which is precedence: the first line that matches wins. */\n\
+         export const DUCKDB_TYPES: readonly DuckdbType[] = [\n",
+    );
+    for t in &cat.duckdb {
+        let spellings: Vec<String> = t
+            .spellings
+            .iter()
+            .map(|s| match s {
+                Spelling::Exact(x) => format!("{x:?}"),
+                Spelling::Prefix(x) => format!("\"{x}*\""),
+                Spelling::Any => "\"*\"".to_string(),
+            })
+            .collect();
+        let _ = writeln!(
+            out,
+            "  {{ primitive: {:?}, spellings: [{}] }},",
+            t.primitive,
+            spellings.join(", ")
+        );
+    }
+    out.push_str("];\n");
     out
 }
 

@@ -434,7 +434,7 @@ async fn a_joined_relation_feeds_the_vertex_it_emits() {
         },
         Op::Sink {
             input: 3,
-            sink: SinkRef::Corpus,
+            sink: SinkRef::Graph,
         },
     ];
 

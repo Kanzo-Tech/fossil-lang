@@ -48,7 +48,7 @@ let profile = plan.finish();                // types, keys, inclusions, samples
 The browser reaches it through
 `fossil-wasm`'s `Profiler` and runs each query on the page's DuckDB-WASM: `runProfiler` in
 `@fossil-lang/wasm` is the loop (`packages/wasm/src/profile.ts, runProfiler`), and `profile` beside
-it reads each source under its credential and hands the plan its name
+it reads each source under its credential and hands the plan its name and its binding
 (`packages/wasm/src/describe.ts, profile`). A program's own sources are `program.describe()`: its
 inputs, profiled, handed to the checker, and answered as the value a run takes. `fossil-df`'s tests run the same plan on the native
 `duckdb` crate, so the code is shared and only the engine differs
@@ -65,6 +65,27 @@ links DuckDB into every build of the crate, the wasm one included.
 the module is still one. A host that cannot afford the statistics gets a mode of Profile —
 `Options::TYPES`, one `DESCRIBE` a source, which is what the editor asks for on every keystroke —
 not a second package.
+
+**A profile names its sources by binding** (owner decision, 15 October 2026). `Profile.sources`,
+an inclusion's `ColumnRef.source` and a failure's `source` carry the name the program binds the source
+to (`users` in `users := io.csv("@lake/users.csv")`): the name a prompt, a mapping and a diagnostic
+write, and the one a host used to recover from a path with `bindingName` and a suffix for the
+collisions. `ProfileSource` takes it as `binding`, and what it called `name` — what the host's DuckDB
+reads — is `location`, so a source has one name. The descriptor inside a `SourceProfile` is still
+keyed by the reference the program wrote, because that is what the compiler's cache is keyed by and
+what survives a connection being repointed: two bindings of one file share a descriptor and are two
+sources of the profile, each profiled under its own name. A profile of files before there is a program
+has no bindings, so the host gives each the name `bindingName(file)` makes of it, and a collision is
+the host's to disambiguate; a program cannot bind a name twice. The plan reads a binding once, so one
+file bound twice is read twice.
+
+*Held by* `crates/fossil-profile/tests/native.rs`,
+"a_profile_says_what_the_files_are", and `crates/fossil-profile/src/lib.rs`,
+"two_bindings_of_one_file_are_two_sources_under_their_own_names".
+
+**What would reverse it:** a host that profiles by path and has no bindings at all, and a cost of
+reading one file twice that is measured on a program that does it. Then the key is the name again and a
+binding is the host's to attach.
 
 ## The mapping is Fossil, and the model cannot write a name that does not exist
 
@@ -105,6 +126,59 @@ to the engine itself.
 **What would reverse it:** a model that writes mappings measurably better filling a JSON spec than
 writing grammar-held Fossil with the checker as its oracle, over the evaluation set. Then a spec
 returns — RML's, not one of ours ([discarded](/docs/design/discarded)).
+
+## The names a model writes in are computed, not proposed
+
+**`vocabularyOf` and `subjectOf` are fossil's, over a `Model`** (owner decision, 15 October 2026). A
+host that has decided what a graph holds — types over one source each, identified by some of its
+columns, and the relations between them — passes that `Model` and the profiled sources, and fossil
+answers the `Vocabulary` `grammarFor` takes and each type's `@subject`
+(`crates/fossil-ide/src/constrain.rs, vocabulary_of`, `subject_of`; `@fossil-lang/wasm`'s
+`vocabularyOf` and `subjectOf`). keasy wrote both by hand: a type's IRI is `<base>/vocab/<name>`, a
+field's `<base>/vocab/<field>`, a thing's `<base>/id/<name in words>/`, and a field's type is the
+checker's own spelling of the primitive (`Option<Date>`, `Seq<Ref<Institution>>`). Nothing in the model
+is the proposing model's: it cannot invent an IRI, and the spelling of a type is the one the checker
+prints (`Primitive`'s `Display`), so a copy in a host could not drift from it. The IRI scheme is a
+policy, and it is one: a host that wants another passes a vocabulary it built, which
+`grammarFor` still takes. A relation's `many` is `Seq<Ref<…>>` and wins over `optional`, as a sequence
+is already empty.
+
+*Held by* `crates/fossil-ide/tests/constrain.rs`,
+"a_subject_is_the_workspaces_prefix_the_types_words_and_the_identitys_holes",
+"a_vocabulary_declares_the_types_with_the_workspaces_iris_and_reads_only_what_they_use".
+
+**What would reverse it:** a second host with a different IRI scheme that wants the rest of the
+function, the fields and the relations, and not the IRIs. Then the scheme is an argument and the default
+is this one.
+
+## The graph before a run
+
+**`program.mapping()` is the mapping of the program's types, with no run.** The pre-run shape of a
+graph — the types, their keys, columns and labels — is `Mapping.model()` over this document, and no
+host builds it by hand ([the graph as Apache GraphAr](/docs/design/graphar) has the function and what
+differs from the run's). It is not `program.describe()`, which is a credential and a query per source;
+the mapping reads no source and needs no `describe` first.
+
+**What would reverse it:** a shape a program declares that the types cannot state without running it —
+a type that exists only by what a source contains. Then that type is absent before the run and present
+after, and the host says so.
+
+## The DuckDB type table reaches TypeScript from the catalogue
+
+**`cargo xtask catalogue` projects the `duckdb` table of `catalogue.bnf` to
+`packages/wasm/src/catalogue.generated.ts` as `DUCKDB_TYPES`**, in file order, which is precedence. A
+host that stands in for an engine — a test double answering a `DESCRIBE` — says a primitive in the
+words the table does, and states no row of it; keasy's fixture kept its own `Primitive` to DuckDB-type
+map beside the Rust table. Only the table is projected. What a `DESCRIBE` type *means* is matched by
+`fossil-profile`, in the wasm module, from the same file, and a matcher in TypeScript would be a second
+implementation of it.
+
+*Held by* `crates/xtask/tests/catalogue_generated.rs`,
+"the_duckdb_table_is_projected_to_typescript_in_file_order", and
+"the_checked_in_files_match_the_catalogue".
+
+**What would reverse it:** a TypeScript host that has to read a `DESCRIBE` itself and cannot ask the
+module. Then the matcher is generated beside the table, from the same lines, as the Rust one is.
 
 ## Order
 

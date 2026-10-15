@@ -157,7 +157,7 @@ describe('openProgram', () => {
         },
       ]);
       expect(profiled.undescribed).toEqual([]);
-      expect(profiled.profile.sources.map((s) => s.descriptor.key)).toEqual(['@lake/users.csv']);
+      expect(profiled.profile.sources.map((s) => [s.binding, s.descriptor.key])).toEqual([['users', '@lake/users.csv']]);
     } finally {
       program.close();
     }

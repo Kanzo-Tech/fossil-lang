@@ -116,7 +116,7 @@ pub(crate) struct Laid {
 
 impl Laid {
     /// The columns stored as text that are not text, by `(vertex type, column)`.
-    pub(crate) fn natural(&self) -> crate::describe::Natural {
+    pub(crate) fn natural(&self) -> fossil_mir::describe::Natural {
         self.vertices
             .iter()
             .flat_map(|v| {

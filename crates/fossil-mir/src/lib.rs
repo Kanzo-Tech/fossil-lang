@@ -20,6 +20,7 @@
 //! schema; `/docs/design/algebra` is the page that argues it, and
 //! [`op::Op`]'s own doc comments are the signatures.
 
+pub mod describe;
 pub mod diagnostics;
 pub mod graph;
 pub mod lower;

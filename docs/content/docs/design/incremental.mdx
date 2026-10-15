@@ -105,7 +105,7 @@ ty, rust-analyzer and Cairo put the Salsa substrate in one small crate at the bo
 its inputs, the file abstraction — the parser in a crate of its own, the semantic analysis in one or
 a few, the editor functions in one with no protocol in it, and each transport in a thin crate over
 those. fossil's crates are cut that way, and a crate that is none of those folds into the one whose
-subject it is. Six are modules of that crate now:
+subject it is. Seven are modules of those crates now:
 
 | module | because |
 | --- | --- |
@@ -113,7 +113,8 @@ subject it is. Six are modules of that crate now:
 | `fossil_base::sources` | the columns a host found for a source are the value of an input, so the type is the input's; the trait beside it, its schema and its stub had no caller |
 | `fossil_hir::lineage` | what a program reads is a question about its def map, asked by every host |
 | `fossil_hir::shex`, `fossil_hir::shacl` | a shape document becomes a type, and the types are here — the decoders and the `providers` rows that install them; what the executor was handed beside them, an enum whose one live method returned a `GraphSchema`, is a `GraphSchema` |
-| `fossil_df::layout`, `fossil_df::describe` | the graph's layout and its mapping are the writer's: nothing else lays out a GraphAr graph, and neither module exports anything |
+| `fossil_df::layout` | the graph's layout is the writer's: nothing else lays out a GraphAr graph, and the module exports nothing |
+| `fossil_mir::describe` | the graph's mapping is a function of the types, so the editor's module links it and a host asks before a run ([the graph as Apache GraphAr](/docs/design/graphar)) |
 
 One is still a crate of its own:
 
@@ -144,6 +145,44 @@ modules at the fork's `889cb741`, built the same way (`wasm-bindgen --target web
 29,546,971 (6,859,811 gzipped) for the executor's: the editor's module is 540,548 bytes (8.0%) smaller than at the
 measurement above, with the graph's own growth still +758,472 (+13.9%) over the module before the fork, and the executor's
 is 17,199 bytes smaller than before while carrying the GraphAr writer, `graphar-parquet` and `rml`. 
+
+**The editor's module is built with `wasm-release`, like the other two.** `packages/wasm`'s `build-wasm.sh` used
+`cargo build --release` and `wasm-opt -O3`; it now builds with the profile the executor and the storage module
+already used (`opt-level = "z"`, fat LTO, `strip`, `panic = "abort"`) and runs `wasm-opt -Oz`, so there is one
+size profile and not two. Nothing here catches an unwind (`grep -rn catch_unwind crates/` is empty), so `panic = "abort"`
+gives up nothing on `wasm32-unknown-unknown`. At the fork's `889cb741`, on 2026-10-15, the editor's module is
+5,013,996 bytes (1,622,233 gzipped) as shipped before, and 3,549,130 (1,245,546 gzipped) as shipped now: 29.2% fewer
+bytes and 23.2% fewer gzipped. The price is speed the module has no benchmark for: `update` plus `diagnostics` on
+`examples/hello.fossil` measured 0.3 to 0.7 ms an edit on a loaded machine for the old and the new build alike, which
+is inside the noise, so what that costs a large program is not known. `wasm-opt` is not free either: on the
+size-tuned build it saves raw bytes and adds gzipped ones (the module before `wasm-opt`: 4,164,703, 1,185,693 gzipped),
+and the executor's does the same (with the change below: 29,541,340 and 6,857,455 gzipped before `-Oz`, 24,909,829 and 7,248,203 after, and 25,807,990
+and 7,240,564 after `-Os`). The scripts keep it because the module is parsed and compiled raw, and a host that serves
+Brotli was not measured.
+
+**One thing in the editor's module is `regex`, and one function keeps it there.** Of the editor's 6,218,133 bytes before `wasm-opt`, 1,114,518
+(17.9%) are `regex`, `regex-automata`, `regex-syntax`, `aho-corasick` and the Unicode tables they carry, and the only
+call that reaches them from fossil is `shex_ast`'s `ShapeExprLabel::try_from(&str)`, which compiles `<(.*)>` and `_:(.*)`
+to strip two delimiters (`twiggy paths` from `Regex::new` ends at it through `FromStr` and `Deserialize`, and nowhere else). Written as string searches,
+with a test that holds both against the regexes they replace, the module is 5,103,615 bytes (1,412,754 gzipped) before
+`wasm-opt` and 2,761,994 (966,691 gzipped) as shipped with the profile above. That is a change in the fork, not here, and
+the rev moves to it when it is merged. The executor does not gain: DataFusion links `regex` itself, and its module is
+5,631 bytes smaller. `oxrdfxml` and `quick-xml`, which `deny.toml` ignores two advisories for, are compiled and
+linked into nothing: no symbol of either is in the editor's module.
+
+**What would reverse it:** a measurement of the editor's `update` on a program of a real size that shows the
+`opt-level = "z"` cost in a keystroke, in which case the editor takes `opt-level = "s"` in a profile of its own: with the change above, 3,448,192 bytes
+(1,098,275 gzipped) after `wasm-opt -O3`, against 2,884,232 (971,688) for `"z"` after the same.
+
+**The editor's module links the mapping.** `describe` moved to `fossil-mir` ([the graph as Apache
+GraphAr](/docs/design/graphar), D6) so that `program.mapping()` can answer before a run, which puts `rml`'s AST and its
+Turtle writer in the editor's module, beside `vocabularyOf` and `subjectOf`. Built with `--profile wasm-release` and
+`wasm-bindgen --target web`, before `wasm-opt`, at the fork's `889cb741` on 2026-10-15, it is 4,360,297 bytes (1,244,285
+gzipped) against the 4,164,703 (1,185,693 gzipped) above, which was not measured again: 195,594 bytes more (+4.7%) and
+58,592 more gzipped (+4.9%). `wasm-opt` was not run. The module is still under the 2 MB compressed ceiling `build-wasm.sh` asserts.
+
+**What would reverse it:** that growth showing in first paint. Then `mapping()` is the executor's module's and the
+editor's is what it was, at the price of a host loading the larger module to ask for a shape before a run.
 
 **What would reverse it:** a growth of that module that shows in first paint and that the fork
 cannot trim (a parser the fork's features cannot drop, say), or its additions not reaching an upstream

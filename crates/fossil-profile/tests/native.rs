@@ -33,8 +33,9 @@ fn profile(sources: impl IntoIterator<Item = Source>, options: Options) -> Profi
 
 fn source(dir: &std::path::Path, file: &str, format: &str) -> Source {
     Source {
+        binding: file.trim_end_matches(".csv").into(),
         key: file.into(),
-        name: dir.join(file).display().to_string(),
+        location: dir.join(file).display().to_string(),
         format: format.into(),
         option: None,
         etag: format!("etag:{file}"),
@@ -100,6 +101,11 @@ fn a_profile_says_what_the_files_are() {
         awards.descriptor.etag, "etag:awards.csv",
         "the host's validator is carried through"
     );
+    assert_eq!(
+        (awards.binding.as_str(), awards.descriptor.key.as_str()),
+        ("awards", "awards.csv"),
+        "a source is named by its binding, and keyed by the reference the program wrote"
+    );
     assert_eq!(awards.rows, Some(4));
     assert!(!awards.sampled);
     assert_eq!(
@@ -113,11 +119,11 @@ fn a_profile_says_what_the_files_are() {
 
     assert!(profile.inclusions.contains(&Inclusion {
         from: ColumnRef {
-            source: "awards.csv".into(),
+            source: "awards".into(),
             column: "laureate".into()
         },
         to: ColumnRef {
-            source: "laureates.csv".into(),
+            source: "laureates".into(),
             column: "id".into()
         },
     }));
@@ -144,11 +150,11 @@ fn an_inclusion_is_a_column_whose_values_are_all_another_sources_key() {
 
     let edge = Inclusion {
         from: ColumnRef {
-            source: "awards.csv".into(),
+            source: "awards".into(),
             column: "laureate".into(),
         },
         to: ColumnRef {
-            source: "laureates.csv".into(),
+            source: "laureates".into(),
             column: "id".into(),
         },
     };
@@ -161,7 +167,7 @@ fn an_inclusion_is_a_column_whose_values_are_all_another_sources_key() {
         !profile
             .inclusions
             .iter()
-            .any(|i| i.from.source == "strays.csv" && i.from.column == "laureate"),
+            .any(|i| i.from.source == "strays" && i.from.column == "laureate"),
         "9 is no laureate: {:?}",
         profile.inclusions
     );
@@ -175,7 +181,7 @@ fn a_file_duckdb_cannot_read_is_a_failure_and_the_rest_is_profiled() {
 
     assert_eq!(profile.sources.len(), 2);
     assert_eq!(profile.failed.len(), 1);
-    assert_eq!(profile.failed[0].source, "missing.csv");
+    assert_eq!(profile.failed[0].source, "missing");
 }
 
 #[test]

@@ -58,14 +58,14 @@ percent-encoding = "2"
 # One git source for every rudof crate, so `IriS`, `PrefixMap` and `Object` are one type in all of
 # them; the fork leaves `rudof_iri/fetch` and `rudof_rdf/sparql` (reqwest, tokio) off by default, and
 # `rudof_rdf` reads only the syntaxes asked for: fossil reads Turtle.
-shex_ast = { git = "https://github.com/Kanzo-Tech/rudof", rev = "889cb741e19524a1da5468ecbbeed8499c787458", default-features = false }
-rudof_iri = { git = "https://github.com/Kanzo-Tech/rudof", rev = "889cb741e19524a1da5468ecbbeed8499c787458", default-features = false }
-rudof_rdf = { git = "https://github.com/Kanzo-Tech/rudof", rev = "889cb741e19524a1da5468ecbbeed8499c787458", default-features = false, features = ["turtle"] }
-prefixmap = { git = "https://github.com/Kanzo-Tech/rudof", rev = "889cb741e19524a1da5468ecbbeed8499c787458", default-features = false }
-shacl = { git = "https://github.com/Kanzo-Tech/rudof", rev = "889cb741e19524a1da5468ecbbeed8499c787458", default-features = false }
+shex_ast = { git = "https://github.com/Kanzo-Tech/rudof", rev = "cbb80d7ea7bc5639b8a1f716c4ee5ba9ce7195b0", default-features = false }
+rudof_iri = { git = "https://github.com/Kanzo-Tech/rudof", rev = "cbb80d7ea7bc5639b8a1f716c4ee5ba9ce7195b0", default-features = false }
+rudof_rdf = { git = "https://github.com/Kanzo-Tech/rudof", rev = "cbb80d7ea7bc5639b8a1f716c4ee5ba9ce7195b0", default-features = false, features = ["turtle"] }
+prefixmap = { git = "https://github.com/Kanzo-Tech/rudof", rev = "cbb80d7ea7bc5639b8a1f716c4ee5ba9ce7195b0", default-features = false }
+shacl = { git = "https://github.com/Kanzo-Tech/rudof", rev = "cbb80d7ea7bc5639b8a1f716c4ee5ba9ce7195b0", default-features = false }
 # The mapping `describe` builds and writes: `rml`'s AST and its Turtle writer. Its `sql` feature (a
 # sqlparser AST, wasm-clean) is a dev-dependency of `fossil-df`, which renders the mapping to hold it.
-rml = { git = "https://github.com/Kanzo-Tech/rudof", rev = "889cb741e19524a1da5468ecbbeed8499c787458", default-features = false }
+rml = { git = "https://github.com/Kanzo-Tech/rudof", rev = "cbb80d7ea7bc5639b8a1f716c4ee5ba9ce7195b0", default-features = false }
 # The RDF terms `io.rdf` and the SHACL decoder read, from the graph `rudof_rdf` parses.
 #
 # `rdf-12` is oxrdf's RDF 1.2 gate and it is OFF by default. It gates `Term::Triple`,
@@ -91,7 +91,7 @@ bytes = "1"
 
 # === The native engine — NATIVE ONLY ===
 # No crate links it on a normal edge; `fossil-df` and `fossil-profile` keep it as a
-# dev-dependency, to read a written corpus back or to bring an engine to a test.
+# dev-dependency, to read a written graph back or to bring an engine to a test.
 # `deny.toml`'s
 # `duckdb` wrappers list is the enforced version of that sentence.
 duckdb = { version = "1.10502", features = ["bundled"] }
@@ -174,10 +174,12 @@ lto = "thin"
 codegen-units = 1
 strip = "debuginfo"
 
-# Size-tuned profile for the browser wasm (fossil-df-wasm). Inherits the native
-# release tuning, then trades native speed for bytes — the executor is
-# lazy-loaded over the wire, so size dominates. Built via packages/executor's
-# build-wasm.sh (`--profile wasm-release`); wasm-opt -Oz runs on top.
+# Size-tuned profile for every browser wasm (fossil-wasm, fossil-df-wasm,
+# fossil-storage-wasm). Inherits the native release tuning, then trades native
+# speed for bytes — all three are fetched over the wire, so size dominates. Built
+# via packages/*/scripts/build-wasm.sh (`--profile wasm-release`); wasm-opt -Oz
+# runs on top. `panic = "abort"` loses nothing here: wasm32-unknown-unknown has no
+# unwinding to lose, and nothing in `crates/` calls `catch_unwind`.
 [profile.wasm-release]
 inherits = "release"
 opt-level = "z"      # optimise for size over speed (vs release's 3)

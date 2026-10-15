@@ -1,6 +1,6 @@
 /**
  * @fossil-lang/executor — the DataFusion executor that runs fossil mappings in the browser and in
- * Node (the heavy, lazy-loaded counterpart to `@fossil-lang/wasm`), and the one writer of a corpus.
+ * Node (the heavy, lazy-loaded counterpart to `@fossil-lang/wasm`), and the one writer of a graph.
  *
  *   import { run } from '@fossil-lang/executor';
  *
@@ -22,4 +22,4 @@ export { initFossilExecutor, type InitInput } from './load.js';
 export { run, type FilesRun, type HostRun, type InMemoryRun, type RunOptions } from './run.js';
 // What a run into memory answers, and what a reader registers with the engine (`registerFileBuffer`): one type,
 // in `@fossil-lang/types`, so the reader needs no executor.
-export type { CorpusFile } from '@fossil-lang/types';
+export type { GraphFile } from '@fossil-lang/types';

@@ -47,12 +47,12 @@ Nicknamed : Person from PersonRow.join(NickRow, on = PersonRow.id == NickRow.id)
 "#;
 
 /// Each vertex's nicknames, joined, and `∅` for a vertex that has none.
-fn nicknames(corpus: &native::Corpus) -> Vec<(String, String)> {
-    let root = corpus.materialise();
+fn nicknames(ran: &native::Written) -> Vec<(String, String)> {
+    let root = ran.materialise();
     native::rows(&format!(
         "SELECT subject, coalesce(array_to_string(list_sort(nickname), ','), '∅') \
          FROM read_parquet({}) ORDER BY 1",
-        native::at(root.path(), &corpus.chunk("Person")),
+        native::at(root.path(), &ran.chunk("Person")),
     ))
     .into_iter()
     .map(|r| {
@@ -72,10 +72,10 @@ fn every_value_of_a_relational_source_is_kept() {
         ("nickname.csv", NICKNAMES),
         ("people.fossil", PROGRAM),
     ]);
-    let corpus = native::run_dir(dir.path(), "people.fossil", &[]).expect("the program runs");
+    let ran = native::run_dir(dir.path(), "people.fossil", &[]).expect("the program runs");
 
-    assert_eq!(corpus.vertex_count("Person"), 3);
-    let person = corpus.vertex("Person");
+    assert_eq!(ran.vertex_count("Person"), 3);
+    let person = ran.vertex("Person");
     assert_eq!(
         person.property_groups.len(),
         1,
@@ -101,7 +101,7 @@ fn every_value_of_a_relational_source_is_kept() {
 
     // Ada holds two, and the repeated `Countess` once; Linus one; Grace none.
     assert_eq!(
-        nicknames(&corpus),
+        nicknames(&ran),
         [
             (
                 "https://example.org/person/1".to_string(),
@@ -115,11 +115,7 @@ fn every_value_of_a_relational_source_is_kept() {
         ]
     );
     assert_eq!(
-        corpus
-            .files
-            .keys()
-            .filter(|p| p.contains("nickname"))
-            .count(),
+        ran.files.keys().filter(|p| p.contains("nickname")).count(),
         1,
         "the group's chunk, and no table of the property's own"
     );
@@ -154,10 +150,10 @@ fn an_rdf_list_is_a_row_per_value() {
         ("people.ttl", RDF_TTL),
         ("people.fossil", RDF_PROGRAM),
     ]);
-    let corpus = native::run_dir(dir.path(), "people.fossil", &[]).expect("the program runs");
+    let ran = native::run_dir(dir.path(), "people.fossil", &[]).expect("the program runs");
 
-    assert_eq!(corpus.vertex_count("Person"), 2);
-    let person = corpus.vertex("Person");
+    assert_eq!(ran.vertex_count("Person"), 2);
+    let person = ran.vertex("Person");
     let nickname = person.property_groups[0]
         .properties
         .iter()
@@ -169,7 +165,7 @@ fn an_rdf_list_is_a_row_per_value() {
         "a value, in a list"
     );
     assert_eq!(
-        nicknames(&corpus),
+        nicknames(&ran),
         [
             (
                 "https://ex.org/person/1".to_string(),

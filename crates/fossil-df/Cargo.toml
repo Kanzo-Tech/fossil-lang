@@ -32,7 +32,7 @@ fossil-hir = { path = "../fossil-hir" }
 # through `fossil-wasm`, so the gate gains no crate (`/docs/design/facts`).
 fossil-profile = { path = "../fossil-profile" }
 fossil-mir = { path = "../fossil-mir" }
-# The one IO path of a run: sources read and the corpus written through
+# The one IO path of a run: sources read and the graph written through
 # `object_store` stores built from vended credentials. `object-store` only — the
 # `js` host adapter is `fossil-df-wasm`'s.
 fossil-storage = { path = "../fossil-storage", features = ["object-store"] }
@@ -52,10 +52,8 @@ fossil-graph-schema = { path = "../fossil-graph-schema" }
 # `rudof_rdf`'s in-memory graph. Pure Rust, WASM-clean — RDF is decoded at the
 # I/O border, same as in the browser.
 rudof_rdf = { workspace = true }
-# The RML-Core mapping that says what the graph's tables mean as RDF: `describe` builds its AST and
-# `rml::rdf::write_turtle` writes it as `mapping.ttl`.
-rml = { workspace = true }
-rudof_iri = { workspace = true }
+# A subject is validated as an IRI before it is a vertex (`layout`); the mapping that says what the
+# tables mean as RDF is `fossil_mir::describe`'s.
 oxrdf = { workspace = true }
 # `default-features = false` drops datafusion's `sql` frontend (we build plans
 # via the DataFrame/LogicalPlan API, not `ctx.sql()`) and its own `compression`

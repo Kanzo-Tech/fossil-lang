@@ -9,7 +9,7 @@ description: Residency against visibility, a canonical camera, and the three pro
 > fails the in-browser thresholds — open over 1.5 s, first paint over 3 s, or heap over 1.5 GB at
 > a million vertices over HTTP.
 
-A corpus is [addressed, not queried](/docs/design/corpus): a reader computes the address of every tile
+A graph is [addressed, not queried](/docs/design/graph): a reader computes the address of every tile
 it wants before it issues a request. [One door](/docs/design/one-door) is the shape that arithmetic is
 published in. This page is the other side of it — what a *view* has to be, and what it owes whoever
 is looking at the picture. The view is `@kanzo-tech/graph`, in kanzo-ui; what is argued here is what
@@ -37,7 +37,7 @@ comparison of two numbers rather than of an accumulated transform.
 </div>
 
 **Under `frame` residency and visibility were one set, and that was measured.** Over the
-million-vertex bench corpus the whole-extent view opened **245 tiles of 245** — 20.4 MB — to draw one
+million-vertex bench graph the whole-extent view opened **245 tiles of 245** — 20.4 MB — to draw one
 vertex in sixty-four, and every one of the 145 tiles the 50% view opened was already among them. The
 reader answered a rectangle, so an answer could not be reused for the next one.
 
@@ -64,12 +64,12 @@ while loading. What makes the parent *correct* to leave up rather than merely be
 [monotone refinement](#2-monotone-refinement): the rows that replace a cell are exactly its members.
 
 What was blank under `frame` was the region newly in frame, not the frame: a view that uploads only
-when its state changes keeps the previous picture up, correctly placed, because positions are corpus
+when its state changes keeps the previous picture up, correctly placed, because positions are graph
 coordinates and the renderer is pinned — see [path independence](#3-path-independence).
 
 ## The three properties
 
-The measurements below were taken against a real million-vertex corpus through a real engine, with
+The measurements below were taken against a real million-vertex graph through a real engine, with
 no browser and no GPU, by scripts in the playground that are deleted with it (after `2fa5f22`). What
 they could not check was the picture. What they checked was every claim the picture rests on.
 
@@ -77,7 +77,7 @@ they could not check was the picture. What they checked was every claim the pict
 
 For any region *R*, the share of the coarse view inside *R* is the share of the graph inside *R*. A
 view that fails this is not slower or emptier: it is **wrong about the shape of the graph**. It shows
-a cloud the corpus does not have, and nothing on screen says so.
+a cloud the graph does not have, and nothing on screen says so.
 
 The statistic is **total variation distance** between two normalised density grids. Total variation
 and not a χ², because the question is about a picture: TV is exactly the largest fraction of the ink
@@ -109,7 +109,7 @@ where nothing is asked to fill more bins than it has points, the same rung beats
 
 **This was published as a fact about the pyramid before it was recognised as a fact about the grid**,
 and the retraction is on [cells](/docs/design/later/cells#the-quotient-saturates-down-the-pyramid-and-the-marks-do-not).
-Measured across two corpora at five resolutions, **no arm at one bin per mark or finer fails, and
+Measured across two graphs at five resolutions, **no arm at one bin per mark or finer fails, and
 every failure is at two bins per mark or coarser** — 130 rows, zero counterexamples in either
 direction. So a fidelity figure quoted without the mark count it was taken at, and the grid it was
 taken on, is not a figure.
@@ -136,7 +136,7 @@ holds the membership against the payload.
 
 **What would reverse it.** A partition that is not a shift of `dense_id` — a base that is not a power
 of four, or cells cut on something other than the order. Then a cell's members are a lookup and not a
-range, and refinement is a claim to test per corpus rather than a property of the addressing.
+range, and refinement is a claim to test per graph rather than a property of the addressing.
 
 ### 3. Path independence — the same rectangle by two routes is the same picture
 
@@ -148,7 +148,7 @@ did, through the rectangle.
 
 The renderer holds the positions it was handed and derives its space→screen map from *their extent*.
 A camera reads back through `screenToSpacePosition`, which answers in that map's coordinates; the
-corpus answers in the coordinates it was written in. cosmos.gl's `setPointPositions(positions)`
+graph answers in the coordinates it was written in. cosmos.gl's `setPointPositions(positions)`
 called with no second argument means, in its own documentation, *use `config.rescalePositions`* —
 which, with the simulation off, is rescaling. So the map is rebuilt from whichever answer just
 arrived, and the loop closes:
@@ -166,7 +166,7 @@ Measured through the library's own scale accessor, with the camera set once and 
 | 2,500 over a 10% box | 1.0004 | x[101.1, 1000.7] |
 
 One camera, three questions, **12.9× the area** between the first two. Driven over the
-million-vertex corpus, two routes ending on the identical camera rectangle drew 8,395 marks one way
+million-vertex graph, two routes ending on the identical camera rectangle drew 8,395 marks one way
 and **0** the other — the blank canvas that was reported — and pinned, both routes agreed exactly:
 18,308 against 18,308, sharing 100% of the union.
 

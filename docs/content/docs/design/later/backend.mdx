@@ -1,6 +1,6 @@
 ---
 title: The backend
-description: fossil is the backend and kanzo-ui is the view, with one path between them — a corpus read the way Apache Iceberg reads a table and addressed the way an OGC tile matrix set addresses a tile, with the cell pyramid as the zoom levels, the level files retired, and the reader split into modules that each follow one of the two.
+description: fossil is the backend and kanzo-ui is the view, with one path between them — a graph read the way Apache Iceberg reads a table and addressed the way an OGC tile matrix set addresses a tile, with the cell pyramid as the zoom levels, the level files retired, and the reader split into modules that each follow one of the two.
 ---
 
 > **Deferred, not reversed.** A graph has no tile contract: `attachGraph` attaches it and
@@ -18,7 +18,7 @@ kept beside it — the playground went for being a second viewer, `@fossil-lang/
 `@fossil-lang/corpus`, and this page is the shape it has.
 
 The shape is borrowed, and naming where it comes from is what makes it checkable rather than an
-analogy. **Reading a corpus follows Apache Iceberg's read path**, Catalog → Table → Scan: a table is
+analogy. **Reading a graph follows Apache Iceberg's read path**, Catalog → Table → Scan: a table is
 loaded from its metadata, a scan is a filter plus a projection, planning turns the scan into tasks
 pruned by statistics the writer published, and a task is read on its own. **Addressing follows the
 OGC Two Dimensional Tile Matrix Set** (17-083r4) and OGC API – Tiles (20-057): a set of tile matrices,
@@ -43,7 +43,7 @@ view cache them without asking; the moment the reader holds a cache of its own t
 residency policies over one set of tiles, and the camera page measured what the first one cost to
 build at the wrong seam ([the camera](/docs/design/later/camera)).
 
-**What would reverse it.** A second view — anything other than kanzo-ui reading a corpus at
+**What would reverse it.** A second view — anything other than kanzo-ui reading a graph at
 interactive rates — that would otherwise have to rebuild the same cache. Then the cache is shared
 infrastructure, and it would belong in a package between the two, still not in the reader.
 
@@ -55,9 +55,9 @@ the SQL pair are the verbs' generated shapes, unchanged.
 
 ```text
 declare function attach(url: string, options: AttachOptions & { engine: Engine; sql: 'allowed' }): Promise<SqlCorpus>;
-declare function attach(url: string, options: AttachOptions & { engine: Engine }): Promise<Corpus>;
+declare function attach(url: string, options: AttachOptions & { engine: Engine }): Promise<Graph>;
 declare function attach(job: string, options: AttachOptions & { engine: Engine; host: Host; sql: 'allowed' }): Promise<SqlCorpus>;
-declare function attach(job: string, options: AttachOptions & { engine: Engine; host: Host }): Promise<Corpus>;
+declare function attach(job: string, options: AttachOptions & { engine: Engine; host: Host }): Promise<Graph>;
 interface AttachOptions {
   engine: Engine;
   host?: Host;
@@ -65,7 +65,7 @@ interface AttachOptions {
   manifestFiles?: Record<string, string>;
   wasm?: InitInput;
 }
-interface Corpus {
+interface Graph {
   readonly url: string;
   readonly types: CorpusTypes;
   relations(): Promise<readonly CorpusRelation[]>;
@@ -75,7 +75,7 @@ interface Corpus {
   schema(params?: SchemaParams): Promise<SchemaResult>;
   close(): Promise<void>;
 }
-interface SqlCorpus extends Corpus {
+interface SqlCorpus extends Graph {
   executeSql(params: ExecuteSqlParams): Promise<ExecuteSqlResult>;
 }
 interface TileMatrixSet {
@@ -195,11 +195,11 @@ What each member answers, in one line each:
   in the footer. Consecutive tiles of one zoom are one range, so **a run is one statement**, split
   back into a batch per tile on that column; tiles that are not consecutive are separate statements,
   never a disjunction. Under `rowgroups` the range is the run's row groups and no others; under
-  `files` the files are the tiles. [The ruling](#a-read-does-not-cost-the-corpus) is below.
+  `files` the files are the tiles. [The ruling](#a-read-does-not-cost-the-graph) is below.
 - **`edges({ from, direction })`** — an answer per tile of `from`, each the relations incident to it
   out of the half aligned on
   `direction`, **and the ones it declined, with fossil's `GapReason`**: `not-declared` for an
-  orientation the corpus does not publish, `other-space` for a relation whose far end is another
+  orientation the graph does not publish, `other-space` for a relation whose far end is another
   type, which is read only when `relation` names it. At `z = Z` a batch is the adjacency's two
   columns, and a tile the tile manifest lists no entry for is answered empty without a request;
   below it, the rung's quotient — `src_cell`, `dst_cell` and a `weight` — where the writer published
@@ -211,9 +211,9 @@ What each member answers, in one line each:
   the tiles it holds and the ones below them.
 - **`schema`, `relations`, `executeSql`** — unchanged: the verbs' introspection, what a SQL host registers, and the escape hatch behind `sql: 'allowed'`.
 
-**Nothing else crosses.** The addressing a corpus is opened with — `CorpusAddressing` and its
+**Nothing else crosses.** The addressing a graph is opened with — `CorpusAddressing` and its
 family — and `QueryFn` are internal, and the engine is the one capability; a consumer that needs a
-URL has outgrown a surface whose claim is that a corpus is a URL.
+URL has outgrown a surface whose claim is that a graph is a URL.
 
 **What would reverse it.** A view question that cannot be answered by composing these members
 without reading a byte twice. The test is kanzo-ui's showcase: if the graph code there cannot come
@@ -247,25 +247,25 @@ with one referent, and a cell row grows a pair per channel, each naming its own.
 
 | Iceberg | fossil | taken or departed, and why |
 | --- | --- | --- |
-| `Catalog.load_table`, `StaticTable.from_metadata(metadata_location)` | `attach(url, { engine })`, `attach(job, { engine, host })` | **Taken.** A corpus has no catalog service, so the URL case is the static table; the job case reuses what [storage access](/docs/design/prior-art#storage-access) already took from the REST catalog — a vended credential scoped to one prefix. |
-| `Table.schema()` | `corpus.types` | **Taken**, read off the bytes at `open` for the reason `ac1801d4:packages/corpus/src/open.ts, open` gives: the manifest declares three properties against seven columns on disk. |
-| `Table.scan(row_filter, selected_fields, case_sensitive, snapshot_id, options, limit)` | `corpus.scan({ type, filter, select })` | **Departs twice.** No `snapshot_id`: a corpus is written once and never appended to, so there is one snapshot and nothing to name. **No `limit`**: a task is a tile, and a tile holds at most `tileRows` rows by construction, so every read is bounded by its address rather than by a clause. No zoom and no box either, though a camera always has both: a scan is planned once over every zoom, and which of its tasks a camera sees is the view's cull against the boxes `tileMatrix` publishes. |
+| `Catalog.load_table`, `StaticTable.from_metadata(metadata_location)` | `attach(url, { engine })`, `attach(job, { engine, host })` | **Taken.** A graph has no catalog service, so the URL case is the static table; the job case reuses what [storage access](/docs/design/prior-art#storage-access) already took from the REST catalog — a vended credential scoped to one prefix. |
+| `Table.schema()` | `graph.types` | **Taken**, read off the bytes at `open` for the reason `ac1801d4:packages/corpus/src/open.ts, open` gives: the manifest declares three properties against seven columns on disk. |
+| `Table.scan(row_filter, selected_fields, case_sensitive, snapshot_id, options, limit)` | `graph.scan({ type, filter, select })` | **Departs twice.** No `snapshot_id`: a graph is written once and never appended to, so there is one snapshot and nothing to name. **No `limit`**: a task is a tile, and a tile holds at most `tileRows` rows by construction, so every read is bounded by its address rather than by a clause. No zoom and no box either, though a camera always has both: a scan is planned once over every zoom, and which of its tasks a camera sees is the view's cull against the boxes `tileMatrix` publishes. |
 | `EqualTo`, `In`, `IsNull`, `And`, `Or`, `Not`; `UnboundPredicate.bind(schema)`, `rewrite_not` | `Filter`, bound in `scan()` | **Taken**, including the timing: an unknown column is an error at bind, before anything is planned, and a `not` is pushed to the leaves as `rewrite_not` does. Spelled as JSON rather than classes so it crosses a worker boundary as it is. `StartsWith` and `IsNaN` are left out until something asks, and NaN is Iceberg's: not a literal, and matched by no comparison — the rendered SQL says `NOT isnan(x)` beside `x > v`, because DuckDB orders NaN above every number. Nulls are SQL's. |
-| `plan_files()` → `FileScanTask { file, delete_files, residual }`; iceberg-rust adds `start`, `length`, `record_count` | `plan()` → `ScanTask { z, tile, rows, bbox, residual }` | **Departs on the unit.** A task is a **tile**, which under `container: rowgroups` is one row group — iceberg-rust's `start`/`length` split, not PyIceberg's whole file. No delete files: nothing is ever deleted from a corpus. The byte range stays inside the reader; a view keys on the address. |
+| `plan_files()` → `FileScanTask { file, delete_files, residual }`; iceberg-rust adds `start`, `length`, `record_count` | `plan()` → `ScanTask { z, tile, rows, bbox, residual }` | **Departs on the unit.** A task is a **tile**, which under `container: rowgroups` is one row group — iceberg-rust's `start`/`length` split, not PyIceberg's whole file. No delete files: nothing is ever deleted from a graph. The byte range stays inside the reader; a view keys on the address. |
 | `_InclusiveMetricsEvaluator` over `lower_bounds`, `upper_bounds`, `null_value_counts` — *rows might match* | the planner over the tile manifest | **Taken as the pruning rule**: a tile is dropped only when its statistics prove no row can match, and a tile with no statistics for a column is kept. |
 | `StrictMetricsEvaluator` — *rows must match*, which PyIceberg's planner does not use | `ScanTask.residual` | **Taken further than Iceberg takes it.** A tile whose bounds satisfy the filter outright carries a `null` residual and is read with no predicate beyond the range that selects it — except for a comparison on a float, which never settles: the manifest counts no NaN, because Parquet's footer does not, and Iceberg's `nan_value_counts` is the statistic that would let it. |
-| `ManifestEvaluator` over the manifest list's partition summaries | the zoom | **Departs.** A corpus has no partitions; the only coarse cut is `z`, every `z` is planned, and the view picks among them. |
+| `ManifestEvaluator` over the manifest list's partition summaries | the zoom | **Departs.** A graph has no partitions; the only coarse cut is `z`, every `z` is planned, and the view picks among them. |
 | `to_arrow()`, `to_arrow_batch_reader()` over the whole scan | `scan.read(addresses)`, a batch per task | **Departs.** There is no whole-scan read, because the unit a view caches and cancels is the task, and a batch comes back per task whatever was read together. iceberg-rust's reader streams per task too; fossil reads a run of consecutive tasks in one statement, because the statement is what costs a round trip and a footer. |
 
 **The filter is data, not a SQL fragment**, and it is the filter language that was refused for
 `read`'s `where` while `read` existed. The refusal does not transfer, because what it weighed is
 different here. `where` was a query language beside `execute_sql`, buying read-time policy the
-corpus has no chokepoint for. `Filter` buys **planning**: the planner evaluates it against statistics
+graph has no chokepoint for. `Filter` buys **planning**: the planner evaluates it against statistics
 before a byte is read, and a string cannot be evaluated without being parsed — which is the second
 language again, spelled worse. It is rendered to SQL in one place, for one engine, and it carries no
 `execute_sql` authority, so a view the hatch is closed to can hold one.
 
-**What would reverse it.** Iceberg's shape stops fitting the day a corpus changes after it is
+**What would reverse it.** Iceberg's shape stops fitting the day a graph changes after it is
 written — appends, deletes, a second snapshot. Then `snapshot_id` and delete files come back, and
 with them Iceberg's own answer rather than an invention of ours. Short of that, a whole-scan read
 comes back if a second consumer that is not a view — a batch job — needs one, and it would be a loop
@@ -283,7 +283,7 @@ over `plan()` in that consumer, not a member here.
 | WebMercatorQuad: matrix `z` is `2^z × 2^z`, four children per tile | the parent of `(z, t)` is `(z − 1, t >> (shift(z−1) − shift(z)))` | **Taken.** Between two rungs the difference is two bits — four children per tile, the quad tree's own branching. From the rows to the first rung it is the declared base, four bits at sixteen vertices per cell. |
 | an out-of-range tile is a 404 or a 400 | `read` of an address outside `tiles` throws `CorpusReadError` | **Taken.** |
 
-**What would reverse it.** A corpus whose positions sit on a grid a writer fixes in advance — a
+**What would reverse it.** A graph whose positions sit on a grid a writer fixes in advance — a
 raster, or a `geographic` plane quantised to a declared square — would make the rank and the code the
 same number, and the Annex I arithmetic would then work unchanged. The published boxes would become
 derivable, and a document carries a fact exactly when a reader cannot recover it, so they would go.
@@ -310,9 +310,9 @@ TILE_SHIFT` is 12, so 4,096 — and a declared base of `b = 2^B` vertices per ce
   Every tile at every zoom is an interval of one axis, which is what lets a single conjunctive range
   select it and lets its parent be a shift.
 
-Three corpora, every figure derived from those four lines rather than measured:
+Three graphs, every figure derived from those four lines rather than measured:
 
-| | com-DBLP, 317,080 | the bench corpus, 1,000,000 | 10,000,000 |
+| | com-DBLP, 317,080 | the bench graph, 1,000,000 | 10,000,000 |
 | --- | --- | --- | --- |
 | `Z` | 9 | 9 | 11 |
 | tiles at `z = Z` | 78 | 245 | 2,442 |
@@ -390,7 +390,7 @@ mechanism.
 
 ### What the backend's half measures at a million vertices
 
-Measured on 2026-09-29 over a corpus the layout pass wrote — `ac1801d4:crates/fossil-layout/examples/enrich_memory`'s
+Measured on 2026-09-29 over a graph the layout pass wrote — `ac1801d4:crates/fossil-layout/examples/enrich_memory`'s
 fixture, 1,000,000 vertices at mean degree 14 (6,993,608 edges), 4,096 rows a tile, pyramid base 16,
 `rowgroups` — for a window of 1% of the extent, a tenth of it on each axis at its centre. The finest
 zoom whose planned tiles fit 65,536 rows is `Z` itself: the box filter plans **8 of 245** payload
@@ -412,7 +412,7 @@ over the window's ids and no range on the aligned column, so the engine read 17.
 `by_source` and 16.5 MB of `by_target` in 525 requests, where `edges` reads one row group of each per
 tile. What the tiles do not buy is the vertex side at `Z`: the same 4.55 MB either way, in 25
 requests over 8 statements against `rows`' 10 in one — each statement read the footer again and
-could not coalesce ranges across tiles, which [a read does not cost the corpus](#a-read-does-not-cost-the-corpus)
+could not coalesce ranges across tiles, which [a read does not cost the graph](#a-read-does-not-cost-the-graph)
 closes — and the reads are sequential because a view keeps one in flight. The edge count
 is the other half of the trade — the tiles' edges are every edge of the 8 tiles, 458,204, against the
 91,652 incident to the window's vertices — and it is the view's to cull, per tile, once, and cache.
@@ -437,7 +437,7 @@ window needs becomes one read and the per-run form costs round trips for nothing
 
 ### The writer publishes what the reader used to read from footers
 
-The reader used to read every tile's footer while the corpus opened, and did it there on purpose: a
+The reader used to read every tile's footer while the graph opened, and did it there on purpose: a
 level that arrived as a promise would be a request between the camera moving and an address being
 computable. The rule survives and the cost does not. **The writer already has every number the footer
 sweep recovered**, so it writes them once, beside the bytes, and `open` reads one file per type
@@ -464,7 +464,7 @@ What would bring it is a host that issues its own `Range` request for a row grou
 **What would reverse it.** A writer other than fossil's. The statistics are then a claim the reader
 has to check rather than trust, and the check exists: `ac1801d4:packages/corpus/guards`' `tile-manifest` holds
 the file against the footers read back from disk, tile for tile and bound for bound, and
-`ac1801d4:crates/fossil-cli/tests/conformance.rs` holds a corpus `fossil run` wrote — payload and every rung —
+`ac1801d4:crates/fossil-cli/tests/conformance.rs` holds a graph `fossil run` wrote — payload and every rung —
 against `parquet_metadata` the same way.
 
 ### Cancellation is a signal the engine honours
@@ -489,9 +489,9 @@ against the latency of a cancel on the host's engine.
 `ac1801d4:packages/corpus/src/corpus.ts` was 2,570 lines, and the seams above are where it came apart. Each
 module follows one of the two references and none of them reaches 500 lines.
 
-| module | follows | what it holds | out of `corpus.ts` |
+| module | follows | what it holds | out of `graph.ts` |
 | --- | --- | --- | --- |
-| `open.ts` | Iceberg's `load_table` | the two shapes, the manifest read, lending, the catalog's holders and `close`, and the `Corpus` assembled from one factory per module | `open`, `vended`, `opened` |
+| `open.ts` | Iceberg's `load_table` | the two shapes, the manifest read, lending, the catalog's holders and `close`, and the `Graph` assembled from one factory per module | `open`, `vended`, `opened` |
 | `tile-matrix.ts` | OGC 17-083r4 | the matrices from the manifest: `z`, shift, counts, boxes, the extent and the mode channel | `levelForCanvas`'s arithmetic, what `levelsOf` and `strideOf` spelled |
 | `tile-manifest.ts` | Iceberg's manifest | reading the published per-tile statistics once per type | `tileBoxes` and `footers`, which the writer's tile manifest replaced |
 | `expression.ts` | Iceberg's expressions | `Filter`, binding it to a matrix's columns, the inclusive and strict evaluators, and rendering the residual as SQL | the box predicate `boxOf` |
@@ -500,7 +500,7 @@ module follows one of the two references and none of them reaches 500 lines.
 | `verbs.ts` | — | the views the verbs read, `schema`, `relations`, `executeSql` | `verbs`, `relations` |
 | `sql.ts` | — | literals, identifiers and the 64-bit id guard | `lit`, `ident`, `list`, `idOf`, `floatOf`, `CorpusReadError` |
 
-`corpus.ts` keeps the surface's own types — `Corpus`, `SqlCorpus`, `CorpusTypes`, `CorpusRelation` —
+`graph.ts` keeps the surface's own types — `Graph`, `SqlCorpus`, `CorpusTypes`, `CorpusRelation` —
 and each member's types went with the member. `frame` and `rows` ran compositions no reference names
 and were held in two modules of their own, so that retiring them deleted two files rather than
 carving two. `query.ts` is where the engine's two faces meet — rows for the members that walk
@@ -522,11 +522,11 @@ module being allowed to grow.
 | `extent`, `Extent` | `tileMatrix(type).extent` |
 | `neighbours`, `Neighbourhood` | `edges` from the tiles holding the seeds; a walk of more than one hop is the caller's loop |
 | `levelsOf`, `LevelInfo`, `strideOf`, `strideBits`, `rowsAt` | `tileMatrix` |
-| `corpus.addressing` and the `CorpusAddressing` family, `QueryFn` | internal; the engine is the one capability |
+| `graph.addressing` and the `CorpusAddressing` family, `QueryFn` | internal; the engine is the one capability |
 | `VertexLevels`, `write_levels`, `write_edge_levels`, every `l{k}/` | the cell pyramid |
 
 **Nothing was deleted while something still read it**, which fixed the order. The writer published
-the tile manifest first, with a guard holding it against the footers; `corpus.ts` split into the
+the tile manifest first, with a guard holding it against the footers; `graph.ts` split into the
 modules above with its behaviour unchanged, so the diff that moved code was not the diff that changed
 it; `tileMatrix`, `scan` and `edges` landed on those modules, held against `rows` over the same box
 and against the aggregation obligations of [cells](/docs/design/later/cells); kanzo-ui moved
@@ -552,7 +552,7 @@ rung from the rows at `Z` would read every row under the camera and make a coars
 fine one does, which is the property the tile matrix exists to prevent.
 
 **What would reverse it.** A view that needs the filtered field at a zoom where the rows do not fit —
-a crossfilter brush over a corpus of ten million is the likely first — and a writer willing to
+a crossfilter brush over a graph of ten million is the likely first — and a writer willing to
 summarise per filter value, which is a second pyramid per channel rather than a reader-side fallback.
 
 **Rows and cells cross only while loading.** A cell tile is drawn until the row tiles under it
@@ -597,10 +597,10 @@ are measured rather than assumed.
 `tile_manifest: tile-manifest.json` — and not inline in the YAML. It was decided by building both
 behind a switch, measuring them, and deleting the loser.
 
-Measured on 2026-09-29 over corpora the layout pass wrote (`ac1801d4:crates/fossil-layout/examples/enrich_memory`'s
+Measured on 2026-09-29 over graphs the layout pass wrote (`ac1801d4:crates/fossil-layout/examples/enrich_memory`'s
 fixture at mean degree 14, pyramid base 16, seven payload columns of which four are numeric), with the
 manifest served over local HTTP and parsed the way the reader parses it: the YAML by
-`fossil-graph-wasm`'s `Corpus`, the file by `JSON.parse`. Medians of 31 opens and of 31 verb calls,
+`fossil-graph-wasm`'s `Graph`, the file by `JSON.parse`. Medians of 31 opens and of 31 verb calls,
 Mac16,8, Node 23.
 
 | | 1,000,000 | 3,000,000 | 10,000,000 |
@@ -618,12 +618,12 @@ Two costs decide it and they point the same way above a million vertices.
 - **Open.** The file costs one more serial request than inline — the path is in the YAML, so the
   manifest cannot be fetched beside it — and inline costs a YAML parse that grows with the tile count.
   At ten million the parse is 31.8 ms more than the file's, so the file opens faster over any link
-  whose round trip is under about 32 ms, and the break-even rises with the corpus: it was 2.9 ms at a
+  whose round trip is under about 32 ms, and the break-even rises with the graph: it was 2.9 ms at a
   million and 11 ms at three. Gzipped the two transfers are within 7 kB of each other at ten million
   (75 kB against 69 kB), so bandwidth does not move it.
 - **Every verb after it.** `fossil-graph-wasm`'s `dispatch_graph` loads the manifest set on every
   call, so an inline tile manifest is parsed again for every `schema` and every `execute_sql`:
-  56.7 ms a call at ten million, against 0.44 ms. That cost is paid for the life of the corpus, and
+  56.7 ms a call at ten million, against 0.44 ms. That cost is paid for the life of the graph, and
   the file's round trip is paid once.
 
 And a third that is not a timing: `DuckDB` reads JSON, so the guard that holds the file against the
@@ -631,8 +631,8 @@ footers is one SQL join in the `guards/` directory a stranger copies, where an i
 a second YAML reader past `guards/manifest.mjs`'s one level of nesting.
 
 **What would reverse it.** A reader that parses the manifest set once rather than per verb, together
-with corpora whose tile count keeps the parse gap below one round trip on the links they are read
-over — at ten million that gap is 32 ms, and a corpus read across an ocean has a longer trip than
+with graphs whose tile count keeps the parse gap below one round trip on the links they are read
+over — at ten million that gap is 32 ms, and a graph read across an ocean has a longer trip than
 that. Then one request fewer is worth more than the parse, and the entries move into the YAML under
 the same four names.
 
@@ -643,18 +643,18 @@ keeps one box per tile.** Ruled on 2026-09-30, on the investigation kanzo-ui's g
 The curve is Wikipedia's `xy2d` at `n = 2^16` over the same binary32 quantisation the Z-curve used,
 published with vectors on [addressing](/docs/design/later/addressing#the-arithmetic) and in
 `ac1801d4:corpus.bnf`'s gloss, and written by `ac1801d4:crates/fossil-layout/src/layout/hilbert.rs, hilbert2`. Nothing
-reads both orders: every corpus is written again, and one written before the ruling fails
+reads both orders: every graph is written again, and one written before the ruling fails
 `hilbert-order`.
 
 **The finding, as the view reported it.** A window holding about 5,000 vertices still drew cells:
 the payload tiles whose boxes it intersected held more rows than the view's 20,000, so the finest
 zoom that fit was a rung. And one payload tile cost about 230 ms, as three sequential statements —
-`scan.read` and both halves of `edges`. The second half is [the next ruling](#a-read-does-not-cost-the-corpus).
+`scan.read` and both halves of `edges`. The second half is [the next ruling](#a-read-does-not-cost-the-graph).
 
 ### What a payload tile's box claims, measured
 
 Measured on 2026-09-29 and again after the ruling by `ac1801d4:crates/fossil-layout/examples/tile_compactness.rs`
-over three corpora of 1,000,000 vertices: the bench corpus kanzo-ui's view was built against, and
+over three graphs of 1,000,000 vertices: the bench graph kanzo-ui's view was built against, and
 `enrich_memory`'s fixture at mean degree 14 through the real layout pass, in each order.
 *Compactness* is a tile's box over the area its rows would cover on a uniformly filled extent — one
 is a square of exactly its own rows. Windows are 400 squares centred on random vertices; *tiles
@@ -670,7 +670,7 @@ shape can do with the same tiles.
 | … tiles holding a window vertex p50 · p90 | 8 · 10 | 8 · 10 | 7 · 9 |
 | the `spatial-tiles` guard's mean box share | — | 1.13% | 0.57% |
 
-The archive corpus is 1,543 vertices, one tile, and has nothing to measure; com-DBLP was not rebuilt.
+The archive graph is 1,543 vertices, one tile, and has nothing to measure; com-DBLP was not rebuilt.
 
 **The boxes were not wide in the sense the report meant.** The median tile was twice its own area,
 not the extent, and the `spatial-tiles` guard's bound of one half is two orders of magnitude away.
@@ -680,7 +680,7 @@ geometry's share of the cost.
 ### Where it came from
 
 **`dense_id` was already a pure curve rank**, and the community-major order is not a second sort
-underneath it. On all three corpora the written order is exactly the order of the recomputed codes —
+underneath it. On all three graphs the written order is exactly the order of the recomputed codes —
 the `hilbert-order` guard's rule — and the groups come out contiguous because
 `ac1801d4:crates/fossil-layout/src/layout/place.rs, cluster_layout` gives each one an aligned block of the
 quaternary, and an aligned block is one interval of codes on either curve. So there was no community
@@ -720,7 +720,7 @@ had to touch one tile that straddled a large quad.
 ### The options, measured
 
 Every row over `enrich_memory`'s fixture, the ~5,000-vertex window, p50 · p90. The sub-box and
-quadtree rows were simulated over the corpus the Z-curve wrote; the Hilbert row is the pass itself.
+quadtree rows were simulated over the graph the Z-curve wrote; the Hilbert row is the pass itself.
 The ones not taken are on [what was discarded](/docs/design/discarded), each with what would bring
 it back.
 
@@ -731,7 +731,7 @@ it back.
 | sixteen equal sub-boxes per tile | 6 · 9 | 24,576 · 36,864 | unchanged | the same, sixteen boxes |
 | tiles cut on quad boundaries — quadtree leaves of at most 4,096 | 4 · 7 | 14,742 · 22,022 | **breaks** `tile = dense_id >> 12`: 364 tiles of 3,656 rows at the median, so a tile stops being arithmetic and cells stop nesting in tiles | the addressing becomes a table |
 | **the Hilbert rank, 4,096 rows** — taken | **5 · 7** | **20,480 · 28,672** | every `cluster_id` one run (995 of 995); the share of cells spanning two clusters identical at every rung; rung-1 cell area spread **5,030× → 428×**, rung 3 **571× → 21×**, rung 6 **11× → 3×** | the order the format publishes, its vectors and guards, and every conformance corpus regenerated |
-| 1,024-row tiles, Z-curve · Hilbert | 15 · 19 and 11 · 14 | 15,360 · 19,456 and 11,264 · 14,336 | cells nest in tiles to 4⁵ | four times the statements, at a per-statement cost measured below to grow with the corpus |
+| 1,024-row tiles, Z-curve · Hilbert | 15 · 19 and 11 · 14 | 15,360 · 19,456 and 11,264 · 14,336 | cells nest in tiles to 4⁵ | four times the statements, at a per-statement cost measured below to grow with the graph |
 
 **Hilbert is the only row that is a change to the order rather than to what is published about it.**
 Every aligned `2^k` square is one interval of `4^k` Hilbert indices exactly as it is of Z-curve codes,
@@ -758,19 +758,19 @@ rule on [addressing](/docs/design/later/addressing#the-order-that-makes-an-inter
 `ac1801d4:corpus.bnf`'s gloss, and `vectors.json`'s `hilbert2` table where `morton2` was — written by
 `ac1801d4:crates/fossil-layout/examples/hilbert_vectors.rs` from the writer's own curve and held against it by
 a Rust test, because a curve is exactly the arithmetic Iceberg publishes vectors for and PMTiles left
-every port to re-derive ([prior art](/docs/design/prior-art#the-corpus-and-how-a-format-ships)).
+every port to re-derive ([prior art](/docs/design/prior-art#the-graph-and-how-a-format-ships)).
 `guards/arithmetic.mjs` carries the function and `guards.mjs` sixteen unrolled steps of SQL for the
 `hilbert-order` guard. `ac1801d4:packages/corpus/conformance/corpus` was regenerated from its recipe and every
-test corpus is written through the pass. kanzo-ui changes no view code — it culls against the boxes
-it is handed, and they are tighter — and rebuilds its bench corpora; its row budget is its own call,
+test graph is written through the pass. kanzo-ui changes no view code — it culls against the boxes
+it is handed, and they are tighter — and rebuilds its bench graphs; its row budget is its own call,
 which the floor above bounds.
 
 **What would reverse it.** A reader that computes which ids a rectangle holds from the codes
 themselves rather than from published boxes — BIGMIN/LITMAX over a Z-curve is a few bit operations,
 and its Hilbert equivalent is a state machine a port would have to get right. No reader here does
-that since [the anchor was discarded](/docs/design/discarded); a corpus whose positions sit on a
+that since [the anchor was discarded](/docs/design/discarded); a graph whose positions sit on a
 writer-fixed grid, the reversal named under the OGC table above, would be the one that asks. Or a
-measured corpus on which Hilbert tiles are not tighter than the Z-curve's, which would mean the gain
+measured graph on which Hilbert tiles are not tighter than the Z-curve's, which would mean the gain
 here is this placement's rather than the curve's.
 
 That anchor's own row named the condition that would bring it back — *a read where the 13% is the
@@ -778,7 +778,7 @@ difference between fitting a budget and not* — and this was that read: at a 5,
 over-read was 1.4×, and it was the difference. It does not come back, because the curve closes the
 gap the anchor would have closed, with no second index.
 
-## A read does not cost the corpus
+## A read does not cost the graph
 
 **`scan.read` and `edges` take a list of addresses and answer one batch per address, and a run of
 consecutive tiles of one zoom is read as one statement with one conjunctive range, split back into
@@ -788,7 +788,7 @@ host should, beside the interrupt it already requires. Ruled on 2026-09-30.
 
 ### Three statements a tile, and what they actually cost
 
-The same nine tiles a ~5,000-vertex window at the centre of kanzo-ui's bench corpus opened under the
+The same nine tiles a ~5,000-vertex window at the centre of kanzo-ui's bench graph opened under the
 Z-curve, with both halves of their edges: 591,937 rows. *A* was the contract as it stood — three
 statements a tile. *B* folds a tile's three into one `UNION ALL BY NAME`; *C* one statement per part
 across the nine; *D* one statement for the window; *E* one statement per part with each run of
@@ -809,7 +809,7 @@ no faster: every `read_parquet` branch plans its own scan and reads its own foot
 many. The 230 ms the view measured was round trips — at 10 ms a request, A is 190 ms a tile — and
 two things make them, neither of which is the statement count.
 
-**The footer is read again by every statement, and it grows with the corpus.** Without the metadata
+**The footer is read again by every statement, and it grows with the graph.** Without the metadata
 cache, 3.7 of A's 6.17 MB are footers: the payload's is 176 kB at a million vertices and **2.24 MB
 at ten million**, because the container is one file with a row group per tile and the footer lists
 every one. Cached, it is still planned against: natively a vertex statement costs 1.3 ms at a

@@ -14,7 +14,7 @@ the prefix as if it were a URL.
 Both are the boundary violation [Three hosts](/docs/design/three-hosts#the-test-for-the-host-boundary)
 names: a host re-deriving what the library knows. Where a run's thread goes is the executor's
 knowledge — it is the executor's module that holds the thread — and the bytes a run answers into
-memory are `CorpusFile`s the engine can register by name. So the first moves here, and the second is
+memory are `GraphFile`s the engine can register by name. So the first moves here, and the second is
 the one line `resolve` is.
 
 ## `run` runs in a worker, and its signature does not change
@@ -58,7 +58,7 @@ The worker holds the executor; **the page keeps the two things only it has, the 
 | page | `run` | `program`, `into`, `limit`, `profiled`, and for a run over bytes `files` and `path` — `files` copied, so the caller's buffers stay the caller's |
 | worker | `ask` | `connections` or `credentials(scope, access)`, with an id |
 | page | `answer` / `refuse` | the host's answer to that id, or its failure as below |
-| worker | `done` | the `RunReport`, and into memory the `CorpusFile[]`, their buffers **transferred**, each once |
+| worker | `done` | the `RunReport`, and into memory the `GraphFile[]`, their buffers **transferred**, each once |
 | worker | `failed` | the run's failure, as below |
 
 **A host call is the host's call, with a signal.** The worker's `Host` answers `connections({ signal })`
@@ -120,7 +120,7 @@ the buffer to its worker and would detach the caller's, so the copy is the engin
 same `files` can be attached twice. kanzo-ui's engine already has exactly this method, so an engine
 that satisfies the type today still does.
 
-**`CorpusFile` lives in `@fossil-lang/types`**, `{ path, bytes }`, so a reader holds what
+**`GraphFile` lives in `@fossil-lang/types`**, `{ path, bytes }`, so a reader holds what
 `@fossil-lang/executor` answers without depending on the executor.
 
 **What would reverse it:** an engine that can read the bytes in place, without a registry — then the
@@ -131,8 +131,8 @@ then become a package of that host's.
 
 | Where | What changes |
 | --- | --- |
-| `@fossil-lang/executor` | `run` in a worker where the platform has one, in-process otherwise; `worker.ts` the worker's side, the protocol above in one module both sides import; the compiled module posted once per worker; `initFossilExecutor` compiles on the page; `CorpusFile` re-exported from `@fossil-lang/types` rather than declared |
-| `@fossil-lang/types` | `CorpusFile`; `Engine.registerFileBuffer`; the failure-as-data shape and its rebuild, on `/internal` where the executor and nothing on the barrel needs it |
+| `@fossil-lang/executor` | `run` in a worker where the platform has one, in-process otherwise; `worker.ts` the worker's side, the protocol above in one module both sides import; the compiled module posted once per worker; `initFossilExecutor` compiles on the page; `GraphFile` re-exported from `@fossil-lang/types` rather than declared |
+| `@fossil-lang/types` | `GraphFile`; `Engine.registerFileBuffer`; the failure-as-data shape and its rebuild, on `/internal` where the executor and nothing on the barrel needs it |
 | `fossil-df-wasm` | nothing: the worker instantiates the same module |
 | crates | nothing |
 

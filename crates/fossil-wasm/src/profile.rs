@@ -1,7 +1,8 @@
 //! `Profiler` — [`fossil_profile::Profiler`] for a JS host: the plan in wasm,
 //! each query run on the page's DuckDB-WASM by the host, and the answers fed
 //! back. `runProfiler` in `@fossil-lang/wasm` is the loop around it. And `grammarFor`:
-//! what a model may write once the sources are profiled — `fossil_ide::constrain`.
+//! what a model may write once the sources are profiled — `fossil_ide::constrain`, whose
+//! `vocabularyOf` and `subjectOf` are the names and the identities a host computes for it.
 
 use fossil_graph_schema::js::invalid_argument;
 use fossil_profile::{Options, Rows, Source};
@@ -141,4 +142,39 @@ pub fn grammar_for(
             grammar: fossil_ide::constrain::grammar_for(&vocabulary).ebnf(),
         },
     )
+}
+
+/// The vocabulary of `model` over the profiled `sources`, every IRI under `base`
+/// (`fossil_ide::constrain::vocabulary_of`): what [`grammar_for`] takes.
+///
+/// # Errors
+///
+/// `api/invalid-argument` when `model`, `sources` or `base` is not its shape.
+#[wasm_bindgen(js_name = vocabularyOf, unchecked_return_type = "Vocabulary")]
+pub fn vocabulary_of(
+    #[wasm_bindgen(unchecked_param_type = "Model")] model: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "SourceVocabulary[]")] sources: JsValue,
+    base: &str,
+) -> Result<JsValue, JsValue> {
+    let model: fossil_ide::constrain::Model = argument("model", "a Model", model)?;
+    let sources: Vec<fossil_ide::constrain::SourceVocabulary> =
+        argument("sources", "an array of SourceVocabulary", sources)?;
+    to_value(
+        "the vocabulary",
+        &fossil_ide::constrain::vocabulary_of(&model, &sources, base),
+    )
+}
+
+/// A type's `@subject` under `base` (`fossil_ide::constrain::subject_of`).
+///
+/// # Errors
+///
+/// `api/invalid-argument` when `ty` is not a `ModelType`.
+#[wasm_bindgen(js_name = subjectOf)]
+pub fn subject_of(
+    #[wasm_bindgen(unchecked_param_type = "ModelType")] ty: JsValue,
+    base: &str,
+) -> Result<String, JsValue> {
+    let ty: fossil_ide::constrain::ModelType = argument("type", "a ModelType", ty)?;
+    Ok(fossil_ide::constrain::subject_of(&ty, base))
 }

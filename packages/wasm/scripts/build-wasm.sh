@@ -47,10 +47,13 @@ fi
 
 # ---- 1. Build the WASM via cargo ----
 
-echo "[build-wasm] cargo build --release --target wasm32-unknown-unknown -p fossil-wasm"
-cargo build --release --target wasm32-unknown-unknown -p fossil-wasm
+# --profile wasm-release (NOT plain --release): the one size-tuned profile of the workspace,
+# the same one the executor and the storage module are built with (opt-level="z" + fat LTO +
+# strip + panic=abort). `/docs/design/incremental` has what it costs and saves.
+echo "[build-wasm] cargo build --profile wasm-release --target wasm32-unknown-unknown -p fossil-wasm"
+cargo build --profile wasm-release --target wasm32-unknown-unknown -p fossil-wasm
 
-WASM_INPUT="$REPO_ROOT/target/wasm32-unknown-unknown/release/fossil_wasm.wasm"
+WASM_INPUT="$REPO_ROOT/target/wasm32-unknown-unknown/wasm-release/fossil_wasm.wasm"
 if [[ ! -f "$WASM_INPUT" ]]; then
   echo "::error::cargo build did not produce expected artefact: $WASM_INPUT" >&2
   exit 1
@@ -73,11 +76,19 @@ wasm-bindgen "$WASM_INPUT" \
   --target web \
   --out-dir "$PKG_DIR"
 
-# ---- 3. (Optional) Run wasm-opt -O3 for smaller artefact ----
+# ---- 3. (Optional) Run wasm-opt -Oz for smaller artefact ----
+#
+# The `--enable-*` set is EXACTLY the six features wasm32-unknown-unknown turns on by default
+# (Rust 1.87 / LLVM 20), the same as packages/executor/scripts/build-wasm.sh and for the same
+# reason: a size-tuned build is full of `memory.copy`, which wasm-opt rejects unless told the
+# input may use bulk memory. NOT `-all`: that lets wasm-opt EMIT gc / typed function references.
 
 if [[ $HAS_WASM_OPT -eq 1 ]]; then
-  echo "[build-wasm] wasm-opt -O3"
-  wasm-opt -O3 "$PKG_DIR/fossil_wasm_bg.wasm" -o "$PKG_DIR/fossil_wasm_bg.wasm"
+  echo "[build-wasm] wasm-opt -Oz (wasm32 default feature set, no gc)"
+  wasm-opt -Oz \
+    --enable-bulk-memory --enable-sign-ext --enable-mutable-globals \
+    --enable-nontrapping-float-to-int --enable-reference-types --enable-multivalue \
+    "$PKG_DIR/fossil_wasm_bg.wasm" -o "$PKG_DIR/fossil_wasm_bg.wasm"
 fi
 
 # ---- 4. Report size + assert the 2 MB compressed ceiling ----

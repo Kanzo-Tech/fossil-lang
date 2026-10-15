@@ -1,5 +1,5 @@
 ---
-title: The corpus as Apache GraphAr
+title: The graph as Apache GraphAr
 description: "What a run writes is an Apache GraphAr graph plus the RML-Core mapping that says what its tables mean as RDF, written together once. Four owners, one way to do each thing: graphar encodes the graph and reads it into DuckDB and knows no RDF; rudof, through our fork, does all of RDF; fossil is the language and the engine; @kanzo-tech/graph owns the global id and the drawing; keasy composes them. This page has the layout, the owners' decisions with what would reverse each, the decisions the writer took, the public API and what remains."
 direction:
   summary: "The readers of a run's result — `@kanzo-tech/graph` on GraphAr's relations and footers, and keasy composing `mount`, `attachGraph` and rudof's `Mapping` — are written against the graph fossil writes, so a GraphAr reader opens the tables and an RDF reader their meaning without a byte of fossil."
@@ -13,13 +13,13 @@ the language and the engine; the encoding of a graph as files is graphar's, and 
 validation of RDF is rudof's. There is no reader package of fossil's: the host composes `mount`,
 `attachGraph` and rudof's `Mapping`, and `run` is the one door fossil owns.
 
-**What exists, and what is a direction.** The writer, `describe`, the layout, the counts and the
+**What exists, and what is a direction.** The writer, `describe` (also before a run, from the types), the layout, the counts and the
 deletion of the earlier format are the tree; [the format](/docs/format) specifies the files for a
 reader who has none of this repository. What this page still marks as a direction is the other side of
 the files: kanzo-ui's `@kanzo-tech/graph` reading GraphAr's relations and footers, keasy's call sites,
 and `@kanzo-tech/rudof-wasm`'s `Mapping` reaching a page ([reading a graph](#reading-a-graph)).
 
-[Discarded](/docs/design/discarded#the-corpus) records why GraphAr was refused before: no reader that
+[Discarded](/docs/design/discarded#the-graph) records why GraphAr was refused before: no reader that
 fossil's users run spoke it. **This design builds that reader rather than waiting for one** — DuckDB
 views over the GraphAr tables, which is exactly where kanzo-ui and keasy read. Everything below was
 re-read at `apache/incubator-graphar@06dddb1` (2026-10-10) and its test data at
@@ -33,7 +33,7 @@ and says where it ran.
 | --- | --- | --- |
 | encoding a property graph as files, and reading those files into DuckDB | **`Kanzo-Tech/graphar`** — knows no RDF | `graphar-info`, `graphar-parquet`, `@kanzo-tech/graphar-duckdb` |
 | parsing, writing and validating RDF, ShEx, SHACL and RML, and turning tables into an `(s,p,o)` relation | **rudof, through our fork `Kanzo-Tech/rudof`** | `rudof_rdf`, `shex_ast`, `shacl`, a new `rml` crate, and `Mapping` on `rudof_wasm` |
-| the language and the engine | **fossil** | the compiler, and `fossil-df`: execute, `layout`, `describe`, write |
+| the language and the engine | **fossil** | the compiler, `fossil-mir`'s `describe`, and `fossil-df`: execute, `layout`, write |
 | the global id, and how a graph is drawn | **`@kanzo-tech/graph`** | arithmetic over GraphAr's per-type index |
 | composing the above for a product | **keasy** | `mount` + `attachGraph` + `Mapping.triples`, about 20 lines |
 
@@ -53,7 +53,8 @@ flowchart LR
   end
   subgraph F["fossil-lang"]
     hir["fossil-hir<br/>shapes → types"]
-    df["fossil-df<br/>execute · layout · describe · write"]
+    mir["fossil-mir<br/>describe"]
+    df["fossil-df<br/>execute · layout · write"]
     exe["@fossil-lang/executor: run"]
     st["@fossil-lang/storage: mount"]
   end
@@ -65,7 +66,8 @@ flowchart LR
   hir --> shex
   hir --> shacl
   df --> pq
-  df --> rml
+  df --> mir
+  mir --> rml
   df --> rdf
   exe --> df
   ui -. SQL only .-> js
@@ -145,7 +147,7 @@ retired — and then the crates are ours to keep.
 ### rudof: our fork, `Kanzo-Tech/rudof`
 
 fossil consumes rudof **from our fork, by git `rev`**, as keasy's server already does; `deny.toml`
-gains the fork under `allow-git`. fossil pins `889cb741`, the merge of R-d into the fork's `master` (R-b is `a113142c`);
+gains the fork under `allow-git`. fossil pins `cbb80d7e`, the fork's `master` after R-d (R-d itself is `889cb741`) (R-b is `a113142c`);
 the crates are `shex_ast`, `shacl`, `rudof_rdf`, `rudof_iri`, `prefixmap` and `rml`, from one git
 source, each with `default-features = false`. Its npm half stays `@kanzo-tech/rudof-wasm`. Offering
 the changes to upstream rudof is optional and later.
@@ -180,9 +182,11 @@ directions.
 
 | crate or package | what it is |
 | --- | --- |
-| `fossil-syntax`, `fossil-base`, `fossil-mir`, `fossil-ide`, `fossil-wasm`, `@fossil-lang/wasm`, `codemirror-fossil` | nothing changed |
+| `fossil-syntax`, `fossil-base`, `codemirror-fossil` | nothing changed |
+| `fossil-mir` | `describe`: the mapping of the types, public, so a host asks before a run (D6) |
+| `fossil-ide`, `fossil-wasm`, `@fossil-lang/wasm` | `program.mapping()` is that function over the program's types; `vocabularyOf` and `subjectOf` compute a model's names and `@subject`; a profile names its sources by binding ([profile](/docs/design/profile)) |
 | `fossil-hir` | `shacl.rs` walks rudof's `ASTSchema` from `ShaclParser` into `OutputShapes`, and `oxttl`/`oxrdf` leave the crate. `shex.rs` keeps `shex_ast`. The `providers` registry is unchanged: the names are fossil's, the parse each calls is rudof's |
-| `fossil-df` | the writer through `graphar-parquet`; `layout` and `describe`, both crate-private; `facts.rs` writes the Parquet footers (D2); `rdf.rs` on `rudof_rdf`'s parser; ids numbered per type. `corpus::*` is gone |
+| `fossil-df` | the writer through `graphar-parquet`; `layout`, crate-private; `facts.rs` writes the Parquet footers (D2); `rdf.rs` on `rudof_rdf`'s parser; ids numbered per type. `corpus::*` is gone |
 | `fossil-df-wasm`, `@fossil-lang/executor` | `run` unchanged; the executor holds the integration tests (`integration/`: run → `attachGraph` → assert) |
 | `fossil-storage` (+ `-wasm`), `@fossil-lang/storage` | `mount` has hosts as its callers; `Storage::at` addresses a prefix for the writer |
 | `@fossil-lang/types` | the whole `corpus/*` area is gone; `write/invalid-subject`, `write/duplicate-value`, `write/unrepresentable` and `write/ambiguous-iri` are added |
@@ -234,11 +238,11 @@ entry.
 ### The result, as a type
 
 ```rust
-// fossil-df (crate-private: both modules export nothing; Executor::execute is the door)
-pub(crate) struct Description { pub mapping: rml::Mapping }   // + shapes, lineage, the day each has a reader
+// fossil-mir::describe (public: a pure function of the types, which the editor's wasm links)
+pub fn describe(schema: &GraphSchema, natural: &Natural) -> Result<Mapping, DescribeError>;  // no data, no db; A2 held
+pub fn turtle(mapping: &Mapping) -> Result<String, DescribeError>;                           // mapping.ttl
+// fossil-df (crate-private: the module exports nothing; Executor::execute is the door)
 pub(crate) fn layout(graph: &Graph) -> Result<Laid, WriteError>;     // the tables as GraphAr's, held to A1/A4/A5
-pub(crate) fn describe(schema: &GraphSchema, info: &GraphInfo, natural: &Natural)
-    -> Result<Description, WriteError>;                                // pure: no data, no db; A2 held
 ```
 
 `write` calls them in that order and refuses before it writes a chunk: the layout and the mapping are
@@ -246,20 +250,34 @@ built, and every admissibility condition the writer can check is held, before th
 writer then puts each chunk (one request per chunk, through the routed store), then `mapping.ttl`, then
 the information files, then `fossil.graph.yml`.
 
-The description is built in `fossil-df::describe` **with rudof's AST types**, and rudof's writer
+The description is built in `fossil-mir::describe` **with rudof's AST types**, and rudof's writer
 serialises it. **There is no `fossil-rdf` crate.** The mapping (and, the day they are emitted, the
-shapes and the lineage) is a pure function of `GraphSchema`, the layout and what the program read;
-none of it reads data, and it is written in the same pass as the tables it describes — so it lives in
-the module that writes those tables (D6), and **crate-private**: a module that exports nothing cannot be
-reached for a second purpose. That is the pattern OpenLineage's integrations follow,
-emitting lineage from the run and keeping no lineage component, and dbt's, whose `manifest.json` is an
-artefact of `dbt run`.
+shapes and the lineage) is a pure function of the `GraphSchema`; none of it reads data, and it is
+written in the same pass as the tables it describes. That is the pattern OpenLineage's integrations
+follow, emitting lineage from the run and keeping no lineage component, and dbt's, whose
+`manifest.json` is an artefact of `dbt run`.
 
-**What would reverse it.** A host that needs the description **without running** — the editor
-showing the mapping a program will produce. Then `layout` and `describe` move to `fossil-mir`, beside
-the assembly of `GraphSchema`, and become public; the editor's wasm links `rml`, and that size is
-measured first ([incremental](/docs/design/incremental) has the editor's module before and after the
-fork; `fossil_df_wasm_bg.wasm` is the executor's).
+**A host describes before a run, from the types alone** (owner decision, 15 October 2026; it reverses
+the earlier rule that `describe` was the run's, crate-private). keasy's `joinGraphOf` built the shape
+of a graph by hand, to show a dashboard before data existed; the compiler already knows the types.
+`describe` takes the `GraphSchema` and nothing of the layout: a vertex type's table is its label, a
+relation's is `<Src>_<label>_<Dst>`, and a table's columns are its properties' names, the
+single-valued ones and then the multi-valued, beside `subject` and the index columns. The layout is
+the data's — its types, its nullability, its chunk size — and stays in `fossil-df`. So
+`FossilProgram.mapping()` in `@fossil-lang/wasm` is `fossil_hir::shapes::program_shapes`, the types a
+program declares and imports, through `describe`, and `mapping.ttl` is the same function over the
+schema the run produced. `crates/fossil-df/tests/mapping.rs`,
+"the_mapping_a_programs_types_describe_is_the_mapping_its_run_writes" holds the two to one document for a
+program that imports its type and one that declares its own.
+
+**What differs, stated.** A column the engine produced as a decimal or as bytes is stored as text, and
+only the run knows (`Natural`): before a run it is `xsd:string`. A field the types declare and no
+mapping writes has a predicate in the description and no column in the run's tables. A program with no
+type describes an empty mapping.
+
+**What would reverse it.** A column of the mapping that only the layout can name, or a host that needs
+the description to be exactly the run's before it runs. Then the part of the layout the mapping reads
+becomes a function of the types, or the mapping is the run's again.
 
 ### `examples/hello.fossil`, the walking skeleton
 
@@ -383,7 +401,7 @@ it.
 **RML-Core, because the language column decides it.** fossil writes `rdf:langString` values with the
 tag read per row, which only RML-Core can express; it "follows exactly the same syntax as R2RML", so
 one vocabulary does the whole document. The price is a Community Group draft, not a Recommendation.
-Only RML-Core is used: RML-LV's logical views stay [discarded](/docs/design/discarded#the-corpus-as-rdf),
+Only RML-Core is used: RML-LV's logical views stay [discarded](/docs/design/discarded#the-graph-as-rdf),
 and joins are SQL2008 queries.
 
 **The supported subset is the one the writer emits, and `rml` refuses the rest by name.** It models
@@ -685,7 +703,7 @@ So **a graph with a `langString` property is not opened by GraphAr's C++ and Jav
 revision**, and the claim "a GraphAr reader opens the tables" holds for it only for readers that
 follow the specification's user-defined-type clause: `graphar-info` and `@kanzo-tech/graphar-duckdb`.
 The owner chose this knowing it, because the alternative either loses the tag or admits a
-misaligned state ([the parallel-list encoding](/docs/design/discarded#the-corpus-as-apache-graphar) is discarded for it). A graph with no tagged multi-valued property uses only
+misaligned state ([the parallel-list encoding](/docs/design/discarded#the-graph-as-apache-graphar) is discarded for it). A graph with no tagged multi-valued property uses only
 built-in types and every reader opens it. The conformance job's C++ and PySpark readers therefore
 open the graphs without a `langString` property; the property is tested through `graphar-duckdb`.
 
@@ -765,7 +783,7 @@ combine across row groups by sum, minimum and maximum — the *distributive* agg
 *holistic* is our reading of their definition, which does not name it). `key_value_metadata` is the slot
 Parquet gives facts it has no field for, and the one Arrow itself uses (`ARROW:schema`). arrow-rs
 truncates a bound at 64 bytes and marks it inexact, so a reader that keeps only exact bounds never
-shows a cut value — the rule [the corpus's own facts](/docs/design/facts) already states.
+shows a cut value — the rule [the graph's own facts](/docs/design/facts) already states.
 
 **The graph reads them itself.** `@kanzo-tech/graph`'s `readCatalog` and `useFieldStats` take the
 counts from the footers with DuckDB's own table functions, over the paths `graphar_chunks(type, kind,
@@ -965,14 +983,20 @@ become a package — and it belongs to whoever that host is, not to fossil.
 | surface | item | state |
 | --- | --- | --- |
 | `@fossil-lang/executor` | `run(program, { host, into })` → `RunReport`; the in-memory and `files` forms → `{ report, files }` | `files` holds the GraphAr tree and `mapping.ttl`; `<location>fossil.graph.yml` is what was written |
-| | `initFossilExecutor`, `HostRun`, `FilesRun`, `InMemoryRun`, `RunOptions`, `CorpusFile` | unchanged |
-| `@fossil-lang/types` | `Host`, `HostCall`, `Engine`, `Table`, `Vector`, `CorpusFile`, `RunReport` | unchanged |
+| | `initFossilExecutor`, `HostRun`, `FilesRun`, `InMemoryRun`, `RunOptions` | unchanged |
+| | `CorpusFile` | **renamed** `GraphFile`; the in-memory location is `memory://graph/` |
+| `@fossil-lang/types` | `Host`, `HostCall`, `Engine`, `Table`, `Vector`, `RunReport` | unchanged |
+| | `CorpusFile` | **renamed** `GraphFile` |
 | | `corpus/unreadable`, `corpus/not-a-location`, `corpus/duplicate-table`, `corpus/unsupported-format`, `corpus/not-json` | **deleted**: they were the earlier reader's; `attachGraph` throws its own |
 | | `write/invalid-subject`, `write/duplicate-value`, `write/ambiguous-iri`, `write/unrepresentable` | **new** |
-| `@fossil-lang/wasm`, `@fossil-lang/storage`, `@fossil-lang/codemirror-fossil` | every export | unchanged |
-| `fossil_df` | `Executor`, `Output`, `Ran`, `CorpusFile`, `MEMORY`, `RunReport`, `EdgeDrops` | unchanged |
-| | `write(graph, ctx, storage, dest) -> Result<Written, WriteError>` | `Written.graph` is a `graphar_info::GraphInfo`; `WriteError` has `Unrepresentable`, `AmbiguousIri`, `Mapping` and `Graphar` and no `Json` |
-| | `layout`, `describe`, `Description` | crate-private |
+| `@fossil-lang/storage`, `@fossil-lang/codemirror-fossil` | every export | unchanged |
+| `@fossil-lang/wasm` | `program.mapping()`, `vocabularyOf`, `subjectOf`, `DUCKDB_TYPES` | **new** |
+| | `ProfileSource.name`; a profile's `SourceProfile`, `ColumnRef.source` and `ProfileFailure.source` | `name` is `location`, and a profile names its sources by `binding` ([profile](/docs/design/profile)) |
+| `fossil_df` | `Executor`, `Output`, `Ran`, `MEMORY`, `RunReport`, `EdgeDrops` | unchanged |
+| | `CorpusFile`; `SinkRef::Corpus` in `fossil_mir` | **renamed** `GraphFile` and `SinkRef::Graph`; `MEMORY` is `memory://graph/` |
+| | `write(graph, ctx, storage, dest) -> Result<Written, WriteError>` | `Written.graph` is a `graphar_info::GraphInfo`; `WriteError` has `Unrepresentable`, `Describe` and `Graphar` and no `Json` |
+| | `layout` | crate-private |
+| `fossil_mir::describe` | `describe(schema, natural) -> Result<Mapping, DescribeError>`, `turtle`, `DescribeError`, `Natural` | **new**, moved out of `fossil-df`, where `describe` and `Description` were crate-private |
 | `fossil_df::corpus` | `manifest::*`, `generated::*` | **deleted**, with `corpus.bnf` and `cargo xtask corpus`; the path functions and `DataType` are `graphar-parquet`'s and `graphar-info`'s |
 
 ## What has no owner or no standard
@@ -1064,7 +1088,7 @@ The owner decided D2, D3, D4, D7 and the names; the rest are the recommendation,
 | **D3** | A multi-valued property is a property of its owner with **`cardinality: set`**; a tagged one has the user-defined element type `langString` (`STRUCT<value, lang>`), declared as `gar/v1 (langString)`. The writer refuses duplicates (`write/duplicate-value`). `list` is rejected. **A known departure:** GraphAr's C++ and Java readers at `06dddb1` do not parse a user-defined type | The C++ and Java readers accepting a struct element, or an upstream tagged-string type merged; for `set`, a consumer for which order is data |
 | **D4** | Datatypes such as `xsd:gYear`, and the annotations, are read from the mapping through rudof's `Mapping.model()`, **deferred after the first paint**; names until then | A first paint the deferred load measurably still hurts |
 | **D5** | The entry is the fixed name `fossil.graph.yml`, and the mapping the fixed name `mapping.ttl` beside it; no pointer in `extra_info`; `RunReport` unchanged | Two graphs under one location |
-| **D6** | `layout` and `describe` live in `fossil-df`, as the run's result, **crate-private** | A host that needs the description without running |
+| **D6** | `describe` lives in `fossil-mir`, **public**, over the types alone, so a host asks before a run; `layout` lives in `fossil-df`, crate-private, because it reads the data | A column of the mapping that only the layout can name |
 | **D7** | graphar is **published at `0.1.0-alpha.1`**: `graphar-info` and `graphar-parquet` on crates.io, `@kanzo-tech/graphar-duckdb` on npm (`alpha`), and fossil depends on the crates by version. rudof is consumed **from our fork by git `rev`** (a tag when a newer one exists), and `@kanzo-tech/rudof-wasm` on npm | A fossil crate published to crates.io, which cannot depend on a git source: then the fork publishes too |
 | **D8** | `rml` lives in the rudof fork | Upstream rudof declining it while a second consumer appears |
 | **D9** | The editor's wasm is measured in F0 and accepted unless the first paint gets appreciably worse | That measured regression; then the SHACL decode stays out of the editor's module |
@@ -1078,13 +1102,13 @@ The owner decided D2, D3, D4, D7 and the names; the rest are the recommendation,
 | upstream | Offered to Apache GraphAr **after** fossil runs on graphar | Apache asking for the code before fossil runs on it |
 
 **`tests/wasm_parity` is deleted.** It was the manual DuckDB-WASM cross-engine parity harness, and its
-baseline was written by `corpus_exec.rs` from the earlier corpus writer. It was in no CI job, so
+baseline was written by `corpus_exec.rs` from the earlier graph writer. It was in no CI job, so
 nothing ran it, and a harness whose baseline is a deleted format cannot be kept without a replacement
 nobody asked for. **What would bring it back:** a native and a WASM run of the same program seen to
 diverge; then a parity check over a GraphAr graph, with its baseline written by the new writer.
-[Discarded](/docs/design/discarded#the-corpus-as-apache-graphar) has the row.
+[Discarded](/docs/design/discarded#the-graph-as-apache-graphar) has the row.
 
 A graph of the earlier layout is not read by anything, and stored ones are written again (K1).
 
-The rejected alternative of every row is on [discarded](/docs/design/discarded#the-corpus-as-apache-graphar),
-with what would bring it back; the sources are on [prior art](/docs/design/prior-art#the-corpus-as-apache-graphar).
+The rejected alternative of every row is on [discarded](/docs/design/discarded#the-graph-as-apache-graphar),
+with what would bring it back; the sources are on [prior art](/docs/design/prior-art#the-graph-as-apache-graphar).

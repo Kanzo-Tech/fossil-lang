@@ -12,7 +12,7 @@
 //!
 //! The checker's disagreement with the engine is real, and is in
 //! `aggregate_result_types.rs`; it is a question about the language, not about
-//! what a corpus says of its own bytes.
+//! what a graph says of its own bytes.
 
 // The fixtures use interpolation syntax (`"…{Order.customer}"`), which clippy
 // mistakes for format args in a plain string literal.
@@ -52,8 +52,8 @@ fn declared_and_on_disk(program: &str) -> (String, String) {
         ("data/orders.csv", ORDERS),
         ("spend.fossil", program),
     ]);
-    let corpus = native::run_dir(dir.path(), "spend.fossil", &[]).expect("the program runs");
-    let spend = corpus.vertex("Spend");
+    let ran = native::run_dir(dir.path(), "spend.fossil", &[]).expect("the program runs");
+    let spend = ran.vertex("Spend");
     let declared = spend.property_groups[0]
         .properties
         .iter()
@@ -62,14 +62,14 @@ fn declared_and_on_disk(program: &str) -> (String, String) {
         .data_type
         .to_string();
 
-    let root = corpus.materialise();
+    let root = ran.materialise();
     let conn = duckdb::Connection::open_in_memory().expect("duckdb");
     let on_disk = conn
         .query_row(
             &format!(
                 "SELECT column_type FROM (DESCRIBE SELECT * FROM \
                  read_parquet('{}')) WHERE column_name = 'total'",
-                root.path().join(corpus.chunk("Spend")).display(),
+                root.path().join(ran.chunk("Spend")).display(),
             ),
             [],
             |row| row.get::<_, String>(0),

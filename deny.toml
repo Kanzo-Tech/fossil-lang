@@ -121,7 +121,7 @@ deny = [
     # `--allow unused-wrapper`, which is not scoped to an entry.
     { name = "duckdb", wrappers = [
         # Direct parents by a DEV edge only, and nothing links it on a normal
-        # one: `fossil-df`'s tests read back the corpus it wrote and describe a
+        # one: `fossil-df`'s tests read back the graph it wrote and describe a
         # program's sources before checking it (`tests/support/profile.rs`), and
         # `fossil-profile`'s tests run the profiler's plan on it.
         "fossil-df",

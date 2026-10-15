@@ -1,24 +1,24 @@
 ---
 title: A door for a camera
-description: "How a camera read a tiled corpus through `open` and three members — `tileMatrix`, `scan` and `edges` — where every answer was a function of a tile's address; why the zoom was picked off the tile matrix, and why the coarse zooms were cells and not a sample."
+description: "How a camera read a tiled graph through `open` and three members — `tileMatrix`, `scan` and `edges` — where every answer was a function of a tile's address; why the zoom was picked off the tile matrix, and why the coarse zooms were cells and not a sample."
 ---
 
 > **Deferred, not reversed.** A graph is attached by `attachGraph` and read with the host's
-> SQL — [one door](/docs/design/one-door); this is what the door owed a camera when the corpus was tiled. The code existed at commit `ac1801d4` (main
+> SQL — [one door](/docs/design/one-door); this is what the door owed a camera when the graph was tiled. The code existed at commit `ac1801d4` (main
 > `e5b2113f`), and every path on this page is spelled against that commit, `@fossil-lang/corpus`, the reader it extends, among them: the package is deleted. What brings it back: a
 > graph that fails the in-browser thresholds — open over 1.5 s, first paint over 3 s,
 > or heap over 1.5 GB at a million vertices over HTTP.
 
-A consumer that wanted a picture out of a corpus used to order three concepts by hand — the
+A consumer that wanted a picture out of a graph used to order three concepts by hand — the
 addressing, the door and a renderer's source contract — and sew them together with SQL of its own.
 There was one door, and a camera went through it in three calls:
 
 ```text
-const corpus = await attach(url, { engine });
-const set = corpus.tileMatrix('Person');                 // every zoom, every tile, its rows and box
-const scan = corpus.scan({ type: 'Person', select });    // bound once per filter, not per camera move
+const graph = await attach(url, { engine });
+const set = graph.tileMatrix('Person');                 // every zoom, every tile, its rows and box
+const scan = graph.scan({ type: 'Person', select });    // bound once per filter, not per camera move
 const batches = await scan.read(visible);                // a batch per tile address
-const lines = await corpus.edges({ from: visible, direction: 'src' });
+const lines = await graph.edges({ from: visible, direction: 'src' });
 ```
 
 [The backend](/docs/design/later/backend) is where the contract is argued against Apache Iceberg and the OGC
@@ -30,7 +30,7 @@ rule it was built on.
 ## An answer is a function of an address
 
 `scan.read` and `edges` answer **one batch per `(type, z, tile)`**, and the batch is a pure function
-of that address, the scan's filter and its projection — the corpus bytes and nothing else. No cap
+of that address, the scan's filter and its projection — the graph bytes and nothing else. No cap
 that moves with what a window happens to hold, no stride derived from a running count, no state
 carried between calls.
 
@@ -92,7 +92,7 @@ the manifest the reader performs before a character of SQL exists.
 **It still cannot come out, and the reason is the host contract.** `@fossil-lang/corpus` asks a host
 for exactly one capability — an engine whose `query(sql, { signal })` answers in Arrow-shaped columns
 (`ac1801d4:packages/types/src/engine.ts, Engine`) — and links no engine of its own. SQL is not a language
-choice here; it is the *only channel* through which a byte of a corpus reaches this package.
+choice here; it is the *only channel* through which a byte of a graph reaches this package.
 
 So what the SQL is allowed to be is the constraint that survives: **every clause in it is a function
 of numbers computed above it**, never of anything read. A run of consecutive tiles is one statement
@@ -105,18 +105,18 @@ ranges are byte ranges and the filter is evaluated here, and neither is SQL.
 ## It grew `open` rather than opening a port beside it
 
 A camera needs an engine — reading tiles is SQL — so it was never going to live on a subpath that had
-none. **Both of the subpaths that did are gone**, and for one reason each time: `./corpus` was
+none. **Both of the subpaths that did are gone**, and for one reason each time: `./graph` was
 justified by a closure that reached no WASM and the door reached the verbs, and `./address` by the
 same promise kept at the price of
-[a second implementation of the arithmetic](/docs/design/later/corpus-tiles#conformance-is-a-round-trip-and-what-it-rests-on-is-not-a-headcount).
+[a second implementation of the arithmetic](/docs/design/later/graph-tiles#conformance-is-a-round-trip-and-what-it-rests-on-is-not-a-headcount).
 
 **This package made the same mistake three times and corrected it each time.** `createGraphClient`
 took `{ query, manifestFiles }` and returned the verbs beside a door that took `(url, { query })`:
 two entry points over one manifest with no rule for choosing, folded in so that the verbs are the
 transport and this is the door. `resolveCorpus` needed no engine and outlived both subpaths, until
 its one consumer went and every open took an engine and published the addressing as
-`corpus.addressing`. And that member went with `frame`: the addressing is internal, a consumer that
-needs a URL has outgrown a surface whose claim is that a corpus is a URL, and the engine is the one
+`graph.addressing`. And that member went with `frame`: the addressing is internal, a consumer that
+needs a URL has outgrown a surface whose claim is that a graph is a URL, and the engine is the one
 capability a host supplies.
 
 `tileMatrix`, `scan` and `edges` are **three members of one door and not three doors**: they read the

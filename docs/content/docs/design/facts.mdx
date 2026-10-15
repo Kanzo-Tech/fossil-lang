@@ -157,9 +157,9 @@ the manifest as `inclusions`, read as `fossil_inclusions`. They are gone from th
 **They were the cost.** Measured natively, release build, the run into memory, median of three
 interleaved with the same program on the writer without facts, on a shared four-core host (load 10
 to 13). *Write* is `fossil_df::write` whole; *facts* the part of it that counted; the SNB, CORDIS and
-Nobel corpora are the keasy dev examples:
+Nobel graphs are the keasy dev examples:
 
-| corpus | tables · rows written | run before | run with inclusions | write before → with inclusions | facts | of it, inclusions | manifest |
+| graph | tables · rows written | run before | run with inclusions | write before → with inclusions | facts | of it, inclusions | manifest |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | shop, 60,000 · 180,000 | 3 · 395,854 | 0.98 s | 1.01 s | 57 → 221 ms | 166 ms | 4 asks, 148 ms | 2.6 → 6.5 KB |
 | shop, 200,000 · 600,000 | 3 · 1,313,992 | 3.30 s | 3.85 s | 163 → 798 ms | 610 ms | 4 asks, 379 ms | 2.6 → 6.6 KB |
@@ -176,13 +176,13 @@ out not to be contained. The peak did not move with any of it (51 to 291 MiB res
 and without facts), because the counts read the batches the writer already holds. Vermont was not
 measured; it is not in this repository.
 
-**Without them**, the same bench once more over the two corpora they cost most on, median of three,
+**Without them**, the same bench once more over the two graphs they cost most on, median of three,
 on the same host when it was otherwise idle (load under 5) — so the run times are not comparable to
 the table's, while the write and the counting inside it are what was asked of them. The CORDIS subset
 is derived from the current CORDIS dump, the archived one being unreachable that day: 0.4 to 0.7 % more
 rows per file.
 
-| corpus | write | of it, counting | run | manifest |
+| graph | write | of it, counting | run | manifest |
 | --- | --- | --- | --- | --- |
 | CORDIS (Horizon subset) | 384 ms | 179 ms | 3.63 s | 37.6 KB |
 | LDBC SNB SF0.1 | 519 ms | 277 ms | 6.23 s | 63.1 KB |

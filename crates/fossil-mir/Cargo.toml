@@ -27,6 +27,13 @@ fossil-hir      = { path = "../fossil-hir" }
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 salsa           = { workspace = true }
 smol_str        = { workspace = true }
+# `describe`: the RML-Core mapping of a graph's tables, built with rudof's AST and
+# written as Turtle. A pure function of the types, so the editor's wasm links it
+# and a host asks for the mapping before any run (`/docs/design/graphar`, D6).
+rml             = { workspace = true }
+rudof_iri       = { workspace = true }
+oxrdf           = { workspace = true }
+thiserror       = { workspace = true }
 
 [dev-dependencies]
 # The host with a shape decoder installed. A DEV-dependency on a DEV-only

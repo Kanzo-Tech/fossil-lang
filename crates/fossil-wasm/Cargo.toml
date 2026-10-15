@@ -27,7 +27,7 @@ workspace = true
 [dependencies]
 # Compiler-core crates wired into FossilWorkspace::compile
 # The wasm dep tree is the compiler front-end crates plus WASM glue. NO
-# fossil-df (the corpus format and its writer — the editor writes no corpus;
+# fossil-df (the graph format and its writer — the editor writes no graph;
 # that is fossil-df-wasm's job).
 fossil-base    = { path = "../fossil-base" }
 fossil-syntax  = { path = "../fossil-syntax" }

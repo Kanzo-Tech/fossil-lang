@@ -54,6 +54,7 @@ fn the_wire() {
     generator.subschema_for::<fossil_profile::Query>();
     generator.subschema_for::<fossil_profile::Profile>();
     generator.subschema_for::<fossil_ide::constrain::Vocabulary>();
+    generator.subschema_for::<fossil_ide::constrain::Model>();
     generator.subschema_for::<fossil_storage::StorageCredential>();
     generator.subschema_for::<fossil_storage::Access>();
     generator.subschema_for::<fossil_storage::Scope>();

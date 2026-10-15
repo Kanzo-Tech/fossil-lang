@@ -18,7 +18,7 @@ this repository has paid for twice.
 **A GraphAr graph and its mapping.** A vertex type is `<Type>.vertex.yml` and a property group of
 Parquet chunks, a relation is `<Src>_<label>_<Dst>.edge.yml` with an adjacency list ordered by source,
 `fossil.graph.yml` names them all, and `mapping.ttl` says what the tables mean as RDF
-([the corpus](/docs/design/corpus), [the format](/docs/format)). The index is per type, and the global
+([the graph](/docs/design/graph), [the format](/docs/format)). The index is per type, and the global
 id is the reader's arithmetic over the types. Every reader names the ROLE it means rather than a
 column name: the identity is the property with `is_primary`, an address is GraphAr's index. The graph
 carries the data and not a picture of it:
@@ -41,7 +41,7 @@ one back.
 | --- | --- | --- |
 | every vertex, then every edge, with a hard barrier between them | `crates/fossil-df/src/lib.rs, execute_graph` | the payload columns and the edges, as Arrow in memory; `dense_id` numbered globally as each type lands (`crates/fossil-df/src/lib.rs, prepend_dense_id`) |
 | the layout: every table as GraphAr's, held to admissibility | `crates/fossil-df/src/layout.rs, layout` | the information files and the batches, per-type indices, `write/*` refusals before a byte is written |
-| the mapping | `crates/fossil-df/src/describe.rs, describe` | the RML-Core document of the tables, A2 held |
+| the mapping | `crates/fossil-mir/src/describe.rs, describe` | the RML-Core document of the tables, A2 held, from the types alone |
 | one chunk per table, row groups of 122,880, every page ZSTD, footers carrying the counts | `crates/fossil-df/src/write.rs, write` | the chunks, the counts, `mapping.ttl`, the information files, and `fossil.graph.yml` last |
 
 Nothing is staged and read back: the writer encodes the batches the executor already held.
@@ -85,7 +85,7 @@ the mapping. [Position](/docs/design/position) argues the field it no longer car
 ## The graph today
 
 The same three boundaries seen from the tree: `language` and `editor` serve the program, `engine`
-runs the plan, `corpus` is the artefact's storage. Grouped by what each crate is about, because thirteen nodes
+runs the plan, `graph` is the artefact's storage. Grouped by what each crate is about, because thirteen nodes
 drawn flat show nothing. The ugliness is the finding, not a failure of the drawing.
 
 ```mermaid
@@ -93,7 +93,7 @@ graph LR
   L["<b>language</b> · 6 crates<br/>base · syntax · hir · mir<br/>graph-schema · profile"]
   E["<b>editor</b> · 2 crates<br/>ide · wasm"]
   M["<b>engine</b> · 2 crates<br/>df · df-wasm"]
-  C["<b>corpus</b> · 2 crates<br/>storage · storage-wasm"]
+  C["<b>graph</b> · 2 crates<br/>storage · storage-wasm"]
   X["<b>no home</b> · 1 crate<br/>xtask"]
 
   E -->|11| L
@@ -114,17 +114,18 @@ that links no engine ([Profile](/docs/design/profile)) — and the engine's sixt
 language is that same plan: the writer counts what it wrote with it, rendered on DataFusion
 ([the graph's own facts](/docs/design/facts)).
 
-The arrow between engine and corpus runs one way:
+The arrow between engine and graph runs one way:
 
 | direction | edge | why it is there |
 | --- | --- | --- |
-| engine → corpus | `fossil-df → fossil-storage`, `fossil-df-wasm → fossil-storage` | a run reads its sources and writes the graph through the job's store |
+| engine → graph | `fossil-df → fossil-storage`, `fossil-df-wasm → fossil-storage` | a run reads its sources and writes the graph through the job's store |
 
 `fossil-storage` is filed by subject and not by history. The graph format is not on that side at
-all: the layout and the mapping are `fossil_df::layout` and `fossil_df::describe`, because the format
-is the writer's and nothing else lays out a graph
+all: the layout is `fossil_df::layout`, because the format is the writer's and nothing else lays out a
+graph, and the mapping is `fossil_mir::describe`, a pure function of the types that a host asks before a
+run
 ([the crates, as the references cut them](/docs/design/incremental#the-crates-as-the-references-cut-them)).
-The corpus side reaches into the language at one crate only — `corpus → language` is `fossil-storage` and
+The graph side reaches into the language at one crate only — `graph → language` is `fossil-storage` and
 `fossil-storage-wasm` taking `fossil-graph-schema` for the error catalogue, the leaf where shared
 vocabulary goes ([one error](/docs/design/errors)) — and at nothing that parses or resolves. [One engine](/docs/design/one-engine) is where the rest
 of the filing gets settled.

@@ -2,7 +2,7 @@
   "name": "fossil-monorepo",
   "private": true,
   "version": "0.0.0",
-  "description": "fossil — the compiler, the editor layer and the executor — monorepo root",
+  "description": "fossil — the compiler, the editor layer, the executor and the storage layer — monorepo root",
   "//scripts": "The four recursive scripts stay on packages/ — an app is not a library and has neither a size budget nor a dist to build for anyone. `docs:*` is the separate door.",
   "scripts": {
     "build": "pnpm --filter \"./packages/*\" build",

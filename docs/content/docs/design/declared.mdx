@@ -32,7 +32,7 @@ type Person
 
 A declaration lowers to the same neutral shape vocabulary a ShEx or SHACL decoder produces
 (`crates/fossil-graph-schema/src/shapes.rs, OutputShapes`), in
-`crates/fossil-hir/src/declared.rs, lower_declarations`. The checker, the MIR and the corpus writer
+`crates/fossil-hir/src/declared.rs, lower_declarations`. The checker, the MIR and the graph writer
 read that vocabulary and never learn whether it came from a declaration or a document — the cut
 [Inference from shapes](/docs/design/shapes) already made between ShEx and SHACL, made once more.
 A declaration is a third decoder whose input is the program. A declared type is a row of the same
@@ -71,7 +71,7 @@ and `+` do not appear.
 
 `Option` and `Seq` hold a primitive or a `Ref<T>`, and the count is said once, outermost: the
 vocabulary carries one `(min, max)` per property, so `Option<Seq<T>>` would be a second spelling of
-`Seq<T>`, `Seq<Option<T>>` a list with holes no corpus can write, and `Option<Option<T>>` nothing. Each
+`Seq<T>`, `Seq<Option<T>>` a list with holes no graph can write, and `Option<Option<T>>` nothing. Each
 is refused as [`type/invalid-field-type`](/docs/errors/type/invalid-field-type), as are `Ref<String>`
 (a reference is to a node) and a type of the program written bare (`livesIn: City` is
 `Ref<City>`). A name that is neither a primitive nor a constructor is
@@ -119,7 +119,7 @@ introduced twice — declared twice, imported twice, or one of each — is
 `{ A, B } := io.rdf(…, schema = …)`, binds its members by the same rule, because it is the same member
 list.
 
-What the corpus calls a type is still its IRI's last segment, as it always was: `type { Place as City }`
+What the graph calls a type is still its IRI's last segment, as it always was: `type { Place as City }`
 writes a `Place` table, because the vertex table is named for the node's `rdf:type` and not for a word
 of the program.
 

@@ -50,7 +50,7 @@ export interface Engine {
 
 /** One file of a graph: its path under the graph's root, and its bytes — what a run into memory
  *  answers and what a reader registers with `registerFileBuffer`. */
-export interface CorpusFile {
+export interface GraphFile {
   /** `fossil.graph.yml`, `mapping.ttl`, `<Type>.vertex.yml`, `vertex/<Type>/<group>/chunk0`, … */
   path: string;
   bytes: Uint8Array;

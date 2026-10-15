@@ -145,7 +145,7 @@ describe('run over files', () => {
     expect(countOf(result.files, 'vertex/Person/vertex_count')).toBe(3n);
     expect(countOf(result.files, 'edge/Order_placedBy_Person/ordered_by_source/edge_count0')).toBe(4n);
 
-    expect(result.report.location).toBe('memory://corpus/');
+    expect(result.report.location).toBe('memory://graph/');
     // Every order names a real person, so nothing dangled — and `0` is stated.
     expect(result.report.dropped).toEqual([{ table: 'Order_placedBy_Person', dropped: 0 }]);
   });

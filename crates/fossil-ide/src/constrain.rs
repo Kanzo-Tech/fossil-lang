@@ -19,6 +19,7 @@
 
 use std::fmt::Write as _;
 
+use fossil_graph_schema::Primitive;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -85,6 +86,162 @@ pub struct SourceVocabulary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delimiter: Option<String>,
     pub columns: Vec<String>,
+}
+
+/// What a host has decided a graph holds, before any program is written: the types, each over
+/// one source and identified by some of its columns, and the relations between them. The
+/// vocabulary and the subjects of the program that maps it are computed from it
+/// ([`vocabulary_of`], [`subject_of`]) and not written by whoever proposes the mappings.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+pub struct Model {
+    pub types: Vec<ModelType>,
+    #[serde(default)]
+    pub edges: Vec<ModelEdge>,
+}
+
+/// A type of a [`Model`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModelType {
+    pub name: String,
+    /// The binding of the source its rows are read from.
+    pub source: String,
+    /// The columns of `source` that identify one: a key, or a link file's two ends.
+    pub identity: Vec<String>,
+    pub fields: Vec<ModelField>,
+}
+
+/// A column of a source, kept as a field of a [`ModelType`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModelField {
+    pub name: String,
+    pub primitive: Primitive,
+    /// Some rows have none: the field is `Option<…>`.
+    #[serde(default)]
+    pub optional: bool,
+}
+
+/// A relation of a [`Model`], from one type to another.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct ModelEdge {
+    /// The field of `from` that holds it.
+    pub name: String,
+    pub from: String,
+    pub to: String,
+    /// The binding of the source that holds the `to`'s key.
+    pub on: String,
+    /// Zero or more per `from`: `Seq<Ref<…>>`.
+    #[serde(default)]
+    pub many: bool,
+    /// Some `from` has none: `Option<Ref<…>>`.
+    #[serde(default)]
+    pub optional: bool,
+}
+
+/// `base` with exactly one trailing `/`: the root every IRI of a workspace is under.
+fn root(base: &str) -> String {
+    if base.ends_with('/') {
+        base.to_string()
+    } else {
+        format!("{base}/")
+    }
+}
+
+/// How a name in the data is said as words: `birth_date` is `birth date` and `LaureateAward` is
+/// `laureate award`. A boundary is a lower-case letter or digit before a capital, and a run of
+/// `_`, `-` and `.` is one space.
+fn spoken(name: &str) -> String {
+    let mut spaced = String::with_capacity(name.len() + 4);
+    let mut previous = '\0';
+    for c in name.chars() {
+        if c.is_ascii_uppercase() && (previous.is_ascii_lowercase() || previous.is_ascii_digit()) {
+            spaced.push(' ');
+        }
+        spaced.push(c);
+        previous = c;
+    }
+    let mut words = String::with_capacity(spaced.len());
+    let mut in_run = false;
+    for c in spaced.chars() {
+        if matches!(c, '_' | '-' | '.') {
+            if !in_run {
+                words.push(' ');
+            }
+            in_run = true;
+        } else {
+            in_run = false;
+            words.push(c);
+        }
+    }
+    words.trim().to_lowercase()
+}
+
+/// A type's `@subject`: its things' IRI prefix under `base`, and the columns of its identity as
+/// holes — `https://acme.example/id/laureate/{laureates.id}`. The prefix is the workspace's and
+/// the type's, never the mapping's author's.
+#[must_use]
+pub fn subject_of(ty: &ModelType, base: &str) -> String {
+    let holes: Vec<String> = ty
+        .identity
+        .iter()
+        .map(|column| format!("{{{}.{column}}}", ty.source))
+        .collect();
+    format!(
+        "{}id/{}/{}",
+        root(base),
+        spoken(&ty.name).replace(' ', "-"),
+        holes.join("-")
+    )
+}
+
+/// The vocabulary of `model` over the profiled `sources`, every IRI under `base`: each type
+/// declared with a field per kept column and one per relation that leaves it, and the sources
+/// the types and relations read. A type's IRI and a field's are `<base>/vocab/<name>`.
+#[must_use]
+pub fn vocabulary_of(model: &Model, sources: &[SourceVocabulary], base: &str) -> Vocabulary {
+    let vocab = format!("{}vocab/", root(base));
+    let declared = model
+        .types
+        .iter()
+        .map(|t| {
+            let columns = t.fields.iter().map(|f| {
+                let ty = f.primitive.to_string();
+                DeclaredField {
+                    name: f.name.clone(),
+                    iri: format!("{vocab}{}", f.name),
+                    ty: if f.optional {
+                        format!("Option<{ty}>")
+                    } else {
+                        ty
+                    },
+                }
+            });
+            let relations = model.edges.iter().filter(|e| e.from == t.name).map(|e| {
+                let to = format!("Ref<{}>", e.to);
+                DeclaredField {
+                    name: e.name.clone(),
+                    iri: format!("{vocab}{}", e.name),
+                    ty: match (e.many, e.optional) {
+                        (true, _) => format!("Seq<{to}>"),
+                        (false, true) => format!("Option<{to}>"),
+                        (false, false) => to,
+                    },
+                }
+            });
+            DeclaredType {
+                name: t.name.clone(),
+                iri: format!("{vocab}{}", t.name),
+                fields: columns.chain(relations).collect(),
+            }
+        })
+        .collect();
+    let read = |name: &str| {
+        model.types.iter().any(|t| t.source == name) || model.edges.iter().any(|e| e.on == name)
+    };
+    Vocabulary {
+        imports: Vec::new(),
+        declared,
+        sources: sources.iter().filter(|s| read(&s.name)).cloned().collect(),
+    }
 }
 
 impl Vocabulary {
