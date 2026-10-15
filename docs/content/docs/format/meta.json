@@ -1,4 +1,4 @@
 {
-  "title": "The corpus format",
-  "pages": ["index", "conventions", "reading"]
+  "title": "The graph format",
+  "pages": ["index", "conventions", "reading", "round-trip"]
 }

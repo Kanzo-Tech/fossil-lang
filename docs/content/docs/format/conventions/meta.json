@@ -2,6 +2,8 @@
   "title": "Conventions",
   "pages": [
     "identity",
-    "adjacency"
+    "adjacency",
+    "datatypes",
+    "statistics"
   ]
 }
