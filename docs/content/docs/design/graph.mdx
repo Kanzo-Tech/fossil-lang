@@ -9,6 +9,15 @@ consume, not an endpoint. Files. The graph is an
 [Apache GraphAr](/docs/design/graphar) graph — YAML information files and Parquet chunks — and
 `mapping.ttl`, laid out as [/docs/format](/docs/format) specifies.
 
+**The word is *graph*** (owner decision, 15 October 2026). What a run writes was called a corpus while its
+format was fossil's own, and it is an Apache GraphAr graph now, so `GraphFile`, `memory://graph/`,
+`SinkRef::Graph` and the pages that say what a run writes say graph; the in-memory location of a
+run, `memory://corpus/`, was a consumer-visible string and changed with them. *Corpus* is kept where
+it is a different thing: the body of programs the documentation and the tests run
+(`docs/programs/`), and the names of what was deleted (`@fossil-lang/corpus`, `corpus.bnf`), which a
+page cites by the name it had. **What would reverse it:** nothing about the word; a consumer that
+cannot edit a string would, and there is none at `0.x`.
+
 A reader opens the graph document and reads the tables it names — from a local path, an object
 store, or a plain web server. **There is no service in the path**, so no query language between
 reader and data beyond the engine the reader already has, no process to keep alive, no writer version

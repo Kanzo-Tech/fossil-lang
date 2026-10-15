@@ -33,8 +33,8 @@ describe('FossilProgram.mapping', () => {
       expect(fetched).toEqual([]);
       expect(turtle).toContain('https://schema.org/Person');
       expect(turtle).toContain('https://schema.org/name');
-      expect(turtle).toContain('Laureate_awarded_Prize');
-      expect(turtle).toContain('"Prize"');
+      expect(turtle).toContain('Person_awarded_Prize');
+      expect(turtle).toContain('<#Prize>');
     } finally {
       program.close();
     }
@@ -57,7 +57,7 @@ describe('FossilProgram.mapping', () => {
     const { host } = recordingHost('{}');
     const program = await openProgram('declared.fossil', { host, text: '' });
     try {
-      expect(await program.mapping()).not.toContain('Laureate');
+      expect(await program.mapping()).not.toContain('Person');
       program.update(PROGRAM.replace('vocab/awarded', 'name').replace('https://schema.org/name', 'https://nobel.example/name'));
       await expect(program.mapping()).rejects.toMatchObject({ code: 'write/ambiguous-iri' });
     } finally {
