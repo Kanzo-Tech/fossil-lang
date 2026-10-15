@@ -309,7 +309,7 @@ pub struct AggSpec<'db> {
 /// properties are carried together so the backend emits one wide row per source
 /// row. `ty` is fossil's canonical type — the backend derives the xsd
 /// spelling from it (the core stays format-agnostic). `rdf_uri` is the predicate
-/// IRI the GraphAr layout and the RML mapping read; `single_valued` (shape cardinality) drives
+/// IRI the `GraphAr` layout and the RML mapping read; `single_valued` (shape cardinality) drives
 /// duplicate collapse.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct VProp<'db> {
