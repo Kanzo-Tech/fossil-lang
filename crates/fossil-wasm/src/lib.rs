@@ -124,10 +124,6 @@ impl FossilWorkspace {
             files: OpenFiles::default(),
         }
     }
-
-    // A `classification()` method sat here, returning the `{ name, wasm_class }`
-    // manifest for an editor to gray out the native-only stdlib functions.
-    // There are none: `crates/fossil-hir/src/stdlib.rs` records the removal.
 }
 
 /// The JS-facing workspace — `FossilWorkspace` on the JS side, and a

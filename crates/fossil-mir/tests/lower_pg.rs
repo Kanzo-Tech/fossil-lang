@@ -95,7 +95,7 @@ fn lower_pg_emits_source_vertex_sink() {
     assert_eq!(
         name.rdf_uri.as_deref(),
         Some("https://example.org/name"),
-        "prop carries its predicate IRI for the manifest/DCAT"
+        "prop carries its predicate IRI for the layout and the mapping"
     );
 }
 

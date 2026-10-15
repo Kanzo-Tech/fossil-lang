@@ -71,8 +71,7 @@ console_error_panic_hook = { workspace = true }
 # needs it is the rudof/ShEx stack, not salsa: `cargo tree -p fossil-wasm -i
 # getrandom@0.3.4 --target wasm32-unknown-unknown` arrives through `rand` ←
 # `oxrdf` ← `oxrdfio` ← `rudof_rdf` ← `shex_ast`. Salsa's own hashbrown hashes
-# with foldhash and draws no randomness. The line here used to say
-# salsa→hashbrown→ahash, until the tree above was read. The `.cargo/config.toml`
+# with foldhash and draws no randomness. The `.cargo/config.toml`
 # rustflag is the belt-and-suspenders fallback for unconditioned call sites.
 getrandom = { workspace = true }
 uuid      = { workspace = true }

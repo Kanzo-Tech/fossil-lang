@@ -14,14 +14,8 @@ description = "DataFusion backend for the property-graph MIR (lower_to_mir_pg)"
 # Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
-# The workspace lint table (pedantic + nursery at warn), absent here until
-# 2026-09-18 and never by an argument anybody made. It is not a free omission:
-# eight pedantic findings surfaced only when code MOVED out of this crate into
-# one that does inherit the table, so the alternative — leaving it off and
-# letting the destination crate catch them — is a finding that waits for a
-# refactor. The crates that were still without it — `fossil-graph-schema`
-# and `xtask` among them — now inherit it too, so
-# `grep -L lints crates/*/Cargo.toml` is empty and this is a policy again.
+# The workspace lint table (pedantic + nursery at warn). Every crate inherits
+# it, so `grep -L lints crates/*/Cargo.toml` is empty and this is a policy.
 [lints]
 workspace = true
 
@@ -88,10 +82,9 @@ oxrdf = { workspace = true }
 # a feature flag, which is a different thing from unrenderable for want of a
 # capability, and it was filed beside the ones that cannot be done at all.
 #
-# `crypto_expressions` is deliberately OFF. It is the sibling package, and its
-# `sha256` had exactly one consumer — `anon.hash` — which is gone from the
-# language. Turning it on would grow the wasm surface for a function no
-# template says.
+# `crypto_expressions` is deliberately OFF. It is the sibling package, and no
+# function of the language needs its `sha256`. Turning it on would grow the
+# wasm surface for a function no template says.
 datafusion = { version = "54", default-features = false, features = [
   "parquet",
   "nested_expressions",

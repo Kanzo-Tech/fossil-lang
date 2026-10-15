@@ -1780,8 +1780,7 @@ shape https://a.example/Tag
         let mappings = dm.mappings(&db);
         assert_eq!(mappings.len(), 1);
         // Per-kind dense indexing. `User` is the only MAPPING
-        // in hello.fossil, so its dense index is 0 (was 2 under the
-        // legacy all-children index space).
+        // in hello.fossil, so its dense index is 0.
         assert_eq!(mappings[0].index(&db), 0);
         assert_eq!(mappings[0].file(&db), file);
     }

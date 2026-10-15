@@ -307,9 +307,9 @@ pub struct AggSpec<'db> {
 ///
 /// The PG-canonical replacement for a per-predicate triple emission: a vertex's
 /// properties are carried together so the backend emits one wide row per source
-/// row. `ty` is fossil's canonical type — the backend derives the manifest's and
-/// xsd's spelling from it (the core stays format-agnostic). `rdf_uri` is the predicate
-/// IRI the manifest/DCAT layer reads; `single_valued` (shape cardinality) drives
+/// row. `ty` is fossil's canonical type — the backend derives the xsd
+/// spelling from it (the core stays format-agnostic). `rdf_uri` is the predicate
+/// IRI the GraphAr layout and the RML mapping read; `single_valued` (shape cardinality) drives
 /// duplicate collapse.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub struct VProp<'db> {

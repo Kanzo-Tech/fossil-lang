@@ -425,8 +425,8 @@ MappingHeader       := IDENT SHAPE_SEP ShapeExpr 'from' Expression
    not a token.
 
    There is no `in g` either. The named graph clause parsed into an IN_CLAUSE
-   nothing read, and the corpus has nowhere to put a graph name: a `fossil/1`
-   corpus is vertex and edge tables, not quads. `in` is an ordinary identifier. *)
+   nothing read, and a graph has nowhere to put a graph name: a GraphAr
+   graph is vertex and edge tables, not quads. `in` is an ordinary identifier. *)
 ShapeExpr           := IDENT
 
 (* `from` takes a full expression, and that is where the verbs live: `from
