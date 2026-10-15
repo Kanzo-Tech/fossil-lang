@@ -145,6 +145,34 @@ modules at the fork's `889cb741`, built the same way (`wasm-bindgen --target web
 measurement above, with the graph's own growth still +758,472 (+13.9%) over the module before the fork, and the executor's
 is 17,199 bytes smaller than before while carrying the GraphAr writer, `graphar-parquet` and `rml`. 
 
+**The editor's module is built with `wasm-release`, like the other two.** `packages/wasm`'s `build-wasm.sh` used
+`cargo build --release` and `wasm-opt -O3`; it now builds with the profile the executor and the storage module
+already used (`opt-level = "z"`, fat LTO, `strip`, `panic = "abort"`) and runs `wasm-opt -Oz`, so there is one
+size profile and not two. Nothing here catches an unwind (`grep -rn catch_unwind crates/` is empty), so `panic = "abort"`
+gives up nothing on `wasm32-unknown-unknown`. At the fork's `889cb741`, on 2026-10-15, the editor's module is
+5,013,996 bytes (1,622,233 gzipped) as shipped before, and 3,549,130 (1,245,546 gzipped) as shipped now: 29.2% fewer
+bytes and 23.2% fewer gzipped. The price is speed the module has no benchmark for: `update` plus `diagnostics` on
+`examples/hello.fossil` measured 0.3 to 0.7 ms an edit on a loaded machine for the old and the new build alike, which
+is inside the noise, so what that costs a large program is not known. `wasm-opt` is not free either: on the
+size-tuned build it saves raw bytes and adds gzipped ones (the module before `wasm-opt`: 4,164,703, 1,185,693 gzipped),
+and the executor's does the same (with the change below: 29,541,340 and 6,857,455 gzipped before `-Oz`, 24,909,829 and 7,248,203 after, and 25,807,990
+and 7,240,564 after `-Os`). The scripts keep it because the module is parsed and compiled raw, and a host that serves
+Brotli was not measured.
+
+**One thing in the editor's module is `regex`, and one function keeps it there.** Of the editor's 6,218,133 bytes before `wasm-opt`, 1,114,518
+(17.9%) are `regex`, `regex-automata`, `regex-syntax`, `aho-corasick` and the Unicode tables they carry, and the only
+call that reaches them from fossil is `shex_ast`'s `ShapeExprLabel::try_from(&str)`, which compiles `<(.*)>` and `_:(.*)`
+to strip two delimiters (`twiggy paths` from `Regex::new` ends at it through `FromStr` and `Deserialize`, and nowhere else). Written as string searches,
+with a test that holds both against the regexes they replace, the module is 5,103,615 bytes (1,412,754 gzipped) before
+`wasm-opt` and 2,761,994 (966,691 gzipped) as shipped with the profile above. That is a change in the fork, not here, and
+the rev moves to it when it is merged. The executor does not gain: DataFusion links `regex` itself, and its module is
+5,631 bytes smaller. `oxrdfxml` and `quick-xml`, which `deny.toml` ignores two advisories for, are compiled and
+linked into nothing: no symbol of either is in the editor's module.
+
+**What would reverse it:** a measurement of the editor's `update` on a program of a real size that shows the
+`opt-level = "z"` cost in a keystroke, in which case the editor takes `opt-level = "s"` in a profile of its own: with the change above, 3,448,192 bytes
+(1,098,275 gzipped) after `wasm-opt -O3`, against 2,884,232 (971,688) for `"z"` after the same.
+
 **What would reverse it:** a growth of that module that shows in first paint and that the fork
 cannot trim (a parser the fork's features cannot drop, say), or its additions not reaching an upstream
 release; the decode is then fossil's again, over a Turtle reader.

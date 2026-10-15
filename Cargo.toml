@@ -174,10 +174,12 @@ lto = "thin"
 codegen-units = 1
 strip = "debuginfo"
 
-# Size-tuned profile for the browser wasm (fossil-df-wasm). Inherits the native
-# release tuning, then trades native speed for bytes — the executor is
-# lazy-loaded over the wire, so size dominates. Built via packages/executor's
-# build-wasm.sh (`--profile wasm-release`); wasm-opt -Oz runs on top.
+# Size-tuned profile for every browser wasm (fossil-wasm, fossil-df-wasm,
+# fossil-storage-wasm). Inherits the native release tuning, then trades native
+# speed for bytes — all three are fetched over the wire, so size dominates. Built
+# via packages/*/scripts/build-wasm.sh (`--profile wasm-release`); wasm-opt -Oz
+# runs on top. `panic = "abort"` loses nothing here: wasm32-unknown-unknown has no
+# unwinding to lose, and nothing in `crates/` calls `catch_unwind`.
 [profile.wasm-release]
 inherits = "release"
 opt-level = "z"      # optimise for size over speed (vs release's 3)
