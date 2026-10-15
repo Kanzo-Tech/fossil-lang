@@ -217,10 +217,6 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            lexer's DISCRIMINANTS into a TS enum, which was wrong in nine
                            places by the time it went. This one keys on the NAMES the wasm
                            legend ships, and the guard is on the Rust side
-  profile/                 what a program's sources are, on the host's DuckDB: each read under
-                           its credential, then `fossil-profile`'s plan run on the engine
-                           (`runProfiler`, from `wasm/`). The plan is Rust, the same one
-                           `fossil-df`'s tests run on native `duckdb`
 
 docs/                      Next.js + fumadocs, and ALL of the prose: the book, the corpus
                            format, and the design argument behind a maintainers' divider.
