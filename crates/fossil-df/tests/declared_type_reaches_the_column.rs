@@ -1,4 +1,4 @@
-//! The type `fossil.json` declares for a column is the type the file holds.
+//! The type the information file declares for a property is the type the file holds.
 //!
 //! Not the CHECKER's type (`VProp.ty`) stamped beside a Parquet column the
 //! ENGINE encoded: the two disagree in two ways. `Integer <: Float` lets an
@@ -6,9 +6,9 @@
 //! call returns `sig.ret` to the checker and `Int64` to the file
 //! (`tests/aggregate_result_types.rs` is that table); and the executor
 //! introspects nothing, so an untyped column would be declared `string` over a
-//! `BIGINT`. `properties` describes the file a reader opens, so the writer
-//! spells the written column's Arrow type (`fossil_df::corpus::manifest::data_type_name`)
-//! and neither disagreement reaches the artefact.
+//! `BIGINT`. The property group describes the file a reader opens, so the
+//! writer chooses the `GraphAr` type the written column's values need
+//! (`fossil_df::layout`) and neither disagreement reaches the artefact.
 //!
 //! The checker's disagreement with the engine is real, and is in
 //! `aggregate_result_types.rs`; it is a question about the language, not about
@@ -44,7 +44,7 @@ order_id,customer,amount
 ";
 
 /// Run the fixture and give back `(declared, on_disk)` for `total`: the
-/// manifest's `data_type` string, and what `DuckDB` says the Parquet column is —
+/// information file's `data_type`, and what `DuckDB` says the Parquet column is —
 /// read with plain SQL and never through the writer's own types.
 fn declared_and_on_disk(program: &str) -> (String, String) {
     let dir = native::write_dir(&[
@@ -53,19 +53,14 @@ fn declared_and_on_disk(program: &str) -> (String, String) {
         ("spend.fossil", program),
     ]);
     let corpus = native::run_dir(dir.path(), "spend.fossil", &[]).expect("the program runs");
-    let m = corpus.manifest();
-    let spend = m
-        .vertex_tables
-        .iter()
-        .find(|v| v.name == "Spend")
-        .expect("Spend");
-    let declared = spend
+    let spend = corpus.vertex("Spend");
+    let declared = spend.property_groups[0]
         .properties
         .iter()
         .find(|p| p.name == "total")
         .expect("total is declared")
         .data_type
-        .clone();
+        .to_string();
 
     let root = corpus.materialise();
     let conn = duckdb::Connection::open_in_memory().expect("duckdb");
@@ -74,7 +69,7 @@ fn declared_and_on_disk(program: &str) -> (String, String) {
             &format!(
                 "SELECT column_type FROM (DESCRIBE SELECT * FROM \
                  read_parquet('{}')) WHERE column_name = 'total'",
-                root.path().join(&spend.path).display(),
+                root.path().join(corpus.chunk("Spend")).display(),
             ),
             [],
             |row| row.get::<_, String>(0),
@@ -85,7 +80,7 @@ fn declared_and_on_disk(program: &str) -> (String, String) {
 
 /// `group_by(Order.customer, total = math.sum(Order.amount))` over an `Int64`
 /// column: the checker believes `double`, the engine writes `Int64`, and the
-/// manifest says what was written.
+/// information file says what was written.
 #[test]
 fn a_group_bys_aggregate_declares_what_the_file_holds() {
     let (declared, on_disk) = declared_and_on_disk(
@@ -102,7 +97,10 @@ Spending : Spend from PerCustomer
     total    = PerCustomer.total
 ",
     );
-    assert_eq!(declared, "int64", "the manifest declares the column's type");
+    assert_eq!(
+        declared, "int64",
+        "the information file declares the property's type"
+    );
     assert_eq!(on_disk, "BIGINT");
 }
 
@@ -122,7 +120,10 @@ Spending : Spend from Order
     total    = math.abs(Order.amount)
 ",
     );
-    assert_eq!(declared, "int64", "the manifest declares the column's type");
+    assert_eq!(
+        declared, "int64",
+        "the information file declares the property's type"
+    );
     assert_eq!(on_disk, "BIGINT");
 }
 
@@ -143,6 +144,9 @@ Spending : Spend from Order
     total    = Order.amount
 ",
     );
-    assert_eq!(declared, "int64", "the manifest declares the column's type");
+    assert_eq!(
+        declared, "int64",
+        "the information file declares the property's type"
+    );
     assert_eq!(on_disk, "BIGINT");
 }

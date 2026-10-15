@@ -1,10 +1,11 @@
 //! **The walking skeleton**: `examples/hello.fossil` through the executor
-//! produces a readable corpus — five `Person` vertices, asserted by CONTENT.
+//! produces a readable `GraphAr` graph — five `Person` vertices, asserted by
+//! CONTENT.
 //!
 //! The program runs where a reader of the file would run it: `examples/` is
 //! served from memory and the program is compiled at its URL there, so
-//! `users.csv` and `hello.shex` resolve beside it. The corpus is read back with
-//! `DuckDB`, never through the writer's own types.
+//! `users.csv` and `hello.shex` resolve beside it. The graph is read back with
+//! `graphar-info` and `DuckDB`, never through the writer's own types.
 //!
 //! Content and not existence: any regression that silently changes the
 //! produced graph — wrong template substitution, a dropped property, an
@@ -28,27 +29,29 @@ fn walking_skeleton_writes_5_person_vertices_with_expected_content() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     let corpus = native::run_dir(&examples, "hello.fossil", &[]).expect("hello.fossil runs");
 
-    // The manifest: one vertex table, `Person` — the local name of the shape's
-    // IRI, never the mapping's own name — carrying the program's `name`.
-    let manifest = corpus.manifest();
-    assert_eq!(manifest.vertex_tables.len(), 1);
-    let person = &manifest.vertex_tables[0];
-    assert_eq!(person.name, "Person");
-    assert_eq!(person.path, "vertex/Person.parquet");
-    assert_eq!(person.record_count, 5);
-    assert_eq!(person.derived_from, ["users.csv"], "the source, as written");
-    for column in ["dense_id", "subject", "name"] {
-        assert!(
-            person.properties.iter().any(|p| p.name == column),
-            "`{column}` is declared: {:?}",
-            person.properties
-        );
-    }
+    // The graph: one vertex type, `Person` — the local name of the shape's IRI,
+    // never the mapping's own name — in one property group, `subject` first and
+    // the key, then the program's `name`.
+    let graph = corpus.graph();
+    assert_eq!(graph.vertices.len(), 1);
+    assert!(graph.edges.is_empty());
+    let person = &graph.vertices[0];
+    assert_eq!(person.r#type, "Person");
+    assert_eq!(corpus.vertex_count("Person"), 5);
+    let properties: Vec<(&str, bool)> = person.property_groups[0]
+        .properties
+        .iter()
+        .map(|p| (p.name.as_str(), p.is_primary))
+        .collect();
+    assert_eq!(properties, [("subject", true), ("name", false)]);
 
-    // The bytes.
+    // The bytes: the chunk the information file names, read back by `DuckDB`
+    // and never through the writer's own types.
     let root = corpus.materialise();
+    let chunk = corpus.chunk("Person");
+    assert_eq!(chunk, "vertex/Person/subject_name/chunk0");
     assert_eq!(
-        native::column(root.path(), &person.path, "subject"),
+        native::column(root.path(), &chunk, "subject"),
         [
             "https://example.org/user/1",
             "https://example.org/user/2",
@@ -59,8 +62,13 @@ fn walking_skeleton_writes_5_person_vertices_with_expected_content() {
         "the subjects are the five expanded user IRIs",
     );
     assert_eq!(
-        native::column(root.path(), &person.path, "name"),
+        native::column(root.path(), &chunk, "name"),
         ["Alice", "Bob", "Carol", "Dave", "Eve"],
         "the `name` column carries the five names from users.csv",
+    );
+    assert_eq!(
+        native::column(root.path(), &chunk, "_graphArVertexIndex"),
+        ["0", "1", "2", "3", "4"],
+        "the index is the row, from 0",
     );
 }

@@ -3,15 +3,16 @@ title: An argument is invalid
 description: "`api/invalid-argument` — a caller passed a value that is not what the call takes; `data` names the argument and what was expected."
 ---
 
-A call into fossil from JavaScript was handed something of the wrong shape: no engine, a negative
-limit, a credential that is not one. The message names the argument and what it should have been:
+A call into fossil from JavaScript was handed something of the wrong shape: a run over files asked
+to write to a job, a limit that is not a whole number, a credential that is not one. The message
+names the argument and what it should have been:
 
 ```ts
-await attach(url, {} as AttachOptions);
+await run(program, { files, path, into: { job: 'job-1' } });
 ```
 
 ```text
-attach() needs an engine: { engine } for a corpus at a URL, { engine, host } for a job's
+`into` is not 'memory' for a run over files, which has no host to vend a write
 ```
 
 A host sees `data: { argument, expected }` — the parameter's name as the call spells it, and a short
@@ -20,18 +21,17 @@ that refusal is the `cause`. The places that raise it:
 
 | call | `argument` | `expected` |
 | --- | --- | --- |
-| `attach` (`@fossil-lang/corpus`) | `engine` | an Engine |
-| `attach` (`@fossil-lang/corpus`) | `host` | exactly one of host and url |
 | `setConnections` (workspace and executor) | `connections` | an object of `{ name: baseUrl }` |
 | `registerInferredDescriptor` (workspace and executor) | `descriptorJson` | an InferredDescriptor as JSON |
 | `registerUndescribed` (workspace and executor) | `problemJson` | a Problem as JSON |
+| `run` (`@fossil-lang/executor`) | `into`, `limit` | `'memory'` for a run over files; a whole number |
 | `run` over `files` (`@fossil-lang/executor`) | `files`, `path` | an object of `{ [url]: Uint8Array }` keyed by URL; a URL |
 | `storageGrant`, `storageName` | `credential`, `access` | a StorageCredential; `read` or `write` |
 | `storageRead` | `targets` | an array of `{ location, connection? }` |
 
 ## Why fossil refuses it
 
-These are mistakes in the calling code, not in a program or a corpus, and the area says so: the
+These are mistakes in the calling code, not in a program or a graph, and the area says so: the
 code is `api/…` because the mistake is in how the API was called
 ([one error, from Rust to the screen](/docs/design/errors)). Nearly every check runs at the entry
 point, before anything is read, so a wrong argument never becomes a half-done read or a confusing failure

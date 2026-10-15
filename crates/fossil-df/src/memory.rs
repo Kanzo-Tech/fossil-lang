@@ -7,7 +7,7 @@
 //! [`BUDGET`](crate::memory::BUDGET) bytes, arithmetic that saturates instead
 //! of wrapping, and a refusal that names the consumer, what it asked for and
 //! what was already held. The run keeps that refusal and reports it as
-//! `run/over-budget` (`Problem::OverBudget`) before the corpus is written — the
+//! `run/over-budget` (`Problem::OverBudget`) before the graph is written — the
 //! write starts only after `execute_graph` returns.
 //!
 //! **Why a bound and not the default.** `DataFusion`'s default pool is
@@ -41,8 +41,8 @@
 //! Parquet are outside it, which is why
 //! [`BUDGET`](crate::memory::BUDGET) is half the address space and not all of
 //! it. Measured on the shop program in Node: 900,000 people finish at 2.64 GiB
-//! of linear memory, and 1,000,000 are refused at 2.70 GiB, before the corpus
-//! is written — refused, not trapped. `packages/corpus/integration/scale.test.ts`
+//! of linear memory, and 1,000,000 are refused at 2.70 GiB, before the graph
+//! is written — refused, not trapped. `packages/executor/integration/scale.test.ts`
 //! runs that scale.
 //!
 //! What would reverse it: a `DataFusion` whose sort charges a slice for what it

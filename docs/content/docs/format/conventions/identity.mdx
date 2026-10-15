@@ -1,69 +1,126 @@
 ---
 title: Identity
-description: dense_id is an address and the subject IRI is a name. One gapless 0..V−1 across the whole graph, each vertex type one contiguous range of it, stored uint32; the subject is what anything outside the corpus keys on.
+description: A vertex's index is its row within its type, gapless from 0, and the global id is the reader's arithmetic over the types. The subject IRI is what anything outside the graph keys on.
 ---
 
-A corpus carries two things that are easy to confuse and must not be. **`dense_id` is where a
-vertex is. The subject IRI is which vertex it is.**
+A graph carries two things that are easy to confuse and must not be. **A vertex's index is where it
+is in its type. The subject IRI is which vertex it is.** The id a reader draws with is a third
+thing, and it is the reader's.
 
-## `dense_id` is a gapless `0..V−1`
+## The index is per type, and a gapless run
 
-Across the whole graph — every vertex table together, not each one separately — the dense ids are
-exactly the integers from zero to one less than the total vertex count, with no gaps and no repeats.
-`V` is the sum of the vertex tables' `record_count`.
+GraphAr numbers vertices within a type. Each chunk of a vertex type carries `_graphArVertexIndex`
+as an `int64`, and an edge carries `_graphArSrcIndex` and `_graphArDstIndex` into its source and
+destination types. The specification: each vertex type "constructs a logical vertex table, with
+each vertex assigned with a global index inside this type (called internal vertex id) starting from
+0, corresponding to the row number of the vertex in the logical vertex table". The column names are
+in GraphAr's libraries and not its specification.
 
-- **One id space.** An edge's `src` and `dst` are two integers in it, and a reader needs no type to
-  know which vertex one names: the id alone is enough, and the table holding it is the one whose
-  rows cover it.
-- **A buffer is indexed by id.** A reader that loads every vertex into one array puts vertex
-  `i` at index `i`, and an edge list becomes indices into that array with no lookup between.
-- **A missing tail is caught.** The declared counts sum to `V`, and the ids cover `0..V−1`; a table
-  that stops short breaks the coverage.
+A fossil writer writes one chunk per type, with the rows numbered from 0. **A type's indices are
+exactly `0 … count − 1`**: no gap, no repeat, and `count` is the type's `vertex_count` file.
 
-Every vertex table is **sorted by `dense_id`**, and its rows are its ids in ascending order.
+- **An edge's endpoints are two integers in two types.** The type names are in the edge's
+  information file, so the integers alone are enough to find the vertices.
+- **A missing tail is caught.** The count file, the number of rows and the largest index must agree.
+- **The index is stored as a column.** The specification gives the reason: the payload format's
+  filter push-down needs it, and because the index is continuous the format can delta-encode it
+  without much overhead.
 
-Guard: `dense-ids` — and every guard named here is specified in full, with what it cannot prove, on
-[the guard index](/docs/format#the-guards).
+**A reader refuses a gap.** GraphAr does not promise the property: its paper (Li et al., PVLDB
+18(3), §3.1) says the internal ids of partition *i* start at `partition_size × i` and that
+"bubbles are allowed at the end of each partition", so the rows can be fewer than the partition
+size and the index space then has gaps, and the specification says the index is the row number in
+"continuous" chunks. A foreign writer may follow the paper. `@kanzo-tech/graphar-duckdb`'s
+`attachGraph` requires, for each vertex type, that the first property group's chunks hold
+`vertex_count` rows whose indices run from 0 to `vertex_count − 1`, and refuses a graph that does not
+as `invalid`, naming the type, before it makes a view.
 
-## Each type is one range, in manifest order
+## The global id is the reader's arithmetic
 
-The vertex tables take the ids in the order `vertex_tables` lists them: the first table holds
-`0..n₀−1`, the second `n₀..n₀+n₁−1`, and so on. Inside a table the ids follow the `subject` in
-ascending order. So a table's ids are the sum of the `record_count`s before it, and that many more —
-a reader knows which table holds an id from the counts alone, and loads a table into its slice of
-one buffer without reading another.
+A drawing wants one id across the whole graph — a GPU buffer is indexed by it, and a cross-type
+semi-join needs one id space. The files do not carry one. A reader computes it:
 
-The order carries no geometry. A corpus is the graph, not a picture of it; where a vertex is drawn
-is the reader's choice ([where x and y come from](/docs/design/position)).
+```
+first(t) = Σ count of the vertex types before t, in graphar_vertex_types.ordinal order
+id       = first(t) + _graphArVertexIndex          cast to UINTEGER
+```
+
+**This is a prefix sum, and it is injective only because every type's indices are gapless.**
+Without that, the ids of a type reach into the range of the type after it, which is why the reader's
+refusal above is a precondition of the formula and not a courtesy.
+
+**`ordinal` is a convention of fossil's writer and of `attachGraph`.** The specification gives the
+order of `vertices:` in the graph document no meaning. `graphar_vertex_types.ordinal` is the
+position in the document `attachGraph` read, counted from 1, and the writer writes `vertices:` in a
+defined order ([below](#the-order-of-the-types)). A GraphAr reader is free to ignore it, and then it
+has the tables and no global id.
+
+**The global id is not stable under change.** A prefix sum shifts: a row added to an early type
+renumbers every later type's ids. It holds for the id that is drawn and not for the files, where a
+new subject renumbers only the vertices after it in its own type. It is safe while the id is
+computed again at every attach, and wrong for anything that keeps one. Nothing keeps one: keep the
+subject.
+
+**A graph holds at most 4,294,967,295 vertices in all**, so the cast to `UINTEGER` always fits;
+a run with more is refused as [`run/too-large`](/docs/errors/run/too-large). Unsigned is the half a
+reader gets wrong in silence: a signed reading of an id past 2³¹ is negative.
+
+### What the arithmetic costs
+
+Measured on 2026-10-14: DuckDB-WASM 1.32.0 (DuckDB v1.4.3) in Node, blocking bindings, one thread,
+local files, a shared 4-core host at load average 8.4; 1,000,000 vertices and 2,000,000 distinct
+random edges sorted by `(src, dst)`, written by pyarrow with ZSTD level 3, row groups of 122,880
+rows and `DELTA_BINARY_PACKED` on the sorted key. Two runs of seven reads each, best and median:
+
+| read, as Arrow | raw `int64` index | through the arithmetic, cast to `uint32` |
+| --- | --- | --- |
+| edges `src, dst`, 2M | 165 / 232 ms; 171 / 256 ms | 152 / 183 ms; 164 / 201 ms |
+| Arrow held | 32.0 MB | 16.0 MB |
+| vertex ids, 1M | — | 24 / 26 ms; 28 / 39 ms |
+
+On disk the edge file is 10.62 MB, and the offset table for a million sources is 0.36 MB. **The
+arithmetic costs nothing this host could resolve, and the cast keeps the Arrow at 16 MB.** What
+doubles memory is a reader that does not cast.
+
+## The order of the types
+
+The vertex types are listed in `vertices:` in the order of the IRI each is known by, compared as the
+string it is, code point by code point: a ShEx label, a SHACL shape's `sh:targetClass` (the smallest
+when there are several, the shape's own IRI when there is none), a declared type's class IRI. A shape
+with no IRI, a blank node with no `sh:targetClass`, goes after every shape that has one, by the sorted
+IRIs of its predicates. A tie that survives is not broken: it is the compile error
+[`shape/ambiguous-order`](/docs/errors/shape/ambiguous-order), naming both shapes.
+
+The document's own order is never the order, and neither is `sh:order` on a node shape: SHACL defines
+it for property shapes and groups, where it orders a shape's properties and is read. The argument for
+the key, and what would reverse it, are on [the order of shapes](/docs/design/shapes#the-order-of-shapes),
+and the position it gives a type is the `ordinal` of `graphar_vertex_types`.
 
 ## The identity is the subject IRI
 
-A new subject renumbers every vertex after it — in its own table, and in every table after that one —
-so a `dense_id` stored outside the corpus names a different vertex after the next write.
+A new subject renumbers every vertex after it in its own type, and the global id of every later
+type, so an index or an id stored outside the graph names a different vertex after the next write.
 
-So the identity is the subject IRI, carried as the column the manifest's `identity` names —
-`subject` — non-null and unique within its table. A selection, a bookmark, a link from another system,
-a row in somebody else's database: all of them key on the IRI. The consequence that catches people is
-in the client: a viewer that tracks selection by *index into its buffers* has stored an address, and
-the address does not survive a rewrite.
+So the identity is the subject IRI: the property `subject`, the type's primary key
+(`is_primary: true`), first in its property group. It is non-null, an absolute IRI, and unique
+within its type **and not the subject of a vertex of any other type** — the scope of a subject is
+every vertex type together, because RDF identity is the IRI over the whole graph
+([the round trip](/docs/format/round-trip) holds a mapping to it as A1). A selection, a bookmark, a
+link from another system, a row in somebody else's database: all of them key on the IRI. The
+consequence that catches people is in the client: a viewer that tracks selection by *index into its
+buffers* has stored an address, and the address does not survive a rewrite.
 
-Finding a vertex by its IRI is a filter on that column — `WHERE subject = ?` over its table — and the
-corpus carries no second copy of the rows sorted by identity to make it cheaper.
+Finding a vertex by its IRI is a filter on that column — `WHERE subject = ?` over the type's view —
+and the graph carries no second copy of the rows sorted by identity to make it cheaper.
 
-Guard: `identity-is-the-subject`.
-
-## Thirty-two bits in the column
-
-`dense_id`, `src` and `dst` are **`uint32`**, so **one corpus holds at most 4,294,967,295
-vertices**. Unsigned is the half a reader gets wrong in silence: a signed reading of an id past 2³¹ is
-negative, and an index built from it points somewhere real and wrong.
-
-Why the column is the narrower of the two widths it could have been is [argued with the measurement
-that decides it](/docs/design/corpus#the-width-of-an-address-and-what-actually-runs-out-first).
+Neither the index nor the global id is an identity; the identity is the subject. **A graph carries
+no position.** It is the graph and not a picture of it: where a vertex is drawn is the reader's
+choice ([where x and y come from](/docs/design/position)).
 
 ## At a language boundary
 
 A count, or a sum of counts, may exceed what a 32-bit integer holds, and a `Number` in JavaScript is
-exact to 2⁵³. An id is a `uint32` and fits either. **What does not fit is `>>` on a `Number`**, which
-truncates to 32 signed bits before it shifts: arithmetic on ids in JavaScript is done on unsigned
-values (`>>> 0`) or as `BigInt`, never with a signed shift.
+exact to 2⁵³. An index is an `int64` in the file, which a reader in JavaScript holds as a `bigint`,
+and an id after the cast is a `uint32` and fits a `Number`. **What does not fit is `>>` on a
+`Number`**, which truncates to 32 signed bits before it shifts: arithmetic on ids in JavaScript is
+done on unsigned values (`>>> 0`) or as `BigInt`, never with a signed shift.

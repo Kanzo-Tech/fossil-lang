@@ -3,17 +3,17 @@ title: A door for a camera
 description: "How a camera read a tiled corpus through `open` and three members — `tileMatrix`, `scan` and `edges` — where every answer was a function of a tile's address; why the zoom was picked off the tile matrix, and why the coarse zooms were cells and not a sample."
 ---
 
-> **Deferred, not reversed.** A `fossil/1` corpus is attached by `open` and read with the host's
+> **Deferred, not reversed.** A graph is attached by `attachGraph` and read with the host's
 > SQL — [one door](/docs/design/one-door); this is what the door owed a camera when the corpus was tiled. The code existed at commit `ac1801d4` (main
-> `e5b2113f`), and every path on this page is spelled against that commit. What brings it back: a
-> `fossil/1` corpus that fails the in-browser thresholds — open over 1.5 s, first paint over 3 s,
+> `e5b2113f`), and every path on this page is spelled against that commit, `@fossil-lang/corpus`, the reader it extends, among them: the package is deleted. What brings it back: a
+> graph that fails the in-browser thresholds — open over 1.5 s, first paint over 3 s,
 > or heap over 1.5 GB at a million vertices over HTTP.
 
 A consumer that wanted a picture out of a corpus used to order three concepts by hand — the
 addressing, the door and a renderer's source contract — and sew them together with SQL of its own.
 There was one door, and a camera went through it in three calls:
 
-```ts
+```text
 const corpus = await attach(url, { engine });
 const set = corpus.tileMatrix('Person');                 // every zoom, every tile, its rows and box
 const scan = corpus.scan({ type: 'Person', select });    // bound once per filter, not per camera move

@@ -216,3 +216,59 @@ pub(crate) fn register_provider_sources(
         fossil_df::register_rdf(ctx, &binding, &turtle).expect("register the RDF source");
     }
 }
+
+// ───────────────────────────────────────────────────────────────────── graph
+
+/// Where a test finds a file a run wrote, by its path under the graph's root.
+pub(crate) type Read<'a> = &'a dyn Fn(&str) -> Option<Vec<u8>>;
+
+/// `fossil.graph.yml` and the documents it names, parsed into `GraphAr`'s own
+/// model by `graphar-info` and validated — never through the writer's types.
+pub(crate) fn graph(read: Read<'_>) -> graphar_info::GraphInfo {
+    let text = |name: &str| {
+        String::from_utf8(read(name).unwrap_or_else(|| panic!("the run wrote `{name}`")))
+            .expect("an information file is UTF-8")
+    };
+    let graph = graphar_info::GraphInfo::load(&text("fossil.graph.yml"), |name| Ok(text(name)))
+        .expect("fossil.graph.yml is a GraphAr graph");
+    graph.validate().expect("the graph is valid");
+    graph
+}
+
+/// An `int64` count file, as `GraphAr` writes it.
+pub(crate) fn count(read: Read<'_>, path: &str) -> u64 {
+    let bytes = read(path).unwrap_or_else(|| panic!("the run wrote `{path}`"));
+    u64::try_from(i64::from_le_bytes(
+        bytes.as_slice().try_into().expect("a count is eight bytes"),
+    ))
+    .expect("a count is not negative")
+}
+
+/// The vertices of `ty`, from its `vertex_count` file.
+pub(crate) fn vertex_count(read: Read<'_>, graph: &graphar_info::GraphInfo, ty: &str) -> u64 {
+    let info = graph
+        .vertices
+        .iter()
+        .find(|v| v.r#type == ty)
+        .unwrap_or_else(|| panic!("the graph has no vertex type `{ty}`"));
+    count(read, &graphar_parquet::paths::vertex_count(info))
+}
+
+/// The edges of `triple`, from its `edge_count` files: none are written for a
+/// type with no source vertex.
+pub(crate) fn edge_count(read: Read<'_>, graph: &graphar_info::GraphInfo, triple: &str) -> u64 {
+    let info = graph
+        .edges
+        .iter()
+        .find(|e| e.triple() == triple)
+        .unwrap_or_else(|| panic!("the graph has no edge type `{triple}`"));
+    let sources = vertex_count(read, graph, &info.src_type);
+    (0..sources.div_ceil(info.src_chunk_size))
+        .map(|part| {
+            count(
+                read,
+                &graphar_parquet::paths::edge_count(info, &info.adj_lists[0], part),
+            )
+        })
+        .sum()
+}

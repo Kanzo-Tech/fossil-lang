@@ -63,12 +63,6 @@ use std::process::{Command, Stdio};
 // ── The lexer ──────────────────────────────────────────────────────────────
 
 /// One token of a `.bnf` data file.
-///
-/// `pub(crate)` rather than private because `corpus.bnf` is written in this same
-/// dialect and is lexed by [`lex`] rather than by a second scanner. What it does
-/// NOT share is the statement parser below, whose messages name this file: the
-/// grammar of a `col` is four clauses and stating them in `super::corpus` keeps
-/// each file's parse errors naming the file the reader has open.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Tok {
     /// An identifier, possibly dotted: `csv`, `read_csv_auto`, `str.replace`,
@@ -85,9 +79,6 @@ pub(crate) enum Tok {
 const PUNCT: &[&str] = &["->", "=", ";", ".", "(", ")", ",", ":", "+", "?"];
 
 /// Tokenise the whole file, skipping `(* … *)` commentary.
-///
-/// Shared with `corpus.bnf` — see [`Tok`]. The comment, string and dotted-word
-/// rules are the part that would drift between two scanners, so there is one.
 ///
 /// Comment detection takes precedence over string detection, which is what lets
 /// the commentary contain quotation marks (it is full of them) without the

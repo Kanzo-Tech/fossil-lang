@@ -7,8 +7,8 @@
 //! the scalar rendering has always had it. What `group_by` added is a place
 //! where the declared type is WRITTEN DOWN in the artefact —
 //! `crates/fossil-df/src/lib.rs`'s `node_property` puts the checker's
-//! `Primitive` into the manifest while `files.rs` encodes the engine's Arrow
-//! type into the Parquet — so this file measures the pair rather than arguing
+//! `Primitive` into the schema while `layout.rs` stores the engine's Arrow
+//! type as `GraphAr`'s and the Parquet writer encodes it — so this file measures the pair rather than arguing
 //! about it.
 //!
 //! Every number here is produced by the run, not transcribed: the aggregate
@@ -216,8 +216,7 @@ async fn each_aggregate_disagrees_in_its_own_way() {
 
     // A decimal widens its PRECISION and stays a decimal, so neither candidate
     // fix reaches it by declaring a scalar: `Primitive` has no decimal, and
-    // `fossil_df::corpus::manifest::data_type_name` has no `Decimal128` arm either
-    // (it would fall to `binary`).
+    // `GraphAr` has none either (the writer stores a decimal as its text).
     assert_eq!(
         at("math.sum", &DataType::Decimal128(10, 2)),
         DataType::Decimal128(20, 2),

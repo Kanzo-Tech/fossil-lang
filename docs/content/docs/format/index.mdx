@@ -1,258 +1,235 @@
 ---
-title: What a corpus is
-description: A graph on disk that outlives the process that wrote it, read by code that was never compiled against it — one fossil.json, a Parquet file per vertex type, one per relation and one per multi-valued property. The artifact is the API.
+title: What a run writes
+description: An Apache GraphAr graph and the RML-Core mapping that says what its tables mean as RDF, written together under one location with fixed names. The artifact is the API.
 ---
 
-A **fossil corpus** is a graph written to disk: a Parquet file per vertex type, a Parquet file per
-relation, one per multi-valued property, and one small JSON manifest that names them. It is read by code that was not compiled
-against the code that wrote it.
+A run answers `{ location, dropped }`. What it wrote is under `location`, and it is two things:
 
-That last clause is the whole design. A corpus is not a serialisation of somebody's object graph —
-it is the interface. **The seam between the two halves of fossil is the corpus on disk, not an
-API.** A reader needs the manifest, a Parquet reader and the conventions on these pages, and nothing
-else of fossil's.
+- **A graph**, in [Apache GraphAr](https://graphar.apache.org)'s format: YAML information files
+  that describe it, and Parquet chunks that hold it — a table per vertex type and per relation,
+  with the count and offset files GraphAr defines.
+- **Its description as RDF**: `mapping.ttl`, an RML-Core mapping that says what the tables mean —
+  which class a vertex type is, which predicate a column is, which term and datatype its values
+  are.
+
+It is read by code that was not compiled against the code that wrote it. That clause is the whole
+design: a graph on disk is not a serialisation of somebody's object graph, it is the interface.
+**The seam between the two halves of fossil is the files, not an API.** A reader needs a YAML
+parser and a Parquet reader for the tables, and a Turtle parser for their meaning, and nothing else
+of fossil's.
 
 <Callout title="Two products, one repository">
 The other half of fossil is a statically-typed language that produces a graph, taught in
-[the book](/docs/book/getting-started). Nothing here requires it: a corpus is readable by anyone with a Parquet reader, and the
-conventions below are what makes that true instead of merely possible.
+[the book](/docs/book/getting-started). Nothing here requires it. The tables are GraphAr's, and the
+conventions on these pages are what a fossil graph adds to GraphAr, each stated as fossil's own.
 </Callout>
 
-## One file is named in advance
+## Two names are fixed
 
-A reader over HTTP cannot list a directory, so nothing is discovered by listing. `fossil.json` is the
-one name known in advance, and it names every other file by its path relative to the corpus root.
+A reader over HTTP cannot list a directory, so nothing is discovered by listing. The graph is named
+`fossil`, so its graph document is `fossil.graph.yml`, and the mapping is `mapping.ttl` beside it.
+Those are the two names known in advance. The graph document names every vertex and edge
+information file, and GraphAr's own rules for paths give every count and chunk file from those.
 
 ```
-<dest>/
-  fossil.json                         the manifest, written last
-  vertex/<Type>.parquet               one per vertex type
-  edge/<Src>_<label>_<Dst>.parquet    one per relation
-  property/<Type>_<name>.parquet      one per multi-valued property
+<location>/
+  fossil.graph.yml                          the graph document, written last: the commit
+  <Type>.vertex.yml                         one per vertex type
+  <Src>_<label>_<Dst>.edge.yml              one per relation
+  vertex/<Type>/vertex_count                the type's row count, one int64
+  vertex/<Type>/<group>/chunk0              the type's rows, one chunk
+  edge/<Src>_<label>_<Dst>/ordered_by_source/
+    adj_list/part0/chunk0                   the relation's (source, destination) pairs
+    offset/chunk0                           where each source's edges begin
+    edge_count0                             the part's row count
+    vertex_count                            the source type's row count
+  mapping.ttl                               what the tables mean as RDF
 ```
 
-**`fossil.json` is written last, and its presence is the commit.** A directory holding Parquet and
-no manifest is a write that did not finish, and a reader treats it as no corpus at all. Nothing else
-marks a corpus complete, and nothing else needs to: every file the manifest names is on disk before
-the manifest is.
+No entry points at `mapping.ttl`: the graph document carries no `extra_info`, and the two files are
+written together and never move apart. The graph document carries no `prefix` either. Without one,
+the data is under the directory that holds the document, which is GraphAr's default. A written
+`prefix` is a path two readers would read differently: GraphAr's C++ library resolves a relative one
+against the process's working directory, and `@kanzo-tech/graphar-duckdb` against the document.
 
-```jsonc
-{
-  "format": "fossil/1",
-  "vertex_tables": [{
-    "name": "Person",
-    "iri": "https://example.org/#Person",
-    "path": "vertex/Person.parquet",
-    "key": "dense_id",
-    "identity": "subject",
-    "record_count": 1000000,
-    "derived_from": ["@crm/people.csv"],
-    "properties": [
-      { "name": "dense_id", "type": "uint32", "role": "address" },
-      { "name": "subject", "type": "string", "role": "identity" },
-      { "name": "birth_year", "type": "int32", "nullable": true }
-    ]
-  }],
-  "edge_tables": [{
-    "name": "Order_placedBy_Person",
-    "label": "placedBy",
-    "path": "edge/Order_placedBy_Person.parquet",
-    "source":      { "key": "src", "references": "Order" },
-    "destination": { "key": "dst", "references": "Person" },
-    "record_count": 2000000,
-    "derived_from": ["@crm/orders.csv", "@crm/people.csv"],
-    "properties": [
-      { "name": "src", "type": "uint32", "role": "endpoint" },
-      { "name": "dst", "type": "uint32", "role": "endpoint" }
-    ]
-  }],
-  "property_tables": [{
-    "name": "Person_nickname",
-    "path": "property/Person_nickname.parquet",
-    "source": { "key": "src", "references": "Person" },
-    "record_count": 1500000,
-    "derived_from": ["@crm/people.csv"],
-    "properties": [
-      { "name": "src", "type": "uint32", "role": "endpoint" },
-      { "name": "nickname", "type": "string", "iri": "https://example.org/#nickname" }
-    ]
-  }]
-}
+**`fossil.graph.yml` is written last, and its presence is the commit.** A directory holding chunks
+and no graph document is a write that did not finish, and a reader treats it as no graph at all.
+GraphAr defines no commit; this is fossil's. Every other file, `mapping.ttl` among them, is on disk
+before the graph document is.
+
+`dropped` stays in the run's answer. The graph carries no account of what a run left out.
+
+## The walking skeleton
+
+The program in `examples/hello.fossil` reads five rows of CSV and writes five `Person` vertices.
+This is the layout it has:
+
+```
+<location>/
+  fossil.graph.yml
+  Person.vertex.yml
+  vertex/Person/vertex_count               one int64, little-endian
+  vertex/Person/subject_name/chunk0        Parquet: _graphArVertexIndex, subject, name
+  mapping.ttl
 ```
 
-The vocabulary is SQL/PGQ's rather than any graph-archive format's: a **vertex table** and an **edge
-table**, each with a `key`, and an edge table's `source` and `destination` naming the key column and
-the vertex table it `references`. A table's `name` is what a reader registers it under, and it is
-unique across the corpus. An edge table's `label` is not: one label can join several pairs of types,
-so `Src_label_Dst` is the name and `label` a field beside it.
-
-**A multi-valued property is a table of its own**, a row per value: `src`, the `dense_id` of the
-vertex the value belongs to, and the value under the property's name, which carries its `iri` and
-term as a vertex column does. It is first normal form because a cell is one RDF term — R2RML maps
-one cell to one term (§10.2) and an array is no Core SQL — and because a relational source already
-spells several values as several rows. A single-valued property stays a column of its vertex table.
-`property_tables` is absent when the program declares no multi-valued or language-tagged property,
-and a writer refuses a program whose table names would collide.
-
-**A language-tagged property is a property table too, whatever its cardinality**, with a third
-column: `lang`, the value's BCP 47 tag, whose `properties` entry carries the role `language`. The
-value column's `datatype` is `rdf:langString` and `term_type` `rr:Literal`; each row is one
-`rdf:langString` literal, the value its lexical form and `lang` its tag, well-formed by RFC 5646
-§2.2.9 as RDF 1.1 Concepts §3.3 requires. It is a property table because that is where the tag has a
-fixed column name, and because one value per language is the ordinary case — SHACL's `sh:name`
-«should only have one value per language tag».
-
-| field | what it says | what a reader does with it before reading Parquet |
-| --- | --- | --- |
-| `format` | `fossil/1` | refuses any other value |
-| `name`, `path` | the table and its file | registers one relation per table |
-| `key`, `source.key`, `destination.key` | `dense_id`, `src`, `dst` | joins edges and properties to vertices without knowing column names |
-| `identity` | `subject` | keys anything held outside the corpus |
-| `record_count` | the rows in the file | sizes buffers, and checks a file it read in full |
-| `derived_from` | the sources the table's rows were derived from, PROV-O's `prov:wasDerivedFrom` | names a table's inputs without the program |
-| `properties` | every column, in order, with its type | knows the schema without opening a footer |
-| `properties[].role` | what a column the writer emits IS | tells the writer's columns from the program's without a list of names |
-| `properties[].term_type`, `.datatype` | the RDF term the shape declares for the values | states the column's RDF meaning without re-deriving it |
-| `annotations` on a vertex table, an edge table or a column | what the type, the relation or the field is called and described as: ShEx 2.1's `Annotation`, verbatim | names them in a person's language without the program |
-| `references` | the vertex table at each end | knows which relations join which types, and whose values a property holds |
-| `properties[].stats` | the column's counts over every row of the table | knows nulls, distinct values, bounds and commonest values without a scan |
-| `candidate_keys` | the columns never null and never repeated | knows a table's identifiers without counting |
-
-`type` is one of `string`, `bool`, `int8` … `int64`, `uint8` … `uint64`, `float`, `double`, `date`,
-`timestamp`, `time` and `decimal` — `corpus.bnf`'s spellings, written by
-`crates/fossil-df/src/corpus/manifest.rs, data_type_name`. The JSON Schema of the whole document is
-`crates/fossil-df/src/corpus/fossil.schema.json`. `iri`, `nullable`, `term_type`, `datatype`,
-`derived_from`, `annotations`, `stats` and `candidate_keys` are optional and absent when
-there is nothing to say.
-
-**`annotations` are the shape's and the program's.** Each is ShExJ's Annotation (ShEx 2.1 §5.9),
-`{ "predicate": <IRI>, "object": <objectValue> }`, where the object is an IRI as a bare string or a
-literal as `{ "value", "language"?, "datatype"? }` — `datatype` where ShExJ writes `type`, the same word
-a column uses for a datatype IRI:
-
-```jsonc
-"annotations": [
-  { "predicate": "http://www.w3.org/2000/01/rdf-schema#label",
-    "object": { "value": "fecha de nacimiento", "language": "es" } }
-]
+```yaml
+# fossil.graph.yml
+name: fossil
+vertices:
+  - Person.vertex.yml
+version: gar/v1
 ```
 
-A vertex table's are its type's, an edge table's its relation's, a column's its property's. A label
-has one predicate, `rdfs:label`, and a description one, `rdfs:comment`, whichever document gave it:
-SHACL's `sh:name` and `sh:description` on a property shape are written as `rdfs:label` and
-`rdfs:comment` annotations, ahead of any the same shape carries under those predicates. They state
-nothing about the data, and [the corpus as triples](/docs/format/reading/rdf) holds none of them.
-
-**`stats` and `candidate_keys` are the writer's count of what it wrote**, taken over
-every row of every table, exactly:
-
-```jsonc
-"stats": { "null_count": 31, "distinct_count": 975, "min_value": "1817-11-30", "max_value": "1997-07-12",
-           "most_common_vals": ["1898-06-13"], "most_common_freqs": [0.001976] }
+```yaml
+# Person.vertex.yml
+type: Person
+chunk_size: 5
+prefix: vertex/Person/
+property_groups:
+  - prefix: subject_name/
+    file_type: parquet
+    properties:
+      - name: subject
+        data_type: string
+        is_primary: true
+      - name: name
+        data_type: string
+        is_primary: false
+        is_nullable: false
+version: gar/v1
 ```
 
-`null_count` is the rows with no value, `distinct_count` the distinct non-null values, and
-`min_value` and `max_value` the least and greatest value — Parquet's `Statistics` names.
-`most_common_vals` are the ten commonest non-null values that occur at least twice, most frequent
-first and ties by value, and `most_common_freqs` each one's share of the table's `record_count`, nulls
-among the rows, in the same order — PostgreSQL's `pg_stats` names, for the one statistic Parquet has
-no field for. Every value
-is the text [`triples`](/docs/format/reading/rdf) gives it, the natural lexical form of the column's
-`type`; a value longer than 64 bytes is left out rather than cut, so `min_value` or
-`max_value` is then absent, and so are the `most_common_vals` and `most_common_freqs` that would hold
-it. A table's `candidate_keys` are its columns of a keyable type whose `null_count` is 0 and whose
-`distinct_count` is its `record_count` — read off the counts, not counted again. A corpus carries no
-dependency between two columns: no reference format does. They describe the corpus as written: a corpus written from a sample of its sources counts the sample.
+```turtle
+# mapping.ttl
+@prefix rml: <http://w3id.org/rml/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
-**`derived_from` names each source as the program wrote it** — `@crm/people.csv`, or a path relative
-to the program — and never the location it resolved to, so a corpus carries no storage prefix and
-repointing a connection does not change it. The list is sorted and holds each source once: a vertex
-table's is every source its mappings read, through every join; an edge table's the same over the
-mappings that write the relation; a property table's over the mappings that write the property.
+<#Person> a rml:TriplesMap ;
+  rml:logicalSource [ rml:source [ a rml:Source ] ;
+                      rml:referenceFormulation rml:SQL2008Table ; rml:iterator "Person" ] ;
+  rml:subjectMap [ rml:reference "subject" ; rml:termType rml:IRI ;
+                   rml:class <https://example.org/Person> ] ;
+  rml:predicateObjectMap [ rml:predicate <https://example.org/name> ;
+                           rml:objectMap [ rml:reference "name" ; rml:datatype xsd:string ] ] .
+```
 
-**`term_type` and `datatype` are the shape's, verbatim.** A column whose shape declares a term
-carries it as the standard IRIs: `term_type` is R2RML's `rr:IRI` or `rr:Literal`, and `datatype`
-the datatype IRI the document wrote — `xsd:gYear` stays `xsd:gYear` whatever the column's `type`.
-A column whose shape declares none carries neither, and its RDF meaning is
-[the natural literal](/docs/format/reading/rdf) of its `type`, R2RML's default.
+Read through [`attachGraph`](/docs/format/reading/without-fossil)'s view of `Person`, the five
+rows came back as `(0, https://example.org/user/1, Alice)` to `(4, https://example.org/user/5,
+Eve)`: the index, the subject and the name, on DuckDB-WASM 1.4.3.
 
-**`role` says what a column the writer emits IS**: `address` (`dense_id`), `identity` (`subject`),
-`endpoint` (`src`, `dst`) and `language` (`lang`). They are `corpus.bnf`'s roles, and the writer reads them from there.
-A column of the program's carries none, so the columns to leave out of a field listing are the ones
-with a `role`. What a reader does with a role is the reader's decision. A corpus written before the
-field existed carries no `role` anywhere; it is optional within `fossil/1`.
+## How a program becomes a graph
 
-**A corpus carries no position.** It is the graph and not a picture of it: where a vertex is drawn
-is the reader's choice, from two of the program's columns or from its own layout
-([where x and y come from](/docs/design/position)).
+| the program has | the graph has |
+| --- | --- |
+| a type written by a mapping | a **vertex type**: `<Type>.vertex.yml`, one property group holding every property of the type |
+| the type's identity, `@subject` | the property `subject`, `is_primary: true`, first in the group |
+| a single-valued property | a property of the group, with the [GraphAr type](/docs/format/conventions/datatypes) its value needs, `is_nullable` always written |
+| a multi-valued property | a property of the same group with `cardinality: set`, a list in the chunk |
+| a language-tagged property | a property of type `langString`, a struct of `value` and `lang` |
+| a relation between two types | an **edge type** `<Src>_<label>_<Dst>`, one adjacency list, `ordered_by_source`, `directed: true`, and no property group |
+| the shape's class, predicate, term and datatype | the [mapping](/docs/format/reading/rdf), and nowhere in the YAML |
+| the sources a table was derived from | nowhere: the graph names no input |
 
-## The conventions
+The vocabulary is GraphAr's: a vertex *type* and an edge *type* with a `src_type`, an `edge_type`
+and a `dst_type`. An edge type's name is `<Src>_<label>_<Dst>` because one label can join several
+pairs of types. **Every table is one chunk.** Each `chunk_size` is at least the table's row count,
+so the one file per table that a reader would expect is one chunk of GraphAr's; an edge type's
+`src_chunk_size` and `dst_chunk_size` are the `chunk_size` of the vertex types at its ends, which
+GraphAr's information model requires.
 
-Three things define a corpus beyond the manifest. Each is held by a guard below.
+**A table is read in the order of its key**: a vertex type by its index, a relation by source and
+then destination ([identity](/docs/format/conventions/identity),
+[adjacency](/docs/format/conventions/adjacency)).
 
 | | the convention | what it buys |
 | --- | --- | --- |
-| [Identity](/docs/format/conventions/identity) | `dense_id` is a gapless `0..V−1` across the whole graph, stored `uint32`, each vertex table one contiguous range of it and sorted by it; the identity is the subject IRI | one id space, so an edge's endpoints are two integers and a vertex buffer is indexed by id |
-| [Adjacency](/docs/format/conventions/adjacency) | a relation is one table of `src`, `dst`, sorted by `(src, dst)` | the CSR a graph algorithm wants, read as it lies |
-| Payload | plain Parquet, row groups of **122,880** rows, every page ZSTD, default statistics | an engine prunes row groups off the footer, and any Parquet reader opens the file |
+| [Identity](/docs/format/conventions/identity) | a vertex's index is its row, `0 … count − 1` in its type; the global id is the reader's arithmetic over the types; the identity is the subject IRI | one dense id space without storing one, and an index that does not move when a type is read |
+| [Adjacency](/docs/format/conventions/adjacency) | a relation is one `ordered_by_source` list of per-type indices, with its offset table | the CSR a graph algorithm wants, read as it lies |
+| [Data types](/docs/format/conventions/datatypes) | GraphAr's types, `time` as a string, millisecond timestamps, `set` and `langString` | a graph every GraphAr reader opens, except where a tagged value is declared |
+| [Statistics](/docs/format/conventions/statistics) | Parquet's footer statistics, and `fossil:stats` for what Parquet has no field for | an engine reads counts and bounds off the footer without a scan |
+| Payload | plain Parquet, row groups of 122,880 rows, every page ZSTD | an engine prunes row groups off the footer, and any Parquet reader opens the file |
 
 The row-group size is DuckDB's own default, fixed by the writer rather than left to the Parquet
 library, whose default puts a million-row table in one row group and leaves nothing to prune.
 
+## Whose rule it is
+
+A fossil graph is GraphAr's, and every departure and addition is named. A claim about the tables
+holds in GraphAr's words wherever GraphAr has them; the rest are fossil's, and a reader that ignores
+them still reads the tables.
+
+| | whose |
+| --- | --- |
+| Vertex, edge and property group documents, the chunks, the count and offset files | GraphAr's. The specification names the documents and what they contain; the paths of the chunk, count and offset files are conventions of GraphAr's code and not of its specification, and the specification names `<label>.vertex.yml` where C++'s writer writes `.vertex.yaml` |
+| The internal vertex id, `_graphArVertexIndex` | GraphAr's: "starting from 0, corresponding to the row number of the vertex in the logical vertex table". The column names are in GraphAr's libraries, not its specification |
+| The index being **gapless** | the specification's sentence, which GraphAr's paper does not keep; fossil's writer is gapless and its reader refuses a gap |
+| The order of `vertices:` meaning anything | fossil's, and `attachGraph`'s |
+| The global id | the reader's, and not stored |
+| The commit: the graph document written last | fossil's |
+| The names `fossil.graph.yml` and `mapping.ttl` | fossil's |
+| `langString`, the struct's shape | fossil's, under the specification's user-defined types, which GraphAr's C++ and Java readers do not parse |
+| `fossil:stats`: its key, its JSON Schema, its version | fossil's, in Parquet's `key_value_metadata` |
+| Datatypes beyond GraphAr's, such as `xsd:gYear` over an `int32` | the mapping's, and only there |
+| The seven-column `triples` relation | rudof's: its column names come from SPARQL 1.1 Results JSON, and no standard defines a triples table |
+| A logical source in the mapping that names a GraphAr graph | none: the mapping's sources are SQL names the host resolves |
+
 ## Versions
 
-`format` is the only version a corpus carries, and it is one string for the whole corpus: `fossil/1`.
-A reader refuses any other before it reads a byte of Parquet, so a JSON file that is not a corpus is
-stopped rather than misread.
+**The format carries no version string of its own.** What identifies a fossil graph is the pair
+`fossil.graph.yml` and `mapping.ttl` at a location: a graph document whose `name` is `fossil`, and
+the mapping beside it. A directory holding GraphAr's documents under another name is a GraphAr
+graph and not a fossil graph, and one holding `fossil.graph.yml` without `mapping.ttl` is a write
+that did not finish. A reader opens `fossil.graph.yml` and refuses a location that has none.
 
-**`fossil/1` is the format the reader and the writer of one release agree on.** Every reader of a
-corpus is released with the writer, and a change to the format — a field, a column, a role — ships in
-both at once, with no reader that knows two layouts. A field a reader does not know is ignored, so a
-corpus written before a field existed reads as one that has nothing to say there. When a reader
-outside that release exists, the next change that is not an addition is `fossil/2`
-([the argument](/docs/design/corpus#one-format-changed-in-place)).
+The versions inside it are other people's and one of ours:
+
+- `version: gar/v1` in every information file, which is GraphAr's, and the only one GraphAr defines.
+  A graph with a tagged multi-valued property writes `gar/v1 (langString)` in the documents that use
+  it, which is how GraphAr declares a user-defined type.
+- `version: 1` inside the value of `fossil:stats`, which a reader of that key checks and refuses
+  another ([Statistics](/docs/format/conventions/statistics)).
+- the draft of RML-Core that `mapping.ttl` is written against, which is the vocabulary's namespace
+  IRI, `http://w3id.org/rml/`, and no version.
+
+A key in a document that GraphAr does not define is refused, by `graphar-info` and by
+`attachGraph`, and not read past, so the writer writes none of its own. So is a `version` other
+than `gar/v1`.
+
+*Design question.* A change to a fossil convention that is not an addition — the order of the types,
+the rule for the global id — has no place to say so: the graph document has no key of ours, and the
+version of a fossil convention is not in any file. The first such change settles where it goes; the
+candidate is `extra_info`, keyed by a namespace IRI and never by a word of fossil's.
 
 ## Why a format and not a library
 
 A library is a fine contract when there is one consumer and one language. This has neither: the
-corpus is read from TypeScript over DuckDB-WASM, from native DuckDB, and from a notebook that knows
-nothing about any of it. A shared crate fails three ways at once. It puts a compiler *and a version*
-between writer and reader, which is the edge the two-core split removes. It gives a third party
-nothing. And it makes one reader's idea of the manifest the manifest, where a document that
-`JSON.parse` reads is everybody's.
+graph is read from TypeScript over DuckDB-WASM, from native DuckDB, from Rust, and from a notebook
+that knows nothing about any of it. A shared crate fails three ways at once. It puts a compiler
+*and a version* between writer and reader, which is the edge the two-core split removes. It gives a
+third party nothing. And it makes one reader's idea of the files the files, where a YAML document
+and a Parquet file are everybody's.
 
-The reference for the stance is **Iceberg, Delta Lake and Lance**: a manifest plus files, many
-engines reading the same table, none of them the contract. The vocabulary is **SQL/PGQ**'s, because a
-vertex table and an edge table with keys and references is what a property-graph query already
-names — [the corpus](/docs/design/corpus#the-vocabulary-is-sqlpgqs-declared-and-not-executed) argues
-it.
+The reference is **Apache GraphAr**: the
+[format specification](https://graphar.apache.org/docs/specification/format) first, and where it is
+silent, its C++ library and the files of its testing repository. It is the property-graph format
+that a Parquet reader and a YAML parser are enough for, and the one that gives each vertex type a
+table, which is what a SQL engine reads. Where fossil departs from GraphAr's libraries the page that
+states the rule says so, and the departure that matters is on
+[data types](/docs/format/conventions/datatypes#a-tagged-value-and-the-readers-that-refuse-it).
 
-The guards below exist because of a lesson GraphAr taught. Every language's CI cloned its
-shared corpus and no job wrote with one implementation and read with another; through that gap a
-fourth implementation landed having re-derived the path arithmetic differently from the other three
-*and* from the corpus on disk, green on both sides, because its tests asserted hand-written strings
-instead of resolving against the artifact.
+GraphAr is an Apache Incubator project, and its specification is shorter than its code: the paths
+of the data files, the names of the index columns and the cardinality of a property are in the
+libraries. The code that writes and reads a fossil graph is `graphar-info` and `graphar-parquet`
+(Rust), and `@kanzo-tech/graphar-duckdb` (TypeScript), each of which names where it follows C++ and
+where it follows the specification instead.
 
-## The guards
+## The pages
 
-```bash
-node packages/corpus/guards/check.mjs /path/to/corpus
-```
-
-`node` and the `duckdb` binary. No fossil crate, no npm package, no install, no build step — copy
-the `guards/` directory somewhere else and it runs, which is the position the third party this
-format exists for is in. `--explain` prints what each one proves, `packages/corpus/guards/README.md` has
-how each is proved to fire, and `packages/corpus/conformance/` holds a corpus that satisfies every
-one of them, with the recipe that reproduces it.
-
-The list is rendered from `packages/corpus/guards/guards.mjs` at build time, so it cannot name a guard
-that does not exist, omit one that does, or paraphrase what one proves. **There is deliberately no
-number in this sentence**: a count is the one part of a rendered list that stays wrong on its own.
-
-<Callout type="warn" title="The price, stated where it is paid">
-**There is no type. A guard checks what it was asked to check and nothing more.** That is the entire
-difference between this and a compiler, and it is why every entry below publishes what it *cannot*
-prove beside what it can. The second half is the one worth reading.
-</Callout>
-
-<GuardIndex />
+- [Identity](/docs/format/conventions/identity): the per-type index, the global id, the subject.
+- [Adjacency](/docs/format/conventions/adjacency): a relation as GraphAr's CSR.
+- [Data types](/docs/format/conventions/datatypes): what each value is written as, and the tagged one.
+- [Statistics](/docs/format/conventions/statistics): the counts, in the footer.
+- [Reading one without fossil](/docs/format/reading/without-fossil): `attachGraph`, and any other reader.
+- [Its RDF meaning, as a mapping](/docs/format/reading/rdf): `mapping.ttl`.
+- [What a round trip preserves](/docs/format/round-trip): the mapping's property, and what a writer refuses.

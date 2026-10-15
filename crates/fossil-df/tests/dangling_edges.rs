@@ -19,9 +19,9 @@
 //! subject identifies at most one vertex. A vertex type materialised without
 //! dedup can hold two rows with the same `subject`, and then one candidate
 //! resolves to two edges and the subtraction under-reports — saturating to zero
-//! while rows were both duplicated and dropped. That corpus already violates
-//! `identity-is-the-subject` (`packages/corpus/guards/guards.mjs`), which is the
-//! guard that catches it; nothing here does.
+//! while rows were both duplicated and dropped. That graph already violates
+//! admissibility A1 (`/docs/design/graphar`), which the writer refuses as
+//! `write/duplicate-value`; nothing here does.
 //!
 //! It also says nothing about WHICH endpoint dangled, or which subject: a count
 //! is what the writer can produce without holding the unresolved rows, and
@@ -92,8 +92,8 @@ async fn a_dangling_endpoint_is_counted_rather_than_swallowed() {
     );
 
     // What the write answers is what a caller reads, and it names the edge
-    // table the count belongs to rather than re-spelling the edge's triple.
-    let (written, _) = support::write_in_memory(&graph).await;
+    // type the count belongs to rather than re-spelling the edge's triple.
+    let (written, files) = support::write_in_memory(&graph).await;
     assert_eq!(
         written.dropped,
         vec![fossil_df::EdgeDrops {
@@ -102,8 +102,16 @@ async fn a_dangling_endpoint_is_counted_rather_than_swallowed() {
         }],
     );
     assert_eq!(
-        written.manifest.edge_tables[0].name, written.dropped[0].table,
-        "the drop is keyed by the table name the manifest declares"
+        written.info.edges[0].triple(),
+        written.dropped[0].table,
+        "the drop is keyed by the edge type the graph declares"
     );
-    assert_eq!(written.manifest.edge_tables[0].record_count, 3);
+    assert_eq!(
+        support::edge_count(
+            &|path| files.get(path).cloned(),
+            &written.info,
+            &written.dropped[0].table
+        ),
+        3
+    );
 }

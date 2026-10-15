@@ -1,18 +1,21 @@
 //! **What a run writes of `/docs/design/labels` and `/docs/design/facts`**:
-//! `docs/programs/labels` executed, and its corpus read back — the manifest as
-//! JSON, the Parquet with `DuckDB`, never through the writer's own types.
+//! `docs/programs/labels` executed, and its graph read back — the information
+//! files with `graphar-info`, the Parquet with `DuckDB`, never through the
+//! writer's own types.
+//!
+//! The annotations a shape carries are not here: `GraphAr` has no word for them,
+//! and they are the mapping's (`mapping.ttl`, which has its own tests).
 //!
 //! # What it does NOT prove
 //!
-//! - **That a reader reads them.** `@fossil-lang/corpus`'s views are held by its
-//!   own tests and its integration suite.
+//! - **That a reader reads them.** `@kanzo-tech/graphar-duckdb`'s views are held
+//!   by its own tests.
 //! - **That the counts fit the budget on a large corpus.** Nothing here is
 //!   measured; `/docs/design/facts` says what would be.
 
 use std::path::Path;
 
-use fossil_df::corpus::manifest::Annotation;
-use fossil_graph_schema::{RDF_LANG_STRING, RDFS_LABEL};
+use graphar_info::{Cardinality, DataType};
 
 #[path = "support/native.rs"]
 mod native;
@@ -23,144 +26,146 @@ fn labels() -> native::Corpus {
     native::run_dir(&dir, "labels.fossil", &[]).expect("labels.fossil runs")
 }
 
-/// A language-tagged value is a property table of three columns, the tag
-/// under `lang` with the role `language`, whatever the field's count; and the
-/// value column says `rdf:langString`.
+/// A language-tagged value is the user-defined type `langString`, a set of
+/// `(value, lang)` structs on the vertex type that owns it, whatever the field's
+/// count; and the document that uses it declares it on its version line.
 #[test]
-fn a_lang_string_is_a_property_table_with_a_language_column() {
+fn a_lang_string_is_a_set_of_structs_on_its_vertex_type() {
     let corpus = labels();
-    let manifest = corpus.manifest();
-    for (table, count) in [("Person_name", 3), ("Prize_motivation", 3)] {
-        let t = manifest
-            .property_tables
+    for (ty, property) in [("Person", "name"), ("Prize", "motivation")] {
+        let info = corpus.vertex(ty);
+        let p = info.property_groups[0]
+            .properties
             .iter()
-            .find(|t| t.name == table)
-            .unwrap_or_else(|| panic!("{table}"));
-        assert_eq!(t.record_count, count);
-        let json = serde_json::to_value(&t.properties).unwrap();
-        assert_eq!(json[2]["name"], "lang");
-        assert_eq!(json[2]["role"], "language");
-        assert_eq!(json[1]["datatype"], RDF_LANG_STRING);
+            .find(|p| p.name == property)
+            .unwrap_or_else(|| panic!("{ty}.{property}"));
+        assert_eq!(p.data_type, DataType::UserDefined("langString".to_string()));
+        assert_eq!(p.cardinality, Cardinality::Set);
+        assert_eq!(info.version.to_string(), "gar/v1 (langString)");
     }
-    let root = corpus.materialise();
     assert_eq!(
-        native::column(
-            root.path(),
-            "property/Person_name.parquet",
-            "name || '@' || lang"
-        ),
+        corpus.graph().version.to_string(),
+        "gar/v1",
+        "the graph document declares nothing it does not use"
+    );
+    assert_eq!(corpus.vertex_count("Person"), 2);
+    assert_eq!(corpus.vertex_count("Prize"), 3);
+    let root = corpus.materialise();
+    let names = native::rows(&format!(
+        "SELECT n.value || '@' || n.lang AS v FROM (SELECT unnest(name) AS n FROM read_parquet({})) ORDER BY 1",
+        native::at(root.path(), &corpus.chunk("Person")),
+    ));
+    assert_eq!(
+        names
+            .into_iter()
+            .map(|r| r[0].clone().expect("a name"))
+            .collect::<Vec<_>>(),
         [
             "Albert Einstein@en",
             "Maria Skłodowska-Curie@pl",
             "Marie Curie@en"
         ]
     );
+    let tags = native::rows(&format!(
+        "SELECT n.lang FROM (SELECT unnest(motivation) AS n FROM read_parquet({})) ORDER BY 1",
+        native::at(root.path(), &corpus.chunk("Prize")),
+    ));
     assert_eq!(
-        native::column(root.path(), "property/Prize_motivation.parquet", "lang"),
-        ["en", "en", "en"],
+        tags.into_iter().map(|r| r[0].clone()).collect::<Vec<_>>(),
+        vec![Some("en".to_string()); 3],
         "a constant tag is `rr:language`"
     );
 }
 
-/// The annotations are carried onto the type, the field and the relation,
-/// `ShEx`'s Annotation as written.
-#[test]
-fn annotations_reach_the_manifest() {
-    let manifest = labels().manifest();
-    let person = manifest
-        .vertex_tables
-        .iter()
-        .find(|v| v.name == "Person")
-        .expect("Person");
-    assert_eq!(
-        person.annotations,
-        [
-            Annotation::literal(RDFS_LABEL, "Nobel laureate", Some("en")),
-            Annotation::literal(RDFS_LABEL, "galardonado con el Nobel", Some("es")),
-        ]
-    );
-    let born = person
-        .properties
-        .iter()
-        .find(|p| p.name == "birthDate")
-        .expect("birthDate");
-    assert_eq!(born.annotations.len(), 2);
-    let awarded = &manifest.edge_tables[0];
-    assert_eq!(
-        awarded.annotations,
-        [Annotation::literal(RDFS_LABEL, "awarded", Some("en"))]
-    );
-    let text = String::from_utf8(
-        labels()
-            .files
-            .get("fossil.json")
-            .cloned()
-            .expect("fossil.json"),
-    )
-    .unwrap();
-    assert!(
-        text.contains("\"format\": \"fossil/1\""),
-        "the format is changed in place"
-    );
-}
-
-/// The writer counts every column of every table — Parquet's counts and
-/// bounds, `pg_stats`' commonest values with their share of the rows — names
-/// the candidate keys the counts make, and tests no inclusion.
+/// The writer counts every property of every vertex chunk: Parquet's own
+/// counts and bounds in the column statistics, and the distinct count and the
+/// commonest values — `pg_stats`' with their share of the rows — under
+/// `fossil:stats`. An adjacency chunk carries neither, and no inclusion or
+/// candidate key is stored.
 #[test]
 fn the_writer_counts_what_it_wrote() {
-    let manifest = labels().manifest();
-    let prize = manifest
-        .vertex_tables
-        .iter()
-        .find(|v| v.name == "Prize")
-        .expect("Prize");
-    assert_eq!(prize.candidate_keys, ["dense_id", "subject"]);
-    let category = prize
-        .properties
-        .iter()
-        .find(|p| p.name == "category")
-        .and_then(|p| p.stats.as_ref())
-        .expect("category is counted");
+    let corpus = labels();
+    let root = corpus.materialise();
+    let chunk = native::at(root.path(), &corpus.chunk("Prize"));
+
+    let footer = native::rows(&format!(
+        "SELECT decode(value) FROM parquet_kv_metadata({chunk}) WHERE key::VARCHAR = 'fossil:stats'"
+    ));
+    let stats: serde_json::Value =
+        serde_json::from_str(footer[0][0].as_deref().expect("fossil:stats")).expect("JSON");
+    assert_eq!(stats["version"], 1);
+    let columns = stats["columns"].as_object().expect("columns");
+    let mut keys: Vec<&str> = columns.keys().map(String::as_str).collect();
+    keys.sort_unstable();
     assert_eq!(
-        (category.null_count, category.distinct_count),
-        (0, 2),
+        keys,
+        ["category", "motivation", "subject"],
+        "by property name, the index column not among them"
+    );
+    let category = &columns["category"];
+    assert_eq!(
+        category["distinct_count"], 2,
         "three prizes in two categories"
     );
-    assert_eq!(category.min_value.as_deref(), Some("chemistry"));
-    assert_eq!(category.max_value.as_deref(), Some("physics"));
-    assert_eq!(category.most_common_vals, ["physics"]);
+    assert_eq!(category["most_common_vals"], serde_json::json!(["physics"]));
     assert_eq!(
-        category.most_common_freqs,
-        [2.0 / 3.0],
+        category["most_common_freqs"],
+        serde_json::json!([2.0 / 3.0]),
         "two of the three prizes"
     );
-    let motivation = &manifest
-        .property_tables
+    assert_eq!(
+        columns["subject"],
+        serde_json::json!({ "distinct_count": 3 }),
+        "no value repeats, so none is commonest"
+    );
+    assert_eq!(
+        columns["motivation"]["distinct_count"], 3,
+        "a set is counted over its elements, by lexical form"
+    );
+
+    // Nulls and bounds are the footer's own.
+    let bounds = native::rows(&format!(
+        "SELECT path_in_schema, stats_null_count::VARCHAR, stats_min_value, stats_max_value, \
+                min_is_exact::VARCHAR, max_is_exact::VARCHAR \
+         FROM parquet_metadata({chunk}) \
+         WHERE path_in_schema IN ('category') OR path_in_schema LIKE 'motivation%value' ORDER BY 1"
+    ));
+    let cell = |row: &Vec<Option<String>>, i: usize| row[i].clone().expect("a statistic");
+    let category = bounds
         .iter()
-        .find(|t| t.name == "Prize_motivation")
-        .expect("motivation")
-        .properties[1];
-    let stats = motivation.stats.as_ref().expect("counted");
+        .find(|r| r[0].as_deref() == Some("category"))
+        .expect("category");
     assert_eq!(
-        stats.min_value.as_deref(),
-        Some("for his services to Theoretical Physics")
+        (
+            cell(category, 1).as_str(),
+            cell(category, 2).as_str(),
+            cell(category, 3).as_str()
+        ),
+        ("0", "chemistry", "physics")
+    );
+    let motivation = bounds
+        .iter()
+        .find(|r| r[0].as_deref().is_some_and(|p| p.starts_with("motivation")))
+        .expect("motivation");
+    assert_eq!(
+        cell(motivation, 2),
+        "for his services to Theoretical Physics"
     );
     assert_eq!(
-        stats.max_value, None,
-        "the greatest motivation is longer than 64 bytes, and left out rather than cut"
+        cell(motivation, 5),
+        "false",
+        "the greatest motivation is longer than 64 bytes, and cut and marked inexact"
     );
-    let edge = &manifest.edge_tables[0];
-    assert!(edge.properties.iter().all(|p| p.stats.is_some()));
-    let text = String::from_utf8(labels().files["fossil.json"].clone()).unwrap();
-    assert!(
-        !text.contains("inclusions"),
-        "a corpus carries no inclusions: {text}"
-    );
+
+    let edge = native::at(root.path(), &corpus.adjacency("Person_awarded_Prize"));
+    let none = native::rows(&format!(
+        "SELECT count(*)::VARCHAR FROM parquet_kv_metadata({edge}) WHERE key::VARCHAR = 'fossil:stats'"
+    ));
+    assert_eq!(none[0][0].as_deref(), Some("0"));
 }
 
 /// `write/invalid-language-tag` — a tag read from the data that is not BCP 47
-/// refuses the run: no corpus with an `rdf:langString` that has no valid tag.
+/// refuses the run: no graph with an `rdf:langString` that has no valid tag.
 #[test]
 fn a_per_row_tag_that_is_not_bcp_47_refuses_the_run() {
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/programs/labels");

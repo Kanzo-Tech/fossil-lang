@@ -34,31 +34,32 @@ showing it is outside the contract.
 
 ## The door, and where the secrets go
 
-The second surface is querying a corpus that has already been written.
+The second surface is querying a graph that has already been written.
 
 The generic answer would be *give the agent SQL*. It works, and it costs the agent the whole of the
 layout: which files exist, how identifiers are laid out, how an edge names its endpoints. An agent
-writing SQL against a corpus has to learn a physical schema before it can ask a question, and every
+writing SQL against a graph has to learn a physical schema before it can ask a question, and every
 answer it gets is only as correct as its model of that schema.
 
-So what fossil publishes is the part an agent would otherwise reconstruct. `fossil.json` names every
-vertex and edge table, its columns with their types, its row count and, for an edge table, which
-vertex table each endpoint references — and `@fossil-lang/corpus` attaches it beside the tables as
-relations — `fossil_tables`, `fossil_columns`, the annotations and the writer's counts
-([the corpus's own facts](/docs/design/facts)) — so an agent reads the structure with the same
-SQL it reads the data with, before it has to guess a column name.
+So what fossil publishes is the part an agent would otherwise reconstruct. The information files name
+every vertex and edge type, its properties with their types, its row count and, for an edge type, the
+vertex type at each end — and `attachGraph` attaches them beside the tables as relations —
+`graphar_vertex_types`, `graphar_edge_types`, `graphar_properties` and the rest, with the writer's
+counts in the footers ([the graph's own facts](/docs/design/facts)), and the mapping says what the
+tables mean as RDF — so an agent reads the structure with the same SQL it reads the data with, before
+it has to guess a column name.
 
 ### One binding, and no protocol server
 
-What an agent reaches is the one binding — `@fossil-lang/corpus`, in process, over the host's
+What an agent reaches is the one binding — `attachGraph`, in process, over the host's
 engine — and a host that wants to hand it to an agent over a protocol wraps that binding rather than
 growing a second one beside it. A protocol server of fossil's own is
 [discarded](/docs/design/discarded#the-tooling), with what would bring it back.
 
 ### Credentials ride the call, never argv, never the environment
 
-One invariant travels with every surface that reads a corpus, and it is not negotiable. A job's
-corpus is opened with the credential the host vends for it, through `Host` in
+One invariant travels with every surface that reads a graph, and it is not negotiable. A job's
+graph is opened with the credential the host vends for it, through `Host` in
 `packages/types/src/host.ts, Host`, and nothing names a secret in a file path, an argument vector or
 an environment variable.
 

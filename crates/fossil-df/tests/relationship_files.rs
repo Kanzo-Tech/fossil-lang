@@ -71,25 +71,6 @@ fn dir(program: &str) -> tempfile::TempDir {
     ])
 }
 
-/// `(src subject, dst subject)` of every row of one edge table, sorted.
-fn pairs(root: &std::path::Path, edge: &str, src: &str, dst: &str) -> Vec<(String, String)> {
-    let conn = duckdb::Connection::open_in_memory().expect("duckdb");
-    let p = |rel: String| root.join(rel).display().to_string().replace('\'', "''");
-    let sql = format!(
-        "SELECT s.subject, d.subject FROM read_parquet('{e}') e \
-         JOIN read_parquet('{s}') s ON s.dense_id = e.src \
-         JOIN read_parquet('{d}') d ON d.dense_id = e.dst ORDER BY 1, 2",
-        e = p(format!("edge/{edge}.parquet")),
-        s = p(format!("vertex/{src}.parquet")),
-        d = p(format!("vertex/{dst}.parquet")),
-    );
-    let mut stmt = conn.prepare(&sql).expect("prepare");
-    stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-        .expect("query")
-        .collect::<Result<_, _>>()
-        .expect("rows")
-}
-
 #[test]
 fn a_quoted_column_reads_a_header_an_identifier_cannot_spell() {
     let dir = dir(PROGRAM);
@@ -104,7 +85,7 @@ fn a_quoted_column_reads_a_header_an_identifier_cannot_spell() {
     let root = corpus.materialise();
     let person = |id: u8| format!("https://example.org/person/{id}");
     assert_eq!(
-        pairs(root.path(), "Person_knows_Person", "Person", "Person"),
+        corpus.pairs(root.path(), "Person_knows_Person"),
         [
             (person(1), person(2)),
             (person(1), person(3)),
@@ -118,10 +99,9 @@ fn a_quoted_column_reads_a_header_an_identifier_cannot_spell() {
 fn two_mappings_of_one_type_write_each_shared_edge_once_with_both_contributions() {
     let dir = dir(PROGRAM);
     let corpus = native::run_dir(dir.path(), "snb.fossil", &[]).expect("the program runs");
-    let m = corpus.manifest();
 
-    // `People` and `Friends` both write `livesIn`. One table, listed once.
-    let names: Vec<&str> = m.edge_tables.iter().map(|e| e.name.as_str()).collect();
+    // `People` and `Friends` both write `livesIn`. One edge type, listed once.
+    let names = corpus.edge_types();
     assert_eq!(names, ["Person_livesIn_City", "Person_knows_Person"]);
     let reported: Vec<&str> = corpus
         .report
@@ -129,21 +109,16 @@ fn two_mappings_of_one_type_write_each_shared_edge_once_with_both_contributions(
         .iter()
         .map(|d| d.table.as_str())
         .collect();
-    assert_eq!(reported, names, "the run report names each table once");
+    assert_eq!(reported, names, "the run report names each edge type once");
 
     // `People` alone has Alan (4), who knows nobody and is in no `Friends` row:
     // the table is the union of both mappings, not whichever ran last or first.
-    let lives_in = m
-        .edge_tables
-        .iter()
-        .find(|e| e.name == "Person_livesIn_City")
-        .expect("livesIn");
-    assert_eq!(lives_in.record_count, 4);
+    assert_eq!(corpus.edge_count("Person_livesIn_City"), 4);
     let root = corpus.materialise();
     let city = |id: &str| format!("https://example.org/city/{id}");
     let person = |id: u8| format!("https://example.org/person/{id}");
     assert_eq!(
-        pairs(root.path(), "Person_livesIn_City", "Person", "City"),
+        corpus.pairs(root.path(), "Person_livesIn_City"),
         [
             (person(1), city("c1")),
             (person(2), city("c2")),
@@ -160,19 +135,19 @@ fn an_optional_property_one_mapping_writes_survives_the_merge_with_one_that_does
     // wrote — never the other mapping's null.
     let dir = dir(PROGRAM);
     let corpus = native::run_dir(dir.path(), "snb.fossil", &[]).expect("the program runs");
-    let person = corpus
-        .manifest()
-        .vertex_tables
-        .into_iter()
-        .find(|v| v.name == "Person")
-        .expect("Person");
-    assert_eq!(person.record_count, 4);
-    assert!(person.properties.iter().any(|p| p.name == "email"));
+    let person = corpus.vertex("Person");
+    assert_eq!(corpus.vertex_count("Person"), 4);
+    assert!(
+        person.property_groups[0]
+            .properties
+            .iter()
+            .any(|p| p.name == "email")
+    );
     let root = corpus.materialise();
     let conn = duckdb::Connection::open_in_memory().expect("duckdb");
     let path = root
         .path()
-        .join("vertex/Person.parquet")
+        .join(corpus.chunk("Person"))
         .display()
         .to_string();
     let mut stmt = conn
@@ -223,9 +198,8 @@ Elsewhere : Person from PersonRow.where(PersonRow.city != "c1")
 "#;
     let dir = dir(program);
     let corpus = native::run_dir(dir.path(), "snb.fossil", &[]).expect("the program runs");
-    let m = corpus.manifest();
-    assert_eq!(m.edge_tables.len(), 1, "{:?}", m.edge_tables);
-    assert_eq!(m.edge_tables[0].record_count, 4);
+    assert_eq!(corpus.edge_types().len(), 1, "{:?}", corpus.edge_types());
+    assert_eq!(corpus.edge_count(&corpus.edge_types()[0]), 4);
     assert_eq!(corpus.report.dropped.len(), 1);
 }
 
@@ -312,7 +286,7 @@ Knowings : Knowing from KnowsRow
     let knowing = |a: u8, b: u8| format!("https://example.org/knowing/{a}-{b}");
     let person = |id: u8| format!("https://example.org/person/{id}");
     assert_eq!(
-        pairs(root.path(), "Knowing_known_Person", "Knowing", "Person"),
+        corpus.pairs(root.path(), "Knowing_known_Person"),
         [
             (knowing(1, 2), person(2)),
             (knowing(1, 3), person(3)),

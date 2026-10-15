@@ -1,0 +1,106 @@
+---
+title: What a round trip preserves
+description: The mapping's property, stated so it can be wrong — on which graphs the RDF image keeps the tables' information, what it does not keep, and that the writer refuses a graph whose image would lose it.
+---
+
+"An RDF reader opens the tables' meaning without fossil" is only worth saying if it can be wrong, so
+this page states what the mapping preserves, on which graphs, and what it does not.
+
+**It is derived here from the definition of information preservation in Sequeda, Arenas and
+Miranker (WWW 2012, Def. 2: a mapping is information preserving if a computable inverse recovers the
+database from its image), together with Hartig's conditions on property graphs (Defs. 7–10,
+Remark 3) and R2RML's rules for generating terms and for the output dataset (§11). It is not a
+statement quoted from a paper, and no paper proves it for a GraphAr graph.** Sequeda et al. prove it
+for the W3C Direct Mapping; the formal literature on property graphs and RDF has results for RDF to
+property graph (Angles, Thakkar and Tomaszuk 2020) and for property graph to RDF-star (Hartig 2014),
+and none for this direction and this mapping.
+
+## Setting
+
+A graph 𝔾 is the vertex tables (one per type, with the key `subject`), the edge tables (one per
+relation) and a mapping M, an RML-Core document whose logical sources are SQL queries over those
+tables. ⟦M⟧(𝔾) is M's output dataset restricted to the default graph, and it is a **set** of triples.
+
+𝔾 ≈ 𝔾′ when, after renumbering the vertices of each type, both have for every type and column the
+same set of `(subject, value)` pairs and for every relation the same set of
+`(source subject, target subject)` pairs, the values compared **as RDF terms** — lexical form,
+datatype IRI and lower-cased language tag.
+
+## Statement R
+
+- **R1, layout independence.** If M defines no blank node and no term map reads
+  `_graphArVertexIndex`, `_graphArSrcIndex`, `_graphArDstIndex` or a row position, then ⟦M⟧(𝔾) =
+  ⟦M⟧(𝔾′) whenever 𝔾 and 𝔾′ differ only in vertex-row order (with endpoints renumbered), chunking,
+  file layout, integer width and statistics. The equality is of sets, not of graphs up to
+  isomorphism, because there is no blank node.
+- **R2, information preservation.** For every **admissible** 𝔾 there is a computable N from RDF
+  graphs to graphs with N(⟦M⟧(𝔾)) ≈ 𝔾. fossil ships no N and nothing needs one: R2 is what makes
+  the claim testable, by computing ⟦M⟧ twice from permuted inputs (R1) and from a graph and its
+  recovery.
+- **R3, enforcement.** The writer **refuses** a graph that is not admissible, as `write/*`, and does
+  not write one whose RDF image loses it.
+- **R4, monotonicity.** If every logical source of M is monotone — selection, projection, join,
+  unnest; no aggregate, negation or limit — then adding rows to the tables only adds triples.
+
+## Admissible
+
+- **A1.** Every `subject` is non-NULL, an absolute IRI, unique within its type **and not the
+  subject of a vertex of any other type**: the key's scope is every vertex type together, because
+  RDF identity is the IRI over the whole graph. (PG-Keys' `EXCLUSIVE` and `MANDATORY`, with that
+  scope.)
+- **A2.** Distinct types have distinct class IRIs, and within a class distinct columns have
+  distinct predicate IRIs; no relation's predicate is a column predicate of its source class.
+- **A3.** Each column's value-to-literal map (R2RML's natural mapping or a declared datatype) is
+  injective on the column's values and raises no data error.
+- **A4.** A multi-valued column is a `set`: its elements are pairwise distinct as RDF terms, none is
+  NULL, and a tag is well-formed and lower-case.
+- **A5.** The pairs `(src, dst)` of a relation are distinct, and an edge table carries no column the
+  mapping cannot express: a core mapping has no construct for a statement about a triple.
+- **A6.** M defines no blank node.
+- **A7.** No term raises a data error.
+
+**The writer refuses what it can check.** A1 is [`write/invalid-subject`](/docs/errors/write/invalid-subject)
+for a NULL or relative subject and [`write/duplicate-value`](/docs/errors/write/duplicate-value) for a
+subject repeated within a type or across two; A2 is [`write/ambiguous-iri`](/docs/errors/write/ambiguous-iri),
+raised from the mapping before any chunk is written; A5 is `write/duplicate-value` for a parallel
+edge; A4 is `write/duplicate-value` for a repeated element or a
+NULL one and [`write/invalid-language-tag`](/docs/errors/write/invalid-language-tag) for a tag that
+is malformed, empty or NULL; a value GraphAr's types cannot hold — a `uint64` above `i64::MAX`, a
+timestamp finer than a millisecond — is [`write/unrepresentable`](/docs/errors/write/unrepresentable)
+([data types](/docs/format/conventions/datatypes)). A graph is refused, and no graph document is
+written, so there is no graph to open.
+
+A3 and A6 hold by construction: a value's literal is the column's natural one or the shape's declared
+one, and the mapping builds no blank node. A7 is checked for the subjects, which A1 holds to absolute
+IRIs; the values of a column the shape declares an IRI are not validated as IRIs.
+*Design question.* A graph whose IRI-valued column holds a string that is not an IRI is written, and
+its image makes a term a reader will refuse; refusing it at write, as A1 does for subjects, is the
+change the first such graph asks for.
+
+
+## What is preserved
+
+The set of vertices as IRIs, their classes, the set of `(predicate, term)` pairs of each vertex,
+and the set of `(source, target)` pairs of each relation.
+
+## What is not preserved
+
+Stated, and not hidden:
+
+1. Row order, the per-type index, edge order, the offset structure, chunking and file layout.
+2. The physical type: `int32` and `int64` both read back as `xsd:integer`, and `float` and `double`
+   as `xsd:double` (R2RML §10.2); a timestamp's precision beyond its lexical form.
+3. The order and multiplicity of a multi-valued column (it is a set), and the difference between a
+   NULL set, an empty one and an absent column.
+4. The case of a language tag, and RDF 1.2's base direction.
+5. Parallel edges and statements about edges.
+6. `is_nullable`, `is_primary`, the key's scope and every other constraint. RDF is open-world and the
+   image does not entail them: Sequeda et al. prove for the Direct Mapping that no monotone mapping
+   is semantics preserving once foreign keys are considered. Constraints survive only if shapes are
+   emitted and validated, and the graph carries none.
+7. Statistics, `fossil:stats`, annotations and lineage.
+8. **Query preservation** (Def. 3 there) is not claimed: nothing states a translation from SPARQL
+   to SQL.
+
+A test that finds a graph the writer accepts whose image has no recovery narrows this page: either
+the writer refuses it, as a new condition, or the claim shrinks.

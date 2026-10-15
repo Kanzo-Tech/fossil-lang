@@ -22,7 +22,7 @@ disjunction, because only `and` splits a condition.
 
 These are ordinary relational conditions, and an algebra would allow them. fossil refuses them for
 the engine's reason: a theta join or a disjunction leaves no equality to plan a hash join against,
-so what would execute is a nested loop over the product of the two relations — and a corpus is the
+so what would execute is a nested loop over the product of the two relations — and a real table is the
 size at which that is not a slow program but a hung one.
 
 The rule is older than the check. The engine's planner has refused such a condition since joins

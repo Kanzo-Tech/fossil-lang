@@ -55,30 +55,22 @@ fn parse_year_fills_a_gyear_slot_and_writes_the_year_under_its_datatype() {
         ("award.fossil", PROGRAM),
     ]);
     let corpus = native::run_dir(dir.path(), "award.fossil", &[]).expect("the program runs");
-    let award = corpus
-        .manifest()
-        .vertex_tables
-        .iter()
-        .find(|v| v.name == "Award")
-        .expect("Award")
-        .clone();
-    let year = award
+    let award = corpus.vertex("Award");
+    let year = award.property_groups[0]
         .properties
         .iter()
         .find(|p| p.name == "year")
         .expect("year");
-    assert_eq!(year.data_type, "int32");
-    assert_eq!(
-        year.datatype.as_deref(),
-        Some("http://www.w3.org/2001/XMLSchema#gYear")
-    );
+    // The year is an `int32` and nothing more in the YAML: `xsd:gYear` is the
+    // mapping's (`rml:datatype`), which has its own tests.
+    assert_eq!(year.data_type.to_string(), "int32");
 
     let root = corpus.materialise();
     let conn = duckdb::Connection::open_in_memory().expect("duckdb");
     let years: Vec<i32> = conn
         .prepare(&format!(
             "SELECT year FROM read_parquet('{}') ORDER BY 1",
-            root.path().join(&award.path).display()
+            root.path().join(corpus.chunk("Award")).display()
         ))
         .expect("prepare")
         .query_map([], |row| row.get(0))

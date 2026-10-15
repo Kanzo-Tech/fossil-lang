@@ -3,12 +3,12 @@ title: The backend
 description: fossil is the backend and kanzo-ui is the view, with one path between them — a corpus read the way Apache Iceberg reads a table and addressed the way an OGC tile matrix set addresses a tile, with the cell pyramid as the zoom levels, the level files retired, and the reader split into modules that each follow one of the two.
 ---
 
-> **Deferred, not reversed.** A `fossil/1` corpus has no tile contract: `open` attaches it and
+> **Deferred, not reversed.** A graph has no tile contract: `attachGraph` attaches it and
 > every read is the host's SQL. The tiles were ordered by the writer's placement, which is gone too
 > ([where x and y come from](/docs/design/position)), so a tile contract that comes back brings an
 > order of its own. The code existed at commit `ac1801d4` (main
-> `e5b2113f`), and every path on this page is spelled against that commit. What brings it back: a
-> `fossil/1` corpus that fails the in-browser thresholds — open over 1.5 s, first paint over 3 s,
+> `e5b2113f`), and every path on this page is spelled against that commit, `@fossil-lang/corpus`, the reader it extends, among them: the package is deleted. What brings it back: a
+> graph that fails the in-browser thresholds — open over 1.5 s, first paint over 3 s,
 > or heap over 1.5 GB at a million vertices over HTTP.
 
 **fossil is the backend. The view is `@kanzo-tech/graph` and the rest of kanzo-ui, and there is one
@@ -53,7 +53,7 @@ This is everything that crosses. `Engine` and `Host` are `@fossil-lang/types`' o
 (`ac1801d4:packages/types/src/engine.ts, Engine`, `ac1801d4:packages/types/src/host.ts, Host`), and `SchemaResult` and
 the SQL pair are the verbs' generated shapes, unchanged.
 
-```ts
+```text
 declare function attach(url: string, options: AttachOptions & { engine: Engine; sql: 'allowed' }): Promise<SqlCorpus>;
 declare function attach(url: string, options: AttachOptions & { engine: Engine }): Promise<Corpus>;
 declare function attach(job: string, options: AttachOptions & { engine: Engine; host: Host; sql: 'allowed' }): Promise<SqlCorpus>;
@@ -642,7 +642,7 @@ the same four names.
 keeps one box per tile.** Ruled on 2026-09-30, on the investigation kanzo-ui's graph view asked for.
 The curve is Wikipedia's `xy2d` at `n = 2^16` over the same binary32 quantisation the Z-curve used,
 published with vectors on [addressing](/docs/design/later/addressing#the-arithmetic) and in
-`corpus.bnf`'s gloss, and written by `ac1801d4:crates/fossil-layout/src/layout/hilbert.rs, hilbert2`. Nothing
+`ac1801d4:corpus.bnf`'s gloss, and written by `ac1801d4:crates/fossil-layout/src/layout/hilbert.rs, hilbert2`. Nothing
 reads both orders: every corpus is written again, and one written before the ruling fails
 `hilbert-order`.
 
@@ -755,7 +755,7 @@ taking a block's corner from its alignment because Hilbert enters a block at whi
 orientation puts first (reading the first cell put 24,570 ids inside foreign groups, and
 `ac1801d4:crates/fossil-layout/tests/cells.rs, a_cluster_is_one_run_of_dense_id` caught it). The format: the
 rule on [addressing](/docs/design/later/addressing#the-order-that-makes-an-interval-mean-something),
-`corpus.bnf`'s gloss, and `vectors.json`'s `hilbert2` table where `morton2` was — written by
+`ac1801d4:corpus.bnf`'s gloss, and `vectors.json`'s `hilbert2` table where `morton2` was — written by
 `ac1801d4:crates/fossil-layout/examples/hilbert_vectors.rs` from the writer's own curve and held against it by
 a Rust test, because a curve is exactly the arithmetic Iceberg publishes vectors for and PMTiles left
 every port to re-derive ([prior art](/docs/design/prior-art#the-corpus-and-how-a-format-ships)).

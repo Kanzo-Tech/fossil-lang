@@ -5,7 +5,7 @@ description: A budget bounds the operators inside the pool; a stream bounds ever
 
 > **Deferred, not reversed.** The write path is the wasm executor, and a larger-than-RAM write is
 > not a case it serves. The code existed at commit `ac1801d4` (main `e5b2113f`), and every path on
-> this page is spelled against that commit. What brings it back: a `fossil/1` corpus that fails
+> this page is spelled against that commit. What brings it back: a graph that fails
 > the in-browser thresholds — open over 1.5 s, first paint over 3 s, or heap over 1.5 GB at a
 > million vertices over HTTP. A write that has to spill past RAM brings back a native host with
 > it. What the wasm writer does in its place is refuse: a 2 GiB pool and no disk, and a run over it
@@ -396,7 +396,7 @@ principle, and it is refused for now on three grounds, in the order that decides
 **What brings sequencing back is a value dropped, not an instrument added.** The day the caller
 builds its report before the pass rather than after, what crosses the seam stops being a resident
 set to sample and becomes a number to be handed over — `ac1801d4:crates/fossil-df/src/lib.rs, arrow_gib` was that
-number until `fossil/1` deleted it — and `declared − carried` is arithmetic. Until then the honest sentence is the one the pass
+number until the change of format deleted it — and `declared − carried` is arithmetic. Until then the honest sentence is the one the pass
 now prints when it refuses: **the number is this stage's.**
 
 

@@ -46,7 +46,7 @@ export const dynamic = "force-static";
 const ORIGIN = process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/+$/, "");
 
 const SUMMARY =
-  "A mapping language and a corpus compiler. A fossil program says which columns of which sources become which properties of which shapes; the compiler checks that program against the shape document it produces and the data it reads, then writes a corpus a graph tool can open.";
+  "A mapping language and a graph compiler. A fossil program says which columns of which sources become which properties of which shapes; the compiler checks that program against the shape document it produces and the data it reads, then writes an Apache GraphAr graph, with the mapping that says what it means as RDF, that a graph tool can open.";
 
 /**
  * The one thing a machine has to know before it reads any page here, and the one thing it cannot
@@ -159,7 +159,7 @@ export function GET() {
     // never where the thing it describes lives.
     "## Where the things the pages describe live",
     "",
-    "- `crates/` — the Rust workspace: the compiler stage by stage, the executor that writes a corpus (`fossil-df`, run through its wasm build `fossil-df-wasm`) and the editor's functions (`fossil-ide`, behind `fossil-wasm`). A page that claims something is true today cites a file in here.",
+    "- `crates/` — the Rust workspace: the compiler stage by stage, the executor that writes a graph (`fossil-df`, run through its wasm build `fossil-df-wasm`) and the editor's functions (`fossil-ide`, behind `fossil-wasm`). A page that claims something is true today cites a file in here.",
     "- `docs/programs/` — every program this site shows, one directory per program with its data beside it. These are the files `<Program>` transcludes; they are not extracted from the prose.",
     "- `grammar.bnf` — the language, normative, and transcluded whole into `/docs/book/grammar`. The parser implements it; it does not describe the parser.",
     "- `/docs/design/` — the arguments, and the only place they live. `direction.arguedIn` names one of these pages; `/docs/design/discarded` carries every rejected alternative with the observation that would bring it back.",

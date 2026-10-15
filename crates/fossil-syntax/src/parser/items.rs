@@ -710,8 +710,8 @@ fn parse_mapping_header(p: &mut Parser) {
 // `Users : Person from Adults`, never `Users : ex:Person from Adults`.
 //
 // One shape, and the node is where it lives: `&` is not a token, so there is no
-// intersection to reduce. There is no `in g` either: a `fossil/1` corpus is
-// vertex and edge tables, not quads.
+// intersection to reduce. There is no `in g` either: a fossil graph is
+// vertex and edge types, not quads.
 
 fn parse_shape_expr(p: &mut Parser) {
     p.skip_trivia();

@@ -789,7 +789,7 @@ catalogue! {
     // ── run ─────────────────────────────────────────────────────────────
 
     /// An operator asked for more memory than the run's budget had left.
-    /// Raised while the graph executes, before any byte of the corpus is
+    /// Raised while the graph executes, before any byte of the graph is
     /// written. Sizes are bytes.
     "run/over-budget", "The run needs more memory than its budget",
     #[error(
@@ -805,7 +805,7 @@ catalogue! {
     #[error("the program does not compile; nothing was run")]
     DoesNotCompile {},
 
-    // ── source, engine, write, layout, storage, corpus, api ─────────────
+    // ── source, engine, write, layout, storage, api ─────────────
 
     /// A CSV, JSON or Parquet source names no file in its store.
     "source/not-found", "A source names no file",
@@ -827,13 +827,13 @@ catalogue! {
     #[error("the query engine failed")]
     EngineFailed {},
 
-    /// Writing one file of the corpus failed; the store's error is the cause.
-    "write/failed", "A corpus file could not be written",
+    /// Writing one file of the graph failed; the store's error is the cause.
+    "write/failed", "A graph file could not be written",
     #[error("`{path}` could not be written")]
     WriteFailed { path: String },
 
     /// A row's language tag, read from the data, that is not well-formed BCP
-    /// 47. The run writes no corpus rather than an `rdf:langString` with no
+    /// 47. The run writes no graph rather than an `rdf:langString` with no
     /// valid tag.
     "write/invalid-language-tag", "A value's language tag is not well-formed",
     #[error("`{property}` has a value tagged `{tag}`, which is not a well-formed BCP 47 language tag")]
@@ -843,6 +843,36 @@ catalogue! {
     "write/language-not-allowed", "A value in a language the shape does not admit",
     #[error("`{property}` admits {}, and a value is tagged `{tag}`", code_list(.languages))]
     WriteLanguageNotAllowed { property: String, tag: String, languages: Vec<String> },
+
+    /// A value that must be unique in the graph, and is written twice: a subject
+    /// repeated within a type or across two types (admissibility A1), an
+    /// element repeated in a multi-valued property, which `GraphAr` holds as a set
+    /// (A4), or a relation's `(source, destination)` pair repeated (A5).
+    "write/duplicate-value", "A value appears twice where it must be unique",
+    #[error("`{at}` holds `{value}` twice")]
+    WriteDuplicateValue { at: String, value: String },
+
+    /// A vertex whose `subject` is null or not an absolute IRI (admissibility
+    /// A1): the identity of a vertex is its IRI, and a graph without one for a
+    /// vertex has no vertex to name.
+    "write/invalid-subject", "A vertex has no absolute IRI as its subject",
+    #[error("a `{vertex_type}` vertex has the subject {subject}, which is not an absolute IRI")]
+    WriteInvalidSubject { vertex_type: String, subject: String },
+
+    /// One IRI that names two things the mapping needs it to name one of
+    /// (admissibility A2): two vertex types with one class, two columns of one
+    /// type with one predicate, or a relation whose predicate is a column
+    /// predicate of its source type. The RDF image would make the two one.
+    "write/ambiguous-iri", "One IRI names two things",
+    #[error("`{iri}` names both `{first}` and `{second}`")]
+    WriteAmbiguousIri { iri: String, first: String, second: String },
+
+    /// A value `GraphAr`'s property types cannot hold: an unsigned 64-bit
+    /// integer above `i64::MAX`, a timestamp finer than a millisecond, or a
+    /// column of a type `GraphAr` has no word for.
+    "write/unrepresentable", "A value GraphAr cannot hold",
+    #[error("`{property}` holds `{value}`, of type {datatype}, which GraphAr cannot hold")]
+    WriteUnrepresentable { property: String, datatype: String, value: String },
 
     /// More vertices than a `u32` `dense_id` can number.
     "run/too-large", "The graph has too many vertices",
@@ -913,37 +943,6 @@ catalogue! {
         #[schemars(with = "u64")]
         after: Option<u64>,
     },
-
-    /// A corpus whose manifest could not be read; the reader's error is the cause.
-    "corpus/unreadable", "The corpus could not be read",
-    #[error("{path} could not be read")]
-    CorpusUnreadable { path: String },
-
-    /// A manifest that is not JSON.
-    "corpus/not-json", "The manifest is not JSON",
-    #[error("{path} is not JSON")]
-    NotJson { path: String },
-
-    /// A manifest declaring a format this reader does not read.
-    "corpus/unsupported-format", "The corpus format is not supported",
-    #[error("{path} declares format {format}, and this reader reads fossil/1 only")]
-    UnsupportedFormat { path: String, format: String },
-
-    /// A manifest declaring one table twice.
-    "corpus/duplicate-table", "A table is declared twice",
-    #[error("the corpus declares {table} twice")]
-    DuplicateTable { table: String },
-
-    /// A corpus location carrying a query or a fragment. A corpus is a prefix
-    /// and every file is named under it; a query string — a signature among
-    /// them — addresses one object and does not survive the join. Signed
-    /// storage is reached by opening a job under the host that vends it.
-    "corpus/not-a-location", "Not a corpus location",
-    #[error(
-        "{location} carries a query or a fragment, and a corpus location is a prefix: signed \
-         storage is opened as a job, under the host that vends its credential"
-    )]
-    NotALocation { location: String },
 
     /// An argument a caller passed that is not what the call takes.
     "api/invalid-argument", "An argument is invalid",
@@ -1354,9 +1353,6 @@ mod tests {
                 budget: 2 << 30,
             },
             Problem::DoesNotCompile {},
-            Problem::DuplicateTable {
-                table: "Person".into(),
-            },
             Problem::NoHttpfs {},
             Problem::Bug { what: "x".into() },
             Problem::UnknownField {

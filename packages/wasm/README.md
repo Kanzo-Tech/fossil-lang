@@ -70,7 +70,7 @@ the URL then answers with `index.html`. Keep the three packages out of it —
 
 ```js
 // vite.config.js
-export default { optimizeDeps: { exclude: ['@fossil-lang/wasm', '@fossil-lang/executor', '@fossil-lang/corpus'] } };
+export default { optimizeDeps: { exclude: ['@fossil-lang/wasm', '@fossil-lang/executor'] } };
 ```
 
 A workspace-linked package is never pre-bundled, which is why a host inside this

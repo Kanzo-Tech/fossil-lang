@@ -1,0 +1,42 @@
+---
+title: A value appears twice where it must be unique
+description: "`write/duplicate-value` — a subject, an element of a multi-valued property or a (source, destination) pair that the graph would hold twice, so no graph is written."
+---
+
+The run executed and the writer laid the graph out, and found a value the graph would hold twice where
+it can hold it once:
+
+```text
+write/duplicate-value
+  × `Person.subject and Organisation.subject` holds `https://example.org/acme` twice
+```
+
+`data.at` says where — `<Type>.subject` for a subject repeated within a type, two such places for a
+subject two types both mint, `<Type>.<property>` for an element of a multi-valued property,
+`<Src>_<label>_<Dst>` for a relation — and `data.value` is the value: the subject IRI, the element's
+lexical form (a tagged one as `"cat"@en`), or a relation's two subjects as `source -> destination`.
+
+## Why fossil refuses it
+
+A fossil graph is read back as RDF, and an RDF graph is a set (RDF 1.1 Concepts §3). Three things
+would stop being a set, and each loses what the files promise
+([the round trip](/docs/format/round-trip)):
+
+- **A subject is the identity of a vertex** (A1), and RDF identity is the IRI over the whole graph, not
+  over one type. A subject two vertices carry is one resource written as two, so a mapping that reads
+  the tables back would make the class of one the class of both.
+- **A multi-valued property is a `set`** (A4): `list` would declare an order and a multiplicity the RDF
+  image cannot hold. Two elements are the same when they are the same RDF term; for a tagged value
+  that is the same lexical form with the same tag once the tag is lower-cased, so `"cat"@EN` and
+  `"cat"@en` are one element.
+- **A relation's pairs are distinct** (A5): a table of `(source, destination)` has nowhere to put a
+  multiplicity, so two identical rows are one edge stored twice.
+
+## How to repair it
+
+- **Make the subject unique**: a template that reads the key of the row, not a column that repeats, and
+  a prefix per type when two types draw from one key space.
+- **Deduplicate the values** in the program (`distinct`) or the source; for a tagged value, lower-case
+  the tag in the data.
+- **Deduplicate the pairs** the same way. A mapping that joins repeats its subject once per matching
+  row, and every other edge it writes is repeated with it.

@@ -98,13 +98,22 @@ async fn same_type_from_two_sources_merges_into_one_table() {
         "merged + sorted by subject",
     );
 
-    // The single vertex table reflects the merged count.
+    // The single vertex type reflects the merged count.
     let (written, files) = support::write_in_memory(&graph).await;
-    assert_eq!(written.manifest.vertex_tables.len(), 1);
-    assert_eq!(written.manifest.vertex_tables[0].record_count, 5);
+    assert_eq!(written.info.vertices.len(), 1);
+    assert_eq!(
+        support::vertex_count(&|path| files.get(path).cloned(), &written.info, "Person"),
+        5
+    );
     assert_eq!(
         files.keys().map(String::as_str).collect::<Vec<_>>(),
-        ["fossil.json", "vertex/Person.parquet"],
-        "one vertex table, no duplicate Person entry",
+        [
+            "Person.vertex.yml",
+            "fossil.graph.yml",
+            "mapping.ttl",
+            "vertex/Person/subject_name/chunk0",
+            "vertex/Person/vertex_count",
+        ],
+        "one vertex type, no duplicate Person entry",
     );
 }

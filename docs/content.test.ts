@@ -342,7 +342,7 @@ describe("the group diagram is the manifests", () => {
  * that file already uses — `` `crates/…/x.rs, item_name` `` — and the old one is banned rather than
  * deprecated, because an accepted second spelling is how the first one comes back.
  *
- * **This is not the guard `packages/corpus/CLAUDE.md` forbids rebuilding.** That one proves a cited line
+ * **This is not the guard that proved a cited line.** That one proved a cited line
  * is on disk and implies it says something; 159 dead references accumulated under it. An anchor is a
  * NAME, so reordering a file, inserting an item, or rewriting every comment in it cannot make a
  * citation point somewhere else. It either names something the file defines or it does not.
@@ -472,7 +472,7 @@ describe("every source citation names an item that exists", () => {
  *
  * What it does NOT do, and both are the Rust guard's own admissions repeated:
  *
- *   - **A bare path is checked for existence and nothing else.** `packages/corpus/guards/manifest.mjs`
+ *   - **A bare path is checked for existence and nothing else.** `packages/executor/src/run.ts`
  *     beside a claim about what that scanner skips passes here. Existence is what the move broke,
  *     and it is the whole of what this buys.
  *   - **A `.yml`, `.json` or `.css` citation carries no anchor check.** There is no definition to
@@ -541,7 +541,7 @@ describe("every workspace citation names a file that is there", () => {
   });
 
   it("reads items out of a cited file", () => {
-    expect(workspaceItemsOf("packages/corpus/src/attach.ts").has("attach")).toBe(true);
+    expect(workspaceItemsOf("packages/executor/src/run.ts").has("run")).toBe(true);
   });
 
   it.each(workspaceCitations)("$where cites $id", ({ path, anchor }) => {
@@ -605,7 +605,7 @@ function pageFileForRoute(route: string): string | null {
  * **It read this app's own MDX, and only the markdown-link spelling.** That left two holes and both
  * were measured. Of 309 routes written under `content/docs`, 24 are not `](…)` at all — fifteen
  * `<Card href="/docs/…">` on `design/index.mdx`, nine backticked routes in prose — and of 479 in the
- * tree as a whole, **170 are outside this app entirely**: Rust doc comments, `corpus.bnf`,
+ * tree as a whole, **170 are outside this app entirely**: Rust doc comments, `catalogue.bnf`,
  * `grammar.bnf`, `README.md`, `packages/…`. A route is the one citation form both halves of the tree
  * use, and it was checked in the half least likely to rot, because that half is the one whose build
  * reads it. Widening it found three dead routes on the first run, none of them in an MDX file:
@@ -645,13 +645,12 @@ const ROUTE_TREES: ReadonlyArray<readonly [dir: string, exts: readonly string[]]
   ["packages", [".ts", ".tsx", ".mjs", ".md", ".json"]],
 ];
 
-/** The three data files and the prose at the root, which are in no tree and cite routes anyway. */
+/** The two data files and the prose at the root, which are in no tree and cite routes anyway. */
 const ROUTE_ROOT_FILES = [
   "README.md",
   "CLAUDE.md",
   "CONTRIBUTING.md",
   "grammar.bnf",
-  "corpus.bnf",
   "catalogue.bnf",
 ];
 
@@ -1140,7 +1139,7 @@ describe("every bare call in a ts block names something a package exports", () =
   });
 
   it("reads exports out of a package entry point", () => {
-    expect(exportedNamesOf(join(PACKAGES_ROOT, "corpus/src/index.ts"), true).has("attach")).toBe(true);
+    expect(exportedNamesOf(join(PACKAGES_ROOT, "executor/src/index.ts"), true).has("run")).toBe(true);
     expect(packageExports.size).toBeGreaterThan(50);
   });
 

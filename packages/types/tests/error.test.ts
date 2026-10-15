@@ -48,7 +48,7 @@ describe('FossilError.of', () => {
   });
 
   it('puts a FossilError cause on the wire as its problem', () => {
-    const inner = FossilError.of('corpus/unreadable', { path: 'x/fossil.json' });
+    const inner = FossilError.of('write/failed', { path: 'x/fossil.graph.yml' });
     const outer = FossilError.of('document/unread', { documents: ['a'] }, { cause: inner });
     expect(outer.cause).toBe(inner);
     expect(outer.problem.cause).toBe(inner.problem);
@@ -139,8 +139,8 @@ describe('FossilError.of, its detail', () => {
     expect(FossilError.of('storage/host-refused', { scope: 'its connections' }).message).toBe(
       'the host refused its connections',
     );
-    expect(FossilError.of('corpus/duplicate-table', { table: 'Person' }).message).toBe(
-      'the corpus declares Person twice',
+    expect(FossilError.of('write/duplicate-value', { at: 'Person', value: 'a' }).message).toBe(
+      '`Person` holds `a` twice',
     );
   });
 });

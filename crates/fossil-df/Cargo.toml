@@ -1,5 +1,5 @@
 # DataFusion backend for the property-graph MIR: lowers `lower_to_mir_pg` to a
-# DataFusion plan, executes it, and writes the `fossil/1` corpus through
+# DataFusion plan, executes it, and writes an Apache GraphAr graph through
 # `Storage` — `Executor` is the one host that writes one. Compiles to wasm32
 # (the browser executor) and natively (the tests) alike.
 [package]
@@ -47,13 +47,21 @@ fossil-storage = { path = "../fossil-storage", features = ["object-store"] }
 object_store = { workspace = true }
 futures = { workspace = true }
 bytes = { workspace = true }
+# The graph a run writes is Apache GraphAr's: the information files and the Parquet chunks
+# are `graphar-*`'s, and this crate lays out and counts what it hands them.
+graphar-info = { workspace = true }
+graphar-parquet = { workspace = true }
 # The canonical graph-schema contract — the metadata fossil-df produces and the
-# manifest materializes from (the universal substrate's single source).
+# graph is laid out from (the universal substrate's single source).
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 # RDF input seam: Turtle parsing for `io.rdf` sources → Arrow rows, through
 # `rudof_rdf`'s in-memory graph. Pure Rust, WASM-clean — RDF is decoded at the
 # I/O border, same as in the browser.
 rudof_rdf = { workspace = true }
+# The RML-Core mapping that says what the graph's tables mean as RDF: `describe` builds its AST and
+# `rml::rdf::write_turtle` writes it as `mapping.ttl`.
+rml = { workspace = true }
+rudof_iri = { workspace = true }
 oxrdf = { workspace = true }
 # `default-features = false` drops datafusion's `sql` frontend (we build plans
 # via the DataFrame/LogicalPlan API, not `ctx.sql()`) and its own `compression`
@@ -90,9 +98,7 @@ datafusion = { version = "54", default-features = false, features = [
 ] }
 
 # `src/report.rs` — what a run tells its caller, and what `serde-wasm-bindgen`
-# hands JS — and `src/corpus/manifest.rs`, `fossil.json` itself; `schemars`
-# derives the TypeScript of the one and the JSON Schema of the other
-# (`xtask/tests/wire.rs`).
+# hands JS; `schemars` derives its TypeScript (`xtask/tests/wire.rs`).
 serde = { workspace = true }
 schemars = { workspace = true }
 # The JSON array reader (`read_json_source`). `arrow-json` decodes a slice of
@@ -109,12 +115,13 @@ unicode-normalization = { workspace = true }
 [dev-dependencies]
 # `tests/programs.rs` keeps each conformance program's artefacts as files.
 expect-test = { workspace = true }
-# `tests/write.rs` reads the corpus back with a second engine: a corpus only
-# one writer can read is not a corpus. `tests/builtin_smoke.rs` binds every
-# stdlib template on it, and `tests/corpus_exec.rs` writes the native half of
-# the cross-engine parity baseline (`tests/wasm_parity/`), digested with `sha2`.
+# `tests/write.rs` reads the graph back with a second engine: a graph only
+# one writer can read is not a graph. `tests/builtin_smoke.rs` binds every
+# stdlib template on it.
 duckdb = { workspace = true }
-sha2 = { workspace = true }
+# `tests/mapping.rs` renders the mapping to a view over the written graph (`rml::sql`) and reads the
+# triples back, which is Statement R made a test.
+rml = { workspace = true, features = ["sql"] }
 # `tests/write.rs` wraps an `object_store` store to record the order of the
 # writes, and the trait is an `async_trait`.
 async-trait = { workspace = true }

@@ -45,7 +45,7 @@ export interface FilesRun extends Common {
 /** Where a run reads, where it writes, and how much. */
 export type RunOptions = HostRun | FilesRun;
 
-/** What a run into memory answers: the report and every file of the corpus. */
+/** What a run into memory answers: the report and every file of the graph. */
 export interface InMemoryRun {
   report: RunReport;
   files: CorpusFile[];
@@ -60,7 +60,7 @@ export interface InMemoryRun {
  * `run/over-budget` for a run that needed more than the executor's 2 GiB, decided while the graph
  * executes, so nothing has been written; `internal/bug` for a failure fossil did not raise — a
  * panic — the original kept as its cause. A stopped run rejects with the signal's reason, and
- * since `fossil.json` is written last it leaves no corpus.
+ * since `fossil.graph.yml` is written last it leaves no graph.
  */
 export async function runHere(program: string, options: RunOptions): Promise<RunReport | InMemoryRun> {
   const { profiled, signal, limit } = options;

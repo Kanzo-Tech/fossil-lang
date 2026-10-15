@@ -1,0 +1,117 @@
+---
+title: Statistics
+description: Counted once, at write, by the writer that already holds the batches. Nulls and bounds are Parquet's own footer statistics; the distinct count and the commonest values are the fossil:stats key in the chunk's key_value_metadata, a versioned JSON document.
+---
+
+A graph is written once and read many times, so each column is counted once, by the writer, on the
+batches it already holds — not by every reader at every open. A reader that wants nulls, bounds,
+distinct values or the commonest values of a column reads them off the footer of the chunk, with no
+scan.
+
+They go in each vertex chunk's own Parquet footer, the one place a Parquet reader already looks:
+
+- `null_count`, `min_value` and `max_value` in the column chunks' `Statistics`, with
+  `is_min_value_exact` and `is_max_value_exact`;
+- the distinct count and the most common values with their frequencies in the file's
+  `key_value_metadata`, under the key **`fossil:stats`**, because Parquet has no field for them.
+
+The columns that carry them are the **properties** of the chunk's property group. The reserved
+index columns are not properties and carry Parquet's own statistics only, as an adjacency or offset
+chunk does.
+
+**`fossil:stats` is fossil's convention, not GraphAr's and not Parquet's.** `parquet.thrift` gives
+the file metadata and each column chunk's a list of string keys and string values, and names none;
+Arrow uses the file-level one for its own `ARROW:schema`. The `fossil:` prefix namespaces the key the
+way `ARROW:` does, and the value is this document, versioned, and checked by the writer's tests:
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["version", "columns"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "columns": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["distinct_count"],
+        "additionalProperties": false,
+        "properties": {
+          "distinct_count": { "type": "integer", "minimum": 0 },
+          "most_common_vals": { "type": "array", "maxItems": 10, "items": { "type": "string" } },
+          "most_common_freqs": { "type": "array", "maxItems": 10, "items": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 } }
+        }
+      }
+    }
+  }
+}
+```
+
+`columns` is keyed by the property's name. For the walking skeleton's `Person` chunk the value is
+
+```json
+{"version":1,"columns":{"subject":{"distinct_count":5},"name":{"distinct_count":5}}}
+```
+
+`most_common_vals` and `most_common_freqs` are two arrays of the same length, as PostgreSQL's
+`pg_stats` has them: the ten most frequent non-null values that occur at least twice, most frequent
+first and ties by value, each as the column type's text, and each one's share of the chunk's rows.
+They are absent when no value repeats. A multi-valued column's `distinct_count` and values count its
+**elements**, since Parquet counts leaf values.
+
+**A reader that does not know the key loses nothing a Parquet reader needs.** One that does checks
+`version` and refuses another.
+
+## What a reader may combine
+
+A graph the fossil writer wrote has one chunk per type, so a chunk's counts are the type's. A graph
+of several chunks, which a foreign writer may write, is read by these rules:
+
+- **Nulls add up, and bounds fold.** `null_count` across row groups and chunks is a sum, and
+  `min_value` and `max_value` a minimum and a maximum — the aggregates that distribute over a union.
+  A bound the writer cut at 64 bytes is marked inexact, so a reader that keeps only exact bounds
+  never shows a cut value.
+- **A distinct count does not combine.** The distinct count of a union cannot be computed from the
+  counts of its parts: it lies between the largest and the sum, and no more is known. A reader that
+  needs one over several chunks counts again. The same holds of the commonest values and their
+  frequencies, which are a share of one chunk's rows.
+
+This is also why the distinct count is not written in `Statistics.distinct_count`: Parquet's
+statistics are per row group, `null_count` sums and the bounds fold, and a distinct count does not;
+and the arrow-rs writer (`parquet` 58.3.0) writes none unless a caller sets one through
+`write_batch_with_statistics`.
+
+## Reading them
+
+DuckDB's own table functions read both halves over the chunk paths `graphar_chunks` answers, with no
+fossil code:
+
+```sql
+SELECT path_in_schema, row_group_id, stats_null_count, stats_min_value, stats_max_value,
+       min_is_exact, max_is_exact
+FROM parquet_metadata((SELECT list(path) FROM graphar_chunks WHERE type = 'Person' AND kind = 'vertex'));
+
+SELECT key::VARCHAR, decode(value)
+FROM parquet_kv_metadata((SELECT list(path) FROM graphar_chunks WHERE type = 'Person' AND kind = 'vertex'));
+```
+
+Over the walking skeleton's chunk the first returned, on native DuckDB:
+
+```
+path_in_schema        null_count  min                          max                          exact
+_graphArVertexIndex   0           0                            4                            true
+subject               0           https://example.org/user/1   https://example.org/user/5   true
+name                  0           Alice                        Eve                          true
+```
+
+On DuckDB-WASM 1.4.3 the two queries took 27 ms and 5 ms (2026-10-14).
+
+**The candidate keys are not stored.** A reader derives them: the primary key, plus every column
+with `null_count = 0` and `distinct_count` equal to the count whose GraphAr type can be a key
+(`int32`, `int64`, `string`, `date`, `timestamp`), read from single-valued scalar columns only. A
+graph carries no dependency between two columns: no reference format does.
+
+**They describe the graph as written.** A graph written from a sample of its sources counts the
+sample.

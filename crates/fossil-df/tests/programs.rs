@@ -12,8 +12,8 @@
 //!   no diagnostic.
 //! - `compiled.txt` — what the compiler understood: type bindings and their
 //!   shape IRIs, source bindings with their pipelines, per mapping the
-//!   properties written against the properties lowered, then the tables
-//!   `fossil.json` declares and every relation's dropped count.
+//!   properties written against the properties lowered, then the types
+//!   `fossil.graph.yml` declares and every relation's dropped count.
 //!
 //! `UPDATE_EXPECT=1 cargo test -p fossil-df --test programs` rewrites them
 //! (`expect-test`).
@@ -26,7 +26,8 @@
 //!    at least one.
 //! 3. Every `type { … }` binding outside `errors/` resolves to a shape IRI.
 //! 4. The programs outside `errors/` run and write at least one vertex type.
-//! 5. The store holds `fossil.json` and exactly the tables it names.
+//! 5. The store holds `fossil.graph.yml` and exactly the files the information
+//!    files name.
 //!
 //! Every failure is collected and printed as one map rather than aborting at
 //! the first.
@@ -110,55 +111,53 @@ fn walk(dir: &Path, out: &mut Vec<Program>) {
 // ─────────────────────────────────────────────────────────────────── rendering
 
 /// What the run wrote, rendered without a single machine-dependent byte: the
-/// tables `fossil.json` declares, in its order, and the run's dropped count
+/// types `fossil.graph.yml` declares, in its order, and the run's dropped count
 /// beside each relation. The destination is not here.
 ///
-/// The column list is the manifest's, so it carries `dense_id`, `subject` and
-/// the three layout columns beside the program's own properties — those are
-/// declared and a reader gets them. What each mapping wrote is the section above
-/// this one; this section is what the corpus says.
+/// The column list is the property group's, so it carries `subject` beside the
+/// program's own properties, and a multi-valued one is marked `[set]` — those
+/// are declared and a reader gets them. What each mapping wrote is the section
+/// above this one; this section is what the graph says. The type's IRI is the
+/// mapping's, and is not here.
 fn render_run(corpus: &native::Corpus) -> String {
-    let manifest = corpus.manifest();
+    let graph = corpus.graph();
     let mut out = String::from("\n── run ──\n");
-    if manifest.vertex_tables.is_empty() {
+    if graph.vertices.is_empty() {
         out.push_str("NO VERTEX TYPE was written\n");
     }
-    for v in &manifest.vertex_tables {
-        let columns: Vec<&str> = v.properties.iter().map(|p| p.name.as_str()).collect();
+    for v in &graph.vertices {
+        let columns: Vec<String> = v
+            .property_groups
+            .iter()
+            .flat_map(|g| &g.properties)
+            .map(|p| match p.cardinality {
+                graphar_info::Cardinality::Single => p.name.clone(),
+                _ => format!("{} [{}]", p.name, p.cardinality),
+            })
+            .collect();
         let _ = writeln!(
             out,
-            "vertex {} ({}) × {} — {}",
-            v.name,
-            v.iri.as_deref().unwrap_or("no rdf:type"),
-            v.record_count,
+            "vertex {} × {} — {}",
+            v.r#type,
+            corpus.vertex_count(&v.r#type),
             columns.join(", "),
         );
     }
-    for p in &manifest.property_tables {
-        let columns: Vec<&str> = p.properties.iter().map(|c| c.name.as_str()).collect();
-        let _ = writeln!(
-            out,
-            "property {} × {} — {}",
-            p.name,
-            p.record_count,
-            columns.join(", "),
-        );
-    }
-    if manifest.edge_tables.is_empty() {
+    if graph.edges.is_empty() {
         out.push_str("NO EDGE TYPE was written\n");
     }
-    for e in &manifest.edge_tables {
+    for e in &graph.edges {
         let dropped = corpus
             .report
             .dropped
             .iter()
-            .find(|d| d.table == e.name)
+            .find(|d| d.table == e.triple())
             .map_or(0, |d| d.dropped);
         let _ = writeln!(
             out,
             "edge {} × {}{}",
-            e.name,
-            e.record_count,
+            e.triple(),
+            corpus.edge_count(&e.triple()),
             // Silent on a clean run: an artefact that says «0 dropped» on every
             // program stops being read, and the one program that drops a row is
             // the whole reason the number exists.
@@ -172,29 +171,54 @@ fn render_run(corpus: &native::Corpus) -> String {
     out
 }
 
-/// Invariant 7: the store holds `fossil.json` and exactly the tables it names.
+/// Invariant 5: the store holds `fossil.graph.yml`, the mapping beside it and
+/// exactly the files the information files name — each document, each chunk,
+/// each count and each offset table.
 fn unnamed_or_missing(corpus: &native::Corpus) -> Vec<String> {
-    let manifest = corpus.manifest();
-    let mut named: Vec<String> = manifest
-        .vertex_tables
-        .iter()
-        .map(|v| v.path.clone())
-        .chain(manifest.edge_tables.iter().map(|e| e.path.clone()))
-        .chain(manifest.property_tables.iter().map(|p| p.path.clone()))
-        .collect();
-    named.push("fossil.json".to_string());
+    use graphar_parquet::paths;
+    let graph = corpus.graph();
+    let mut named: Vec<String> = vec!["fossil.graph.yml".to_string(), "mapping.ttl".to_string()];
+    for v in &graph.vertices {
+        named.push(v.file_name());
+        named.push(paths::vertex_count(v));
+        let count = corpus.vertex_count(&v.r#type);
+        for group in &v.property_groups {
+            named.extend(
+                (0..count.div_ceil(v.chunk_size)).map(|k| paths::vertex_chunk(v, group, k)),
+            );
+        }
+    }
+    for e in &graph.edges {
+        let adj = &e.adj_lists[0];
+        named.push(e.file_name());
+        named.push(paths::edge_vertex_count(e, adj));
+        let sources = corpus.vertex_count(&e.src_type);
+        for part in 0..sources.div_ceil(e.src_chunk_size) {
+            named.push(paths::edge_count(e, adj, part));
+            named.push(paths::offset_chunk(e, adj, part));
+        }
+        let edges = corpus.edge_count(&e.triple());
+        if edges > 0 {
+            named.push(paths::adj_list_chunk(e, adj, 0, 0));
+            assert!(
+                edges <= e.chunk_size,
+                "{}: every relation is one chunk",
+                e.triple()
+            );
+        }
+    }
     let mut findings = Vec::new();
     for path in &named {
         if !corpus.files.contains_key(path) {
             findings.push(format!(
-                "  RUN `{path}` is what fossil.json tells a reader to fetch, and it is not there"
+                "  RUN `{path}` is what the information files tell a reader to fetch, and it is not there"
             ));
         }
     }
     for path in corpus.files.keys() {
         if !named.contains(path) {
             findings.push(format!(
-                "  RUN `{path}` was written and fossil.json names it nowhere"
+                "  RUN `{path}` was written and no information file names it"
             ));
         }
     }
@@ -324,7 +348,7 @@ fn the_clean_programs_compile_and_keep_what_they_say() {
                 match native::run_dir(dir, &file_name, &[]) {
                     Ok(corpus) => {
                         compiled.push_str(&render_run(&corpus));
-                        if corpus.manifest().vertex_tables.is_empty() {
+                        if corpus.graph().vertices.is_empty() {
                             findings.push(
                                 "  RUN it ran and wrote no vertex type — the artefact is empty"
                                     .to_string(),

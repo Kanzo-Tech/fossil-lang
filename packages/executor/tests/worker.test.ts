@@ -40,7 +40,7 @@ const refusing: Host = {
 describe('a run in a worker', () => {
   it("answers the run's answer, the files' bytes with it", async () => {
     const bytes = new Uint8Array([1, 2, 3]);
-    const { answer, state } = wired(async () => ({ report: { location: 'memory://', dropped: [] }, files: [{ path: 'fossil.json', bytes }] }), refusing);
+    const { answer, state } = wired(async () => ({ report: { location: 'memory://', dropped: [] }, files: [{ path: 'fossil.graph.yml', bytes }] }), refusing);
     const result = (await answer) as { files: { path: string; bytes: Uint8Array }[] };
     expect(Array.from(result.files[0]!.bytes)).toEqual([1, 2, 3]);
     expect(state.terminated, 'the worker is ended with its run').toBe(true);

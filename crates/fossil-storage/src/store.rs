@@ -281,6 +281,32 @@ impl Storage {
             .map(|(authority, routed)| (authority, Arc::new(routed.clone()) as _))
     }
 
+    /// The store a writer that speaks `object_store` itself writes through, and
+    /// the path `location` is in it: every routed prefix of `location`'s
+    /// authority, with the same deadline on each request that [`Self::put`]
+    /// holds one to. A path a writer joins under the one returned is routed
+    /// as `location` is, so a prefix the host vended for writing covers
+    /// everything beneath it.
+    ///
+    /// # Errors
+    /// Nothing granted covers `location`.
+    pub fn at(&self, location: &str) -> Result<(Arc<dyn ObjectStore>, Path), StorageError> {
+        let (authority, key) = split(location)?;
+        self.authorities
+            .get(&authority)
+            .filter(|routed| routed.covering(key.as_str()).is_some())
+            .map(|routed| {
+                (
+                    Arc::new(routed.clone()) as Arc<dyn ObjectStore>,
+                    Path::from(key.as_str()),
+                )
+            })
+            .ok_or_else(|| StorageError::Outside {
+                location: location.to_string(),
+                prefix: "any prefix the host vended".to_string(),
+            })
+    }
+
     /// The bytes at `location`.
     ///
     /// # Errors
@@ -1025,6 +1051,35 @@ mod tests {
             Some(object_store::Error::Generic { store: "test", .. })
         ));
         assert!(failure.help.is_some(), "the orphaned upload is said");
+    }
+
+    /// A writer that speaks `object_store` joins its paths under the root `at`
+    /// answers, and they land where `put` would have put them.
+    #[tokio::test]
+    async fn at_answers_a_store_and_the_root_a_writer_joins_under() {
+        let mut storage = Storage::new(Arc::new(Fake::default()));
+        let memory = Arc::new(InMemory::new());
+        storage
+            .with_store(
+                "s3://lake/out/",
+                Arc::clone(&memory) as Arc<dyn ObjectStore>,
+            )
+            .expect("store");
+        let (store, root) = storage.at("s3://lake/out/run-1/").expect("covered");
+        assert_eq!(root, Path::from("out/run-1"));
+        let at: Path = root.parts().chain(Path::from("a/b").parts()).collect();
+        store
+            .put(&at, PutPayload::from_static(b"x"))
+            .await
+            .expect("a put under the root");
+        assert_eq!(
+            storage.get("s3://lake/out/run-1/a/b").await.expect("get"),
+            "x"
+        );
+        assert!(matches!(
+            storage.at("s3://lake/elsewhere/"),
+            Err(StorageError::Outside { .. })
+        ));
     }
 
     #[test]

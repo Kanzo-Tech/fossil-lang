@@ -25,7 +25,7 @@ Friends: 5 written, 5 lowered
     knows
 
 ── run ──
-vertex Place (https://geo.example/Place) × 2 — dense_id, subject, name
-vertex Person (https://schema.org/Person) × 3 — dense_id, subject, name, handle
+vertex Place × 2 — subject, name
+vertex Person × 3 — subject, name, handle
 edge Person_livesIn_Place × 3
 edge Person_knows_Person × 3

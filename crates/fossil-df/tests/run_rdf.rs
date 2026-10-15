@@ -13,8 +13,6 @@
 //!   - a typed edge `KB --hasProject--> Project` (a `ShEx` shape-ref);
 //!   - multi-valued: the two `hasProject` objects unroll (UNNEST) into two edges.
 
-use fossil_df::corpus::manifest::{EdgeTable, Manifest, VertexTable};
-
 #[path = "support/native.rs"]
 mod native;
 mod support;
@@ -56,22 +54,22 @@ Projects : ProjectShape from Project
     title = Project.title
 "#;
 
-fn vertex<'m>(m: &'m Manifest, name: &str) -> &'m VertexTable {
-    m.vertex_tables
-        .iter()
-        .find(|v| v.name == name)
-        .unwrap_or_else(|| panic!("no {name} vertex table: {m:?}"))
+/// The edge type from `source` to `destination`.
+fn edge(corpus: &native::Corpus, source: &str, destination: &str) -> graphar_info::EdgeInfo {
+    corpus
+        .graph()
+        .edges
+        .into_iter()
+        .find(|e| e.src_type == source && e.dst_type == destination)
+        .unwrap_or_else(|| panic!("no {source}→{destination} edge type"))
 }
 
-fn edge<'m>(m: &'m Manifest, source: &str, destination: &str) -> &'m EdgeTable {
-    m.edge_tables
+fn columns(corpus: &native::Corpus, ty: &str) -> Vec<String> {
+    corpus.vertex(ty).property_groups[0]
+        .properties
         .iter()
-        .find(|e| e.source.references == source && e.destination.references == destination)
-        .unwrap_or_else(|| panic!("no {source}→{destination} edge table: {m:?}"))
-}
-
-fn columns(v: &VertexTable) -> Vec<&str> {
-    v.properties.iter().map(|p| p.name.as_str()).collect()
+        .map(|p| p.name.clone())
+        .collect()
 }
 
 #[test]
@@ -82,38 +80,39 @@ fn run_rdf_writes_typed_multi_shape_graph_with_multivalued_edges() {
         ("cpi.fossil", CPI_FOSSIL),
     ]);
     let corpus = native::run_dir(dir.path(), "cpi.fossil", &[]).expect("the RDF program runs");
-    let m = corpus.manifest();
 
     // Two vertex types, each materialised from ITS shape (multi-shape: the `KB`
     // member did not get the `Project` shape's columns or vice-versa).
-    let kb = vertex(&m, "KB");
-    assert_eq!(kb.record_count, 1);
+    assert_eq!(corpus.vertex_count("KB"), 1);
     assert_eq!(
-        columns(kb),
-        ["dense_id", "subject", "label"],
-        "KB carries its own column after the writer's two"
+        columns(&corpus, "KB"),
+        ["subject", "label"],
+        "KB carries its own column after its subject"
     );
-    let project = vertex(&m, "Project");
-    assert_eq!(project.record_count, 2);
-    assert_eq!(columns(project), ["dense_id", "subject", "title"]);
+    assert_eq!(corpus.vertex_count("Project"), 2);
+    assert_eq!(columns(&corpus, "Project"), ["subject", "title"]);
 
     // The shape-ref `hasProject` is a TYPED edge KB→Project, NOT a column on KB;
     // kb/1 references two projects → the LIST UNNESTs to two edges.
-    let has_project = edge(&m, "KB", "Project");
-    assert_eq!(has_project.label, "hasProject");
-    assert_eq!(has_project.record_count, 2);
+    let has_project = edge(&corpus, "KB", "Project");
+    assert_eq!(has_project.edge_type, "hasProject");
+    assert_eq!(corpus.edge_count(&has_project.triple()), 2);
     // Both objects named a Project the graph carries, so nothing was discarded.
     assert_eq!(
         corpus
             .report
             .dropped
             .iter()
-            .find(|d| d.table == has_project.name)
+            .find(|d| d.table == has_project.triple())
             .map(|d| d.dropped),
         Some(0)
     );
-    for table in [&kb.path, &project.path, &has_project.path] {
-        assert!(corpus.files.contains_key(table), "{table} is not there");
+    for path in [
+        corpus.chunk("KB"),
+        corpus.chunk("Project"),
+        corpus.adjacency(&has_project.triple()),
+    ] {
+        assert!(corpus.files.contains_key(&path), "{path} is not there");
     }
 }
 
@@ -151,21 +150,15 @@ fn run_rdf_resolves_schema_through_a_connection() {
         &[("data", data.as_str()), ("vocab", vocab.as_str())],
     )
     .expect("the @conn program runs");
-    let m = corpus.manifest();
 
-    assert_eq!(vertex(&m, "KB").record_count, 1);
-    assert_eq!(vertex(&m, "Project").record_count, 2);
-    assert_eq!(edge(&m, "KB", "Project").record_count, 2);
-
-    // Lineage names the source as the program wrote it, never the location the
-    // connection resolved it to: repointing `@data` must not change a corpus.
-    for derived_from in [
-        &vertex(&m, "KB").derived_from,
-        &vertex(&m, "Project").derived_from,
-        &edge(&m, "KB", "Project").derived_from,
-    ] {
-        assert_eq!(derived_from, &["@data/graph.ttl"]);
-    }
+    assert_eq!(corpus.vertex_count("KB"), 1);
+    assert_eq!(corpus.vertex_count("Project"), 2);
+    assert_eq!(
+        corpus.edge_count(&edge(&corpus, "KB", "Project").triple()),
+        2
+    );
+    // The graph names no input: where a table was read from is not in it, so
+    // repointing `@data` cannot change what a run wrote (`/docs/design/graphar`, D1).
 }
 
 // ── Regression: edges to a property-less (leaf) shape ───────────────────────
@@ -205,11 +198,10 @@ fn run_rdf_resolves_edges_to_a_property_less_leaf_shape() {
         ("cpi.fossil", LEAF_FOSSIL),
     ]);
     let corpus = native::run_dir(dir.path(), "cpi.fossil", &[]).expect("the leaf program runs");
-    let m = corpus.manifest();
 
-    assert_eq!(vertex(&m, "Tag").record_count, 1, "one leaf Tag");
+    assert_eq!(corpus.vertex_count("Tag"), 1, "one leaf Tag");
     assert_eq!(
-        edge(&m, "Item", "Tag").record_count,
+        corpus.edge_count(&edge(&corpus, "Item", "Tag").triple()),
         1,
         "an edge to a property-less leaf shape resolves to its row, not to zero"
     );

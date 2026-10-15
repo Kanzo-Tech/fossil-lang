@@ -1,6 +1,6 @@
 // The walking skeleton: five rows of CSV in, five `Person` vertices out, as a
-// `fossil/1` corpus — `vertex/Person.parquet` holds the rows and `fossil.json`
-// declares their columns.
+// Apache GraphAr graph — `vertex/Person/subject_name/chunk0` holds the rows and
+// `Person.vertex.yml` declares their columns.
 //
 // This is the one program asserted by CONTENT rather than by success:
 // `crates/fossil-df/tests/walking_skeleton.rs` runs it through the executor and

@@ -1,159 +1,167 @@
 ---
 title: The corpus
-description: "A graph in Parquet files under a `fossil.json` written last, with no service in the path: one table per vertex type, one per relation, and one id space across the whole graph; why the vocabulary is SQL/PGQ's, why a reader keys on the subject, and what a corpus can carry."
+description: "What a run writes is an Apache GraphAr graph and the RML-Core mapping of its tables, as plain files with no service in the path: one table per vertex type, one per relation, one index space per type; why a reader keys on the subject, why the format changes in place, and what the graph can carry."
 ---
 
-A fossil program produces a **corpus**: a graph written as columnar files with a manifest that names
-them. Not a database to connect to, not a stream to consume, not an endpoint. Files.
+A fossil program produces a **corpus**: a property graph written as columnar files, with the
+mapping that says what its tables mean as RDF. Not a database to connect to, not a stream to
+consume, not an endpoint. Files. The corpus is an
+[Apache GraphAr](/docs/design/graphar) graph — YAML information files and Parquet chunks — and
+`mapping.ttl`, laid out as [/docs/format](/docs/format) specifies.
 
-A reader opens the manifest and reads the tables it names — from a local path, an object store, or a
-plain web server. **There is no service in the path**, so no query language between reader and data
-beyond the engine the reader already has, no process to keep alive, no writer version to match.
+A reader opens the graph document and reads the tables it names — from a local path, an object
+store, or a plain web server. **There is no service in the path**, so no query language between
+reader and data beyond the engine the reader already has, no process to keep alive, no writer version
+to match.
 
 ## Files, and the one that commits them
 
 ```
 <dest>/
-  fossil.json                           written last
-  vertex/<Type>.parquet                 one per vertex type
-  edge/<Src>_<label>_<Dst>.parquet      one per relation
+  fossil.graph.yml                                          written last
+  <Type>.vertex.yml, <Src>_<label>_<Dst>.edge.yml           one per type and per relation
+  vertex/<Type>/<group>/chunk0, vertex/<Type>/vertex_count
+  edge/<Src>_<label>_<Dst>/ordered_by_source/…              adjacency, offsets, counts
+  mapping.ttl                                               RML-Core
 ```
 
-`fossil.json` names every table, its path, its columns with their types and its row count. It is
-written **after** every Parquet
-file, so its presence is the commit: a directory without it is a write that did not finish, and a
-reader that finds it can trust every path it names. The shape is
-`crates/fossil-df/src/corpus/manifest.rs, Manifest`, and [/docs/format](/docs/format) specifies it for a
-reader who has none of this repository.
+`fossil.graph.yml` names every information file, and each of those names its property groups, its
+types and its prefix. It is written **after** every other file, so its presence is the commit: a
+directory without it is a write that did not finish, and a reader that finds it can trust every path
+it names. GraphAr defines no commit; this is fossil's. The shape is `graphar_info::GraphInfo`, built
+by `crates/fossil-df/src/layout.rs, layout`, and [/docs/format](/docs/format) specifies the files for
+a reader who has none of this repository.
 
-**Nothing is computed from a path, and no path is listed.** A reader composes no URL; it takes each
-`path` as written, relative to the manifest. The constraint that forced the old arithmetic addressing
-— **you cannot list a directory over HTTP** — is met by the manifest naming every file, which is the
-whole of what a reader needs when there is one file per table.
+**Nothing is computed from a path that the information files do not give, and no path is listed.** A
+reader composes each path from a `prefix` and a chunk number as GraphAr's libraries do. The constraint
+that forced the old arithmetic addressing — **you cannot list a directory over HTTP** — is met by the
+YAML naming every group and the count files naming every size.
 
-**What would reverse it.** A table too large to be one file. Then a table is several parts and the
-manifest names each; the rule — named, never listed — does not move.
+**What would reverse it.** A table too large to be one chunk. Then `chunk_size` is set below the row
+count and a table is several chunks; a reader's views already read every chunk, and the rule — named,
+never listed — does not move.
 
-## One graph, one id space
+## One index per type, and the global id is the reader's
 
-Every vertex of every type has a `dense_id`, and the ids run `0..V−1` across the **whole graph**, not
-per type. An edge table is `src` and `dst` over those ids, so an edge is a pair of integers whichever
-types it joins, and a viewer's buffer index **is** the id.
+Every vertex has an index within its type, `0..count−1`, and an edge is a pair of indices into the
+types it joins. The executor still numbers every vertex of the graph `0..V−1` in a `dense_id`; the
+writer subtracts the type's first id, so the files carry GraphAr's per-type index and nothing global.
+A viewer's buffer index is the **global id**, which is arithmetic over the types
+([identity](/docs/format/conventions/identity#the-global-id-is-the-readers-arithmetic)): the prefix sum of the
+counts before a type, in `graphar_vertex_types.ordinal` order, plus the index.
 
-The types take the ids in manifest order, each one contiguous range, and inside a type the ids
-follow the subject — `crates/fossil-df/src/lib.rs, prepend_dense_id` numbers each type as it lands.
-So a vertex table is the range from the sum of the counts before it, and a viewer loads it into its
-slice of one buffer without reading another. Every table is written sorted by its key. The order
+The types take their order from [the order of shapes](/docs/design/shapes#the-order-of-shapes), and
+inside a type the indices follow the subject. Every table is written sorted by its key. The order
 carries no geometry: [where a vertex is drawn](/docs/design/position) is the view's choice.
 
 **What would reverse it.** A reader that has to address a subset of the graph smaller than a type by
 arithmetic on ids — which is what the Hilbert order the writer used to number in bought, and only the
-deferred [cells](/docs/design/later/cells) used it.
+deferred [cells](/docs/design/later/cells) used it. Or a reader that needs global ids in the files
+with no query between it and them, which then gets a `dense_id` property beside GraphAr's index.
 
 ### A reader is handed the subject IRI, because an address is not something to key on
 
-A lookup by identity is `WHERE subject = ?`, the IRI. The alternative is the `dense_id`, and it is
-the cheap one. It is refused because **the id is an address**: a new subject renumbers every vertex
-after it, so a `dense_id` held anywhere outside the corpus names a *different vertex* after the next
-write. A
-bookmark, a selection, a link from another system and a row in somebody else's database all key on
-something, and an address is not something to key on.
+A lookup by identity is `WHERE subject = ?`, the IRI. The alternative is the index, and it is the
+cheap one. It is refused because **the index is an address**: a new subject renumbers every vertex
+after it in its type, so an index held anywhere outside the graph names a *different vertex* after
+the next write. A bookmark, a selection, a link from another system and a row in somebody else's
+database all key on something, and an address is not something to key on.
 
-The manifest says which column is which — `key` is `dense_id` and `identity` is `subject`, on every
-vertex table — so a reader keys on the field rather than on a column name it was told.
+The information files say which property is the identity — `is_primary: true` on `subject`, first in
+the group of every vertex type — so a reader keys on the field rather than on a column name it was
+told.
 
-What would reverse it is a corpus whose ids survive a rewrite — a stable id column written beside
+What would reverse it is a graph whose ids survive a rewrite — a stable id property written beside
 the address. Nothing writes one, and adding one is a format change and not a reader change.
 
 ## The artifact is the API
 
 The stance follows the table formats — Iceberg, Delta Lake, Lance — where a manifest plus a set of
 files is the interface, *many* engines read the same table, and **none of them is the contract**. A
-`fossil/1` corpus is plain Parquet: `read_parquet` on a path the manifest names is a whole reader,
-and [reading one without fossil](/docs/format/reading/without-fossil) is the recipe.
+fossil graph is plain Parquet and YAML: `read_parquet` on a path the information files name is a
+whole reader, and [reading one without fossil](/docs/format/reading/without-fossil) is the recipe.
+Here the contract is not even fossil's: it is Apache GraphAr's, and a reader of any GraphAr graph
+reads this one.
 
 **Two implementations before a format change, not after** — the Arrow rule. Parquet is the warning:
 thirteen years of unwithdrawable files and a reference implementation that became normative without
-anyone deciding it.
+anyone deciding it. The two here are `graphar-parquet`, which writes, and `@kanzo-tech/graphar-duckdb`,
+which reads, and neither is a fossil crate.
 
 <Callout type="warn" title="One clock, running one way">
-**If a corpus reaches a reader outside the release that wrote it, the option is gone.** Until then
-`fossil/1` changes in place, as the next section says; the day a third party reads a corpus, the
-format string starts to mean a contract and the next change is `fossil/2`.
+**If a graph reaches a reader outside the release that wrote it, the option is gone.** Until then
+the format changes in place, as the next section says; the day a third party reads a graph, the
+conventions fossil adds to GraphAr's start to mean a contract.
 </Callout>
 
 ## One format, changed in place
 
-`format` stays `fossil/1`, and **the format changes in place: a writer and the reader that reads what
-it writes ship in one release**, and no reader branches on which writer wrote a corpus. Annotations, the
-language column and its role, `rdf:langString` as a column's datatype, and the statistics of
-[the corpus's own facts](/docs/design/facts) are all such changes, and none of them is a version.
+The format has no version string of its own. A fossil graph is identified by `fossil.graph.yml` —
+graph `name: fossil`, `version: gar/v1` — with `mapping.ttl` beside it, and the only version fossil
+owns is the `version: 1` inside `fossil:stats`. **The format changes in place: a writer and the
+reader that reads what it writes ship in one release**, and no reader branches on which writer wrote a
+graph.
 
-The reason is who reads a corpus. Every reader of one is `@fossil-lang/corpus` or the guards beside it,
-released from this repository with `@fossil-lang/executor`, and the one host — keasy — takes both
-together. A second format string would be a branch in every reader to protect a reader that does not
-exist, and a `fossil/1` reader kept alive beside a `fossil/2` one is the backwards compatibility the
-products built on fossil have ruled out. The format string still does the one job it can do: a reader
-refuses a `format` it does not know before it reads a byte of Parquet, so a JSON file that is not a
-corpus is stopped rather than misread.
+The reason is who reads a graph. Every reader of one is `@kanzo-tech/graphar-duckdb` or a
+GraphAr reader, released apart from fossil, and the one host — keasy — takes the writer and the
+reader together. A second format string would be a branch in every reader to protect a reader that
+does not exist, and an old reader kept alive beside a new one is the backwards compatibility the
+products built on fossil have ruled out.
 
-A change that only adds — an optional field, a column on a table whose columns are listed — leaves
-every corpus already written readable by the new reader, and this batch is all of that kind. A change
-that would make an older corpus unreadable is paid for by **writing the corpora a host keeps again**,
-which costs a run because a corpus is a function of its program and its sources, and never by a
-reader that knows two layouts.
+A change that only adds — a key a reader may ignore, an optional property — leaves every graph already
+written readable by the new reader. A change that would make an older graph unreadable is paid for by
+**writing the graphs a host keeps again**, which costs a run because a graph is a function of its
+program and its sources, and never by a reader that knows two layouts. Where a non-additive change to
+a fossil convention records itself is a design question: the candidate is `extra_info` keyed by a
+namespace IRI, never by a fossil word.
 
-**What would reverse it:** a reader outside the release train — a third party's, or a corpus kept and
-read by a reader older than the writer that wrote it — that must keep reading every corpus. Then the
+**What would reverse it:** a reader outside the release train — a third party's, or a graph kept and
+read by a reader older than the writer that wrote it — that must keep reading every graph. Then the
 version rule is Delta Lake's ([discarded](/docs/design/discarded) carries it): a field a reader may
-ignore stays in the version, anything else raises it, for the corpora that use it.
+ignore stays in the version, anything else raises it, for the graphs that use it.
 
-## The vocabulary is SQL/PGQ's, declared and not executed
+## The vocabulary is GraphAr's, and SQL/PGQ's is declared nowhere
 
-`fossil.json` names its tables the way SQL/PGQ names the element tables of a property graph —
-vertex tables and edge tables, a `key`, a `source` and a `destination` that each `references` a
-vertex table, a `label` per relation — because that is the vocabulary of the engine a reader
-actually opens a corpus with. Everything a `CREATE PROPERTY GRAPH` over the views needs is in the
-manifest. Its version string is `fossil/1`, one constant,
-`crates/fossil-df/src/corpus/manifest.rs, FOSSIL_FORMAT`, and a reader rejects any other before it reads a
-byte of Parquet.
+The graph names its tables the way GraphAr does — a vertex *type*, an edge *type* with a `src_type`,
+an `edge_type` and a `dst_type` — because that is the vocabulary of the format a reader opens it with
+and of the libraries that write it. SQL/PGQ's `CREATE PROPERTY GRAPH`, which the earlier manifest
+borrowed the names of, is not declared: nothing in fossil issues a graph query, the door attaches
+views and every read is the host's SQL, and DuckPGQ — the extension that would run `GRAPH_TABLE` — does
+not load in DuckDB-WASM 1.5.x, the engine a browser reader has. A traversal is SQL over
+`_graphArSrcIndex` and `_graphArDstIndex`, written by whoever needs it.
 
-**Declared is all it is.** Nothing in fossil issues a graph query: the door attaches views and every
-read is the host's SQL, and DuckPGQ — the extension that would run `GRAPH_TABLE` over those views — does not load in
-DuckDB-WASM 1.5.x, the engine a browser reader has. A traversal today is SQL over `src` and `dst`,
-written by whoever needs it.
-
-**What would reverse it.** A host engine that runs SQL/PGQ where the reader runs. Then `open` issues
-the `CREATE PROPERTY GRAPH` the manifest already describes, and nothing in the format moves. Borrowing
-another format's names instead is [a discarded alternative](/docs/design/discarded#the-corpus), with
-what would bring it back.
+**What would reverse it.** A host engine that runs SQL/PGQ where the reader runs. Then the attaching
+reader issues the `CREATE PROPERTY GRAPH` the information files already describe, and nothing in the
+format moves. The alternatives are [discarded](/docs/design/discarded#the-corpus), with what would
+bring each back.
 
 ## The width of an address, and what actually runs out first
 
-`dense_id` is declared `uint32`, which puts a hard ceiling of **4,294,967,295 vertices in one graph**
-— every type together, since the id space is shared — and the question the number invites is whether
-that ceiling is close.
+The executor's `dense_id` is a `u32`, and a reader's global id is cast to `UINTEGER`, which puts a
+hard ceiling of **4,294,967,295 vertices in one graph** — every type together, since the id space is
+a sum — and the question the number invites is whether that ceiling is close.
 
 **It is not close, and what is close is something else.** The whole write at ten million vertices
 took **404.4 s** on a 14-core machine with 48 GiB, so 2³² vertices is on the order of two days of
 wall clock — and the wasm writer, the one there is,
 [refuses long before that](/docs/design/three-hosts#what-the-wasm-writer-holds-and-how-it-says-no):
-its budget is 2 GiB, and a `shop` corpus of a million people and three million orders is over it. The
-width is not what stops a corpus. Past it the executor refuses by name, `run/too-large`, where it
+its budget is 2 GiB, and a `shop` graph of a million people and three million orders is over it. The
+width is not what stops a graph. Past it the executor refuses by name, `run/too-large`, where it
 numbers the ids.
 
 The cost of the other choice is on the column every read takes, and it is in memory more than on
-disk. Delta-encoded as the writer writes it, a 64-bit id costs 1–3% more on disk than a 32-bit one,
-but a reader that does not cast it back holds twice the Arrow: 32 MB instead of 16 MB for two million
-edges ([the corpus as Apache GraphAr](/docs/design/graphar) has the measurement). So `uint64` spends
-the most-read bytes in a reader's memory on range nothing can reach.
+disk. GraphAr's index is `int64`; delta-encoded as the writer writes it, it costs 1–3% more on disk
+than a 32-bit one, but a reader that does not cast it back holds twice the Arrow: 32 MB instead of
+16 MB for two million edges ([the corpus as Apache GraphAr](/docs/design/graphar) has the
+measurement). So the reader casts the global id to `UINTEGER`, and the Arrow stays at 16 MB.
 
-### The gapless `0..V−1`, and the price of keeping it
+### The contiguous `0..V−1`, and the price of keeping it
 
-The other half of the same commitment is gaplessness, and it is the convention a writer is most
+The other half of the same commitment is contiguity, and it is the convention a writer is most
 tempted to trade. The temptation is concrete: the writer assigns ids after holding every batch, and
 handing each partition a **preassigned range** removes that — at the price of holes wherever a
-partition does not fill its range.
+partition does not fill its range. A hole in a type's indices makes the reader's prefix sum
+non-injective, and `attachGraph` refuses such a graph as `invalid`.
 
 Both exits were priced on the ten-million corpus before any code was written, and neither is taken.
 
@@ -180,117 +188,82 @@ piece with every mapping in front of it — a check unavailable to any system wh
 independently, which is why the one federation system that shipped an equivalent removed it. And
 atomic renames, lock files, visibility protocols and transaction logs exist to protect a reader from
 a half-written state; with no such reader they are cost without benefit. The one ordering the writer
-keeps is the manifest last, and it is the only one a reader could observe.
+keeps is the graph document last, and it is the only one a reader could observe.
 
 ## The camera has a renderer, and it is not fossil's
 
 The door does not draw, which leaves one thing unstated: *something* has to put a million points on a
 screen, and fossil does not ship it. What draws is `@kanzo-tech/graph`, a WebGL canvas over
 cosmos.gl, and it is the only viewer. **The view owns the picture and every policy over it; fossil
-owns the bytes and the manifest that names them.**
+owns the bytes and the files that name them.**
 
-A `fossil/1` corpus is drawn whole, every vertex and every edge, at a place the view chooses
+A graph is drawn whole, every vertex and every edge, at a place the view chooses
 ([where x and y come from](/docs/design/position)). At two million edges the read was measured in
-DuckDB-WASM, one thread, a local file: `src` and `dst` to **16 MB of Arrow in 51–127 ms**. The tiled read it
-replaced is on [the tiled corpus](/docs/design/later/corpus-tiles), and what brings it back is a
-corpus that does not fit the tab, measured.
+DuckDB-WASM, one thread, a local file: `src` and `dst` to **16 MB of Arrow in 51–127 ms**. The tiled
+read it replaced is on [the tiled corpus](/docs/design/later/corpus-tiles), and what brings it back is
+a graph that does not fit the tab, measured.
 
 ## Conformance reads the bytes with an engine nobody here wrote
 
-The checker is `packages/corpus/guards/check.mjs`, and it needs `node` and the `duckdb` binary and
-nothing else: no crate of this repository, no package, no build. It reads `fossil.json`, opens every
-table with `read_parquet`, and asserts the conventions [/docs/format](/docs/format) states — ids
-unique and gapless over the union of vertex tables, every `src` and `dst` in the table its endpoint
-`references`, each table sorted by its key, each declared count equal to the rows. **An assertion
-there can only be satisfied by agreeing with the bytes**, never by agreeing with another
-implementation of the same arithmetic — the gap through which GraphAr's fourth implementation landed
-green and wrong.
+The files are checked by engines nobody in this repository wrote. `Kanzo-Tech/graphar`'s CI opens
+a graph fossil writes with GraphAr's own C++ and PySpark readers, and fossil's tests read the
+Parquet back with native DuckDB through the information files, and compute the mapping's triples with
+`rml::sql` over the same files (`crates/fossil-df/tests/mapping.rs`). **An assertion there can only be
+satisfied by agreeing with the bytes**, never by agreeing with another implementation of the same
+arithmetic — the gap through which GraphAr's fourth implementation landed green and wrong. What the
+tests cannot prove is what the engines cannot see: a graph with a `langString` property is not opened
+by GraphAr's C++ and Java readers at the revision read ([the datatypes](/docs/format/conventions/datatypes)).
 
-## A multi-valued property is a table of its own
+## A multi-valued property is a property of its owner
 
-A property a shape declares `*` or `+` is **a table of its own, a row per value** — `src`, the
-vertex's address, and the value — and the vertex row carries none of it. It is first normal form,
-and it is chosen because it is the only form the mapping standard reads: R2RML §10.2 makes one cell
-one term, and an array column is SQL feature S091, outside Core SQL 2008. A property table becomes
-[RDF](/docs/format/reading/rdf) through the same join a relation does, so `triples` has one shape
-for both.
+A property a shape declares `*` or `+` is **a property of the vertex type that owns it, with
+`cardinality: set`**, a list in the chunk; a language-tagged one is a list of `langString`. The vertex
+row carries it and nothing else is written. It is the form GraphAr has a slot for, and the mapping's
+logical source unnests the list once, so the standard reader still reads one cell as one term at the
+point where the term is made ([the mapping](/docs/format/reading/rdf#a-multi-valued-property)). The
+form it replaced, a table of its own with a row per value, and the other forms not taken, are on
+[what was discarded](/docs/design/discarded#the-corpus-as-apache-graphar), with what brings each back.
 
-It is also the form both sources already arrive in. A relational source spells "many" as repeated
-rows, which a vertex row can only hold by keeping one of them; RDF arrives as a list, which no term
-map reads. Both now unnest into the same table, by one rule shared with edges: a column whose *type* is
-a list is a row per value, whatever cardinality was declared. GraphAr, Kùzu and Neo4j keep a list
-in the vertex row instead; why not is on [what was discarded](/docs/design/discarded#the-corpus-as-rdf).
+## The graph does not say what it was derived from
 
-A property table's name is `<Type>_<property>`, which can be the name of a relation —
-`Person`'s `knows_Person` and `Person_knows_Person` are one name — and a reader attaches one view
-per name. The writer refuses that run as `corpus/duplicate-table` before a byte is written. What
-would reverse that is a naming scheme with no collision at all, which needs a separator no property
-name can hold; there is none in a format whose names are a shape's.
-
-## A table says what it was derived from
-
-Each table of `fossil.json` carries `derived_from`: the sources its rows were derived from, which is
-PROV-O's `prov:wasDerivedFrom` from the table to each source, with the `was` dropped as snake_case
-drops it. The writer does not recompute it: `crates/fossil-df/src/plan.rs, derived_from` walks the
-MIR DAG from the relation an emit reads back to every `Op::Source` it reaches — the same walk
-`plan_relation` already plans — and the union is taken where the mappings of one type, or of one
-relation, already merge. A property table's is the union over the mappings that write that property.
-`fossil_tables.derived_from` is the same list as a `VARCHAR[]`.
-
-**The value is the source's key as the program wrote it** — `@lake/people.csv`, or `users.csv` —
-which is `ProgramSource.key` and the key an inferred descriptor is registered under. It is never the
-location the key resolved to: a location carries a storage prefix the corpus must not leak, and
-repointing a connection must not change a corpus that read the same data.
-
-It is table-level and nothing finer. OpenLineage's run event states the same fact a level up, as a
-job's `inputs`; column-level lineage, its `ColumnLineageDatasetFacet`, is the next step and would
-need the `ColRef`s behind each property. Both are [discarded for now](/docs/design/discarded#the-corpus),
+A table's lineage — `derived_from`, PROV-O's `prov:wasDerivedFrom` — is not written. Nothing in
+kanzo-ui or keasy reads it, and the graph is a function of its program and its sources, which a host
+keeps. The executor's `Graph` still computes it from the MIR DAG
+(`crates/fossil-df/src/plan.rs, derived_from`), so the first reader of it has the value to hand.
+**What would reverse it.** A reader of lineage: then it is PROV-O when an RDF reader appears, or an
+OpenLineage `RunEvent` if the reader is a Marquez or a DataHub, generated by `describe` and never
+passed through; column-level lineage, the `ColumnLineageDatasetFacet`, is the next step and would need
+the `ColRef`s behind each property. Both are [discarded for now](/docs/design/discarded#the-corpus),
 with what brings each back.
 
-**What would reverse it.** A reader that needs to know *which column* came from where — an audit
-that must trace one property to one source column. Then the field grows a column-level shape beside
-the table's, and the table's stays.
+## What the reader's relations are named
 
-## The reader's relations are named as SQL already names them
-
-`fossil_columns` is spelled as `information_schema.columns` and DuckDB's `duckdb_columns()` spell
-the same facts: `ordinal_position`, `data_type`, and `is_nullable` as a `BOOLEAN`, as
-`duckdb_columns()` has it. `fossil_tables` counts rows as `record_count`, which is `fossil.json`'s
-own field and Iceberg's `data_file.record_count`. Each was a third, shorter spelling beside DuckDB's
-and the manifest's (`rows`, `ordinal`, `type`, `nullable`), and a SQL reader can now guess a column
-without opening [/docs/format](/docs/format). `kind` and `table_name` stay: `vertex`, `edge` and
-`property` are not `information_schema.tables.table_type` values, and `table_name` already is the
-standard's.
-
-`fossil_columns` also carries `datatype`, the literal datatype IRI the column's shape declared —
-`fossil.json`'s own field, R2RML's `rr:datatype` — because `data_type` is the file's and cannot say
-it: an `xsd:gYear` is an `int32` on disk, and a reader that draws a year as a year needs the IRI, not
-the integer. It is null where the shape declared none.
-
-`triples` names a term's parts as SPARQL 1.1 Query Results JSON names them (§3.2.2) — `type`,
-`value`, `datatype` and the language — under the `s_`, `p` and `o_` prefixes: `s_type`, `s_value`,
-`p`, `o_type`, `o_value`, `o_datatype`, `o_lang`. Those are the names an RDF reader already knows.
-The values stay `I` and `L`; SPARQL's `uri` and `literal` would rewrite every comparison a consumer
-makes for no fact it lacks.
+`attachGraph`'s relations are spelled as GraphAr spells the facts: `graphar_vertex_types`,
+`graphar_edge_types`, `graphar_properties`, `graphar_extra_info` and `graphar_chunks`, with
+`ordinal` and `count` as the information files order and size them
+([reading a graph without fossil](/docs/format/reading/without-fossil)). The seven-column triples
+relation `rml::sql` makes of the mapping names a term's parts as SPARQL 1.1 Query Results JSON names
+them (§3.2.2) — `type`, `value`, `datatype` and the language — under the `s_`, `p` and `o_`
+prefixes: `s_type`, `s_value`, `p`, `o_type`, `o_value`, `o_datatype`, `o_lang`. Those are the names
+an RDF reader already knows, and the values stay `I`, `B` and `L`; SPARQL's `uri` and `literal` would
+rewrite every comparison a consumer makes for no fact it lacks.
 
 **What would reverse it.** A consumer whose engine fixes other names for the same facts and cannot
-alias a column — then that consumer's names are the argument, and these move with it. Brevity does
-not: it is what the old names had, and it was the only thing.
+alias a column — then that consumer's names are the argument. Brevity does not.
 
-What the relations carry beyond these — the edge's `label` and its endpoint keys, a column's
-`term_type`, the annotations, and the counts the writer takes of what it wrote — is
-[the corpus's own facts](/docs/design/facts).
+What the relations carry beyond these — the counts the writer takes of what it wrote — is
+[the graph's own facts](/docs/design/facts).
 
-## What a corpus can carry, and where the format lives
+## What a graph can carry, and where the format lives
 
 Vertex and edge tables of values, and one graph: there are no quads and nowhere to put a graph
 name, which is why `grammar.bnf` has no `in g`. And **a cell in a columnar file carries a value, not
-a term with its trimmings**: a literal's language tag, and in RDF 1.2 its base direction, are gone at the pivot into
-columns unless the layout carries them explicitly. Base direction exists precisely because the first
-strong character of a string does **not** determine how it should be laid out, so a value returned
-without it is one the host renders backwards with nothing in the cell to say so.
+a term with its trimmings**: a literal's language tag, and in RDF 1.2 its base direction, are gone at
+the pivot into columns unless the layout carries them explicitly. Base direction exists precisely
+because the first strong character of a string does **not** determine how it should be laid out, so a
+value returned without it is one the host renders backwards with nothing in the cell to say so. The
+tag travels as `langString`; the base direction is not written.
 
-The format itself — the conventions and the executable guards — is documented in `/docs/format` and
-executed by `packages/corpus/guards/`, for somebody implementing a reader and requiring no knowledge
-of the language. **The language is one product and the corpus is another, and the seam is the
-artifact.**
+The format itself — the conventions and what a round trip preserves — is documented in
+[/docs/format](/docs/format), for somebody implementing a reader and requiring no knowledge of the
+language. **The language is one product and the graph is another, and the seam is the artifact.**

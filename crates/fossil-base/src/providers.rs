@@ -19,8 +19,8 @@
 //! `io.shex` is *input* by the bytes and *output* by the meaning: a file is
 //! read, and what it describes is the output contract. That is why it never fit
 //! an axis with one direction in it. The bottom-right cell already exists in the
-//! artefact and not in the language — `fossil.json` is a written type
-//! document and nothing names it.
+//! artefact and not in the language — `fossil.graph.yml` and `mapping.ttl` are
+//! written documents and nothing names them.
 //!
 //! **The write half is deliberately not modelled.** `grammar.bnf` says in as
 //! many words that inventing destination syntax before it is decided is how v0.1

@@ -113,7 +113,7 @@ subject it is. Six are modules of that crate now:
 | `fossil_base::sources` | the columns a host found for a source are the value of an input, so the type is the input's; the trait beside it, its schema and its stub had no caller |
 | `fossil_hir::lineage` | what a program reads is a question about its def map, asked by every host |
 | `fossil_hir::shex`, `fossil_hir::shacl` | a shape document becomes a type, and the types are here — the decoders and the `providers` rows that install them; what the executor was handed beside them, an enum whose one live method returned a `GraphSchema`, is a `GraphSchema` |
-| `fossil_df::corpus` | the corpus format is the writer's: nothing else builds a manifest |
+| `fossil_df::layout`, `fossil_df::describe` | the graph's layout and its mapping are the writer's: nothing else lays out a GraphAr graph, and neither module exports anything |
 
 One is still a crate of its own:
 
@@ -135,15 +135,22 @@ ordered map so that iterating them is the same on every run. The module editors 
 grew from 5,459,661 to 6,758,681 bytes (+1,299,020, +23.8%; 1,555,565 to 1,929,451 gzipped, +24.0%), and the
 executor's, `fossil_df_wasm_bg.wasm`, from 28,840,262 to 29,564,170 (+2.5%; 6,659,933 to 6,864,600 gzipped). Both are
 `wasm-bindgen --target web` output of `cargo build --release` and `--profile wasm-release`, before `wasm-opt`, on 2026-10-14.
-Of the editor's growth, 746,732 bytes are the graph (`rudof_rdf`'s in-memory store parses every RDF syntax it knows,
-and fossil asks for Turtle) and 552,288 are `shacl`'s parser, measured by building the decode with the parser stubbed out. 
+Of the editor's growth, 746,732 bytes were the graph (`rudof_rdf`'s in-memory store parsed every RDF syntax it knows,
+while fossil asks for Turtle) and 552,288 are `shacl`'s parser, measured by building the decode with the parser stubbed out.
+
+**`rudof_rdf` now has one cargo feature per syntax** (the fork's PR #37), and fossil asks for `turtle` alone. The same two
+modules at the fork's `889cb741`, built the same way (`wasm-bindgen --target web`, `cargo build --release` and
+`--profile wasm-release`, before `wasm-opt`, on 2026-10-15), are 6,218,133 bytes (1,775,441 gzipped) for the editor's and
+29,546,971 (6,859,811 gzipped) for the executor's: the editor's module is 540,548 bytes (8.0%) smaller than at the
+measurement above, with the graph's own growth still +758,472 (+13.9%) over the module before the fork, and the executor's
+is 17,199 bytes smaller than before while carrying the GraphAr writer, `graphar-parquet` and `rml`. 
 
 **What would reverse it:** a growth of that module that shows in first paint and that the fork
-cannot trim (a feature per RDF syntax on its store, say), or its additions not reaching an upstream
+cannot trim (a parser the fork's features cannot drop, say), or its additions not reaching an upstream
 release; the decode is then fossil's again, over a Turtle reader.
 
 **What would reverse it:** a module whose consumers are not the crate it sits in — a second reader
-of the corpus format in Rust, say, which would want `fossil_df::corpus` without DataFusion.
+of the graph layout in Rust, say, which would want `fossil_df::layout` without DataFusion.
 
 ## Held by
 

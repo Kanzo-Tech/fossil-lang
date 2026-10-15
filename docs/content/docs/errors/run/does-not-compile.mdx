@@ -25,7 +25,7 @@ if (isFossilError(e, 'run/does-not-compile')) {
 
 When lowering cannot resolve something the graph needs — a source binding that names nothing, a
 mapping with no usable `@subject` — the lowered graph is marked poisoned and carries no operations.
-Executing it would either panic or quietly produce an empty corpus, and neither tells the author
+Executing it would either panic or quietly produce an empty graph, and neither tells the author
 what is wrong. So the executor refuses a poisoned graph, and answers with the diagnostics the
 compiler already recorded: the same mistakes, with the same codes, that `check` and the editor show.
 A run used to answer a sentence telling the host to see diagnostics it had no way to reach; carrying

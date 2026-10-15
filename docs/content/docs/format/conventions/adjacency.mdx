@@ -1,64 +1,119 @@
 ---
 title: Adjacency
-description: A relation is one table of src and dst, global ids, sorted by (src, dst) — the CSR a graph algorithm wants, read as it lies. There is no second copy sorted by destination.
+description: A relation is one ordered_by_source adjacency list of per-type indices, with its offset table — the CSR a graph algorithm wants, read as it lies. There is no second copy sorted by destination.
 ---
 
-Every relation is **one table**: `edge/<Src>_<label>_<Dst>.parquet`, whose columns are `src` and
-`dst` — both `uint32`, both [global `dense_id`s](/docs/format/conventions/identity) — and nothing
-else, because the language has no way to put a property on an edge; the manifest's `properties`
-lists those two. The rows are **sorted by `(src, dst)`**.
+Every relation is **one edge type** with **one adjacency list**, `ordered_by_source`, and no
+property group — the language has no way to put a property on an edge
+([edge properties](/docs/design/later/edge-properties)). Its information file is
+`<Src>_<label>_<Dst>.edge.yml`:
+
+```yaml
+src_type: Order
+edge_type: placedBy
+dst_type: Person
+chunk_size: 75
+src_chunk_size: 75
+dst_chunk_size: 300
+directed: true
+prefix: edge/Order_placedBy_Person/
+adj_lists:
+  - ordered: true
+    aligned_by: src
+    prefix: ordered_by_source/
+    file_type: parquet
+version: gar/v1
+```
+
+and its files, for 75 orders each placed by one of 300 people, are:
+
+```
+edge/Order_placedBy_Person/ordered_by_source/adj_list/part0/chunk0   _graphArSrcIndex, _graphArDstIndex
+edge/Order_placedBy_Person/ordered_by_source/offset/chunk0           _graphArOffset, 75 + 1 rows
+edge/Order_placedBy_Person/ordered_by_source/edge_count0             one int64
+edge/Order_placedBy_Person/ordered_by_source/vertex_count            one int64, the Order count
+```
+
+The adjacency list has two columns, both `int64`, both **indices within their types** — the source
+column indexes the `src_type`'s vertices and the destination column the `dst_type`'s
+([identity](/docs/format/conventions/identity)). Edges are not renumbered against one id space; a
+reader that wants one adds `first(src_type)` and `first(dst_type)` to them.
+
+**Every table is one chunk**, so the list is one part of one chunk, and `src_chunk_size` and
+`dst_chunk_size` are the `chunk_size` of the two vertex types.
 
 ## Why the order is worth a convention
 
-A sorted edge table is not merely convenient to scan — it **is** the CSR structure a graph algorithm
-wants, offsets and values, already laid out:
+The specification: "when the edge type is ordered_by_source, the sorted adjList table together with
+the offset table can be used as CSR, supporting the fast access of the outgoing edges for a given
+vertex". The offset table "is used to record the starting point of the edges for each vertex", "the
+partition of the offset table should be in alignment with the partition of the corresponding vertex
+table", and "the first row of each offset chunk is always 0". Here is that, over the `knows`
+relation of `conformance/sample` in `Kanzo-Tech/graphar` (seven people, eight edges), read through
+`attachGraph` and shown as one chunk would hold it:
 
 ```
-edge/Person_knows_Person.parquet, sorted by (src, dst)     the CSR a reader already has
- row      src      dst                                      offsets[41000] = 0  first row of 41000
-   0    41000     4118  ┐                                   offsets[41001] = 3  one past its last
-   1    41000     8300  │ 41000, degree 3
-   2    41000   912004  ┘                                   offsets[41002] = 3  41001 has no out-edges
-   3    41002       77  ┐ 41002, degree 2                   offsets[41003] = 5
-   4    41002    66051  ┘
-   5    41003   130998  ] 41003, degree 1                   offsets[41004] = 6
-                              targets = the dst column, read as it lies
+adjacency list, by (_graphArSrcIndex, _graphArDstIndex)     offset table, 7 + 1 rows
+ row  src  dst                                              offset[0] = 0   first row of source 0
+   0    0    1  ┐                                            offset[1] = 3   one past its last
+   1    0    2  │ source 0, degree 3                         offset[2] = 5
+   2    0    6  ┘                                            offset[3] = 6
+   3    1    0  ┐ source 1, degree 2                         offset[4] = 6   sources 3, 4, 5
+   4    1    2  ┘                                            offset[5] = 6   have no out-edges
+   5    2    6  ] source 2, degree 1                         offset[6] = 6
+   6    6    0  ┐ source 6, degree 2                         offset[7] = 8
+   7    6    5  ┘                                           targets = the destination column, as it lies
 ```
 
-The offsets are the run boundaries and the values are the `dst` column: no degree-counting pre-pass,
-no scatter, no intermediate bag of pairs. And a file that claims the order and does not have it does
-not fail — it builds a different graph, silently. **Wrong answers rather than slow ones**, which is
-what makes it worth a convention. Guard: `sorted-by-key` — and every guard named on this page is
-specified in full, with what it cannot prove, in [the guard index](/docs/format#the-guards).
+The offsets are the run boundaries and the values are the destination column: no degree-counting
+pre-pass, no scatter, no intermediate bag of pairs. And a file that claims the order and does not
+have it does not fail — it builds a different graph, silently. **Wrong answers rather than slow
+ones**, which is what makes it worth a convention.
 
-Because `src` ascends, a filter on a range of `src` — the out-edges of one vertex type, which is one
-range of ids — prunes row groups off the footer. A range of `dst` does not: the destination order
-inside a run is unrelated to it, so a filter on `dst` reads the table.
+GraphAr orders a list by its aligned end. **Within a source, fossil's writer orders by
+destination**, so the list is sorted by `(source, destination)`; that second key is fossil's
+convention and not GraphAr's. Because the source ascends, a filter on a range of sources — the
+out-edges of one vertex type, which is one range of indices — prunes row groups off the footer. A
+range of destinations does not: the destination order inside a run is unrelated to it, so a filter
+on the destination reads the table.
+
+**The offset table is as long as its vertex type, plus one.** The specification does not give the
+length; GraphAr's testing data (`ldbc_sample/parquet`) is written so, and GraphAr's C++ and Spark
+writers pad the last chunk to `chunk_size + 1` rows instead. Their readers index the table by
+vertex and read either.
 
 ## One copy, one orientation
 
-There is **no second copy sorted by `dst`**. The in-edges of a vertex are `WHERE dst = v` over the
-same table, which a reader answers by reading `dst`, or by building the CSC in memory from the
-columns it already read — the same two columns with their roles swapped. A corpus that stored the
-relation twice would carry it twice, and two copies of one relation can disagree about their rows
-while agreeing about their counts.
+There is **no second adjacency list sorted by destination**, though GraphAr allows one: its
+information files may name several, and the specification notes that two copies make a group of
+edges accessible in both ways. The in-edges of a vertex are `WHERE _graphArDstIndex = v` over the
+same table, which a reader answers by reading the destination column, or by building the CSC in
+memory from the columns it already read — the same two columns with their roles swapped. A graph
+that stored the relation twice would carry it twice, and two copies of one relation can disagree
+about their rows while agreeing about their counts.
+
+`attachGraph` reads an edge type from its first adjacency list, since any one holds every edge.
 
 **Both directions are a relation's answer.** "The papers by this author" is an in-edge from the
-author, and following only `src` is a wrong answer rather than a partial one.
+author, and following only the source is a wrong answer rather than a partial one.
 
 ## Every endpoint is a vertex
 
-Every `src` is a `dense_id` of the vertex table `source.references` names, and every `dst` one of
-the table `destination.references` names. The corruption a renumbering introduces is exactly the
-one where the counts match and the graph is wrong, and a count does not find it. Guard:
-`no-dangling-endpoint`.
+Every source index is below the `vertex_count` of the `src_type`, and every destination below the
+`vertex_count` of the `dst_type`. The writer refuses an edge whose aligned index is not below the
+count it is handed. The corruption a rewrite introduces is exactly the one where the counts match
+and the graph is wrong, and a count does not find it; a reader that joins an edge to its
+endpoints sees a dangling one as a row with no vertex.
 
-The manifest's `record_count` is the relation's row count, and a table whose rows fall short of it is
-a corpus missing edges rather than a sparse graph. Guard: `declared-count`.
+The `edge_count` file is the part's row count, and the `count` of `graphar_edge_types` a reader gets is their
+sum; a list whose rows fall short of it is a graph missing edges rather than a sparse one.
+
+Two edges between the same pair are **parallel edges**, and a relation's pairs are distinct: the
+writer holds them to it ([the round trip](/docs/format/round-trip), A5).
 
 ## What it costs to read one whole
 
-A relation read whole is two `uint32` columns. Over a million vertices and two million edges, `src`
-and `dst` are **16 MB of Arrow, read in 51–127 ms** by DuckDB-WASM in Node on one thread from a local
-file; over 144,784 vertices in twelve types and 426,781 edges in fourteen relations, **3.4 MB in
-24–38 ms**.
+A relation read whole is two columns. Over a million vertices and two million edges, the source and
+destination are **16 MB of Arrow once cast to `uint32`, read in 152–201 ms** by DuckDB-WASM in Node
+on one thread from a local file (the table on
+[identity](/docs/format/conventions/identity#what-the-arithmetic-costs) has the method).

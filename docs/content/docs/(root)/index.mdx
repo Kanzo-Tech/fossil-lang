@@ -4,9 +4,9 @@ description: A statically typed mapping language that turns tables and RDF into 
 ---
 
 fossil is a **mapping language**: you declare how tabular and RDF sources become a graph, and it
-type checks that declaration against the shapes the output has to satisfy. It is also a **corpus
-compiler**: it runs the mapping and writes a graph anyone can read by byte range, with no server in
-the path.
+type checks that declaration against the shapes the output has to satisfy. It is also a **graph
+compiler**: it runs the mapping and writes an Apache GraphAr graph, and the RML mapping that says what
+its tables mean as RDF, which anyone can read by byte range with no server in the path.
 
 This is a whole program. Three rows of CSV go in and three `Person` nodes come out.
 
@@ -17,8 +17,8 @@ shape document declares. Those two meeting is the type check — so `User.nmae` 
 editor rather than a null in the graph.
 
 Run it with `@fossil-lang/executor` — WebAssembly, in a browser tab or in Node — and what comes out
-is the corpus: a `fossil.json` that names everything, and `vertex/Person.parquet` with three `Person`
-nodes in it, one per row.
+is the graph: a `fossil.graph.yml` that names everything, a Parquet chunk with three `Person`
+nodes in it, one per row, and `mapping.ttl`, which says what they mean as RDF.
 
 ## Start here
 
@@ -37,5 +37,6 @@ and an edge — a section at a time.
 ## The rest of the site
 
 [What fossil is](/docs/design) is the thesis and the argument behind it: types arriving from the
-data and from the shape document, and made to meet. [What a corpus is](/docs/format) is the format
-on disk — plain Parquet, read by code that was never compiled against the code that wrote it.
+data and from the shape document, and made to meet. [What a graph is](/docs/format) is the format
+on disk — Apache GraphAr's YAML and plain Parquet, read by code that was never compiled against the
+code that wrote it.

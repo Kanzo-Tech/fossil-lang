@@ -1,0 +1,40 @@
+---
+title: A value GraphAr cannot hold
+description: "`write/unrepresentable` — a value that the graph's property types cannot hold without changing it: an unsigned 64-bit integer above the largest signed one, a timestamp finer than a millisecond, or a column of a type with no GraphAr type."
+---
+
+The writer stores each column as the Apache GraphAr type that holds its values, and one value does not
+fit:
+
+```text
+write/unrepresentable
+  × `Reading.recorded` holds `2026-10-14T12:00:00.000000001`, of type Timestamp(ns), which GraphAr cannot hold
+```
+
+`data.property` is `<Type>.<property>`, `data.datatype` the Arrow type of the column as the run
+produced it, and `data.value` the first value that does not fit, or empty when no value of the type
+does.
+
+## Why fossil refuses it
+
+GraphAr's types are `bool`, `int32`, `int64`, `float`, `double`, `string`, `date` and `timestamp`
+(milliseconds since the Unix epoch), and a list of them
+([the data types](/docs/format/conventions/datatypes)). The writer widens what widens without loss —
+`int8` to `int32`, `uint32` to `int64` — and writes `time`, `binary` and `decimal` as the text they
+are. Two things it cannot do without changing the value:
+
+- **An unsigned 64-bit integer above `i64::MAX`** has no signed 64-bit twin. GraphAr has no unsigned
+  type, and a wrapped value is a different number.
+- **A timestamp with a sub-millisecond part**: GraphAr's `timestamp` is milliseconds, and a string would
+  lose the type every other reader sees. Rounding it would break the injectivity of the value-to-term
+  map that the round trip relies on (A3).
+
+A column of a type with no GraphAr type at all — a nested one, say — is refused the same way, with no
+value.
+
+## How to repair it
+
+- **Cast in the program**: to a smaller integer, or truncate the timestamp to the millisecond when the
+  rest was never data.
+- **Write the value as text** (`str.concat`, a `parse.*`) when the exact value matters more than its
+  type.

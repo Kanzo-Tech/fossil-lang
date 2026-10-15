@@ -8,7 +8,7 @@
 //! relations (Arrow tables); the *graph* is an interpretation that declares:
 //! which relations are node types, what identifies a node (its **key** — here,
 //! the subject IRI), and which predicates **reference** another node type (the
-//! edges). RDF, the `fossil/1` corpus (`dense_id`, `src`/`dst`), edge-lists,
+//! edges). RDF, the `GraphAr` graph (`_graphArVertexIndex`, `_graphArSrcIndex`/`_graphArDstIndex`), edge-lists,
 //! traversal, DCAT are
 //! then all **views or materializers** over this single schema + the relations.
 //!
@@ -36,7 +36,7 @@
 //!
 //! Every node's key is its **subject IRI** (uniform across fossil). An edge
 //! `source → destination` references node types by `label`; the relational plan
-//! computes the actual IRI-valued columns, and the corpus writer resolves
+//! computes the actual IRI-valued columns, and the graph writer resolves
 //! those IRIs to dense ids. The schema only states the shape.
 //!
 //! # Two contracts, one crate
@@ -97,7 +97,7 @@ pub struct Property {
     /// Column / predicate local name, e.g. `"name"`.
     pub name: String,
     /// The canonical (format-neutral) datatype. A materializer derives its own
-    /// spelling from this (`fossil.json` `int64`, xsd `…#integer`, …).
+    /// spelling from this (`GraphAr` `int64`, xsd `…#integer`, …).
     pub datatype: Primitive,
     /// The full RDF predicate IRI (e.g. `https://example.org/name`) — RDF-border
     /// metadata. `None` for a non-RDF graph.
@@ -175,7 +175,7 @@ impl Term {
 /// the schema, the checker and the descriptors all speak it, and a lattice that
 /// crosses a crate boundary as a string is a lattice with no single definition.
 ///
-/// Materializers map it to their own vocabulary (`fossil.json` `string/int64/double/…`,
+/// Materializers map it to their own vocabulary (`GraphAr` `string/int64/double/…`,
 /// `DataFusion` scalars, `DuckDB` column types) next to the materializer; only the
 /// xsd direction lives here, because xsd is the RDF border every side reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
@@ -301,16 +301,16 @@ impl Primitive {
 /// Concepts §3.3) — what [`Primitive::LangString`] is written as.
 pub const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
 
-/// `rdfs:label` — the one predicate a label has in a corpus, whichever document
+/// `rdfs:label` — the one predicate a label has in a graph, whichever document
 /// gave it (`/docs/design/labels`).
 pub const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
 
-/// `rdfs:comment` — the one predicate a description has in a corpus.
+/// `rdfs:comment` — the one predicate a description has in a graph.
 pub const RDFS_COMMENT: &str = "http://www.w3.org/2000/01/rdf-schema#comment";
 
 /// A `ShEx` 2.1 `Annotation` (§5.9): a predicate and an RDF object, about a
 /// type, a field or a relation — never about the data. `ShExJ`'s shape, with one
-/// word changed: a literal's datatype IRI is `datatype`, the word a corpus
+/// word changed: a literal's datatype IRI is `datatype`, the word a graph
 /// column already uses for it, where `ShExJ` writes `type`
 /// (`/docs/design/labels`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]

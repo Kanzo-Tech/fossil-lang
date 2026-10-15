@@ -1,6 +1,6 @@
 /**
  * A run, end to end: read the documents the program names, run the mapping on DataFusion-WASM,
- * write the `fossil/1` corpus. One door, with two independent axes and a limit
+ * write the GraphAr graph and its `mapping.ttl`. One door, with two independent axes and a limit
  * (`/docs/design/three-hosts`):
  *
  * - **Reads.** `host` reads every byte through `object_store` stores built from the credentials
@@ -32,8 +32,8 @@ import { drive, type Request } from './protocol.js';
 export type { FilesRun, HostRun, InMemoryRun, RunOptions } from './here.js';
 
 /**
- * Run a fossil mapping and write its corpus: the report — where it wrote, what the edge joins
- * dropped — and, into memory, the corpus itself. Boots the executor module itself.
+ * Run a fossil mapping and write its graph: the report — where it wrote, what the edge joins
+ * dropped — and, into memory, the graph's files. Boots the executor module itself.
  *
  * Rejects with a `FossilError`: `api/invalid-argument` for `{ files, into: { job } }` or a `limit`
  * that is not a whole number; `document/unread` for a document that could not be read;
@@ -41,7 +41,7 @@ export type { FilesRun, HostRun, InMemoryRun, RunOptions } from './here.js';
  * executes, so nothing has been written; `module/unreachable` for an executor — its module, or its
  * worker — that could not be loaded; `internal/bug` for a failure fossil did not raise — a panic, a
  * worker that died — the original kept as its cause. A stopped run rejects with the signal's reason,
- * and since `fossil.json` is written last it leaves no corpus; in a worker, the worker is ended at
+ * and since `fossil.graph.yml` is written last it leaves no graph; in a worker, the worker is ended at
  * once.
  */
 export function run(program: string, options: HostRun & { into: { job: string } }): Promise<RunReport>;

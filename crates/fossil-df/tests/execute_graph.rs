@@ -92,7 +92,7 @@ async fn execute_graph_resolves_edges_to_dense_ids() {
 }
 
 #[tokio::test]
-async fn the_write_emits_one_manifest_over_one_table_per_type_and_relation() {
+async fn the_write_emits_one_information_file_per_type_and_relation() {
     let (db, file) =
         support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
 
@@ -105,58 +105,76 @@ async fn the_write_emits_one_manifest_over_one_table_per_type_and_relation() {
     assert_eq!(
         files.keys().map(String::as_str).collect::<Vec<_>>(),
         [
-            "edge/Order_placedBy_Person.parquet",
-            "fossil.json",
-            "vertex/Order.parquet",
-            "vertex/Person.parquet",
+            "Order.vertex.yml",
+            "Order_placedBy_Person.edge.yml",
+            "Person.vertex.yml",
+            "edge/Order_placedBy_Person/ordered_by_source/adj_list/part0/chunk0",
+            "edge/Order_placedBy_Person/ordered_by_source/edge_count0",
+            "edge/Order_placedBy_Person/ordered_by_source/offset/chunk0",
+            "edge/Order_placedBy_Person/ordered_by_source/vertex_count",
+            "fossil.graph.yml",
+            "mapping.ttl",
+            "vertex/Order/subject_total/chunk0",
+            "vertex/Order/vertex_count",
+            "vertex/Person/subject_name/chunk0",
+            "vertex/Person/vertex_count",
         ],
     );
 
-    // The document on disk IS the value the write answered.
-    let on_disk: fossil_df::corpus::manifest::Manifest =
-        serde_json::from_slice(&files["fossil.json"]).expect("fossil.json parses");
-    assert_eq!(on_disk, written.manifest);
-    let text = String::from_utf8(files["fossil.json"].clone()).expect("UTF-8");
-    assert!(text.contains("\"format\": \"fossil/1\""), "{text}");
+    // The documents on disk ARE the value the write answered.
+    let read = |path: &str| files.get(path).cloned();
+    let on_disk = support::graph(&read);
+    assert_eq!(on_disk, written.info);
+    assert_eq!(on_disk.name, "fossil");
+    assert_eq!(on_disk.prefix, None, "the data is under the document");
+    assert!(on_disk.extra_info.is_empty());
+    assert_eq!(on_disk.version.to_string(), "gar/v1");
 
-    let m = &written.manifest;
-    let names: Vec<&str> = m.vertex_tables.iter().map(|v| v.name.as_str()).collect();
+    let names: Vec<&str> = on_disk.vertices.iter().map(|v| v.r#type.as_str()).collect();
     assert_eq!(names, ["Person", "Order"], "the schema's order");
-    let person = &m.vertex_tables[0];
-    assert_eq!(person.path, "vertex/Person.parquet");
-    assert_eq!(person.iri.as_deref(), Some("https://example.org/Person"));
-    assert_eq!(
-        (person.key.as_str(), person.identity.as_str()),
-        ("dense_id", "subject")
-    );
-    assert_eq!(person.record_count, 3);
-    assert_eq!(m.vertex_tables[1].record_count, 4);
-    let columns: Vec<&str> = person.properties.iter().map(|p| p.name.as_str()).collect();
-    assert_eq!(&columns[..2], ["dense_id", "subject"]);
-    assert!(columns.contains(&"name"), "{columns:?}");
+    let person = &on_disk.vertices[0];
+    assert_eq!(person.prefix, "vertex/Person/");
+    assert_eq!(person.property_groups.len(), 1, "one group per type");
+    let columns: Vec<&str> = person.property_groups[0]
+        .properties
+        .iter()
+        .map(|p| p.name.as_str())
+        .collect();
+    assert_eq!(columns, ["subject", "name"]);
+    assert!(person.property_groups[0].properties[0].is_primary);
+    assert!(!person.property_groups[0].properties[0].is_nullable);
+    assert_eq!(support::vertex_count(&read, &on_disk, "Person"), 3);
+    assert_eq!(support::vertex_count(&read, &on_disk, "Order"), 4);
+    assert_eq!(person.chunk_size, 3, "one chunk");
 
-    let edge = &m.edge_tables[0];
-    assert_eq!(edge.name, "Order_placedBy_Person");
-    assert_eq!(edge.label, "placedBy");
-    assert_eq!(edge.path, "edge/Order_placedBy_Person.parquet");
-    assert_eq!(edge.iri.as_deref(), Some("https://example.org/placedBy"));
-    assert_eq!(
-        (edge.source.key.as_str(), edge.source.references.as_str()),
-        ("src", "Order")
-    );
+    let edge = &on_disk.edges[0];
+    assert_eq!(edge.triple(), "Order_placedBy_Person");
     assert_eq!(
         (
-            edge.destination.key.as_str(),
-            edge.destination.references.as_str()
+            edge.src_type.as_str(),
+            edge.edge_type.as_str(),
+            edge.dst_type.as_str()
         ),
-        ("dst", "Person")
+        ("Order", "placedBy", "Person")
     );
-    assert_eq!(edge.record_count, 4);
+    assert!(edge.directed);
+    assert!(edge.property_groups.is_empty(), "an edge has no property");
+    assert_eq!(edge.adj_lists.len(), 1);
+    assert_eq!(
+        edge.adj_lists[0].r#type,
+        graphar_info::AdjListType::OrderedBySource
+    );
+    assert_eq!(
+        (edge.src_chunk_size, edge.dst_chunk_size),
+        (4, 3),
+        "the chunk sizes of the end types"
+    );
+    assert_eq!(support::edge_count(&read, &on_disk, &edge.triple()), 4);
 
     // Every `user_id` in `orders.csv` is a real person, so nothing dangled —
     // and `0` is stated rather than omitted.
     assert_eq!(written.dropped.len(), 1);
-    assert_eq!(written.dropped[0].table, edge.name);
+    assert_eq!(written.dropped[0].table, edge.triple());
     assert_eq!(written.dropped[0].dropped, 0);
 }
 

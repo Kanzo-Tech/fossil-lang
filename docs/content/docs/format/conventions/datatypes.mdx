@@ -1,0 +1,154 @@
+---
+title: Data types
+description: Which GraphAr type each value is written as, what is refused because GraphAr cannot hold it, how a multi-valued property is a set, and the one type beyond GraphAr's built-ins, langString — which GraphAr's C++ and Java readers do not parse.
+---
+
+GraphAr's built-in property types are `bool`, `int32`, `int64`, `float`, `double`, `string`, `date`
+(days since the Unix epoch), `timestamp` (milliseconds since the Unix epoch), `time` (milliseconds
+since midnight) and a list of one of them; "GraphAr also supports the user-defined data types,
+which can be used to represent complex data structures, such as the struct, map, and union types"
+(the format specification, "Property Data Types"). A fossil graph writes a property as one of
+those, and the mapping carries the rest.
+
+## What each value is written as
+
+| the value is | the property is | and |
+| --- | --- | --- |
+| `bool`, `float`, `double`, `string`, `date` | `bool`, `float`, `double`, `string`, `date` | |
+| `int8`, `int16`, `int32`, `uint8`, `uint16` | `int32` | widened without loss |
+| `int64`, `uint32` | `int64` | widened without loss |
+| `uint64` | `int64` | a value above `i64::MAX` is refused as `write/unrepresentable` |
+| `timestamp` | `timestamp`, in milliseconds | a value with a sub-millisecond part is refused as `write/unrepresentable` |
+| `time` | `string`, ISO 8601 | `xsd:time` in the mapping |
+| `binary` | `string`, hexadecimal | `xsd:hexBinary` in the mapping |
+| `decimal` | `string`, the decimal's text | `xsd:decimal` in the mapping |
+
+**`time` is written as a string** because neither of GraphAr's reference readers names the type,
+and a graph with no tagged property then stays within what both parse. **A timestamp finer than a
+millisecond is refused** and not written as a string, because GraphAr's `timestamp` is
+milliseconds, and a string would lose the type every other reader sees. [`write/unrepresentable`](/docs/errors/write/unrepresentable) is
+the code for a value GraphAr's types cannot hold, and a column of a type GraphAr has no word for.
+
+**A `decimal` is written as its text** and stated as `xsd:decimal` in the mapping, so the precision
+and the scale a value was written with survive and no reader needs a type GraphAr does not have.
+*Design question.* A consumer that must compare decimals in the files, without the mapping, would need
+GraphAr to name a decimal type; the first one settles it.
+
+**A datatype beyond these lives only in the mapping.** A shape that says `xsd:gYear` over an `int32`
+column makes an `int32` property, and `rml:datatype xsd:gYear` on its object map; the YAML carries
+nothing of it. A reader that wants the year axis reads it from [the mapping](/docs/format/reading/rdf),
+and a reader that does not, reads a number. A copy of the datatype in the Parquet schema was not
+taken: it is a second document that can disagree with the first.
+
+**Nullability is written for every property that is not the primary key**, because GraphAr's default
+for `is_nullable` is true and a fossil property's is false. A non-nullable property that holds a
+null is refused by the writer.
+
+## A multi-valued property is a set
+
+A multi-valued property is a property of the vertex type that owns it, in the same property group,
+with `cardinality: set`. Its Parquet column is a `LIST` of the element: Parquet's three-level `LIST`
+annotation, Arrow's `List<…>`, a DuckDB `T[]`. GraphAr's C++ writer wraps any property whose
+cardinality is not single in a list, so `data_type: string` with `cardinality: set` is one level of
+list, not two.
+
+```yaml
+      - name: nickname
+        data_type: string
+        cardinality: set
+```
+
+**A set, and not a list.** An RDF graph is a set of triples (RDF 1.1 Concepts §3), so several
+objects of one predicate are an unordered collection without duplicates. GraphAr's libraries have
+`single`, `list` and `set`, and the Java source documents `set` as "no duplicates"; the
+specification page does not mention cardinality. **`list` is not written**: it declares an order
+and a multiplicity that the RDF image cannot hold, so the mapping would silently discard what the
+files promise.
+
+**The writer refuses duplicates**, as [`write/duplicate-value`](/docs/errors/write/duplicate-value). Two elements of a set are duplicates
+when they are the same RDF term: for a tagged value, the same lexical form with the same tag after
+the tag is lower-cased. A NULL element is refused the same way. The mapping unnests the column once
+([the mapping](/docs/format/reading/rdf#a-multi-valued-property)).
+
+**An empty set, a NULL set and an absent column read back alike.** Each makes no triple, and a query
+that unnests the column returns no row for any of them.
+
+*Design question.* If order is data for some consumer, it is carried by an element that holds its
+index or by an `rdf:List`, which RML-Core has no construct for. That is a different layout and not a
+flag on this one; the first consumer for which order is data settles it.
+
+## A tagged value is `langString`
+
+A language-tagged value — an `rdf:langString`, a lexical form and a tag — is the user-defined type
+`langString`, a struct of two strings: Arrow `Struct<value: Utf8, lang: Utf8>`. GraphAr names a
+user-defined type and defines no storage for it, so the shape is fossil's. The version line of
+every document that uses it declares the name, which is how GraphAr says a document may:
+
+```yaml
+property_groups:
+  - prefix: subject_name_nickname/
+    file_type: parquet
+    properties:
+      - name: subject
+        data_type: string
+        is_primary: true
+      - name: nickname
+        data_type: langString
+        cardinality: set
+version: gar/v1 (langString)
+```
+
+A tagged multi-valued property, as here, is a column of `LIST<STRUCT<value: STRING, lang: STRING>>`.
+A tagged single-valued property is `langString` with no cardinality, a bare struct. **A tag is read
+from the data per row**, which is why the mapping is RML-Core and not R2RML, whose language tag is a
+constant. The writer lower-cases the tag it writes, and refuses a tag that is malformed, empty or
+NULL as [`write/invalid-language-tag`](/docs/errors/write/invalid-language-tag): a query cannot
+raise RML-Core's data error, so an element with no usable tag would make no triple, and the writer
+is the only place that can refuse it. RDF 1.2's base direction (`rdf:dirLangString`) cannot be
+carried by a pair, and is not written.
+
+`@kanzo-tech/graphar-duckdb` reads the column as it is, a `STRUCT("value" VARCHAR, lang VARCHAR)[]`,
+and takes the DuckDB type only to give a view with no rows a type: its `userTypes` option, `{
+langString: 'STRUCT(value VARCHAR, lang VARCHAR)' }`. `conformance/user_defined` in
+`Kanzo-Tech/graphar` is such a graph: one `concept` type whose `labels` is a `set` of `langString`,
+with a vertex that holds two labels, one that holds an empty set and one that holds NULL:
+
+```
+SELECT id, n.value AS value, n.lang AS lang FROM (SELECT id, unnest(labels) AS n FROM concept)
+ id  value   lang
+  1  'cat'   'en'
+  1  'gato'  'es'
+```
+
+### A tagged value, and the readers that refuse it
+
+**GraphAr's C++ and Java reference readers refuse a graph with a `langString` property.** The
+specification permits it, and the readers do not implement it. Read at
+`apache/incubator-graphar@06dddb1` on 2026-10-14:
+
+- C++ `DataType::TypeNameToDataType` (`cpp/src/graphar/types.cc`) accepts `bool`, `int32`, `int64`,
+  `float`, `double`, `string`, `date`, `timestamp` and `list<>` of `int32`, `int64`, `float`,
+  `double` or `string`, and throws `Unsupported data type` for any other name.
+- C++ `DataType::DataTypeToArrowDataType` and `ArrowDataTypeToDataType` throw "is not supported yet
+  in GraphAr" for every type outside that set, a user-defined one and an Arrow struct included.
+  `USER_DEFINED` is only a name string, so the C++ type has nowhere to say what the struct holds.
+- Java `DataType.fromString` (`maven-projects/info`) accepts the same eight scalars and `list<…>` of
+  them, and throws `IllegalArgumentException("Unknown data type: …")` for any other name.
+
+A graph without a tagged multi-valued property uses only built-in types, and every reader opens it.
+One with one is opened by readers that follow the specification's user-defined-type clause:
+`graphar-info`, `graphar-parquet` and `@kanzo-tech/graphar-duckdb`. `conformance/read_cpp.py` in
+`Kanzo-Tech/graphar` runs GraphAr's own C++ library over `conformance/user_defined` and expects the
+refusal, so the check fails the day C++ opens it. The same C++ reader opens `conformance/sample`,
+which has no such column.
+
+This is a known departure, accepted because the alternatives lose the tag or admit a state that can
+disagree with itself: two parallel lists, one of values and one of tags, can differ in length, and
+DuckDB unnests two lists of different lengths side by side and pads the shorter with NULL, so a
+mismatch would delete triples without an error.
+
+**What would reverse it.** The C++ and Java readers accepting a struct element type, or a
+proposal for a tagged-string type merged into GraphAr — then the type takes GraphAr's name and
+`langString` goes. Or a reader our users run, that refuses a user-defined type, having to open such
+a graph: then the tag is dropped from that graph's files (a `set` of `string`), and stays in the
+mapping as a constant `rml:language` where one language is all a column holds.

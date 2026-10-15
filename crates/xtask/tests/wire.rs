@@ -31,20 +31,6 @@ fn the_error_catalogue() {
     ));
 }
 
-/// `fossil.json`: `fossil.schema.json`, and the reader's declarations of it.
-#[test]
-fn the_manifest() {
-    use fossil_df::corpus::manifest::Manifest;
-    let text = Manifest::json_schema();
-    expect_file![at("crates/fossil-df/src/corpus/fossil.schema.json")].assert_eq(&text);
-    let schema: Value = serde_json::from_str(&text).expect("the schema is JSON");
-    expect_file![at("packages/corpus/src/manifest.gen.ts")].assert_eq(&format!(
-        "{}{}",
-        ts::header("`fossil_df::corpus::manifest::Manifest`"),
-        ts::declarations(&schema)
-    ));
-}
-
 /// What crosses `wasm-bindgen` and the `Host` contract, declared once in
 /// `@fossil-lang/types`.
 #[test]
@@ -130,7 +116,7 @@ fn the_parse_actually_read_the_schema() {
 /// a string field `<name>-value`, a number 7, a list of two — and the rendering
 /// the emitted TypeScript performs ([`problem::render`]) must equal `Problem`'s
 /// own `Display` for that data. It is what keeps a detail raised in
-/// `@fossil-lang/corpus` from reading differently from the same code raised in
+/// `@fossil-lang/types` from reading differently from the same code raised in
 /// Rust — which hand-written renderings do.
 ///
 /// It cannot prove that the TypeScript emitted for the segments renders as

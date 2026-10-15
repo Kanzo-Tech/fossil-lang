@@ -6,7 +6,7 @@ import "./global.css";
 export const metadata = {
   title: { default: "fossil", template: "%s · fossil" },
   description:
-    "A mapping language and a corpus compiler. This site documents where fossil is going, and marks what is already true.",
+    "A mapping language and a graph compiler. This site documents where fossil is going, and marks what is already true.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

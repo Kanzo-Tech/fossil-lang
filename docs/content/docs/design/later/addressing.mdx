@@ -3,10 +3,10 @@ title: Addressing
 description: A tile is 4,096 rows of dense_id ordered by Hilbert code, its address is a shift, and the Parquet footer turns that address into a byte range. There is no tile tree and no index to discover.
 ---
 
-> **Deferred, not reversed.** This is the addressing a `fossil/1` corpus does not have: tiles,
+> **Deferred, not reversed.** This is the addressing a graph does not have: tiles,
 > `tile_of`,
 > the tile manifest and two containers. The code existed at commit `ac1801d4` (and main `e5b2113f`), and
-> every path on this page is spelled against that commit. What brings it back: a `fossil/1` corpus that
+> every path on this page is spelled against that commit. What brings it back: a graph that
 > fails the in-browser thresholds — open > 1.5 s, first paint > 3 s, or heap > 1.5 GB at 1M vertices
 > over HTTP.
 
@@ -487,7 +487,7 @@ chose, and the arithmetic above is what that freedom costs a reader who guesses 
 
 So the composition ships as code, in `@fossil-lang/corpus`, reading the manifest and nothing else:
 
-```ts
+```text
 const corpus = await attach('/bench/1000000', { manifestFiles });
 const { vertexUrls, edgeUrls, complete, gaps } = corpus.tilesFor({ tiles, directions: ['src'] });
 ```

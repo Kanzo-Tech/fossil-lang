@@ -16,7 +16,7 @@ export interface ColumnRef {
 
 /**
  * A column's counts, over the rows the profile read — Parquet's `Statistics` names, which the
- * corpus's `fossil.json` uses for the same facts.
+ * graph's chunk footers use for the same facts.
  */
 export interface ColumnStats {
   /**
@@ -172,15 +172,15 @@ export interface DiagnosticRelatedInformation {
  * How many rows of one relation's input did not become an edge.
  *
  * `execute_edge` resolves both endpoints against the vertex tables with an inner join, so a row
- * naming a subject no vertex carries is discarded. **That is intended and it stays** — a corpus
+ * naming a subject no vertex carries is discarded. **That is intended and it stays** — a graph
  * cannot hold an edge to a vertex that is not there — and it is counted rather than silent.
  *
- * # Why the count is here and not in `fossil.json`
+ * # Why the count is here and not in the graph
  *
- * No reader can verify it: `record_count` earns its place in the manifest by being answerable to
- * the Parquet, and a dropped count is about rows that are not there and never were. And a
- * third-party writer has no such number — it performs no join — so a manifest field for it
- * would make a conforming corpus impossible to write without a fact only fossil's pipeline has.
+ * No reader can verify it: a vertex or edge count earns its place in the graph by being answerable
+ * to the Parquet, and a dropped count is about rows that are not there and never were. And a
+ * third-party writer has no such number — it performs no join — so a field for it would make a
+ * conforming graph impossible to write without a fact only fossil's pipeline has.
  */
 export interface EdgeDrops {
   /**
@@ -188,7 +188,7 @@ export interface EdgeDrops {
    */
   dropped: number;
   /**
-   * The edge table's name in `fossil.json`, `<Src>_<label>_<Dst>`.
+   * The edge type's name in `fossil.graph.yml`, `<Src>_<label>_<Dst>`.
    */
   table: string;
 }
@@ -436,9 +436,9 @@ export interface Position {
  * descriptors all speak it, and a lattice that crosses a crate boundary as a string is a lattice
  * with no single definition.
  *
- * Materializers map it to their own vocabulary (`fossil.json` `string/int64/double/…`,
- * `DataFusion` scalars, `DuckDB` column types) next to the materializer; only the xsd direction
- * lives here, because xsd is the RDF border every side reads.
+ * Materializers map it to their own vocabulary (`GraphAr` `string/int64/double/…`, `DataFusion`
+ * scalars, `DuckDB` column types) next to the materializer; only the xsd direction lives here,
+ * because xsd is the RDF border every side reads.
  */
 export type Primitive = 'string' | 'integer' | 'float' | 'bool' | 'date' | 'date_time' | 'time' | 'g_year' | 'any_uri' | 'lang_string';
 
@@ -556,11 +556,11 @@ export type Role = 'data' | 'schema';
  */
 export interface RunReport {
   /**
-   * One entry per relation, in the order `fossil.json` lists its edge tables.
+   * One entry per relation, in the order `fossil.graph.yml` lists its edge types.
    */
   dropped: EdgeDrops[];
   /**
-   * The prefix the corpus was written under, `fossil.json` at its root.
+   * The prefix the graph was written under, `fossil.graph.yml` at its root.
    */
   location: string;
 }

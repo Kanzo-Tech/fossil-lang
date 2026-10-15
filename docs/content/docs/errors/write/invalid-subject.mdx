@@ -1,0 +1,31 @@
+---
+title: A vertex has no absolute IRI as its subject
+description: "`write/invalid-subject` — a vertex whose subject is NULL or is not an absolute IRI, so no graph is written."
+---
+
+Every vertex is written with the IRI it is called by, and one is not an IRI:
+
+```text
+write/invalid-subject
+  × a `Species` vertex has the subject `https://field.example/species/Corvus corax`, which is not an absolute IRI
+```
+
+`data.vertex_type` is the type and `data.subject` the subject as the data made it, in backticks, or
+`NULL`.
+
+## Why fossil refuses it
+
+The identity of a vertex is its subject, and the whole graph reads back as RDF, where the identity of a
+resource is an absolute IRI (RDF 1.1 Concepts §3.2; admissibility A1 on
+[the round trip](/docs/format/round-trip)). A subject with a space in it, a relative reference or a
+NULL names no resource, so the mapping that reads the tables back as RDF would write a term no RDF
+parser reads. The check is the writer's because the template that builds a subject is evaluated per
+row, over data only the run sees.
+
+## How to repair it
+
+- **Build the subject from something that is a path segment**: `str.slug(Row.name)`, or the row's key.
+- **Filter the rows** whose key is missing with a `where` before the mapping, so the template never
+  reads NULL.
+- **Check that the template starts with a scheme**, `https://` or `urn:`: a subject that is only a
+  column is whatever the column holds.

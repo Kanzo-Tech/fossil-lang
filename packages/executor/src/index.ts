@@ -20,6 +20,6 @@
 // from the one the executor uses. This entry only re-exports.
 export { initFossilExecutor, type InitInput } from './load.js';
 export { run, type FilesRun, type HostRun, type InMemoryRun, type RunOptions } from './run.js';
-// What a run into memory answers, and what `@fossil-lang/corpus` attaches with `{ files }`: one type,
+// What a run into memory answers, and what a reader registers with the engine (`registerFileBuffer`): one type,
 // in `@fossil-lang/types`, so the reader needs no executor.
 export type { CorpusFile } from '@fossil-lang/types';

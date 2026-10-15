@@ -1,0 +1,36 @@
+---
+title: One IRI names two things
+description: "`write/ambiguous-iri` — two vertex types with one class, two columns of one type with one predicate, or a relation whose predicate is a column of its source type, so the mapping would make two things one and no graph is written."
+---
+
+The run executed, and the mapping that says what the graph's tables mean as RDF would use one IRI
+for two things:
+
+```text
+write/ambiguous-iri
+  × `https://example.org/Person` names both `Person` and `Human`
+```
+
+`data.iri` is the IRI, and `data.first` and `data.second` say what it names: a vertex type
+(`Person`), a column (`Person.name`) or a relation (`Order_placedBy_Person`).
+
+## Why fossil refuses it
+
+`mapping.ttl` is how an RDF reader recovers the graph without fossil
+([the round trip](/docs/format/round-trip)), and it can only recover what its IRIs tell apart
+(admissibility A2):
+
+- **Two types with one class**: a reader that gets `ex:Person` back cannot say which table the
+  vertex came from, so the two tables are merged in the image.
+- **Two columns of one type with one predicate**: the image holds one set of `(predicate, term)`
+  pairs per vertex, and a value of either column is a pair of that predicate, so which column held
+  it is lost.
+- **A relation with a column's predicate of its source type**: a triple `(s, p, o)` with an IRI `o`
+  could be an edge of the relation or a column that holds an IRI, and a reader cannot say which
+  table to put it back into.
+
+## How to repair it
+
+- Give each type its own `@iri` (or its own shape), and each field its own predicate.
+- If two types are meant to be one, write them as one type with two mappings: a graph has one table
+  per type, and two mappings of one type contribute rows to it.

@@ -3,12 +3,11 @@ title: The tiled corpus
 description: "What the corpus was when it was addressed rather than read whole: paths computed from a YAML manifest, tiles as row groups, an identity index, two verbs over a Rust reader, and a conformance round trip over three readers — with every measurement that decided it."
 ---
 
-> **Deferred, not reversed.** A `fossil/1` corpus is one Parquet file per table under a
-> `fossil.json`, read whole through [one door](/docs/design/one-door); this is the addressed
-> corpus it replaced, split out of [the corpus](/docs/design/corpus). The GraphAr sections record
-> what the YAML manifest borrowed, and `fossil.json` replaced that manifest rather than deferring
-> it. The code existed at commit `ac1801d4` (main `e5b2113f`), and every path on this page is
-> spelled against that commit. What brings it back: a `fossil/1` corpus that fails the in-browser
+> **Deferred, not reversed.** A graph is one Parquet chunk per table under GraphAr's information files, read whole through
+> [one door](/docs/design/one-door); this is the addressed corpus that preceded it, split out of
+> [the corpus](/docs/design/corpus). The GraphAr sections record what the YAML manifest borrowed;
+> the graph now *is* GraphAr's, and the tiles are not deferred into it. The code existed at commit `ac1801d4` (main `e5b2113f`), and every path on this page is
+> spelled against that commit. What brings it back: a graph that fails the in-browser
 > thresholds — open over 1.5 s, first paint over 3 s, or heap over 1.5 GB at a million vertices
 > over HTTP.
 

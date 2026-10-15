@@ -1,19 +1,20 @@
 ---
 title: Where x and y come from
-description: "The corpus carries the graph, not a picture of it. Where a vertex is drawn is the view's choice: two numeric columns it binds, or its own GPU force simulation."
+description: "The graph carries the data, not a picture of it. Where a vertex is drawn is the view's choice: two numeric columns it binds, or its own GPU force simulation."
 ---
 
-A corpus has no `x`, no `y`, no community column and no `position` in `fossil.json`. It carries the
+A graph has no `x`, no `y`, no community column and no position anywhere in its files. It carries the
 vertices, the edges and the program's columns, numbered so that a view can upload them as they are:
-`dense_id` is `0..V−1` with each type one contiguous range, and an edge's `src`/`dst` are those ids
+each type's index is `0..count−1`, the reader's global id is the prefix sum of the counts plus that
+index, and an edge's ends are indices into the types it joins
 ([identity](/docs/format/conventions/identity)).
 
 **Where a vertex is drawn is the view's choice**, and it has two:
 
 - **two numeric columns it binds** — `lon` and `lat`, or any pair the program wrote. A vertex table
-  without both is not drawn under that binding; the corpus does not invent a position for it.
+  without both is not drawn under that binding; the graph does not invent a position for it.
 - **its own force simulation on the GPU**, when nothing is bound — seeded, settled in the tab, over
-  exactly the vertices and edges the corpus holds.
+  exactly the vertices and edges the graph holds.
 
 That is Cosmograph's architecture — DuckDB-WASM, a Mosaic coordinator, cosmos.gl drawing points by
 index ([prior art](/docs/design/prior-art#where-a-vertex-is-drawn)) — and fossil's writer is
@@ -40,6 +41,6 @@ Chrome 154 headed, real GPU.
 The layout's shape is there within 1–3 s at every N. Loading the buffers (`setPointPositions` +
 `setLinks`) is synchronous: 89 ms at 10k, 229 ms at 50k, ~450 ms at 200k, ~1,100 ms at 500k.
 
-**What would reverse it.** A measured corpus the GPU simulation cannot lay out — above the N this
+**What would reverse it.** A measured graph the GPU simulation cannot lay out — above the N this
 table reaches — that a view must still draw. Then a placement comes back, for that size, and
 [what was discarded](/docs/design/discarded#the-corpus) says which of the nine not to repeat.

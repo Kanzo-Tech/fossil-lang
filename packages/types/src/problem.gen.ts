@@ -99,6 +99,10 @@ export type Code =
   | 'write/failed'
   | 'write/invalid-language-tag'
   | 'write/language-not-allowed'
+  | 'write/duplicate-value'
+  | 'write/invalid-subject'
+  | 'write/ambiguous-iri'
+  | 'write/unrepresentable'
   | 'run/too-large'
   | 'storage/no-credential'
   | 'storage/ambiguous-prefix'
@@ -110,11 +114,6 @@ export type Code =
   | 'storage/host-refused'
   | 'storage/host-silent'
   | 'module/unreachable'
-  | 'corpus/unreadable'
-  | 'corpus/not-json'
-  | 'corpus/unsupported-format'
-  | 'corpus/duplicate-table'
-  | 'corpus/not-a-location'
   | 'api/invalid-argument'
   | 'api/busy'
   | 'api/unknown-handle'
@@ -211,6 +210,10 @@ export const CODES: readonly Code[] = [
   'write/failed',
   'write/invalid-language-tag',
   'write/language-not-allowed',
+  'write/duplicate-value',
+  'write/invalid-subject',
+  'write/ambiguous-iri',
+  'write/unrepresentable',
   'run/too-large',
   'storage/no-credential',
   'storage/ambiguous-prefix',
@@ -222,11 +225,6 @@ export const CODES: readonly Code[] = [
   'storage/host-refused',
   'storage/host-silent',
   'module/unreachable',
-  'corpus/unreadable',
-  'corpus/not-json',
-  'corpus/unsupported-format',
-  'corpus/duplicate-table',
-  'corpus/not-a-location',
   'api/invalid-argument',
   'api/busy',
   'api/unknown-handle',
@@ -832,7 +830,7 @@ export interface ProblemData {
   };
   /**
    * An operator asked for more memory than the run's budget had left. Raised while the graph
-   * executes, before any byte of the corpus is written. Sizes are bytes.
+   * executes, before any byte of the graph is written. Sizes are bytes.
    */
   'run/over-budget': {
     budget: number;
@@ -868,14 +866,14 @@ export interface ProblemData {
    */
   'engine/failed': Record<string, never>;
   /**
-   * Writing one file of the corpus failed; the store's error is the cause.
+   * Writing one file of the graph failed; the store's error is the cause.
    */
   'write/failed': {
     path: string;
   };
   /**
    * A row's language tag, read from the data, that is not well-formed BCP 47. The run writes no
-   * corpus rather than an `rdf:langString` with no valid tag.
+   * graph rather than an `rdf:langString` with no valid tag.
    */
   'write/invalid-language-tag': {
     property: string;
@@ -888,6 +886,43 @@ export interface ProblemData {
     languages: string[];
     property: string;
     tag: string;
+  };
+  /**
+   * A value that must be unique in the graph, and is written twice: a subject repeated within a
+   * type or across two types (admissibility A1), an element repeated in a multi-valued property,
+   * which `GraphAr` holds as a set (A4), or a relation's `(source, destination)` pair repeated
+   * (A5).
+   */
+  'write/duplicate-value': {
+    at: string;
+    value: string;
+  };
+  /**
+   * A vertex whose `subject` is null or not an absolute IRI (admissibility A1): the identity of a
+   * vertex is its IRI, and a graph without one for a vertex has no vertex to name.
+   */
+  'write/invalid-subject': {
+    subject: string;
+    vertex_type: string;
+  };
+  /**
+   * One IRI that names two things the mapping needs it to name one of (admissibility A2): two
+   * vertex types with one class, two columns of one type with one predicate, or a relation whose
+   * predicate is a column predicate of its source type. The RDF image would make the two one.
+   */
+  'write/ambiguous-iri': {
+    first: string;
+    iri: string;
+    second: string;
+  };
+  /**
+   * A value `GraphAr`'s property types cannot hold: an unsigned 64-bit integer above `i64::MAX`, a
+   * timestamp finer than a millisecond, or a column of a type `GraphAr` has no word for.
+   */
+  'write/unrepresentable': {
+    datatype: string;
+    property: string;
+    value: string;
   };
   /**
    * More vertices than a `u32` `dense_id` can number.
@@ -962,39 +997,6 @@ export interface ProblemData {
    */
   'module/unreachable': {
     after?: number;
-    location: string;
-  };
-  /**
-   * A corpus whose manifest could not be read; the reader's error is the cause.
-   */
-  'corpus/unreadable': {
-    path: string;
-  };
-  /**
-   * A manifest that is not JSON.
-   */
-  'corpus/not-json': {
-    path: string;
-  };
-  /**
-   * A manifest declaring a format this reader does not read.
-   */
-  'corpus/unsupported-format': {
-    format: string;
-    path: string;
-  };
-  /**
-   * A manifest declaring one table twice.
-   */
-  'corpus/duplicate-table': {
-    table: string;
-  };
-  /**
-   * A corpus location carrying a query or a fragment. A corpus is a prefix and every file is named
-   * under it; a query string — a signature among them — addresses one object and does not
-   * survive the join. Signed storage is reached by opening a job under the host that vends it.
-   */
-  'corpus/not-a-location': {
     location: string;
   };
   /**
@@ -1110,9 +1112,13 @@ export const TITLES: { readonly [C in Code]: string } = {
   'source/not-utf8': 'A source is not UTF-8',
   'source/unparseable': 'A source does not parse',
   'engine/failed': 'The query engine failed',
-  'write/failed': 'A corpus file could not be written',
+  'write/failed': 'A graph file could not be written',
   'write/invalid-language-tag': 'A value\'s language tag is not well-formed',
   'write/language-not-allowed': 'A value in a language the shape does not admit',
+  'write/duplicate-value': 'A value appears twice where it must be unique',
+  'write/invalid-subject': 'A vertex has no absolute IRI as its subject',
+  'write/ambiguous-iri': 'One IRI names two things',
+  'write/unrepresentable': 'A value GraphAr cannot hold',
   'run/too-large': 'The graph has too many vertices',
   'storage/no-credential': 'No credential was vended',
   'storage/ambiguous-prefix': 'More than one prefix was vended',
@@ -1124,11 +1130,6 @@ export const TITLES: { readonly [C in Code]: string } = {
   'storage/host-refused': 'The host refused',
   'storage/host-silent': 'The host did not answer',
   'module/unreachable': 'A module could not be loaded',
-  'corpus/unreadable': 'The corpus could not be read',
-  'corpus/not-json': 'The manifest is not JSON',
-  'corpus/unsupported-format': 'The corpus format is not supported',
-  'corpus/duplicate-table': 'A table is declared twice',
-  'corpus/not-a-location': 'Not a corpus location',
   'api/invalid-argument': 'An argument is invalid',
   'api/busy': 'Another call is running',
   'api/unknown-handle': 'The handle names nothing',
@@ -1204,6 +1205,10 @@ export type DetailedCode =
   | 'engine/failed'
   | 'write/failed'
   | 'write/invalid-language-tag'
+  | 'write/duplicate-value'
+  | 'write/invalid-subject'
+  | 'write/ambiguous-iri'
+  | 'write/unrepresentable'
   | 'run/too-large'
   | 'storage/no-credential'
   | 'storage/ambiguous-prefix'
@@ -1215,11 +1220,6 @@ export type DetailedCode =
   | 'storage/host-refused'
   | 'storage/host-silent'
   | 'module/unreachable'
-  | 'corpus/unreadable'
-  | 'corpus/not-json'
-  | 'corpus/unsupported-format'
-  | 'corpus/duplicate-table'
-  | 'corpus/not-a-location'
   | 'api/invalid-argument'
   | 'api/busy'
   | 'api/unknown-handle'
@@ -1294,6 +1294,10 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'engine/failed': (_) => `the query engine failed`,
   'write/failed': (d) => `\`${d.path}\` could not be written`,
   'write/invalid-language-tag': (d) => `\`${d.property}\` has a value tagged \`${d.tag}\`, which is not a well-formed BCP 47 language tag`,
+  'write/duplicate-value': (d) => `\`${d.at}\` holds \`${d.value}\` twice`,
+  'write/invalid-subject': (d) => `a \`${d.vertex_type}\` vertex has the subject ${d.subject}, which is not an absolute IRI`,
+  'write/ambiguous-iri': (d) => `\`${d.iri}\` names both \`${d.first}\` and \`${d.second}\``,
+  'write/unrepresentable': (d) => `\`${d.property}\` holds \`${d.value}\`, of type ${d.datatype}, which GraphAr cannot hold`,
   'run/too-large': (d) => `the graph has ${d.vertices} vertices; a \`dense_id\` is a u32`,
   'storage/no-credential': (d) => `the host vended no ${d.access} credential for ${d.scope}`,
   'storage/ambiguous-prefix': (d) => `${d.scope} vends ${d.count} prefixes, and one was expected`,
@@ -1305,11 +1309,6 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'storage/host-refused': (d) => `the host refused ${d.scope}`,
   'storage/host-silent': (d) => `the host did not answer ${d.scope} within ${d.after} ms`,
   'module/unreachable': (d) => `${d.location} could not be loaded`,
-  'corpus/unreadable': (d) => `${d.path} could not be read`,
-  'corpus/not-json': (d) => `${d.path} is not JSON`,
-  'corpus/unsupported-format': (d) => `${d.path} declares format ${d.format}, and this reader reads fossil/1 only`,
-  'corpus/duplicate-table': (d) => `the corpus declares ${d.table} twice`,
-  'corpus/not-a-location': (d) => `${d.location} carries a query or a fragment, and a corpus location is a prefix: signed storage is opened as a job, under the host that vends its credential`,
   'api/invalid-argument': (d) => `\`${d.argument}\` is not ${d.expected}`,
   'api/busy': (d) => `\`${d.call}\` was called while another call is running`,
   'api/unknown-handle': (_) => `the handle names nothing: it was dropped, or never issued`,

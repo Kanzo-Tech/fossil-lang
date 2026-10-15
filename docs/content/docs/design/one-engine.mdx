@@ -1,6 +1,6 @@
 ---
 title: One engine in the compiler
-description: The compiler runs on DataFusion and links no database. Why wasm32 is the reason rather than a preference, what holds it, and why the corpus read path keeps DuckDB on purpose.
+description: The compiler runs on DataFusion and links no database. Why wasm32 is the reason rather than a preference, what holds it, and why the graph read path keeps DuckDB on purpose.
 ---
 
 fossil compiles to relational algebra and something has to execute it. Two things did: DataFusion in
@@ -46,10 +46,10 @@ into one, and the run cannot tell either from a cloud store
 [Unifying the two execution engines](/docs/design/discarded) is a discarded alternative, and it is a
 different decision from this one rather than the same one taken twice.
 
-That row is about the corpus **read** path, where `@fossil-lang/corpus` creates views in TypeScript
-and the host's DuckDB-WASM runs every read. Putting DataFusion there adds a wasm build of several megabytes to
-a path that loads none, and loses the range-request file system that makes reading a corpus over
-plain HTTP work at all. Still rejected.
+That row is about the graph **read** path, where `@kanzo-tech/graphar-duckdb` creates views in
+TypeScript and the host's DuckDB-WASM runs every read. Putting DataFusion there adds a wasm build of
+several megabytes to a path that loads none, and loses the range-request file system that makes
+reading a graph over plain HTTP work at all. Still rejected.
 
 This page is the **write** path, and it asks the compiler to stop *containing* an engine rather than
 asking any consumer to stop using one. The host brings the engine to the read side, which is what the

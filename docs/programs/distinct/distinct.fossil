@@ -7,5 +7,7 @@ Seen := Sighting.select(Sighting.species).distinct()
 // #endregion chain
 
 Observed : Species from Seen
-    @subject = "https://field.example/species/{Sighting.species}"
+    // A subject is an absolute IRI, and a space is not one: `str.slug` makes the
+    // species a path segment the graph can hold.
+    @subject = "https://field.example/species/{str.slug(Sighting.species)}"
     name     = Sighting.species

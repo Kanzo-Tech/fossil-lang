@@ -109,7 +109,7 @@ describe('attachCause', () => {
 
   it('carries it into the problem when the last error is a FossilError', () => {
     const inner = FossilError.of('storage/no-credential', { scope: 'job j', access: 'read' });
-    const outer = FossilError.of('corpus/unreadable', { path: 'fossil.json' }, { cause: inner });
+    const outer = FossilError.of('write/failed', { path: 'fossil.graph.yml' }, { cause: inner });
     attachCause(outer, new Error('release failed'));
     expect(inner.cause).toEqual(new Error('release failed'));
     const wire = outer.problem.cause;

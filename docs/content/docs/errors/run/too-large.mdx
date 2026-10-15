@@ -3,8 +3,8 @@ title: The graph has too many vertices
 description: "`run/too-large` — the graph has more vertices than a 32-bit `dense_id` can number."
 ---
 
-Every vertex of a corpus, across every type, gets a `dense_id`, and the ids are gapless: `0..V−1`
-over the whole graph. A `dense_id` is a `u32`, so a graph with 2³² vertices or more cannot be
+Every vertex of a graph, across every type, gets a `dense_id` in the executor, and the ids are
+gapless: `0..V−1` over the whole graph. A `dense_id` is a `u32`, so a graph with 2³² vertices or more cannot be
 numbered:
 
 ```text
@@ -16,15 +16,16 @@ types, since the id space is shared. It refuses where it numbers the ids, before
 
 ## Why fossil refuses it
 
-The width is a commitment of the format: `dense_id`, `src` and `dst` are `uint32` in every corpus,
-and a reader indexes its buffers by them. It is not what stops a corpus in practice — the browser
-executor's 2 GiB budget refuses long before, as [`run/over-budget`](/docs/errors/run/over-budget).
-The numbers are on
-[the corpus](/docs/design/corpus#the-width-of-an-address-and-what-actually-runs-out-first).
+The width is a commitment of the executor: a reader's global id is the prefix sum of the per-type
+counts plus a type's index, cast to `UINTEGER` ([identity](/docs/format/conventions/identity)), and a
+reader indexes its buffers by it, so the sum must fit. It is not what stops a graph in practice — the
+browser executor's 2 GiB budget refuses long before, as
+[`run/over-budget`](/docs/errors/run/over-budget). The numbers are on
+[the graph](/docs/design/corpus#the-width-of-an-address-and-what-actually-runs-out-first).
 
 ## How to repair it
 
-- **Split the graph.** Write it as several corpora, each under its own destination, by running the
+- **Split the graph.** Write it as several graphs, each under its own destination, by running the
   program over parts of its input.
 - **Emit fewer vertices.** A vertex type fed by several sources is unioned and deduplicated by
   subject; check that each source contributes subjects that belong in the graph, and filter the rest

@@ -1,6 +1,6 @@
 ---
 title: A value in a language the shape does not admit
-description: "`write/language-not-allowed` — a language tag read from the data outside the languages the property's shape admits, so no corpus is written."
+description: "`write/language-not-allowed` — a language tag read from the data outside the languages the property's shape admits, so no graph is written."
 ---
 
 A shape can say which languages a language-tagged property admits — SHACL's `sh:languageIn`, a ShEx
@@ -16,8 +16,8 @@ write/language-not-allowed
 
 ## Why fossil refuses it
 
-A tag from a column is data, so only the run sees it. A corpus whose values break the shape it
-declares is a corpus a SHACL engine would reject, and a dropped row would be a value lost with no
+A tag from a column is data, so only the run sees it. A graph whose values break the shape it
+declares is a graph a SHACL engine would reject, and a dropped row would be a value lost with no
 count anywhere ([Annotations and language-tagged strings](/docs/design/labels)). A constant tag is the
 checker's: [`type/language-not-allowed`](/docs/errors/type/language-not-allowed).
 

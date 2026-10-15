@@ -5,10 +5,11 @@ lazy-loaded counterpart to the LSP-only [`@fossil-lang/wasm`](../wasm).
 
 Wraps the `fossil-df-wasm` wasm-bindgen build (`--target web`). The browser reads
 every document and source the program names under the credentials the host vends,
-runs the mapping on DataFusion-WASM, and writes the `fossil/1` corpus — one
-Parquet per vertex type and per relation, and `fossil.json` last — under the job's
-prefix. No mapping runtime on the server, and no other writer: this is the one
-host that writes a corpus, in the browser and in Node.
+runs the mapping on DataFusion-WASM, and writes an Apache GraphAr graph —
+the information files, one Parquet chunk per vertex type and per relation, and
+`mapping.ttl`, with `fossil.graph.yml` last — under the job's prefix. No mapping
+runtime on the server, and no other writer: this is the one host that writes a
+graph, in the browser and in Node.
 
 ## Usage
 
@@ -34,7 +35,7 @@ const report = await run(program, { host, into: { job: jobId } });   // { locati
 | **`limit`** | at most this many rows read from each source scan, before any join |
 
 ```ts
-await run(program, { host, into: { job } });                          // the job's corpus
+await run(program, { host, into: { job } });                          // the job's graph
 const { report, files } = await run(program, { host, into: 'memory', limit: 200 }); // a preview
 const { report, files } = await run(program, { files, path });        // Node: bytes in, bytes out
 ```
@@ -72,8 +73,8 @@ Pass `profiled` — what the editor's `program.describe()` answered — and the 
 against the same columns the editor did:
 `run(program, { host, into: { job }, profiled })`. Without it every source is an open row.
 
-`report` is `{ location, dropped }`: where the corpus went and, per edge table, how many input rows
-named a vertex that does not exist. What was written is `<location>fossil.json`.
+`report` is `{ location, dropped }`: where the graph went and, per edge table, how many input rows
+named a vertex that does not exist. What was written is `<location>fossil.graph.yml`.
 
 A run that fails throws a `FossilError`: branch on its `code`, never on its message. Its `problem`
 is the failure as plain data, which a host stores as it is and turns back into the error with
@@ -87,7 +88,7 @@ what was already held — while the graph is still executing, so nothing has bee
 `/docs/design/three-hosts` has the budget and its measured ceiling.
 
 A host with no storage — Node, a build script — hands every document and source as bytes, by the
-location fossil resolves it to, and gets the corpus back:
+location fossil resolves it to, and gets the graph back:
 
 ```ts
 import { initFossilExecutor, run } from '@fossil-lang/executor';

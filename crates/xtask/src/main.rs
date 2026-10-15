@@ -10,9 +10,6 @@
 //!                statics from `catalogue.bnf`, and the reference page's tables
 //!                from that file plus `fossil_hir::stdlib`'s registry. `--check`
 //!                fails instead of writing, which is what CI runs.
-//!   corpus       The same, one data file along: the writer's column table from
-//!                `corpus.bnf`, projected into Rust and TypeScript. Two data
-//!                files, two commands, one generator loop.
 //!
 //! What is generated from a Rust type rather than a data file — the JSON
 //! Schemas and the TypeScript declarations — is `tests/wire.rs`, because the
@@ -20,7 +17,7 @@
 
 use std::process::{Command, exit};
 
-use xtask::{catalogue, corpus, depgraph};
+use xtask::{catalogue, depgraph};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -32,17 +29,11 @@ fn main() {
             catalogue::generated(),
             args.next().as_deref() == Some("--check"),
         ),
-        Some("corpus") => generate(
-            "corpus.bnf",
-            "corpus",
-            corpus::generated(),
-            args.next().as_deref() == Some("--check"),
-        ),
         other => {
             if let Some(c) = other {
                 eprintln!("xtask: unknown command {c:?}");
             }
-            eprintln!("usage: cargo xtask <wasm-check | catalogue [--check] | corpus [--check]>");
+            eprintln!("usage: cargo xtask <wasm-check | catalogue [--check]>");
             exit(2);
         }
     }

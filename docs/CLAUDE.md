@@ -9,7 +9,7 @@ documentation app. All four existed. The first two produced the failure this sit
 built to catch — **159 dead citations** in versioned prose, and eighteen of twenty citations of one
 record resolving to a *different* record. The third was `SURFACE-PLAN.md`, 1,443 lines, which
 diagnosed itself on its own line 5 and had been cited 89 times from the code by the time it went. The fourth was
-the corpus contract's own site, a whole second Next.js app — nine runtime dependencies identical version for version
+the graph contract's own site, a whole second Next.js app — nine runtime dependencies identical version for version
 to these — serving twelve pages that are now `content/docs/format/`.
 
 **Do not reintroduce any of them.** If a decision needs somewhere to live, it is a page; if a page
@@ -34,13 +34,13 @@ tests, zero consumers and a retired grammar rule, so it is an entry in `design/d
 
 ## `content/docs/format/` has one tense
 
-The corpus format is a specification, and a specification does not have a roadmap in its prose.
+The graph format is a specification, and a specification does not have a roadmap in its prose.
 **Never write "today", "currently", "not yet", "will be", "for now" on those pages.** A convention
-holds of a corpus or it does not, and what says which is `packages/corpus/guards/check.mjs`, not an
-adverb. Where something is genuinely undecided, write it as a **design question** naming what would
+holds of a graph or it does not, and what says which is the writer's tests and `graphar`'s
+conformance job, not an adverb. Where something is genuinely undecided, write it as a **design question** naming what would
 settle it — which is not the same as a gap.
 
-Numbers there come from measuring, not from memory. The door is `attach`, which answers the attachment
+Numbers there come from measuring, not from memory. The door is `attachGraph`, which answers the attachment
 that detaches it, and every read after it is the host's SQL; `fossil-http` has never existed. When a number
 and a document disagree, read the code — this repository has now cashed that lesson roughly a dozen
 times in one sitting.
@@ -55,8 +55,7 @@ and nothing more. And `unmeasured: true`, the honest alternative the schema offe
 **zero of nine** pages: every one preferred a weak citation to admitting there was no evidence.
 
 So prefer `<Program src= region= />`, which reads the file at build time — an absent region stops
-the build, and the code on the page *is* the code on disk. Same for `<GuardIndex />`, which
-renders `packages/corpus/guards/guards.mjs` rather than transcribing it.
+the build, and the code on the page *is* the code on disk.
 
 **A line number is not a citation.** This paragraph used to end "a bare `file:line` is allowed and is
 your responsibility to verify by opening it", and that policy was measured: of **35 citations, 13
@@ -74,7 +73,7 @@ Where the claim is «this is pinned in that file» and no single item carries it
 no line and no anchor. `path:12` in any form fails the build.
 
 The route half reads the whole tree and not only this app, because a route is the one citation form
-both halves use: of 479 of them, 170 are in Rust doc comments, `corpus.bnf`, `grammar.bnf`,
+both halves use: of 479 of them, 170 are in Rust doc comments, `catalogue.bnf`, `grammar.bnf`,
 `README.md` and `packages/…`, and the widening found three dead routes on its first run — one of
 them inside a `NotImplemented` message a user reads. Inside this app it reads more than markdown
 links, too: fifteen `<Card href="/docs/…">` on `design/index.mdx` were unchecked.
