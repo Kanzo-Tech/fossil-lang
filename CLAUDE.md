@@ -68,7 +68,7 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
   `design/prior-art`, and any number beside the claim it supports. `CONTRIBUTING.md` has the
   reasoning, which is 159 dead citations and 18 of 20 pointing at the wrong record. **Do not
   reintroduce a directory of records.**
-- **pnpm + cargo coexist at repo root.** Rust contributors don't need pnpm; JS/TS contributors need pnpm 9.x + Node 20+. The Rust workspace (`crates/`) and the pnpm workspace (`packages/` + `apps/`) are independent; CI runs them in parallel matrices.
+- **pnpm + cargo coexist at repo root.** Rust contributors don't need pnpm; JS/TS contributors need pnpm 9.x + Node 20+. The Rust workspace (`crates/`) and the pnpm workspace (`packages/`) are independent; CI runs them in parallel matrices.
 - **`RETURNING.md` ritual:** before stepping away from the project for >1 week, write/update
   `RETURNING.md` (gitignored, local-only) describing current state, what's broken, next 3 steps,
   what NOT to do because tried-it. Read on return before any code change. Solo plus an open

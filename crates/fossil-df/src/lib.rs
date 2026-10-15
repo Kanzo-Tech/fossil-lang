@@ -705,10 +705,10 @@ fn row_per_value(df: DataFrame, column: &str) -> datafusion::error::Result<DataF
 }
 
 /// Build a schema [`Property`](NodeProp) for a vertex prop: peel its canonical
-/// type to a [`Primitive`] → the format-neutral [`Primitive`] (the manifest
+/// type to a [`Primitive`] → the format-neutral [`Primitive`] (the layout
 /// derives its `data_type` spelling from it); the predicate IRI + shape
 /// cardinality ride along. Falls back to `string` when the type carries no
-/// primitive (the legacy default).
+/// primitive.
 fn node_property(db: &dyn fossil_base::Db, prop: &VProp<'_>) -> NodeProp {
     NodeProp {
         name: prop.name.to_string(),
@@ -1315,7 +1315,7 @@ async fn fetch_bytes(ctx: &SessionContext, uri: &str) -> datafusion::error::Resu
 /// `sample_size = -1`). `DataFusion` samples only the first ~1000 rows by default,
 /// which mis-types a column whose early values look numeric but later turn
 /// stringy (or vice-versa) — read every record so the inferred Arrow types (and
-/// thus the manifest's `data_type`s) match the writer. Trade-off: inference
+/// thus the layout's `data_type`s) match the writer. Trade-off: inference
 /// reads the file once before execution reads it again; acceptable for parity,
 /// revisit if it bites large remote sources.
 ///

@@ -107,15 +107,8 @@ fn rows(ws: &FossilWorkspace) -> Vec<Diagnostic> {
 ///
 /// Step (4) below asks a question about the PROGRAM, so it looks at the
 /// program's rows. It is the narrower question and it stays narrow.
-///
-/// **This used to carry the reason it HAD to be narrow**, and that reason is
-/// gone: `diagnostic_rows` drained every open file as if it were a fossil program,
-/// so `person.shex` — a `ShExJ` document — was run through the fossil parser and
-/// the workspace list carried twenty-one rows like `expected IDENT, found
-/// STRING` attributed to it. Comparing the whole workspace would have pinned
-/// that. `tests/documents_are_not_programs.rs` is where the fix is measured; a
-/// file the provider catalogue claims is an input, and an input is not drained
-/// as a program.
+/// `tests/documents_are_not_programs.rs` measures that a file the provider
+/// catalogue claims is an input, and an input is not drained as a program.
 fn rows_for(ws: &FossilWorkspace, uri: &str) -> Vec<Diagnostic> {
     ws.diagnostic_rows()
         .into_iter()

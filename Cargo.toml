@@ -122,7 +122,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "wasm
 getrandom = { version = "0.3", features = ["wasm_js"] }
 uuid = { version = "1", features = ["js"] }
 
-# === Logging (LSP — NATIVE ONLY) ===
+# === Logging ===
 # default-features=false to avoid pulling mio, which breaks the WASM gate.
 # Only the env-filter and fmt features are needed.
 tracing = "0.1"

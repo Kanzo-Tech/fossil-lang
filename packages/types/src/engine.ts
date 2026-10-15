@@ -9,12 +9,6 @@
  * a view that stays. `registerFiles` and `dropFiles`, named for DuckDB-WASM's `registerFileURL` and
  * `dropFiles`, are for what a secret cannot reach — an Azure file, which
  * DuckDB-WASM has no extension for — and `registerFileBuffer` for bytes the page already holds.
- *
- * **A host should cache Parquet metadata** — `SET parquet_metadata_cache = true`, once, when it
- * boots. A graph's payload is one chunk per type with a row group per tile, so its footer lists
- * every tile and grows with the graph, and without the cache every statement fetches and parses it
- * again: a tile read costs the graph rather than the tile. Measured in `/docs/design/later/backend`, it
- * is 2.2× on a window's reads in DuckDB-WASM and 2.5× over a 10 ms link.
  */
 export interface Engine {
   /**

@@ -20,21 +20,9 @@ CLAUDE.local.md
 # The RETURNING.md ritual (CLAUDE.md) says local-only, and nothing enforced it.
 RETURNING.md
 
-# insta pending snapshots. `crates/xtask/tests/snapshot_hygiene.rs` assumes these
-# never reach the history — a `.snap.new` is a proposal awaiting `cargo insta
-# review`, and it is the one file that legitimately carries `assertion_line:`.
-*.snap.new
-
 # `.planning/` was ignored here. It is deleted, and the ignore goes with it: if a
 # tool recreates that directory, it must show up in `git status` rather than
 # accumulate a second plan out of sight. That is how the first one got to 106k lines.
-
-# Walking-skeleton local-run artefacts.
-# `fossil compile examples/hello.fossil` writes these to cwd; ignore them at
-# repo root so casual smoke tests don't dirty the tree.
-/output.parquet
-/manifest.yaml
-/.scratch-walking-skel/
 
 # === JS/TS ecosystem (pnpm monorepo) ===
 node_modules/
@@ -46,12 +34,6 @@ node_modules/
 packages/wasm/pkg/
 packages/executor/pkg/
 packages/storage/pkg/
-# Changesets are tracked on main; the `changeset version` step consumes them at
-# release time. Only the empty-template fixture (if any) is ignored.
-# (Earlier 08-01 ignored .changeset/*.md as "PR-bound" — corrected in 08-12 once
-# the publish pipeline made tracking necessary.)
-!.changeset/config.json
-!.changeset/README.md
 # TS incremental build state
 *.tsbuildinfo
 
