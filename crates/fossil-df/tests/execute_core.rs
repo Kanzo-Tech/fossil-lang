@@ -126,6 +126,7 @@ async fn csv_program_runs_through_the_storage_seam() {
         [
             "Person.vertex.yml",
             "fossil.graph.yml",
+            "mapping.ttl",
             "vertex/Person/subject_name/chunk0",
             "vertex/Person/vertex_count",
         ]

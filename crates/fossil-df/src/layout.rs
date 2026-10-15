@@ -18,8 +18,8 @@
 //! (`/docs/format/round-trip`): a subject is a non-null absolute IRI, unique in
 //! the whole graph (A1); a set holds no element twice, and every tag is
 //! well-formed (A4); a relation holds no pair twice (A5); and a value `GraphAr`'s
-//! types cannot hold is refused, not rounded. A2, A6 and A7 are properties of
-//! the mapping, which `describe` writes and holds to them.
+//! types cannot hold is refused, not rounded. A2 is a property of the mapping,
+//! which `describe` holds to it, and A6 and A7 hold by construction there.
 //!
 //! [`GraphAr` format specification]: https://graphar.apache.org/docs/specification/format
 
@@ -86,6 +86,11 @@ pub(crate) struct Vertex {
     pub info: VertexInfo,
     /// A column per property, in the information file's order and nullability.
     pub batch: RecordBatch,
+    /// The XSD datatype, by its local name, of each column that was stored as
+    /// a `string` and is not one: `decimal`, `time` and `hexBinary`. `GraphAr`
+    /// has no word for them, so the mapping states them
+    /// (`/docs/format/conventions/datatypes`).
+    pub natural: HashMap<String, &'static str>,
 }
 
 /// A relation, laid out: its information file, and its one adjacency list.
@@ -107,6 +112,20 @@ pub(crate) struct Laid {
     pub info: GraphInfo,
     pub vertices: Vec<Vertex>,
     pub edges: Vec<Edge>,
+}
+
+impl Laid {
+    /// The columns stored as text that are not text, by `(vertex type, column)`.
+    pub(crate) fn natural(&self) -> crate::describe::Natural {
+        self.vertices
+            .iter()
+            .flat_map(|v| {
+                v.natural
+                    .iter()
+                    .map(|(column, xsd)| ((v.info.r#type.clone(), column.clone()), *xsd))
+            })
+            .collect()
+    }
 }
 
 /// Lay `graph` out, refusing what `GraphAr` cannot hold or the RDF image cannot
@@ -293,6 +312,7 @@ fn vertex(
     let label = node.label.as_str();
     let batches = table.map_or(&[][..], |t| t.batches.as_slice());
 
+    let mut natural: HashMap<String, &'static str> = HashMap::new();
     let mut columns: Vec<(Property, ArrayRef)> = vec![(
         Property {
             name: PAYLOAD_IDENTITY.to_string(),
@@ -327,6 +347,9 @@ fn vertex(
     for (name, arrow) in singles {
         let declared = node.properties.iter().find(|p| p.name == name);
         let array = gather(batches, |b| b.column_by_name(&name).cloned(), &arrow)?;
+        if let Some(xsd) = text_of(array.data_type()) {
+            natural.insert(name.clone(), xsd);
+        }
         let (data_type, array) = match array.data_type() {
             DataType::Struct(_) => tagged(&name, declared, &array)?,
             _ => stored(&format!("{label}.{name}"), &array)?,
@@ -352,7 +375,11 @@ fn vertex(
         .filter(|p| p.cardinality == Cardinality::Multi)
     {
         let values = table.and_then(|t| t.properties.iter().find(|p| p.name == declared.name));
-        columns.push(set(label, declared, values, first, count)?);
+        let column = set(label, declared, values, first, count)?;
+        if let Some(xsd) = column.2 {
+            natural.insert(declared.name.clone(), xsd);
+        }
+        columns.push((column.0, column.1));
     }
 
     let schema = Schema::new(
@@ -400,7 +427,27 @@ fn vertex(
             },
         },
         batch,
+        natural,
     })
+}
+
+/// The XSD datatype a column of `data_type` has, when [`stored`] writes it as a
+/// `string`: the type the engine reads back is `VARCHAR`, and the natural
+/// mapping (R2RML §10.2) would make `xsd:string` of it.
+fn text_of(data_type: &DataType) -> Option<&'static str> {
+    match data_type {
+        DataType::Time32(_) | DataType::Time64(_) => Some("time"),
+        DataType::Decimal32(..)
+        | DataType::Decimal64(..)
+        | DataType::Decimal128(..)
+        | DataType::Decimal256(..) => Some("decimal"),
+        DataType::Binary
+        | DataType::LargeBinary
+        | DataType::BinaryView
+        | DataType::FixedSizeBinary(_) => Some("hexBinary"),
+        DataType::Dictionary(_, values) => text_of(values),
+        _ => None,
+    }
 }
 
 /// A column of structs as the user-defined type `langString`: the lexical form
@@ -491,7 +538,7 @@ fn set(
     values: Option<&PropertyValues>,
     first: u64,
     count: u64,
-) -> Result<(Property, ArrayRef), WriteError> {
+) -> Result<(Property, ArrayRef, Option<&'static str>), WriteError> {
     let name = declared.name.as_str();
     let at = format!("{label}.{name}");
     let batches = values.map_or(&[][..], |v| v.batches.as_slice());
@@ -536,6 +583,7 @@ fn set(
         )));
     }
 
+    let natural = text_of(elements.data_type());
     let (data_type, elements) = if is_tagged {
         let form = exact(&elements, &DataType::Utf8)?;
         let lang = gather(
@@ -587,6 +635,7 @@ fn set(
             cardinality: Several::Set,
         },
         Arc::new(list),
+        natural,
     ))
 }
 

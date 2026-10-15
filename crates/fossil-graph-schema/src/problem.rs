@@ -859,6 +859,14 @@ catalogue! {
     #[error("a `{vertex_type}` vertex has the subject {subject}, which is not an absolute IRI")]
     WriteInvalidSubject { vertex_type: String, subject: String },
 
+    /// One IRI that names two things the mapping needs it to name one of
+    /// (admissibility A2): two vertex types with one class, two columns of one
+    /// type with one predicate, or a relation whose predicate is a column
+    /// predicate of its source type. The RDF image would make the two one.
+    "write/ambiguous-iri", "One IRI names two things",
+    #[error("`{iri}` names both `{first}` and `{second}`")]
+    WriteAmbiguousIri { iri: String, first: String, second: String },
+
     /// A value `GraphAr`'s property types cannot hold: an unsigned 64-bit
     /// integer above `i64::MAX`, a timestamp finer than a millisecond, or a
     /// column of a type `GraphAr` has no word for.

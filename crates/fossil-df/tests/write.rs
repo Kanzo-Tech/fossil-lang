@@ -323,7 +323,7 @@ async fn the_graph_keeps_the_promises_it_makes_to_a_stranger() {
     };
 
     // 1. The files are exactly the information files' and the ones they name.
-    let mut named = vec!["fossil.graph.yml".to_string()];
+    let mut named = vec!["fossil.graph.yml".to_string(), "mapping.ttl".to_string()];
     for v in &g.vertices {
         named.push(v.file_name());
         named.push(paths::vertex_count(v));
@@ -643,6 +643,24 @@ async fn the_graph_keeps_the_promises_it_makes_to_a_stranger() {
         Some("run-1/fossil.graph.yml"),
         "{puts:?}"
     );
+    // The mapping follows every table it describes and precedes the information
+    // files, which the graph document closes.
+    let mapping = puts
+        .iter()
+        .position(|p| p == "run-1/mapping.ttl")
+        .unwrap_or_else(|| panic!("mapping.ttl was never written: {puts:?}"));
+    let last_table = puts
+        .iter()
+        .rposition(|p| p.contains("/vertex/") || p.contains("/edge/"))
+        .expect("tables were written");
+    let first_info = puts
+        .iter()
+        .position(|p| p.ends_with(".yml"))
+        .expect("information files were written");
+    assert!(
+        last_table < mapping && mapping < first_info,
+        "tables, then mapping.ttl, then the information files: {puts:?}"
+    );
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -724,6 +742,7 @@ async fn a_type_with_no_rows_is_still_a_valid_graph() {
         [
             "Person.vertex.yml",
             "fossil.graph.yml",
+            "mapping.ttl",
             "vertex/Person/vertex_count"
         ],
         "a count and no chunk"

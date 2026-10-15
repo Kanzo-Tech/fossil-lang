@@ -3090,6 +3090,43 @@
       "x-detail": "\"a `{vertex_type}` vertex has the subject {subject}, which is not an absolute IRI\""
     },
     {
+      "description": "One IRI that names two things the mapping needs it to name one of (admissibility A2): two vertex types with one class, two columns of one type with one predicate, or a relation whose predicate is a column predicate of its source type. The RDF image would make the two one.",
+      "properties": {
+        "code": {
+          "enum": [
+            "write/ambiguous-iri"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "first": {
+              "type": "string"
+            },
+            "iri": {
+              "type": "string"
+            },
+            "second": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "first",
+            "iri",
+            "second"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "One IRI names two things",
+      "type": "object",
+      "x-detail": "\"`{iri}` names both `{first}` and `{second}`\""
+    },
+    {
       "description": "A value `GraphAr`'s property types cannot hold: an unsigned 64-bit integer above `i64::MAX`, a timestamp finer than a millisecond, or a column of a type `GraphAr` has no word for.",
       "properties": {
         "code": {

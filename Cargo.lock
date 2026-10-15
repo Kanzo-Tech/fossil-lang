@@ -1690,6 +1690,8 @@ dependencies = [
  "miette",
  "object_store",
  "oxrdf",
+ "rml",
+ "rudof_iri",
  "rudof_rdf",
  "salsa",
  "schemars",
@@ -3212,7 +3214,7 @@ dependencies = [
 [[package]]
 name = "prefixmap"
 version = "0.3.4"
-source = "git+https://github.com/Kanzo-Tech/rudof?rev=9ff79986e4ed711c1ee70e5cfa1cc73358a0af45#9ff79986e4ed711c1ee70e5cfa1cc73358a0af45"
+source = "git+https://github.com/Kanzo-Tech/rudof?rev=a113142cd5110a0d23e39a1f13153e09267b3103#a113142cd5110a0d23e39a1f13153e09267b3103"
 dependencies = [
  "colored",
  "indexmap",
@@ -3529,7 +3531,7 @@ dependencies = [
 [[package]]
 name = "rbe"
 version = "0.3.4"
-source = "git+https://github.com/Kanzo-Tech/rudof?rev=9ff79986e4ed711c1ee70e5cfa1cc73358a0af45#9ff79986e4ed711c1ee70e5cfa1cc73358a0af45"
+source = "git+https://github.com/Kanzo-Tech/rudof?rev=a113142cd5110a0d23e39a1f13153e09267b3103#a113142cd5110a0d23e39a1f13153e09267b3103"
 dependencies = [
  "hashbag",
  "indexmap",
@@ -3677,6 +3679,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "rml"
+version = "0.3.4"
+source = "git+https://github.com/Kanzo-Tech/rudof?rev=a113142cd5110a0d23e39a1f13153e09267b3103#a113142cd5110a0d23e39a1f13153e09267b3103"
+dependencies = [
+ "prefixmap",
+ "rudof_iri",
+ "rudof_rdf",
+ "sqlparser",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "rowan"
 version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3691,7 +3705,7 @@ dependencies = [
 [[package]]
 name = "rudof_iri"
 version = "0.3.4"
-source = "git+https://github.com/Kanzo-Tech/rudof?rev=9ff79986e4ed711c1ee70e5cfa1cc73358a0af45#9ff79986e4ed711c1ee70e5cfa1cc73358a0af45"
+source = "git+https://github.com/Kanzo-Tech/rudof?rev=a113142cd5110a0d23e39a1f13153e09267b3103#a113142cd5110a0d23e39a1f13153e09267b3103"
 dependencies = [
  "getrandom 0.3.4",
  "indexmap",
@@ -3706,7 +3720,7 @@ dependencies = [
 [[package]]
 name = "rudof_rdf"
 version = "0.3.4"
-source = "git+https://github.com/Kanzo-Tech/rudof?rev=9ff79986e4ed711c1ee70e5cfa1cc73358a0af45#9ff79986e4ed711c1ee70e5cfa1cc73358a0af45"
+source = "git+https://github.com/Kanzo-Tech/rudof?rev=a113142cd5110a0d23e39a1f13153e09267b3103#a113142cd5110a0d23e39a1f13153e09267b3103"
 dependencies = [
  "colored",
  "const_format",
@@ -4124,7 +4138,7 @@ dependencies = [
 [[package]]
 name = "shacl"
 version = "0.3.4"
-source = "git+https://github.com/Kanzo-Tech/rudof?rev=9ff79986e4ed711c1ee70e5cfa1cc73358a0af45#9ff79986e4ed711c1ee70e5cfa1cc73358a0af45"
+source = "git+https://github.com/Kanzo-Tech/rudof?rev=a113142cd5110a0d23e39a1f13153e09267b3103#a113142cd5110a0d23e39a1f13153e09267b3103"
 dependencies = [
  "itertools",
  "oxrdf",
@@ -4140,7 +4154,7 @@ dependencies = [
 [[package]]
 name = "shex_ast"
 version = "0.3.4"
-source = "git+https://github.com/Kanzo-Tech/rudof?rev=9ff79986e4ed711c1ee70e5cfa1cc73358a0af45#9ff79986e4ed711c1ee70e5cfa1cc73358a0af45"
+source = "git+https://github.com/Kanzo-Tech/rudof?rev=a113142cd5110a0d23e39a1f13153e09267b3103#a113142cd5110a0d23e39a1f13153e09267b3103"
 dependencies = [
  "colored",
  "const_format",
@@ -4236,6 +4250,27 @@ checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "sqlparser"
+version = "0.63.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3679862809bd1f92e563cf6fd820e28f39135303668001c10331d5027183e8b4"
+dependencies = [
+ "log",
+ "sqlparser_derive",
+]
+
+[[package]]
+name = "sqlparser_derive"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2905ae8e8148d8f7f5748ea95d1e949fa4fc1d7f5161547b758ad118b2e4b0aa"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.6",
 ]
 
 [[package]]

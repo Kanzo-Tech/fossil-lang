@@ -171,13 +171,13 @@ fn render_run(corpus: &native::Corpus) -> String {
     out
 }
 
-/// Invariant 5: the store holds `fossil.graph.yml` and exactly the files the
-/// information files name — each document, each chunk, each count and each
-/// offset table.
+/// Invariant 5: the store holds `fossil.graph.yml`, the mapping beside it and
+/// exactly the files the information files name — each document, each chunk,
+/// each count and each offset table.
 fn unnamed_or_missing(corpus: &native::Corpus) -> Vec<String> {
     use graphar_parquet::paths;
     let graph = corpus.graph();
-    let mut named: Vec<String> = vec!["fossil.graph.yml".to_string()];
+    let mut named: Vec<String> = vec!["fossil.graph.yml".to_string(), "mapping.ttl".to_string()];
     for v in &graph.vertices {
         named.push(v.file_name());
         named.push(paths::vertex_count(v));

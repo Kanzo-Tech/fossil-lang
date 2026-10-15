@@ -99,7 +99,7 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
 | wasm-opt (binaryen) | 116 via `cargo install wasm-opt@0.116.1` | NOT apt (ubuntu ships binaryen 108, whose wasm-opt corrupts wasm-bindgen's externref table → `Table.grow(): failed to grow table` instantiating a wasm-bindgen module on Node 20, binaryen #4711; 116 fixes it). `packages/executor/scripts/build-wasm.sh` passes the six wasm32 default features (bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint, reference-types, multivalue — Rust 1.87/LLVM 20). NOT `-all` → no gc/typed-funcref, which break instantiation |
 | arrow + parquet | 58 | the graph writer, `fossil_df::write` (through `datafusion`'s re-export) and `graphar-parquet` |
 | graphar-info, graphar-parquet | 0.1.0-alpha.1, crates.io | the Apache GraphAr YAML model and chunk writers (Kanzo-Tech/graphar); no `tokio`, builds for wasm32; `serde_yaml_ng`, never `serde_yml` |
-| shex_ast, shacl, rudof_rdf, rudof_iri, prefixmap | Kanzo-Tech/rudof by `git` + `rev` (PR #33; the owner tags it later) | ShEx and SHACL shape documents, and the Turtle parser; one git source for all five, `default-features = false` — the defaults drag in `reqwest`/`tokio` and what wasm32 cannot build |
+| shex_ast, shacl, rudof_rdf, rudof_iri, prefixmap, rml | Kanzo-Tech/rudof by `git` + `rev` (master after its `rml` crate; the owner tags it later) | ShEx and SHACL shape documents, the Turtle parser, and `rml`, the RML-Core mapping `describe` builds and writes as `mapping.ttl` (its `sql` feature renders it in tests); one git source for all six, `default-features = false` — the defaults drag in `reqwest`/`tokio` and what wasm32 cannot build |
 | datafusion | 54, `default-features = false` | pinned in `crates/fossil-df/Cargo.toml`, not the workspace table — see the `zstd`/`arrow-ipc` note there |
 
 When bumping: update workspace `Cargo.toml` `[workspace.dependencies]`, run `cargo deny check`,
@@ -135,8 +135,9 @@ crates/
   fossil-storage-wasm/     that, exposed to JS for `@fossil-lang/storage`
   fossil-df/               DataFusion backend for the property-graph MIR, the one graph
                            writer (`write`: `layout` lays the tables out as Apache GraphAr's
-                           and holds them to what an RDF reader can recover, `graphar-parquet`
-                           writes the chunks, `fossil.graph.yml` last), and `Executor` — the
+                           and holds them to what an RDF reader can recover, `describe` builds
+                           the RML-Core mapping of them, `graphar-parquet` writes the chunks,
+                           `mapping.ttl` after them and `fossil.graph.yml` last), and `Executor` — the
                            whole run a host drives, under the 2 GiB pool in `memory.rs` that
                            refuses as `run/over-budget`. `facts` counts what the footers hold
                            (`fossil:stats`)

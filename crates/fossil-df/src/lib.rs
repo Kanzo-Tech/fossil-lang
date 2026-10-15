@@ -35,6 +35,7 @@
 // boxing it would put `Box<Failure>` in every signature a host reads.
 #![allow(clippy::result_large_err)]
 
+mod describe;
 /// The output descriptor a program names, decoded from the document the
 /// checker read — the one resolution every host runs with.
 pub mod descriptor;

@@ -101,6 +101,7 @@ export type Code =
   | 'write/language-not-allowed'
   | 'write/duplicate-value'
   | 'write/invalid-subject'
+  | 'write/ambiguous-iri'
   | 'write/unrepresentable'
   | 'run/too-large'
   | 'storage/no-credential'
@@ -216,6 +217,7 @@ export const CODES: readonly Code[] = [
   'write/language-not-allowed',
   'write/duplicate-value',
   'write/invalid-subject',
+  'write/ambiguous-iri',
   'write/unrepresentable',
   'run/too-large',
   'storage/no-credential',
@@ -914,6 +916,16 @@ export interface ProblemData {
     vertex_type: string;
   };
   /**
+   * One IRI that names two things the mapping needs it to name one of (admissibility A2): two
+   * vertex types with one class, two columns of one type with one predicate, or a relation whose
+   * predicate is a column predicate of its source type. The RDF image would make the two one.
+   */
+  'write/ambiguous-iri': {
+    first: string;
+    iri: string;
+    second: string;
+  };
+  /**
    * A value `GraphAr`'s property types cannot hold: an unsigned 64-bit integer above `i64::MAX`, a
    * timestamp finer than a millisecond, or a column of a type `GraphAr` has no word for.
    */
@@ -1148,6 +1160,7 @@ export const TITLES: { readonly [C in Code]: string } = {
   'write/language-not-allowed': 'A value in a language the shape does not admit',
   'write/duplicate-value': 'A value appears twice where it must be unique',
   'write/invalid-subject': 'A vertex has no absolute IRI as its subject',
+  'write/ambiguous-iri': 'One IRI names two things',
   'write/unrepresentable': 'A value GraphAr cannot hold',
   'run/too-large': 'The graph has too many vertices',
   'storage/no-credential': 'No credential was vended',
@@ -1242,6 +1255,7 @@ export type DetailedCode =
   | 'write/invalid-language-tag'
   | 'write/duplicate-value'
   | 'write/invalid-subject'
+  | 'write/ambiguous-iri'
   | 'write/unrepresentable'
   | 'run/too-large'
   | 'storage/no-credential'
@@ -1335,6 +1349,7 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'write/invalid-language-tag': (d) => `\`${d.property}\` has a value tagged \`${d.tag}\`, which is not a well-formed BCP 47 language tag`,
   'write/duplicate-value': (d) => `\`${d.at}\` holds \`${d.value}\` twice`,
   'write/invalid-subject': (d) => `a \`${d.vertex_type}\` vertex has the subject ${d.subject}, which is not an absolute IRI`,
+  'write/ambiguous-iri': (d) => `\`${d.iri}\` names both \`${d.first}\` and \`${d.second}\``,
   'write/unrepresentable': (d) => `\`${d.property}\` holds \`${d.value}\`, of type ${d.datatype}, which GraphAr cannot hold`,
   'run/too-large': (d) => `the graph has ${d.vertices} vertices; a \`dense_id\` is a u32`,
   'storage/no-credential': (d) => `the host vended no ${d.access} credential for ${d.scope}`,

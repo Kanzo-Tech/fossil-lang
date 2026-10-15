@@ -110,6 +110,7 @@ async fn same_type_from_two_sources_merges_into_one_table() {
         [
             "Person.vertex.yml",
             "fossil.graph.yml",
+            "mapping.ttl",
             "vertex/Person/subject_name/chunk0",
             "vertex/Person/vertex_count",
         ],

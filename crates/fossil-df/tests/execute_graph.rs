@@ -113,6 +113,7 @@ async fn the_write_emits_one_information_file_per_type_and_relation() {
             "edge/Order_placedBy_Person/ordered_by_source/offset/chunk0",
             "edge/Order_placedBy_Person/ordered_by_source/vertex_count",
             "fossil.graph.yml",
+            "mapping.ttl",
             "vertex/Order/subject_total/chunk0",
             "vertex/Order/vertex_count",
             "vertex/Person/subject_name/chunk0",

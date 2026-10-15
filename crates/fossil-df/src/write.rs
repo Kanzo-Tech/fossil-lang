@@ -7,6 +7,9 @@
 //! writer places nothing and computes no community. `/docs/design/position`
 //! has the argument and `/docs/design/discarded` the nine placements before it.
 //!
+//! **`mapping.ttl` is written with the graph, after the tables it describes**
+//! ([`crate::describe`]): the RML-Core mapping that says what they mean as RDF.
+//!
 //! **The graph document goes last, and that is the commit.** Every table is in
 //! the store before the document that names it, so a reader that finds
 //! `fossil.graph.yml` finds everything it lists; a write that fails half way
@@ -28,11 +31,12 @@ use fossil_graph_schema::{Failure, Problem};
 use fossil_storage::{Storage, StorageError};
 use graphar_info::{AdjListType, GraphInfo};
 use graphar_parquet::{Options, SRC_INDEX_COL, VERTEX_INDEX_COL};
+use object_store::{ObjectStore, PutOptions, PutPayload};
 
-use crate::Graph;
 use crate::facts::{self, FOOTER_KEY};
 use crate::layout::{self, user_types};
 use crate::report::EdgeDrops;
+use crate::{Graph, describe};
 
 /// What [`write`](fn@write) answers: the graph it wrote, and what the edge join
 /// discarded — the one fact the graph cannot hold about itself.
@@ -83,6 +87,16 @@ pub enum WriteError {
         vertex_type: String,
         subject: String,
     },
+    /// One IRI that names two things the mapping needs it to name one of (A2).
+    #[error("`{iri}` names both `{first}` and `{second}`")]
+    AmbiguousIri {
+        iri: String,
+        first: String,
+        second: String,
+    },
+    /// The mapping `describe` built is not one `rml` writes: fossil's fault.
+    #[error("the mapping: {0}")]
+    Mapping(rml::Error),
     /// A value `GraphAr`'s types cannot hold.
     #[error("`{property}` holds `{value}`, of type {datatype}, which GraphAr cannot hold")]
     Unrepresentable {
@@ -144,6 +158,9 @@ impl From<WriteError> for Failure {
                 vertex_type,
                 subject,
             }),
+            WriteError::AmbiguousIri { iri, first, second } => {
+                Self::new(Problem::WriteAmbiguousIri { iri, first, second })
+            }
             WriteError::Unrepresentable {
                 property,
                 datatype,
@@ -170,6 +187,7 @@ impl From<WriteError> for Failure {
                 bug("a relation names a vertex type with no table").caused_by(e)
             }
             e @ WriteError::Internal(_) => bug("a table is not in the order promised").caused_by(e),
+            WriteError::Mapping(e) => bug("the mapping is not valid").caused_by(e),
             WriteError::Arrow(e) => bug("an Arrow kernel refused a batch").caused_by(e),
             WriteError::Info(e) => bug("the graph's information files are not valid").caused_by(e),
             WriteError::Graph { source, .. } => bug("a chunk did not encode").caused_by(source),
@@ -195,7 +213,8 @@ impl From<WriteError> for Failure {
 /// [`WriteError`] on the first failure. Nothing is written after it, and
 /// `fossil.graph.yml` never is; the data that cannot be a graph — a subject
 /// that is not an IRI, a value `GraphAr` cannot hold, a set with an element
-/// twice — is refused before any chunk is.
+/// twice, an IRI that names two things in the mapping (A2) — is refused before
+/// any chunk is.
 #[tracing::instrument(skip_all, fields(dest = %dest))]
 pub async fn write(
     graph: &Graph,
@@ -205,6 +224,10 @@ pub async fn write(
 ) -> Result<Written, WriteError> {
     let laid = layout::layout(graph)?;
     laid.info.validate()?;
+    // The mapping is built, and A2 held, before a chunk is written: a graph
+    // whose image would be ambiguous leaves nothing behind.
+    let described = describe::describe(&graph.schema, &laid.info, &laid.natural())?;
+    let mapping = rml::rdf::write_turtle(&described.mapping).map_err(WriteError::Mapping)?;
     let (store, root) = storage.at(dest).map_err(|source| WriteError::Store {
         path: dest.to_string(),
         source,
@@ -256,10 +279,17 @@ pub async fn write(
         });
     }
 
-    // F1b: `mapping.ttl`, the RML-Core document that says what the tables mean as
-    // RDF, is written HERE — after every table it describes and before the graph
-    // document, whose presence is the reader's sign that the rest is there.
-    // `describe` builds it from `laid.info` and the schema with rudof's `rml`.
+    // `mapping.ttl`, the RML-Core document that says what the tables mean as RDF,
+    // goes after every table it describes and before the graph document, whose
+    // presence is the reader's sign that the rest is there.
+    store
+        .put_opts(
+            &root.clone().join(MAPPING),
+            PutPayload::from(mapping.into_bytes()),
+            PutOptions::default(),
+        )
+        .await
+        .map_err(|e| at(MAPPING)(graphar_parquet::Error::Store(e)))?;
 
     graphar_parquet::write_info(&*store, &root, &laid.info)
         .await
@@ -269,6 +299,10 @@ pub async fn write(
         dropped,
     })
 }
+
+/// The mapping's name, beside the graph document: fixed, and no pointer joins
+/// the two (`/docs/design/graphar`, D5).
+const MAPPING: &str = "mapping.ttl";
 
 /// Rows per Parquet row group, in every chunk of a graph.
 ///
