@@ -131,10 +131,10 @@ export async function profile(inputs: readonly Input[], io: ProfileIO): Promise<
       async (sql) => rowsOf(await io.engine.query(sql, { signal: signal ?? new AbortController().signal })),
       { options: io.options, signal },
     );
-    const described = new Set(profiled.sources.map((s) => s.descriptor.key));
-    for (const { source: key, reason } of profiled.failed) {
-      const source = native.find((s) => s.key === key);
-      if (source === undefined || described.has(key) || undescribed.some((u) => u.source === source)) continue;
+    const described = new Set(profiled.sources.map((s) => s.binding));
+    for (const { source: binding, reason } of profiled.failed) {
+      const source = native.find((s) => s.binding === binding);
+      if (source === undefined || described.has(binding) || undescribed.some((u) => u.source === source)) continue;
       undescribed.push({ source, problem: FossilError.of("engine/failed", {}, { cause: new Error(reason) }).problem });
     }
     undescribed.sort((a, b) => inputs.indexOf(a.source) - inputs.indexOf(b.source));

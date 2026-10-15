@@ -33,7 +33,7 @@ and says where it ran.
 | --- | --- | --- |
 | encoding a property graph as files, and reading those files into DuckDB | **`Kanzo-Tech/graphar`** — knows no RDF | `graphar-info`, `graphar-parquet`, `@kanzo-tech/graphar-duckdb` |
 | parsing, writing and validating RDF, ShEx, SHACL and RML, and turning tables into an `(s,p,o)` relation | **rudof, through our fork `Kanzo-Tech/rudof`** | `rudof_rdf`, `shex_ast`, `shacl`, a new `rml` crate, and `Mapping` on `rudof_wasm` |
-| the language and the engine | **fossil** | the compiler, and `fossil-df`: execute, `layout`, `describe`, write |
+| the language and the engine | **fossil** | the compiler, `fossil-mir`'s `describe`, and `fossil-df`: execute, `layout`, write |
 | the global id, and how a graph is drawn | **`@kanzo-tech/graph`** | arithmetic over GraphAr's per-type index |
 | composing the above for a product | **keasy** | `mount` + `attachGraph` + `Mapping.triples`, about 20 lines |
 
@@ -53,7 +53,8 @@ flowchart LR
   end
   subgraph F["fossil-lang"]
     hir["fossil-hir<br/>shapes → types"]
-    df["fossil-df<br/>execute · layout · describe · write"]
+    mir["fossil-mir<br/>describe"]
+    df["fossil-df<br/>execute · layout · write"]
     exe["@fossil-lang/executor: run"]
     st["@fossil-lang/storage: mount"]
   end
@@ -65,7 +66,8 @@ flowchart LR
   hir --> shex
   hir --> shacl
   df --> pq
-  df --> rml
+  df --> mir
+  mir --> rml
   df --> rdf
   exe --> df
   ui -. SQL only .-> js
