@@ -66,6 +66,18 @@ resolved by the host the same way.
 
 ## What each part means
 
+**The names of the triples maps** are fixed by the writer and are never an output: `<#Person>` for a
+vertex type, `<#Person_nickname>` for a multi-valued or language-tagged property (`<#Type_property>`),
+and `<#Order_placedBy_Person>` for a relation (`<#Src_label_Dst>`, the whole triple, so two relations
+with one label cannot collide).
+
+**Identifiers inside a query are always double-quoted** (`"Order"` is a keyword in SQL), except the
+fixed aliases the query itself introduces (`subject`, `value`, `lang`, `source`, `target`, `s`, `d`,
+`e`). `rml:reference` of a column is its bare name, delimited only when it is not a plain identifier.
+
+**A type or a column that has no IRI is not mapped**: a graph of a program that names no shape has
+tables and no RDF meaning, and a vertex map that would have no class and no column is omitted.
+
 **A vertex type** is a triples map over its table. The subject map reads `subject` as an IRI and
 types it with the class (`rml:class`, RML-Core §6.2); each single-valued property is a
 predicate-object map reading its column.
@@ -74,9 +86,9 @@ predicate-object map reading its column.
 the index, and reads the two subjects. For the relation `Order_placedBy_Person`:
 
 ```turtle
-<#placedBy> a rml:TriplesMap ;
+<#Order_placedBy_Person> a rml:TriplesMap ;
   rml:logicalSource [ rml:source [ a rml:Source ] ; rml:referenceFormulation rml:SQL2008Query ;
-    rml:iterator "SELECT s.subject AS source, d.subject AS target FROM Order_placedBy_Person AS e JOIN \"Order\" AS s ON e._graphArSrcIndex = s._graphArVertexIndex JOIN Person AS d ON e._graphArDstIndex = d._graphArVertexIndex" ] ;
+    rml:iterator "SELECT s.subject AS source, d.subject AS target FROM \"Order_placedBy_Person\" AS e JOIN \"Order\" AS s ON e._graphArSrcIndex = s._graphArVertexIndex JOIN \"Person\" AS d ON e._graphArDstIndex = d._graphArVertexIndex" ] ;
   rml:subjectMap [ rml:reference "source" ; rml:termType rml:IRI ] ;
   rml:predicateObjectMap [ rml:predicate ex:placedBy ; rml:objectMap [ rml:reference "target" ; rml:termType rml:IRI ] ] .
 ```
@@ -89,13 +101,14 @@ index, a row position or a blank node is layout independent
 
 A multi-valued property is a column of a list, and its logical source unnests the list once, so each
 row is one element. A tagged one is a list of `(value, lang)` structs, and the object map reads the
-value and the tag from the same row:
+value and the tag from the same row. A single-valued tagged property is a bare struct and is read the
+same way through `col.value` and `col.lang`, with no unnesting:
 
 ```turtle
 <#Person_nickname> a rml:TriplesMap ;
   rml:logicalSource [ rml:source [ a rml:Source ] ;
     rml:referenceFormulation rml:SQL2008Query ;
-    rml:iterator "SELECT subject, n.value AS value, n.lang AS lang FROM (SELECT subject, unnest(nickname) AS n FROM Person)" ] ;
+    rml:iterator "SELECT subject, n.value AS value, n.lang AS lang FROM (SELECT subject, unnest(\"nickname\") AS n FROM \"Person\")" ] ;
   rml:subjectMap [ rml:reference "subject" ; rml:termType rml:IRI ] ;
   rml:predicateObjectMap [ rml:predicate <https://example.org/nickname> ;
     rml:objectMap [ rml:reference "value" ; rml:languageMap [ rml:reference "lang" ] ] ] .
@@ -112,10 +125,13 @@ value without a language map.
 - **The term type** is `rml:IRI` for a subject and for a value the shape declares an IRI, and a
   literal otherwise.
 - **The datatype** is the shape's, verbatim: `rml:datatype xsd:gYear` stays `xsd:gYear` whatever the
-  column's type. Where a shape declares none, the object map states none, and the literal is the
-  column's **natural** one: the natural mapping of SQL types to XSD of R2RML §10.2 — an integer type is
-  `xsd:integer`, `float` and `double` are `xsd:double`, `decimal` is `xsd:decimal`, `boolean`,
-  `date`, `time`, a timestamp and a binary are their XSD types, and a string, and anything else, is
+  column's type. A value the shape declares an IRI is `rml:termType rml:IRI` and has no datatype.
+  Where a shape declares none, the writer states one only where the column's type would lose it:
+  `xsd:gYear` for a year, `xsd:time` for a time, and `xsd:decimal`, `xsd:time` or `xsd:hexBinary` for a
+  column [the writer stored as text](/docs/format/conventions/datatypes). Everywhere else the object
+  map states none, and the literal is the column's **natural** one: the natural mapping of SQL types
+  to XSD of R2RML §10.2 — an integer type is `xsd:integer`, `float` and `double` are `xsd:double`,
+  `boolean`, `date` and a timestamp are their XSD types, and a string, and anything else, is
   `xsd:string`. `rml` decides it by the engine's own type of the column.
 - **A language-tagged value is an `rdf:langString`**: the lexical form is the value, and the tag is
   the column the language map names, lower-cased by the writer (RDF 1.1 Concepts §3.3: the value
@@ -144,6 +160,12 @@ a class needs its own, that is a shape's `sh:name`, which this mapping does not 
 
 They are statements about the vocabulary and not about the data, and a reader that loads
 `mapping.ttl` into the same store as the data asserts them there.
+
+## The bytes of the file are not reproducible
+
+rudof's Turtle writer fixes neither the numbering of blank nodes nor the order of subjects, so two
+runs of one program write the same mapping and different bytes. **A mapping is compared parsed**, as
+the set of its triples maps and annotations, never as text; the writer's own tests do the same.
 
 ## What `rml` supports, and what it refuses
 

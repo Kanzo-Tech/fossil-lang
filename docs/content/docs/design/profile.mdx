@@ -114,9 +114,9 @@ resolver. Both are built: `fossil-profile` with its two hosts, introspect gone, 
 [declared in the program](/docs/design/declared). On keasy's side the executor runs in a worker of
 its own, and it has moved into the executor itself ([A run off the page](/docs/design/off-the-page)).
 
-## The corpus's profile is the same plan
+## The graph's profile is the same plan
 
 A run profiles what it wrote with this plan, over the tables instead of the sources, and stores it in
-`fossil.json` for the readers of the corpus — [the corpus's own facts](/docs/design/facts) argues why
+each vertex chunk's footer for the readers of the graph — [the graph's own facts](/docs/design/facts) argues why
 the output and not the sources, and what the plan gains for it: its queries as data so DataFusion can
 run them too, the least, greatest and commonest values, and Parquet's names for the counts.

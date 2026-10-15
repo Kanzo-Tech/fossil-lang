@@ -2746,7 +2746,7 @@
       "x-detail": "\"`{expression}` is not an expression fossil can lower yet, so this property is not written\""
     },
     {
-      "description": "An operator asked for more memory than the run's budget had left. Raised while the graph executes, before any byte of the corpus is written. Sizes are bytes.",
+      "description": "An operator asked for more memory than the run's budget had left. Raised while the graph executes, before any byte of the graph is written. Sizes are bytes.",
       "properties": {
         "code": {
           "enum": [
@@ -2922,7 +2922,7 @@
       "x-detail": "\"the query engine failed\""
     },
     {
-      "description": "Writing one file of the corpus failed; the store's error is the cause.",
+      "description": "Writing one file of the graph failed; the store's error is the cause.",
       "properties": {
         "code": {
           "enum": [
@@ -2946,12 +2946,12 @@
         "code",
         "data"
       ],
-      "title": "A corpus file could not be written",
+      "title": "A graph file could not be written",
       "type": "object",
       "x-detail": "\"`{path}` could not be written\""
     },
     {
-      "description": "A row's language tag, read from the data, that is not well-formed BCP 47. The run writes no corpus rather than an `rdf:langString` with no valid tag.",
+      "description": "A row's language tag, read from the data, that is not well-formed BCP 47. The run writes no graph rather than an `rdf:langString` with no valid tag.",
       "properties": {
         "code": {
           "enum": [
@@ -3508,155 +3508,6 @@
       "title": "A module could not be loaded",
       "type": "object",
       "x-detail": "\"{location} could not be loaded\""
-    },
-    {
-      "description": "A corpus whose manifest could not be read; the reader's error is the cause.",
-      "properties": {
-        "code": {
-          "enum": [
-            "corpus/unreadable"
-          ],
-          "type": "string"
-        },
-        "data": {
-          "properties": {
-            "path": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "path"
-          ],
-          "type": "object"
-        }
-      },
-      "required": [
-        "code",
-        "data"
-      ],
-      "title": "The corpus could not be read",
-      "type": "object",
-      "x-detail": "\"{path} could not be read\""
-    },
-    {
-      "description": "A manifest that is not JSON.",
-      "properties": {
-        "code": {
-          "enum": [
-            "corpus/not-json"
-          ],
-          "type": "string"
-        },
-        "data": {
-          "properties": {
-            "path": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "path"
-          ],
-          "type": "object"
-        }
-      },
-      "required": [
-        "code",
-        "data"
-      ],
-      "title": "The manifest is not JSON",
-      "type": "object",
-      "x-detail": "\"{path} is not JSON\""
-    },
-    {
-      "description": "A manifest declaring a format this reader does not read.",
-      "properties": {
-        "code": {
-          "enum": [
-            "corpus/unsupported-format"
-          ],
-          "type": "string"
-        },
-        "data": {
-          "properties": {
-            "format": {
-              "type": "string"
-            },
-            "path": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "format",
-            "path"
-          ],
-          "type": "object"
-        }
-      },
-      "required": [
-        "code",
-        "data"
-      ],
-      "title": "The corpus format is not supported",
-      "type": "object",
-      "x-detail": "\"{path} declares format {format}, and this reader reads fossil/1 only\""
-    },
-    {
-      "description": "A manifest declaring one table twice.",
-      "properties": {
-        "code": {
-          "enum": [
-            "corpus/duplicate-table"
-          ],
-          "type": "string"
-        },
-        "data": {
-          "properties": {
-            "table": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "table"
-          ],
-          "type": "object"
-        }
-      },
-      "required": [
-        "code",
-        "data"
-      ],
-      "title": "A table is declared twice",
-      "type": "object",
-      "x-detail": "\"the corpus declares {table} twice\""
-    },
-    {
-      "description": "A corpus location carrying a query or a fragment. A corpus is a prefix and every file is named under it; a query string — a signature among them — addresses one object and does not survive the join. Signed storage is reached by opening a job under the host that vends it.",
-      "properties": {
-        "code": {
-          "enum": [
-            "corpus/not-a-location"
-          ],
-          "type": "string"
-        },
-        "data": {
-          "properties": {
-            "location": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "location"
-          ],
-          "type": "object"
-        }
-      },
-      "required": [
-        "code",
-        "data"
-      ],
-      "title": "Not a corpus location",
-      "type": "object",
-      "x-detail": "\"{location} carries a query or a fragment, and a corpus location is a prefix: signed \\\n         storage is opened as a job, under the host that vends its credential\""
     },
     {
       "description": "An argument a caller passed that is not what the call takes.",

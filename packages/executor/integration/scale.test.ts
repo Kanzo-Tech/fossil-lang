@@ -11,22 +11,18 @@
  * under a gigabyte — it measured 624 MiB when this was written, against 4 GiB of address space.
  */
 
-import { initFossilExecutor } from '@fossil-lang/executor';
 import { describe, expect, it } from 'vitest';
 
-import { runShop } from './shop.js';
+import { initFossilExecutor } from '../src/index.js';
+import { countOf, runShop } from './shop.js';
 
 const PEOPLE = 200_000;
 
 describe('the executor at 200,000 people and 600,000 orders', () => {
   it('writes every order, inside a gigabyte of linear memory', async () => {
     const { files } = await runShop(PEOPLE);
-    const manifest = JSON.parse(new TextDecoder().decode(files.find((f) => f.path === 'fossil.json')!.bytes)) as {
-      vertex_tables: { name: string; record_count: number }[];
-    };
-    const count = (name: string) => manifest.vertex_tables.find((t) => t.name === name)?.record_count;
-    expect(count('Order')).toBe(3 * PEOPLE);
-    expect(count('Person')).toBeGreaterThan(0);
+    expect(countOf(files, 'vertex/Order/vertex_count')).toBe(BigInt(3 * PEOPLE));
+    expect(countOf(files, 'vertex/Person/vertex_count')).toBeGreaterThan(0n);
 
     const { memory } = (await initFossilExecutor()) as { memory: WebAssembly.Memory };
     expect(memory.buffer.byteLength).toBeLessThan(2 ** 30);

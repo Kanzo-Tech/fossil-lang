@@ -22,7 +22,7 @@ syntax/invalid-language-tag
 ## Why fossil refuses it
 
 RDF 1.1 Concepts §3.3 gives every language-tagged string a non-empty tag that is well-formed
-according to BCP 47, and the corpus writes the tag as it was written. The lexer's rule for a tag is
+according to BCP 47, and the writer lower-cases the tag it writes. The lexer's rule for a tag is
 Turtle's and SPARQL's `LANGTAG`, which `abcdefghi` passes; well-formedness — RFC 5646 §2.2.9, a
 language of at most eight letters, then subtags of at most eight — is the checker's
 ([Annotations and language-tagged strings](/docs/design/labels)). Well-formed is not registered:

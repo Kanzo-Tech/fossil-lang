@@ -84,20 +84,17 @@ doubles memory is a reader that does not cast.
 
 ## The order of the types
 
-The vertex types are listed in `vertices:` in the order of this key, compared in turn:
+The vertex types are listed in `vertices:` in the order of the IRI each is known by, compared as the
+string it is, code point by code point: a ShEx label, a SHACL shape's `sh:targetClass` (the smallest
+when there are several, the shape's own IRI when there is none), a declared type's class IRI. A shape
+with no IRI, a blank node with no `sh:targetClass`, goes after every shape that has one, by the sorted
+IRIs of its predicates. A tie that survives is not broken: it is the compile error
+[`shape/ambiguous-order`](/docs/errors/shape/ambiguous-order), naming both shapes.
 
-1. `sh:order` ascending, where the shape has one; a shape without one after every shape with one.
-   On a node shape this is fossil's use of the property, and a ShEx shape, which has none, goes to
-   the next step.
-2. The shape's IRI, compared as the string it is, code point by code point.
-3. A shape that is a blank node has no IRI, and is placed after the shapes with one, by the sorted
-   IRIs of its `sh:targetClass` values and then of its property paths.
-4. A tie that survives all three is a compile error naming both shapes.
-
-A declared type (`@iri`, no document) takes the same key by its class IRI. The document's own order
-is never the order: a rule that read it would make a program's output depend on how a file was laid
-out. The argument for the key, and what would reverse it, are on the design page `design/graphar`,
-behind the maintainers' divider.
+The document's own order is never the order, and neither is `sh:order` on a node shape: SHACL defines
+it for property shapes and groups, where it orders a shape's properties and is read. The argument for
+the key, and what would reverse it, are on [the order of shapes](/docs/design/shapes#the-order-of-shapes),
+and the position it gives a type is the `ordinal` of `graphar_vertex_types`.
 
 ## The identity is the subject IRI
 

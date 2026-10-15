@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
-import { initFossilExecutor, run, type CorpusFile } from '@fossil-lang/executor';
+import { initFossilExecutor, run, type CorpusFile } from '../src/index.js';
 import type { RunReport } from '@fossil-lang/types';
 
 const PROGRAM = new URL('../../../docs/programs/shop/', import.meta.url);
@@ -19,7 +19,7 @@ function sources(people: number): { users: string; orders: string } {
 
 /**
  * `docs/programs/shop/shop.fossil` run through `@fossil-lang/executor` — the only host that writes a
- * corpus — in this process, over `people` generated users. Answers what the run wrote.
+ * graph — in this process, over `people` generated users. Answers what the run wrote.
  */
 export async function runShop(people: number): Promise<{ report: RunReport; files: CorpusFile[] }> {
   const wasm = createRequire(import.meta.url).resolve('@fossil-lang/executor/pkg/fossil_df_wasm_bg.wasm');
@@ -35,4 +35,11 @@ export async function runShop(people: number): Promise<{ report: RunReport; file
     },
     path: `${base}shop.fossil`,
   });
+}
+
+/** A `vertex_count` / `edge_count` file of a graph: one little-endian 64-bit integer. */
+export function countOf(files: readonly CorpusFile[], path: string): bigint {
+  const file = files.find((f) => f.path === path);
+  if (file === undefined) throw new Error(`no ${path}`);
+  return new DataView(file.bytes.buffer, file.bytes.byteOffset, file.bytes.byteLength).getBigInt64(0, true);
 }

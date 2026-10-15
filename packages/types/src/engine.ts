@@ -11,9 +11,9 @@
  * DuckDB-WASM has no extension for — and `registerFileBuffer` for bytes the page already holds.
  *
  * **A host should cache Parquet metadata** — `SET parquet_metadata_cache = true`, once, when it
- * boots. A corpus's payload is one file per type with a row group per tile, so its footer lists
- * every tile and grows with the corpus, and without the cache every statement fetches and parses it
- * again: a tile read costs the corpus rather than the tile. Measured in `/docs/design/later/backend`, it
+ * boots. A graph's payload is one chunk per type with a row group per tile, so its footer lists
+ * every tile and grows with the graph, and without the cache every statement fetches and parses it
+ * again: a tile read costs the graph rather than the tile. Measured in `/docs/design/later/backend`, it
  * is 2.2× on a window's reads in DuckDB-WASM and 2.5× over a 10 ms link.
  */
 export interface Engine {
@@ -48,16 +48,16 @@ export interface Engine {
   /**
    * Make a copy of `bytes` readable under `name`, replacing whatever was there. A copy, because
    * DuckDB-WASM's `registerFileBuffer` transfers the buffer to its worker and would detach the
-   * caller's: the same bytes can then be registered twice. How `attach` reads a corpus a run answered
+   * caller's: the same bytes can then be registered twice. How a reader reads a graph a run answered
    * in memory (`/docs/design/off-the-page`); {@link dropFiles} forgets it.
    */
   registerFileBuffer(name: string, bytes: Uint8Array): Promise<void>;
 }
 
-/** One file of a corpus: its path under the corpus's root, and its bytes — what a run into memory
- *  answers and what `attach` reads with `{ files }`. */
+/** One file of a graph: its path under the graph's root, and its bytes — what a run into memory
+ *  answers and what a reader registers with `registerFileBuffer`. */
 export interface CorpusFile {
-  /** `fossil.json`, `vertex/<Type>.parquet`, `edge/<Src>_<label>_<Dst>.parquet`, … */
+  /** `fossil.graph.yml`, `mapping.ttl`, `<Type>.vertex.yml`, `vertex/<Type>/<group>/chunk0`, … */
   path: string;
   bytes: Uint8Array;
 }

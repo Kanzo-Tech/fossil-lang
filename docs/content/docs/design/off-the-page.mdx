@@ -1,6 +1,6 @@
 ---
-title: A run off the page, a corpus from memory
-description: "In a browser, run runs in a worker the executor owns — the host's calls cross back to the page as messages, a failure crosses with its code, title and data, and the signal terminates the worker — with the same signature it has in Node, where it runs in-process; and attach reads the files a run into memory answered, with no host and no URL."
+title: A run off the page, a graph from memory
+description: "In a browser, run runs in a worker the executor owns — the host's calls cross back to the page as messages, a failure crosses with its code, title and data, and the signal terminates the worker — with the same signature it has in Node, where it runs in-process; and a graph a run into memory answered is attached by registering its files with the engine, with no host and no URL."
 ---
 
 A run is DataFusion over wasm reading every source and writing every Parquet in one call, and on a
@@ -8,13 +8,14 @@ page's main thread that call holds the thread for as long as it takes: the page 
 Stop cannot be pressed. keasy found this and solved it on its side — `run-worker.ts`, a hundred and
 seventy lines of message protocol, and `run.worker.ts` booting the executor in a worker of its own —
 and then solved the next step on its side too: a preview answered into memory is attached by
-`memory-corpus.ts`, which registers each file with DuckDB-WASM under a prefix and points `attach` at
+`memory-corpus.ts`, which registers each file with DuckDB-WASM under a prefix and points the reader at
 the prefix as if it were a URL.
 
 Both are the boundary violation [Three hosts](/docs/design/three-hosts#the-test-for-the-host-boundary)
 names: a host re-deriving what the library knows. Where a run's thread goes is the executor's
-knowledge — it is the executor's module that holds the thread — and what a corpus's files are called
-in an engine is `attach`'s. So both move here, and keasy's copies are deleted.
+knowledge — it is the executor's module that holds the thread — and the bytes a run answers into
+memory are `CorpusFile`s the engine can register by name. So the first moves here, and the second is
+the one line `resolve` is.
 
 ## `run` runs in a worker, and its signature does not change
 
@@ -81,8 +82,8 @@ structured clone, so each side sends the failure as data and the other rebuilds 
 **The signal terminates the worker.** An abort on the page calls `worker.terminate()`, rejects with
 `signal.reason`, and aborts the host calls still in flight. Termination is immediate — it does not
 wait for DataFusion to reach an `await`, which a CPU-bound sort may not do for seconds — and it frees
-the instance's memory with it. What it leaves is what any stopped run leaves: `fossil.json` is written
-last, so there is no corpus. **The cost:** a worker cannot clean up after itself, so a multipart upload
+the instance's memory with it. What it leaves is what any stopped run leaves: `fossil.graph.yml` is written
+last, so there is no graph. **The cost:** a worker cannot clean up after itself, so a multipart upload
 the writer had started under a job's prefix is abandoned rather than aborted, and reclaiming its parts
 is the store's lifecycle rule (`AbortIncompleteMultipartUpload` on S3), as it already is for a tab that
 closed mid-run. In Node the signal reaches the run as it does now.
@@ -97,32 +98,34 @@ it does not become an option every caller passes. And a preview whose worker boo
 most of its time would keep one worker warm — and pay its memory back by terminating it after the
 largest runs.
 
-## `attach` reads a corpus from memory
+## A graph from memory is attached by registering its files
 
 ```ts
 const { report, files } = await run(program, { host, into: 'memory', limit: 200 });
-await using corpus = await attach('preview', { engine, files });
+for (const f of files) await engine.registerFileBuffer(`preview/${f.path}`, f.bytes);
+await using graph = await graphar.attachGraph(engine, 'preview', (paths) => paths.map((p) => `preview/${p}`), {
+  entry: 'fossil.graph.yml',
+});
 ```
 
-**`files` is the third place a corpus can be**, beside `host` (a job's, under its credential) and
-`url` (a corpus at a URL), and `attach` takes exactly one of the three. It registers each file with
-the engine under a prefix of this attachment's own — so a second preview under the same name does not
-take the files of the one it replaces, whose detach comes later — reads `fossil.json` from there, and
-makes every view exactly as for a URL. Detaching gives back the catalog and then the files. A failed
-attach drops what it registered, and the attach's failure is the one reported.
+**The files are the third place a graph can be**, beside a job's (under its credential, through
+`mount`) and a URL: the host names each file the way the engine will read it, and `resolve` returns
+those names. Nothing of fossil is in it, which is why the reader that wrapped this in a package is
+deleted ([one door](/docs/design/one-door)). A prefix of the attachment's own keeps a second preview
+under the same name from taking the files of the one it replaces.
 
-**The engine registers bytes.** `Engine` gains `registerFileBuffer(name, bytes)`: it registers a copy
+**The engine registers bytes.** `Engine` has `registerFileBuffer(name, bytes)`: it registers a copy
 of `bytes` under `name`, replacing whatever was there — DuckDB-WASM's `registerFileBuffer` transfers
 the buffer to its worker and would detach the caller's, so the copy is the engine's to make, and the
 same `files` can be attached twice. kanzo-ui's engine already has exactly this method, so an engine
 that satisfies the type today still does.
 
-**`CorpusFile` moves to `@fossil-lang/types`**, `{ path, bytes }`, so `@fossil-lang/corpus` reads what
-`@fossil-lang/executor` answers without depending on the executor — the reader stays TypeScript with
-no WASM behind it, as its package says.
+**`CorpusFile` lives in `@fossil-lang/types`**, `{ path, bytes }`, so a reader holds what
+`@fossil-lang/executor` answers without depending on the executor.
 
-**What would reverse it:** an engine that can read the bytes in place, without a registry — then
-`files` is read through it and the prefix goes. The parameter stays.
+**What would reverse it:** an engine that can read the bytes in place, without a registry — then the
+files are read through it and the prefix goes. Or a second host writing the same three lines, which
+then become a package of that host's.
 
 ## What it touches
 
@@ -130,7 +133,6 @@ no WASM behind it, as its package says.
 | --- | --- |
 | `@fossil-lang/executor` | `run` in a worker where the platform has one, in-process otherwise; `worker.ts` the worker's side, the protocol above in one module both sides import; the compiled module posted once per worker; `initFossilExecutor` compiles on the page; `CorpusFile` re-exported from `@fossil-lang/types` rather than declared |
 | `@fossil-lang/types` | `CorpusFile`; `Engine.registerFileBuffer`; the failure-as-data shape and its rebuild, on `/internal` where the executor and nothing on the barrel needs it |
-| `@fossil-lang/corpus` | `attach(name, { engine, files })`, exactly one of `host`, `url` and `files`, `api/invalid-argument` otherwise |
 | `fossil-df-wasm` | nothing: the worker instantiates the same module |
 | crates | nothing |
 
@@ -142,7 +144,7 @@ no WASM behind it, as its package says.
 
 **keasy.** Delete `run-worker.ts`, `run.worker.ts` and `run-worker.test.ts`: `executor.ts`'s `runInto`
 calls `run` as it does now, and the worker is fossil's. Delete `memory-corpus.ts` and its test: the
-preview attaches with `attach(name, { engine, files })`. What keasy's tests asserted about the
+preview registers the files and calls `attachGraph`. What keasy's tests asserted about the
 protocol — a host refusal keeping `store/refused` through the worker, an abort reaching the run — moves
 into fossil's tests of `run`, where the protocol now lives.
 
@@ -150,4 +152,4 @@ into fossil's tests of `run`, where the protocol now lives.
 
 The user settled what this page left open: the run is in a worker wherever `globalThis.Worker` is a
 constructor, Deno and Bun included; and 0.3.0-alpha.32 ships all four designs of this batch together —
-annotations and language tags, the views and the corpus's stats, the worker and `attach` from memory.
+annotations and language tags, the views and the graph's stats, the worker and a graph from memory.

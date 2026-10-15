@@ -116,7 +116,7 @@ fn the_parse_actually_read_the_schema() {
 /// a string field `<name>-value`, a number 7, a list of two — and the rendering
 /// the emitted TypeScript performs ([`problem::render`]) must equal `Problem`'s
 /// own `Display` for that data. It is what keeps a detail raised in
-/// `@fossil-lang/corpus` from reading differently from the same code raised in
+/// `@fossil-lang/types` from reading differently from the same code raised in
 /// Rust — which hand-written renderings do.
 ///
 /// It cannot prove that the TypeScript emitted for the segments renders as

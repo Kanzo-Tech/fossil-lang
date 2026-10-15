@@ -66,7 +66,7 @@ exactly one.
   <Card
     href="/docs/design/tooling-for-machines"
     title="Tooling for machines"
-    description="A diagnostic is an API, a manifest names every table before a byte is read, and the documentation index is part of the product."
+    description="A diagnostic is an API, the information files name every table before a byte is read, and the documentation index is part of the product."
   />
 </Cards>
 
@@ -102,27 +102,27 @@ The remaining pages answer the questions that do not fit under a core.
   <Card
     href="/docs/design/corpus"
     title="The corpus"
-    description="Why the output is Parquet files under a manifest written last rather than a server, one id space across the whole graph, and why write-once/read-many is what makes the whole-program checks available at all."
+    description="Why the output is an Apache GraphAr graph and its mapping as files, with the graph document written last, rather than a server; one index per type and the global id the reader's; and why write-once/read-many is what makes the whole-program checks available at all."
   />
   <Card
     href="/docs/design/facts"
-    title="The corpus's own facts"
-    description="Every field of fossil.json as a column of a catalog view, and the writer's profile of what it wrote — nulls, distinct values, bounds, commonest values and their frequencies, and the keys they make, under Parquet's and pg_stats' names — so a reader guesses nothing the writer knew."
+    title="The graph's own facts"
+    description="Every fact of the information files as a relation, and the writer's profile of what it wrote — nulls, distinct values, bounds, commonest values and their frequencies, in each chunk's footer, under Parquet's and pg_stats' names — so a reader guesses nothing the writer knew."
   />
   <Card
     href="/docs/design/graphar"
     title="The corpus as Apache GraphAr"
-    description="Where the corpus is going: a run writes an Apache GraphAr graph and the RML-Core mapping of its tables, together and once. Four owners — graphar, rudof through our fork, fossil, @kanzo-tech/graph — and keasy composing them; @fossil-lang/corpus deleted. The decisions, what would reverse each, and the order of PRs."
+    description="A run writes an Apache GraphAr graph and the RML-Core mapping of its tables, together and once. Four owners — graphar, rudof through our fork, fossil, @kanzo-tech/graph — and keasy composing them. The decisions, what would reverse each, and what remains."
   />
   <Card
     href="/docs/design/one-door"
     title="One door"
-    description="A corpus is attached to the host's engine by open and read with the host's SQL, and each thing the door does is done once, by one layer."
+    description="A graph is attached to the host's engine by attachGraph and read with the host's SQL, and each thing the door does is done once, by one layer."
   />
   <Card
     href="/docs/design/position"
     title="Where x and y come from"
-    description="The corpus carries the graph, not a picture: a view draws it at two columns it binds or with its own GPU simulation."
+    description="The graph carries the data, not a picture: a view draws it at two columns it binds or with its own GPU simulation."
   />
   <Card
     href="/docs/design/three-hosts"
@@ -132,7 +132,7 @@ The remaining pages answer the questions that do not fit under a core.
   <Card
     href="/docs/design/off-the-page"
     title="A run off the page"
-    description="In a browser run runs in a worker the executor owns, with the host's calls and its failures crossing as messages; and attach reads a corpus a run answered in memory."
+    description="In a browser run runs in a worker the executor owns, with the host's calls and its failures crossing as messages; and a graph a run answered in memory is attached by registering its files."
   />
   <Card
     href="/docs/design/later/backend"

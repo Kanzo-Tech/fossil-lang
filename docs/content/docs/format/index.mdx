@@ -62,14 +62,14 @@ before the graph document is.
 ## The walking skeleton
 
 The program in `examples/hello.fossil` reads five rows of CSV and writes five `Person` vertices.
-This is the layout a pyarrow prototype wrote for it:
+This is the layout it has:
 
 ```
 <location>/
   fossil.graph.yml
   Person.vertex.yml
-  vertex/Person/vertex_count               8 B   one int64, little-endian
-  vertex/Person/subject_name/chunk0    1,489 B   Parquet: _graphArVertexIndex, subject, name
+  vertex/Person/vertex_count               one int64, little-endian
+  vertex/Person/subject_name/chunk0        Parquet: _graphArVertexIndex, subject, name
   mapping.ttl
 ```
 

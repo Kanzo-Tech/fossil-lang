@@ -37,7 +37,7 @@ pub struct RunReport {
 ///
 /// `execute_edge` resolves both endpoints against the vertex tables with an
 /// inner join, so a row naming a subject no vertex carries is discarded. **That
-/// is intended and it stays** — a corpus cannot hold an edge to a vertex that is
+/// is intended and it stays** — a graph cannot hold an edge to a vertex that is
 /// not there — and it is counted rather than silent.
 ///
 /// # Why the count is here and not in the graph

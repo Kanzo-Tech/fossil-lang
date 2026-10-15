@@ -36,15 +36,18 @@
     "build": "pnpm run build:wasm && tsc -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "tsc --noEmit"
   },
-  "//dependencies": "`@fossil-lang/types` is the host contract: `run` reads through its `Host` with `resolveDocuments`. A run returns `{ dest, dropped }` and no manifest: `fossil.json` is read by `@fossil-lang/corpus`, typed against the schema the writer generates.",
+  "//dependencies": "`@fossil-lang/types` is the host contract: `run` reads through its `Host` with `resolveDocuments`. A run returns `{ location, dropped }`; what it wrote is read by `@kanzo-tech/graphar-duckdb`, a dev dependency here because only `integration/` reads a graph back.",
   "dependencies": {
     "@fossil-lang/storage": "workspace:*",
     "@fossil-lang/types": "workspace:*"
   },
   "sideEffects": false,
   "devDependencies": {
+    "@duckdb/duckdb-wasm": "1.32.0",
+    "@kanzo-tech/graphar-duckdb": "0.1.0-alpha.1",
     "typescript": "^5.6.0",
     "vitest": "^4.1.11"
   }

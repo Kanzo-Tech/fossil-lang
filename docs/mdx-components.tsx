@@ -7,7 +7,6 @@ import type { MDXComponents } from "mdx/types";
 import { Mermaid } from "@/components/mermaid";
 import { Program } from "@/components/program";
 import { ErrorIndex } from "@/components/error-index";
-import { GuardIndex } from "@/components/guard-index";
 
 export function getMDXComponents(components?: MDXComponents): MDXComponents {
   return {
@@ -22,7 +21,6 @@ export function getMDXComponents(components?: MDXComponents): MDXComponents {
     Mermaid,
     Program,
     ErrorIndex,
-    GuardIndex,
     ...components,
   };
 }

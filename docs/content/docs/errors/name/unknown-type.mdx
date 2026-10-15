@@ -22,7 +22,7 @@ The names are case-sensitive: `string` is not `String`.
 
 ## Why fossil refuses it
 
-The field's type is what every mapping that writes it is checked against, and what the corpus writes
+The field's type is what every mapping that writes it is checked against, and what the graph writes
 as the literal's datatype. A name that is no type would leave the field unchecked and its column
 untyped. The list is the lattice the checker already has
 (`crates/fossil-graph-schema/src/lib.rs, Primitive`) and the three constructors, and nothing else —

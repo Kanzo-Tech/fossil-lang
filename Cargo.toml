@@ -54,17 +54,18 @@ futures = "0.3"
 web-time = "1"
 percent-encoding = "2"
 
-# === Shape documents, RDF and RML: Kanzo-Tech/rudof master at the commit after its `rml` crate; the owner tags it later ===
+# === Shape documents, RDF and RML: Kanzo-Tech/rudof master at the commit after its per-syntax features (R-d); the owner tags it later ===
 # One git source for every rudof crate, so `IriS`, `PrefixMap` and `Object` are one type in all of
-# them; the fork leaves `rudof_iri/fetch` and `rudof_rdf/sparql` (reqwest, tokio) off by default.
-shex_ast = { git = "https://github.com/Kanzo-Tech/rudof", rev = "a113142cd5110a0d23e39a1f13153e09267b3103", default-features = false }
-rudof_iri = { git = "https://github.com/Kanzo-Tech/rudof", rev = "a113142cd5110a0d23e39a1f13153e09267b3103", default-features = false }
-rudof_rdf = { git = "https://github.com/Kanzo-Tech/rudof", rev = "a113142cd5110a0d23e39a1f13153e09267b3103", default-features = false }
-prefixmap = { git = "https://github.com/Kanzo-Tech/rudof", rev = "a113142cd5110a0d23e39a1f13153e09267b3103", default-features = false }
-shacl = { git = "https://github.com/Kanzo-Tech/rudof", rev = "a113142cd5110a0d23e39a1f13153e09267b3103", default-features = false }
+# them; the fork leaves `rudof_iri/fetch` and `rudof_rdf/sparql` (reqwest, tokio) off by default, and
+# `rudof_rdf` reads only the syntaxes asked for: fossil reads Turtle.
+shex_ast = { git = "https://github.com/Kanzo-Tech/rudof", rev = "889cb741e19524a1da5468ecbbeed8499c787458", default-features = false }
+rudof_iri = { git = "https://github.com/Kanzo-Tech/rudof", rev = "889cb741e19524a1da5468ecbbeed8499c787458", default-features = false }
+rudof_rdf = { git = "https://github.com/Kanzo-Tech/rudof", rev = "889cb741e19524a1da5468ecbbeed8499c787458", default-features = false, features = ["turtle"] }
+prefixmap = { git = "https://github.com/Kanzo-Tech/rudof", rev = "889cb741e19524a1da5468ecbbeed8499c787458", default-features = false }
+shacl = { git = "https://github.com/Kanzo-Tech/rudof", rev = "889cb741e19524a1da5468ecbbeed8499c787458", default-features = false }
 # The mapping `describe` builds and writes: `rml`'s AST and its Turtle writer. Its `sql` feature (a
 # sqlparser AST, wasm-clean) is a dev-dependency of `fossil-df`, which renders the mapping to hold it.
-rml = { git = "https://github.com/Kanzo-Tech/rudof", rev = "a113142cd5110a0d23e39a1f13153e09267b3103", default-features = false }
+rml = { git = "https://github.com/Kanzo-Tech/rudof", rev = "889cb741e19524a1da5468ecbbeed8499c787458", default-features = false }
 # The RDF terms `io.rdf` and the SHACL decoder read, from the graph `rudof_rdf` parses.
 #
 # `rdf-12` is oxrdf's RDF 1.2 gate and it is OFF by default. It gates `Term::Triple`,

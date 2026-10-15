@@ -59,12 +59,24 @@ datatype IRI and lower-cased language tag.
 - **A6.** M defines no blank node.
 - **A7.** No term raises a data error.
 
-**The writer refuses what it can check.** A4 is `write/duplicate-value` for a repeated element or a
+**The writer refuses what it can check.** A1 is [`write/invalid-subject`](/docs/errors/write/invalid-subject)
+for a NULL or relative subject and [`write/duplicate-value`](/docs/errors/write/duplicate-value) for a
+subject repeated within a type or across two; A2 is [`write/ambiguous-iri`](/docs/errors/write/ambiguous-iri),
+raised from the mapping before any chunk is written; A5 is `write/duplicate-value` for a parallel
+edge; A4 is `write/duplicate-value` for a repeated element or a
 NULL one and [`write/invalid-language-tag`](/docs/errors/write/invalid-language-tag) for a tag that
 is malformed, empty or NULL; a value GraphAr's types cannot hold — a `uint64` above `i64::MAX`, a
-timestamp finer than a millisecond — is `write/unrepresentable`
+timestamp finer than a millisecond — is [`write/unrepresentable`](/docs/errors/write/unrepresentable)
 ([data types](/docs/format/conventions/datatypes)). A graph is refused, and no graph document is
 written, so there is no graph to open.
+
+A3 and A6 hold by construction: a value's literal is the column's natural one or the shape's declared
+one, and the mapping builds no blank node. A7 is checked for the subjects, which A1 holds to absolute
+IRIs; the values of a column the shape declares an IRI are not validated as IRIs.
+*Design question.* A graph whose IRI-valued column holds a string that is not an IRI is written, and
+its image makes a term a reader will refuse; refusing it at write, as A1 does for subjects, is the
+change the first such graph asks for.
+
 
 ## What is preserved
 

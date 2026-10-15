@@ -40,7 +40,7 @@ mod describe;
 /// checker read — the one resolution every host runs with.
 pub mod descriptor;
 /// The run a host drives: one compiled program, its documents, its sources,
-/// and the corpus it writes.
+/// and the graph it writes.
 pub mod executor;
 mod facts;
 mod layout;
@@ -72,7 +72,7 @@ pub use executor::{CorpusFile, Executor, Output, Ran};
 pub use plan::plan_relation;
 /// What a run hands its caller.
 pub use report::{EdgeDrops, RunReport};
-/// The corpus writer, and what it answers.
+/// The graph writer, and what it answers.
 pub use write::{WriteError, Written, write};
 
 use std::collections::HashMap;
@@ -117,7 +117,7 @@ const PROPERTY_LANGUAGE: &str = "lang";
 /// data — vertex tables and edge tables as in-memory `RecordBatch`es.
 ///
 /// This is the universal substrate made concrete: **relations + a
-/// graph-schema**. The corpus is written *from* this by [`write()`]; the data
+/// graph-schema**. The graph is written *from* this by [`write()`]; the data
 /// carriers hold no metadata of their own — it all lives in
 /// [`schema`](Self::schema).
 #[derive(Debug)]
@@ -892,13 +892,13 @@ async fn execute_edges<'db>(
 /// resolve endpoint IRIs to type-local dense ids. The pairs stay lazy:
 /// [`finalize_edge`] merges every mapping's pairs for the table, dedups and
 /// sorts them. The write renumbers both into the global `dense_id` and sorts
-/// again, so that order is the executor's, not the corpus's.
+/// again, so that order is the executor's, not the graph's.
 ///
 /// # The join is inner, and the discard is counted
 ///
 /// A row whose `src_iri` or `dst_iri` names a subject no vertex carries
 /// resolves nothing and does not become an edge. **That is intended and it
-/// stays** — a corpus cannot hold an edge to a vertex that is not there, and
+/// stays** — a graph cannot hold an edge to a vertex that is not there, and
 /// the `no-dangling-endpoint` guard reads every endpoint back and fails on a
 /// `dense_id` no vertex has.
 ///
@@ -994,7 +994,7 @@ async fn execute_edge(
 /// same edge are the same case one level up: their pairs overlap wherever
 /// their rows mint the same subject.
 ///
-/// A corpus check that asks whether the stored relation is self-consistent
+/// A graph check that asks whether the stored relation is self-consistent
 /// cannot catch it: a duplicate is *in* the relation. `EmitVertex` carries
 /// `dedup: true` for exactly this reason, and [`Cardinality::Single`]'s own doc
 /// — *"a materializer dedups by key"* — is the sentence this makes true.

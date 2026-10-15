@@ -4,7 +4,6 @@ import { dirname, resolve } from 'node:path';
 import { ConsoleLogger, NODE_RUNTIME, createDuckDB, type DuckDBBindings } from '@duckdb/duckdb-wasm/blocking';
 import type { Engine, Table } from '@fossil-lang/types';
 
-
 const require = createRequire(import.meta.url);
 // The Arrow DuckDB-WASM decodes with, reached through it rather than declared beside it: a second
 // copy would be a second `Table` class, and nothing here needs one of its own.

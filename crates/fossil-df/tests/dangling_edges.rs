@@ -19,9 +19,9 @@
 //! subject identifies at most one vertex. A vertex type materialised without
 //! dedup can hold two rows with the same `subject`, and then one candidate
 //! resolves to two edges and the subtraction under-reports — saturating to zero
-//! while rows were both duplicated and dropped. That corpus already violates
-//! `identity-is-the-subject` (`packages/corpus/guards/guards.mjs`), which is the
-//! guard that catches it; nothing here does.
+//! while rows were both duplicated and dropped. That graph already violates
+//! admissibility A1 (`/docs/design/graphar`), which the writer refuses as
+//! `write/duplicate-value`; nothing here does.
 //!
 //! It also says nothing about WHICH endpoint dangled, or which subject: a count
 //! is what the writer can produce without holding the unresolved rows, and

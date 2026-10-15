@@ -36,7 +36,7 @@
 //!
 //! Every node's key is its **subject IRI** (uniform across fossil). An edge
 //! `source → destination` references node types by `label`; the relational plan
-//! computes the actual IRI-valued columns, and the corpus writer resolves
+//! computes the actual IRI-valued columns, and the graph writer resolves
 //! those IRIs to dense ids. The schema only states the shape.
 //!
 //! # Two contracts, one crate
@@ -301,16 +301,16 @@ impl Primitive {
 /// Concepts §3.3) — what [`Primitive::LangString`] is written as.
 pub const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
 
-/// `rdfs:label` — the one predicate a label has in a corpus, whichever document
+/// `rdfs:label` — the one predicate a label has in a graph, whichever document
 /// gave it (`/docs/design/labels`).
 pub const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
 
-/// `rdfs:comment` — the one predicate a description has in a corpus.
+/// `rdfs:comment` — the one predicate a description has in a graph.
 pub const RDFS_COMMENT: &str = "http://www.w3.org/2000/01/rdf-schema#comment";
 
 /// A `ShEx` 2.1 `Annotation` (§5.9): a predicate and an RDF object, about a
 /// type, a field or a relation — never about the data. `ShExJ`'s shape, with one
-/// word changed: a literal's datatype IRI is `datatype`, the word a corpus
+/// word changed: a literal's datatype IRI is `datatype`, the word a graph
 /// column already uses for it, where `ShExJ` writes `type`
 /// (`/docs/design/labels`).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]

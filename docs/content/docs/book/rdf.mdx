@@ -57,8 +57,8 @@ The decoder rejects, shape by shape, and says which (`crates/fossil-graph-schema
 
 **Annotations** are read: a ShEx shape's and triple constraint's `// predicate object`, and a SHACL
 shape's non-validating triples — `sh:name` and `sh:description` as `rdfs:label` and `rdfs:comment`,
-and any predicate outside SHACL's namespace as itself. They reach the corpus's `fossil.json` and make
-no triple. A program writes its own with `@annotation`.
+and any predicate outside SHACL's namespace as itself. They reach `mapping.ttl` as plain triples about the class and predicate IRIs, and make
+no triple of the data. A program writes its own with `@annotation`.
 
 **Closure** (`CLOSED`, `sh:closed`, `EXTRA`) is not read: a property the shape does not declare is
 already an error, so closure could only select what already happens. **SHACL's path** cannot say *one*
@@ -70,6 +70,6 @@ as against *one or more*, so a SHACL document loses that distinction where a ShE
 | --- | --- |
 | `xsd:decimal` with its precision | Read as `Float`, written as `xsd:double`; `parse.float` is the one way to read one from text |
 | Blank nodes | None: every node has an IRI |
-| Named graphs and quads | None: a `fossil/1` corpus is vertex and edge tables |
+| Named graphs and quads | None: a graph is vertex and edge tables |
 | RDF 1.2 triple terms | None ([discarded](/docs/design/discarded)) |
 | Prefixes and CURIEs | None in the language: every IRI is written whole |

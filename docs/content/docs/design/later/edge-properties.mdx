@@ -46,7 +46,7 @@ laureates — which have no `year` — stay in full colour.
   shape's predicates exactly as a mapping body's resolve against its target's. ShEx programs cannot
   annotate until ShEx can say the same thing.
 - **Corpus.** The properties are columns of the relation's edge table after `src` and `dst`, with
-  `iri` and `datatype` as on a vertex table, and `fossil/1` grows by fields a reader may ignore.
+  `iri` and `datatype` as on a vertex table, and the information files grow by keys a reader may ignore.
   `finalize_edge` takes `distinct` over every column, not the pair: two dates on one pair are two edges.
 - **Readers.** A link gets an index as a vertex does — its table's first row plus its row in
   `(src, dst)` order — so a viewer greys a link by index. A clause over an edge column keeps the edges

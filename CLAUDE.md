@@ -18,10 +18,6 @@ Keep it under 200 lines, rules-not-context.
   behind a maintainers' divider,
   `/docs/design` is where an argument lives, with `design/discarded` for every rejected
   alternative and what would bring it back, and `design/prior-art` for every source named.
-- `packages/corpus/` — the artifact's contract, executable: `guards/`, `conformance/` and
-  `integration/`. Its prose is `/docs/format`; the server component that renders `guards.mjs`
-  lives on the docs side and reads across, so renaming it breaks the docs build on purpose. `integration/` is the one directory here that needs `pnpm install`, and
-  `pnpm test:integration` is the only script that reaches it.
 - `docs/programs/` — the conformance programs. Documentation transcludes them; nothing
   retypes a program into prose. No number here: `crates/fossil-df/tests/programs.rs` walks
   the directory, and the count in this line was already wrong.
@@ -99,7 +95,7 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
 | wasm-opt (binaryen) | 116 via `cargo install wasm-opt@0.116.1` | NOT apt (ubuntu ships binaryen 108, whose wasm-opt corrupts wasm-bindgen's externref table → `Table.grow(): failed to grow table` instantiating a wasm-bindgen module on Node 20, binaryen #4711; 116 fixes it). `packages/executor/scripts/build-wasm.sh` passes the six wasm32 default features (bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint, reference-types, multivalue — Rust 1.87/LLVM 20). NOT `-all` → no gc/typed-funcref, which break instantiation |
 | arrow + parquet | 58 | the graph writer, `fossil_df::write` (through `datafusion`'s re-export) and `graphar-parquet` |
 | graphar-info, graphar-parquet | 0.1.0-alpha.1, crates.io | the Apache GraphAr YAML model and chunk writers (Kanzo-Tech/graphar); no `tokio`, builds for wasm32; `serde_yaml_ng`, never `serde_yml` |
-| shex_ast, shacl, rudof_rdf, rudof_iri, prefixmap, rml | Kanzo-Tech/rudof by `git` + `rev` (master after its `rml` crate; the owner tags it later) | ShEx and SHACL shape documents, the Turtle parser, and `rml`, the RML-Core mapping `describe` builds and writes as `mapping.ttl` (its `sql` feature renders it in tests); one git source for all six, `default-features = false` — the defaults drag in `reqwest`/`tokio` and what wasm32 cannot build |
+| shex_ast, shacl, rudof_rdf, rudof_iri, prefixmap, rml | Kanzo-Tech/rudof by `git` + `rev` (master after its per-syntax features, R-d; the owner tags it later) | ShEx and SHACL shape documents, the Turtle parser, and `rml`, the RML-Core mapping `describe` builds and writes as `mapping.ttl` (its `sql` feature renders it in tests); one git source for all six, `default-features = false`, and `rudof_rdf` with `features = ["turtle"]`, the one syntax fossil reads — the defaults drag in `reqwest`/`tokio` and what wasm32 cannot build |
 | datafusion | 54, `default-features = false` | pinned in `crates/fossil-df/Cargo.toml`, not the workspace table — see the `zstd`/`arrow-ipc` note there |
 
 When bumping: update workspace `Cargo.toml` `[workspace.dependencies]`, run `cargo deny check`,
@@ -172,24 +168,12 @@ crates/
 packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts); `runProfiler`
                            is the loop over its `Profiler`
-  corpus/                  the reader, and it is TypeScript and nothing else: `fossil.json`
-                           through `JSON.parse`: `attach` attaches one view per table on the host's
-                           DuckDB — from a job, a URL or the files a run answered in memory — every
-                           fact of the manifest as a relation and the corpus as RDF, `triples`,
-                           and answers its `detach`. `src/index.ts` is the surface. It links no engine
-                           and loads no WASM. Beside `src/` sits the contract it fulfils — `guards/`,
-                           `conformance/` and `integration/` — outside `files`, so npm never
-                           sees it. `tests/manifest.test.ts` holds `src/manifest.ts` against
-                           `fossil-df/src/corpus/fossil.schema.json`; `integration/round-trip.test.ts`
-                           runs a program through the executor and reads the corpus back over
-                           HTTP. `test` stays `tests/` alone because the release gate runs it
-                           without `duckdb`; the contract is `test:contract` (`corpus.yml`) and
-                           `test:integration` (`pnpm-ci.yml`). It was `@fossil-lang/graph` and it
-                           is not a graph: the thing that draws one is `@kanzo-tech/graph`, the
-                           one view layer, in kanzo-ui
-  executor/                the datafusion-wasm executor — the one writer of a corpus. A run
-                           answers `{ location, dropped }`; what it wrote is `<location>fossil.json`.
-                           In a browser it runs in a worker the executor owns (`src/protocol.ts`)
+  executor/                the datafusion-wasm executor — the one writer of a graph. A run
+                           answers `{ location, dropped }`; what it wrote is `<location>fossil.graph.yml`.
+                           In a browser it runs in a worker the executor owns (`src/protocol.ts`).
+                           `integration/` runs a program through it and reads the graph back with
+                           `@kanzo-tech/graphar-duckdb` on DuckDB-WASM (`pnpm test:integration`,
+                           `pnpm-ci.yml`); `test` stays `tests/` alone because the release gate runs it
   types/                   Host — `connections()` + `credentials(scope, access)`, each handed
                            `{ signal }` — the one host contract, and StorageCredential (Iceberg
                            REST's, verbatim); the Engine. And two runtime halves: `FossilError`
@@ -218,7 +202,7 @@ packages/                  npm-published @fossil-lang/* family (pnpm workspace)
                            places by the time it went. This one keys on the NAMES the wasm
                            legend ships, and the guard is on the Rust side
 
-docs/                      Next.js + fumadocs, and ALL of the prose: the book, the corpus
+docs/                      Next.js + fumadocs, and ALL of the prose: the book, the graph
                            format, and the design argument behind a maintainers' divider.
                            NOT published to npm, and no RECURSIVE CI step reaches it (all are
                            filtered to `./packages/*`); `docs.yml` checks it on PRs and

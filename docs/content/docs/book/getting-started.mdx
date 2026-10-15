@@ -11,12 +11,12 @@ flowchart LR
   CSV["<b>data/people.csv</b><br/>the rows you have"] --> RUN(["<b>the executor</b>"])
   SHEX["<b>hello.shex</b><br/>what a Person is"] --> RUN
   PROG["<b>hello.fossil</b><br/>which column is which property"] --> RUN
-  RUN --> OUT["<b>a corpus</b><br/>Person 1 · Person 2 · Person 3"]
+  RUN --> OUT["<b>a graph</b><br/>Person 1 · Person 2 · Person 3"]
 ```
 
 ## Install
 
-fossil runs as WebAssembly, in a browser tab or in Node. The package that writes a corpus is
+fossil runs as WebAssembly, in a browser tab or in Node. The package that writes a graph is
 `@fossil-lang/executor`; the `.wasm` ships inside it.
 
 ```bash
@@ -42,7 +42,7 @@ check before it writes, and refuses a program that fails it.
 
 ## Run it
 
-A host with no storage hands the executor the bytes it holds and gets the corpus back as bytes. In
+A host with no storage hands the executor the bytes it holds and gets the graph back as bytes. In
 Node that is a short script beside the three files:
 
 ```ts
@@ -72,14 +72,16 @@ for (const file of files) {
 ```
 
 `packages/executor/tests/execute.test.ts` runs this script against `docs/programs/hello`. Under
-`out/` is the corpus: `fossil.json`, which names everything else, and one Parquet file per
-type — here `vertex/Person.parquet`, three `Person` rows in it, one per row of `people.csv`.
+`out/` is an Apache GraphAr graph and the mapping that says what it means: `fossil.graph.yml`, which
+names everything else and is written last, `Person.vertex.yml`, the Parquet chunk
+`vertex/Person/subject_name/chunk0` with three `Person` rows in it, one per row of `people.csv`, the
+count beside it, and `mapping.ttl`.
 
 A host that owns storage — a server, or a browser tab with credentials to a bucket — calls `run`
-with `{ host, into: { job } }` instead, and the corpus is written straight into the prefix the host
+with `{ host, into: { job } }` instead, and the graph is written straight into the prefix the host
 vends.
-[What you produce](/docs/book/what-you-produce) and [the corpus format](/docs/format) say what the
-files hold.
+[What you produce](/docs/book/what-you-produce) and [the graph format](/docs/format) say what the
+files hold, and [reading one without fossil](/docs/format/reading/without-fossil) opens them with DuckDB.
 
 ## Where to go next
 

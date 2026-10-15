@@ -148,19 +148,20 @@ describe('run', () => {
     expect(asks).toContainEqual({ scope: { connection: 'lake' }, access: 'read' });
     expect(asks).toContainEqual({ scope: { job: 'job-1' }, access: 'write' });
 
-    // Every file of the corpus was PUT at `<prefix><path>`, and the manifest
-    // last: it is the commit.
+    // Every file of the graph was PUT at `<prefix><path>`, and the graph
+    // document last: it is the commit.
     const written = puts.map((u) => `s3:/${new URL(u).pathname}`);
     expect(written.every((w) => w.startsWith(JOB))).toBe(true);
     for (const need of [
-      'vertex/Person.parquet',
-      'vertex/Order.parquet',
-      'edge/Order_placedBy_Person.parquet',
-      'fossil.json',
+      'vertex/Person/subject_name/chunk0',
+      'vertex/Order/subject_total/chunk0',
+      'edge/Order_placedBy_Person/ordered_by_source/adj_list/part0/chunk0',
+      'mapping.ttl',
+      'fossil.graph.yml',
     ]) {
       expect(written).toContain(`${JOB}${need}`);
     }
-    expect(written.at(-1)).toBe(`${JOB}fossil.json`);
+    expect(written.at(-1)).toBe(`${JOB}fossil.graph.yml`);
   });
 
   it('fails, writing nothing, when a document the program names cannot be read', async () => {
@@ -206,18 +207,15 @@ describe('run', () => {
   });
 });
 
-/** `fossil.json` out of a run into memory. */
-function manifestOf(files: { path: string; bytes: Uint8Array }[]) {
-  const json = files.find((f) => f.path === 'fossil.json');
-  if (json === undefined) throw new Error('no fossil.json');
-  return JSON.parse(new TextDecoder().decode(json.bytes)) as {
-    vertex_tables: { name: string; record_count: number }[];
-    edge_tables: { name: string; record_count: number }[];
-  };
+/** A `vertex_count` / `edge_count` file of a run into memory: one little-endian 64-bit integer. */
+function countOf(files: { path: string; bytes: Uint8Array }[], path: string): bigint {
+  const file = files.find((f) => f.path === path);
+  if (file === undefined) throw new Error(`no ${path}`);
+  return new DataView(file.bytes.buffer, file.bytes.byteOffset, file.bytes.byteLength).getBigInt64(0, true);
 }
 
 describe('run into memory, through a host', () => {
-  it('reads through the connection, asks for no write, and answers the corpus', async () => {
+  it('reads through the connection, asks for no write, and answers the graph', async () => {
     const { gets, puts } = stubFetch(FIXTURES);
     const { host, asks } = recordingHost();
 
@@ -225,10 +223,19 @@ describe('run into memory, through a host', () => {
 
     expect(report.location).toBe('memory://corpus/');
     expect(files.map((f) => f.path).sort()).toEqual([
-      'edge/Order_placedBy_Person.parquet',
-      'fossil.json',
-      'vertex/Order.parquet',
-      'vertex/Person.parquet',
+      'Order.vertex.yml',
+      'Order_placedBy_Person.edge.yml',
+      'Person.vertex.yml',
+      'edge/Order_placedBy_Person/ordered_by_source/adj_list/part0/chunk0',
+      'edge/Order_placedBy_Person/ordered_by_source/edge_count0',
+      'edge/Order_placedBy_Person/ordered_by_source/offset/chunk0',
+      'edge/Order_placedBy_Person/ordered_by_source/vertex_count',
+      'fossil.graph.yml',
+      'mapping.ttl',
+      'vertex/Order/subject_total/chunk0',
+      'vertex/Order/vertex_count',
+      'vertex/Person/subject_name/chunk0',
+      'vertex/Person/vertex_count',
     ]);
     for (const path of Object.keys(FIXTURES)) {
       expect(gets).toContain(`http://localhost:9000${path}`);
@@ -244,14 +251,10 @@ describe('run into memory, through a host', () => {
 
     const { report, files } = await run(PROGRAM, { host, into: 'memory', limit: 2 });
 
-    const manifest = manifestOf(files);
-    expect(manifest.vertex_tables.map((v) => [v.name, v.record_count])).toEqual([
-      ['Person', 2],
-      ['Order', 2],
-    ]);
+    expect([countOf(files, 'vertex/Person/vertex_count'), countOf(files, 'vertex/Order/vertex_count')]).toEqual([2n, 2n]);
     // The first two orders were placed by users 3 and 1; the first two users are 1 and 2.
     expect(report.dropped).toEqual([{ table: 'Order_placedBy_Person', dropped: 1 }]);
-    expect(manifest.edge_tables[0]?.record_count).toBe(1);
+    expect(countOf(files, 'edge/Order_placedBy_Person/ordered_by_source/edge_count0')).toBe(1n);
   });
 
   it('refuses a host run that names no `into` — `{ host, job }` is not an alias', async () => {

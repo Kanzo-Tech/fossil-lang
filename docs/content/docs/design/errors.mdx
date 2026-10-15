@@ -93,7 +93,7 @@ not parsed, typed data beside it, a link to a long explanation, and a chain of c
 ## A code is `area/kind`
 
 A code is two lowercase kebab-case words joined by a slash: `run/over-budget`, `type/property-mismatch`,
-`corpus/not-json`. The area names **where the mistake is**, not which crate noticed it — the same
+`write/duplicate-value`. The area names **where the mistake is**, not which crate noticed it — the same
 mistake found by `check` and again by `run` has one code, which is the point of sharing a namespace.
 
 The grammar is a predicate on both sides: `is_code` in `fossil_graph_schema`, and `isCode` exported
@@ -189,7 +189,7 @@ Float ``). The title is a constant of the variant.
 **A foreign error is a cause, never a code.** DataFusion, `object_store`, DuckDB and a host's own
 rejection have their own vocabularies, and fossil does not classify them. The layer that meets one
 wraps it in the fossil failure it *means* — `engine/failed`, `storage/unreachable`,
-`storage/host-refused` — and keeps the original as `cause`, whole. That is what `attach` and `JsHost` did
+`storage/host-refused` — and keeps the original as `cause`, whole. That is what the old reader's `attach` and `JsHost` did
 wrong at `8d6114a3`: they kept the text and dropped the object. Both keep the cause now — and a
 host's own `area/kind` code on it, [as a foreign one](#a-hosts-code-kept-on-a-foreign-cause).
 
@@ -236,8 +236,8 @@ carries `code`, `data`, `problem` (the whole serialized object) and `cause` — 
 `Failure` becomes a nested `FossilError`, a foreign one an `Error` of its own name. The three wasm
 crates call that function and nothing else; `run_error`, `busy_error`, `js_err` and every
 `JsError::new(&e.to_string())` go. In TypeScript, `new FossilError(problem)` builds the identical
-object for the codes the TypeScript packages raise themselves — the corpus's are all of that kind,
-because [reading is TypeScript](/docs/design/one-door).
+object for the codes the TypeScript packages raise themselves — `module/unreachable` and
+`storage/host-silent` are of that kind.
 
 **Compile diagnostics are still returned, not thrown.** A program with errors is an answer to `check`,
 not a failure of it. The one place a diagnostic becomes a throw is a run over a program that does not
@@ -281,7 +281,7 @@ code's title, and `DETAILS`: each variant's `#[error]`, carried in the schema as
 wherever it is a format string over fields, so `FossilError.of(code, data)` renders the detail Rust would
 and takes none of its own — and the test fails when the checked-in file is stale. Five details raised in
 TypeScript had already drifted from Rust's when this was added. Every other shape that crosses to
-TypeScript is generated the same way, the manifest's included. **What would reverse it:** the generator costing more to keep than the union does to write —
+TypeScript is generated the same way. **What would reverse it:** the generator costing more to keep than the union does to write —
 a schema dialect it cannot read, say.
 
 `FossilError` lives in `@fossil-lang/types`, which gains its first runtime export; every package that
@@ -326,21 +326,20 @@ are the same mistake. The dead `ParseDiagnostic::InconsistentDedent` gets no cod
 | `pipeline` (11) | `unknown-verb`, `stage-arity`, `invalid-stage-argument`, `not-an-aggregate`, `union-alias`, `cycle`, `unknown-columns`, `union-mismatch`, `join-not-equality`, `join-key-not-column`, `join-one-side` |
 | `unsupported` (1) | `expression` — a gap in the compiler, not a mistake in the program |
 
-**Run, storage, corpus and the API — 28 codes.** The executor's descriptor errors reuse the compile
+**Run, write, storage and the API.** The executor's descriptor errors reuse the compile
 codes above (`provider/unknown`, `provider/wrong-capability`, `document/not-registered`,
 `document/unparseable`, …), because they are the same mistake found late:
 
 | Area | Codes | From |
 | --- | --- | --- |
-| `run` (3) | `over-budget`, `does-not-compile`, `too-large` | `RunError`, `refuse_if_poisoned`, the numbering of `dense_id` |
+| `run` | `over-budget`, `does-not-compile`, `too-large` | `RunError`, `refuse_if_poisoned`, the numbering of `dense_id` |
 | `shape` (+1) | `more-than-one-output` | the executor's descriptor |
 | `document` (+1) | `unread` | the executor's `run`, over the documents it could not read |
 | `source` (2) | `not-found`, `unparseable` | a CSV, JSON or Parquet source that names no file; the RDF sources a run decodes |
-| `engine` (1) | `failed` — DataFusion or DuckDB, the engine's error as `cause` | `execute_graph`, the views `attach` creates |
-| `write` (1) | `failed` | `WriteError`; its other variants are `internal/bug` |
+| `engine` (1) | `failed` — DataFusion or DuckDB, the engine's error as `cause` | `execute_graph`, the profile's queries |
+| `write` | `failed`, `invalid-language-tag`, `language-not-allowed`, `duplicate-value`, `invalid-subject`, `ambiguous-iri`, `unrepresentable` | `WriteError`: the file the store refused, and the graph the writer holds to admissibility ([the round trip](/docs/format/round-trip)); its other variants are `internal/bug` |
 | `storage` (9) | `no-credential`, `ambiguous-prefix`, `outside-prefix`, `malformed-credential`, `no-route`, `unreachable`, `no-httpfs`, `host-refused`, `host-silent` | `StorageError`, `@fossil-lang/storage`'s `mount`, `JsHost` — `host-silent` is [failure](/docs/design/failure)'s deadline |
 | `module` (1) | `unreachable` | the three wasm loaders, when a module cannot be fetched |
-| `corpus` (5) | `unreadable`, `not-json`, `unsupported-format`, `duplicate-table`, `not-a-location` | `attach`, `parseManifest` |
 | `api` (3) | `invalid-argument`, `busy`, `unknown-handle` | argument shapes on every wasm entry point, `busy` and the executor's borrow, the workspace's `unknown_handle` |
 
 **`internal/bug` — 1 code** for everything that is fossil's fault and not the caller's: the
@@ -387,7 +386,7 @@ fossil ships no UI of its own.
 
 **So the mapping is keasy's, and it is one component.** keasy writes one `Problem` view that renders a
 `Problem` into `Diagnostic` parts, and it replaces every place in the inventory that shows `.message`
-today: the corpus `Alert`, the SQL panel, the run's `<pre>`, the studio's findings card, the ask panel's
+today: the graph `Alert`, the SQL panel, the run's `<pre>`, the studio's findings card, the ask panel's
 `Failure`.
 
 **keasy's rule, which is the rule for any host:**
@@ -421,12 +420,12 @@ Each step is one branch, one merge, and leaves every gate green; each names what
    and `fossil-storage` become `Failure`. The wasm crates still `.to_string()`. *Gate:* `cargo test`,
    the schema test. *Breaking:* nothing outside Rust.
 3. **The boundary.** The one Rust-to-JS function in all three wasm crates; `problem.gen.ts`,
-   `FossilError` and `isFossilError` in `@fossil-lang/types`; the corpus and storage packages raise
+   `FossilError` and `isFossilError` in `@fossil-lang/types`; the storage package raises
    `FossilError`; `runJob` completes with `problem`. The 16 TypeScript tests that match message text
    assert `code` and `data` instead. *Breaking:* `name === 'OverBudget'` becomes
-   `code === 'run/over-budget'`; `CorpusManifestError` and `CorpusReadError` are gone;
+   `code === 'run/over-budget'`; `CorpusManifestError` and `CorpusReadError` are gone with the package that raised them;
    `CompletePayload.error` is `problem`.
-4. **The error index.** Pages for the run, storage, corpus and API codes, the six fixture pages
+4. **The error index.** Pages for the run, write, storage and API codes, the six fixture pages
    renamed, and the codes-to-pages suite. *Gate:* the docs build.
 5. **Compile diagnostics.** `Diagnostic.problem`; the wire row and the LSP `Diagnostic` gain `code`,
    `title`, `data`, `help`, `didYouMean`, `suggestion`; the six blessed `diagnostic.txt` are re-blessed

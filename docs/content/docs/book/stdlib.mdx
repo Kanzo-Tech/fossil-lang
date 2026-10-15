@@ -102,7 +102,7 @@ line of CSV is what `io.csv` is for.
 Two namespaces have been deleted from the language, and each for its own reason.
 
 `validate` was five rows sharing one shape — the value or an error, never a null — and that shape is
-a raise. The engine that writes a corpus has no way to raise from an expression, so not one of the
+a raise. The engine that writes a graph has no way to raise from an expression, so not one of the
 five could run. `validate.regex` is the instructive one: it lowered to a bare match, which the engine
 renders happily as a `Bool`, under a row declaring `String` — so a mapping that validated a code
 wrote `true` into it and nothing failed. Renderable and wrong is worse than absent.

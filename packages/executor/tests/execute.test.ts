@@ -1,10 +1,10 @@
 /**
  * Integration smoke for @fossil-lang/executor — exercises the real wasm-bindgen
  * build (`--target web`) through the package's typed surface. Proves the full
- * vertex+edge path runs in WASM and emits valid Parquet + the manifest.
+ * vertex+edge path runs in WASM and emits a GraphAr graph with its mapping.
  *
  * The Rust core is covered by `crates/fossil-df/tests/execute_core.rs` and the
- * corpus it writes by `crates/fossil-df/tests/write.rs`;
+ * graph it writes by `crates/fossil-df/tests/write.rs`;
  * this suite covers the wasm-bindgen + JS-marshalling boundary cargo can't reach.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
@@ -35,6 +35,13 @@ const PROGRAM = [
   '    total = orders.amount',
   '',
 ].join('\n');
+
+/** A `vertex_count` / `edge_count` file: one little-endian 64-bit integer. */
+function countOf(files: { path: string; bytes: Uint8Array }[], path: string): bigint {
+  const file = files.find((f) => f.path === path);
+  if (file === undefined) throw new Error(`no ${path}`);
+  return new DataView(file.bytes.buffer, file.bytes.byteOffset, file.bytes.byteLength).getBigInt64(0, true);
+}
 
 async function fixture(name: string): Promise<Uint8Array> {
   const p = fileURLToPath(
@@ -102,42 +109,41 @@ describe('run over files', () => {
   it('runs the full vertex+edge path in wasm and emits valid Parquet', async () => {
     const result = await run(PROGRAM, { files: await files(), path: PATH });
 
-    // One Parquet per vertex type and per relation, and the manifest — and
-    // nothing else. Nothing on the Rust side sees the wasm build's tree; this
-    // file is the gate.
+    // The GraphAr graph and its mapping, and nothing else: an information file
+    // per type and per relation, their chunks and counts, `mapping.ttl`, and
+    // `fossil.graph.yml`. Nothing on the Rust side sees the wasm build's tree;
+    // this file is the gate.
     const paths = result.files.map((f) => f.path).sort();
     expect(paths).toEqual([
-      'edge/Order_placedBy_Person.parquet',
-      'fossil.json',
-      'vertex/Order.parquet',
-      'vertex/Person.parquet',
+      'Order.vertex.yml',
+      'Order_placedBy_Person.edge.yml',
+      'Person.vertex.yml',
+      'edge/Order_placedBy_Person/ordered_by_source/adj_list/part0/chunk0',
+      'edge/Order_placedBy_Person/ordered_by_source/edge_count0',
+      'edge/Order_placedBy_Person/ordered_by_source/offset/chunk0',
+      'edge/Order_placedBy_Person/ordered_by_source/vertex_count',
+      'fossil.graph.yml',
+      'mapping.ttl',
+      'vertex/Order/subject_total/chunk0',
+      'vertex/Order/vertex_count',
+      'vertex/Person/subject_name/chunk0',
+      'vertex/Person/vertex_count',
     ]);
 
-    // Every .parquet is a real Parquet file (magic "PAR1" at both ends).
+    // Every chunk is a real Parquet file (magic "PAR1" at both ends).
     for (const f of result.files) {
-      if (f.path.endsWith('.parquet')) {
+      if (f.path.includes('/chunk')) {
         const b = Buffer.from(f.bytes);
         expect(b.subarray(0, 4).toString('ascii')).toBe('PAR1');
         expect(b.subarray(b.length - 4).toString('ascii')).toBe('PAR1');
       }
     }
 
-    const manifest = JSON.parse(
-      new TextDecoder().decode(result.files.find((f) => f.path === 'fossil.json')!.bytes),
-    );
-    expect(manifest.format).toBe('fossil/1');
-    const person = manifest.vertex_tables.find((v: { name: string }) => v.name === 'Person');
-    expect(person.record_count).toBe(3);
-    expect(person.path).toBe('vertex/Person.parquet');
-    const edge = manifest.edge_tables.find((e: { label: string }) => e.label === 'placedBy');
-    expect(edge.source.references).toBe('Order');
-    expect(edge.destination.references).toBe('Person');
-    expect(edge.record_count).toBe(4);
-
-    // Every table the manifest names is one of the files written.
-    for (const t of [...manifest.vertex_tables, ...manifest.edge_tables]) {
-      expect(paths).toContain(t.path);
-    }
+    const graph = new TextDecoder().decode(result.files.find((f) => f.path === 'fossil.graph.yml')!.bytes);
+    expect(graph).toMatch(/^name: fossil$/m);
+    expect(graph).toMatch(/^version: gar\/v1$/m);
+    expect(countOf(result.files, 'vertex/Person/vertex_count')).toBe(3n);
+    expect(countOf(result.files, 'edge/Order_placedBy_Person/ordered_by_source/edge_count0')).toBe(4n);
 
     expect(result.report.location).toBe('memory://corpus/');
     // Every order names a real person, so nothing dangled — and `0` is stated.
@@ -154,7 +160,13 @@ describe('run over files', () => {
       files: { [`${base}hello.shex`]: await read('hello.shex'), [`${base}data/people.csv`]: await read('data/people.csv') },
       path: `${base}hello.fossil`,
     });
-    expect(result.files.map((f) => f.path).sort()).toEqual(['fossil.json', 'vertex/Person.parquet']);
+    expect(result.files.map((f) => f.path).sort()).toEqual([
+      'Person.vertex.yml',
+      'fossil.graph.yml',
+      'mapping.ttl',
+      'vertex/Person/subject_name/chunk0',
+      'vertex/Person/vertex_count',
+    ]);
   });
 
   // Two mappings of one type are a `UNION ALL`, and a union of two scans has two
@@ -186,9 +198,6 @@ describe('run over files', () => {
         path: PATH,
       },
     );
-    const manifest = JSON.parse(
-      new TextDecoder().decode(result.files.find((f) => f.path === 'fossil.json')!.bytes),
-    );
-    expect(manifest.vertex_tables[0].record_count).toBe(3);
+    expect(countOf(result.files, 'vertex/Person/vertex_count')).toBe(3n);
   });
 });

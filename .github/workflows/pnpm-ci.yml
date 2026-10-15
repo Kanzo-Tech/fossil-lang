@@ -56,36 +56,17 @@ jobs:
       # gate. All three are gone: the acceptance corpus is `docs/programs/`, run
       # by `crates/fossil-df/tests/programs.rs`, which is a Rust test on the
       # Rust side of the seam and never enters a pnpm filter.
-      # For `packages/corpus/integration/`, two steps down. They were
-      # `packages/corpus/tests/{address-cost,cost,containers,frame-levels}.test.ts`,
-      # they probed for the binary with `spawnSync` and hid behind
-      # `describe.skipIf(!hasDuckdb)`, and this step was added so they would stop
-      # reporting GREEN with zero assertions. It did not finish the job: the skip
-      # applies to the TESTS and the describe BODY runs regardless, so the fixture
-      # write at the top of `address-cost.test.ts` ran anyway — and on the release
-      # runner, which installs no duckdb, it took `v0.3.0-alpha.4` down. The suites
-      # are declared now rather than probed: they live in `integration/`, outside
-      # `tests/`, and the script that runs them is the one this job names.
-      - uses: ./.github/actions/duckdb
-
       - name: Test all packages
         run: pnpm --filter "./packages/*" test
 
-      # The suites that write a corpus with the `duckdb` binary and read it back through
-      # `packages/corpus/src` on DuckDB-WASM: every table at its record_count, and a box that
-      # reads fewer row groups than the file has.
+      # The suites that run the real executor over generated rows and read the graph back
+      # through `@kanzo-tech/graphar-duckdb` on DuckDB-WASM: every type at its count, and the
+      # shop program at 200,000 people.
       #
-      # It is a step HERE and not a job in `corpus.yml`, which is the other file that
-      # installs this binary, because `corpus.yml` states its install list as the point of
-      # the guards rather than an accident of them — `node` and `duckdb`, no `pnpm install`,
-      # no `node_modules`. These suites need vitest and the workspace's
-      # `@duckdb/duckdb-wasm`, and this job already has both.
-      #
-      # Named, not recursive: `test:integration` is a script of `@fossil-lang/corpus` and
-      # not part of its `test`, which `release.yml` runs before publishing on a runner with
-      # no duckdb.
-      - name: Corpus integration (the suites that need a real duckdb)
-        run: pnpm --filter "@fossil-lang/corpus" test:integration
+      # Named, not recursive: `test:integration` is a script of `@fossil-lang/executor` and not
+      # part of its `test`, which `release.yml` runs before publishing.
+      - name: Executor integration (the executor writes a graph, a reader reads it back)
+        run: pnpm --filter "@fossil-lang/executor" test:integration
 
       - name: Lint
         run: pnpm exec eslint .

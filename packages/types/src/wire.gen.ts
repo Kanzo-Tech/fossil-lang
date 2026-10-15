@@ -172,7 +172,7 @@ export interface DiagnosticRelatedInformation {
  * How many rows of one relation's input did not become an edge.
  *
  * `execute_edge` resolves both endpoints against the vertex tables with an inner join, so a row
- * naming a subject no vertex carries is discarded. **That is intended and it stays** — a corpus
+ * naming a subject no vertex carries is discarded. **That is intended and it stays** — a graph
  * cannot hold an edge to a vertex that is not there — and it is counted rather than silent.
  *
  * # Why the count is here and not in the graph

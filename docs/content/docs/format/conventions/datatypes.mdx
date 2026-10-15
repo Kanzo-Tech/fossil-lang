@@ -21,16 +21,18 @@ those, and the mapping carries the rest.
 | `timestamp` | `timestamp`, in milliseconds | a value with a sub-millisecond part is refused as `write/unrepresentable` |
 | `time` | `string`, ISO 8601 | `xsd:time` in the mapping |
 | `binary` | `string`, hexadecimal | `xsd:hexBinary` in the mapping |
-| `decimal` | a design question, below | |
+| `decimal` | `string`, the decimal's text | `xsd:decimal` in the mapping |
 
 **`time` is written as a string** because neither of GraphAr's reference readers names the type,
 and a graph with no tagged property then stays within what both parse. **A timestamp finer than a
 millisecond is refused** and not written as a string, because GraphAr's `timestamp` is
-milliseconds, and a string would lose the type every other reader sees. `write/unrepresentable` is
-the code for a value GraphAr's types cannot hold.
+milliseconds, and a string would lose the type every other reader sees. [`write/unrepresentable`](/docs/errors/write/unrepresentable) is
+the code for a value GraphAr's types cannot hold, and a column of a type GraphAr has no word for.
 
-*Design question.* `decimal` has no GraphAr type, and how a decimal is written is not decided. The
-first program that writes one settles it, with the precision it needs.
+**A `decimal` is written as its text** and stated as `xsd:decimal` in the mapping, so the precision
+and the scale a value was written with survive and no reader needs a type GraphAr does not have.
+*Design question.* A consumer that must compare decimals in the files, without the mapping, would need
+GraphAr to name a decimal type; the first one settles it.
 
 **A datatype beyond these lives only in the mapping.** A shape that says `xsd:gYear` over an `int32`
 column makes an `int32` property, and `rml:datatype xsd:gYear` on its object map; the YAML carries
@@ -63,7 +65,7 @@ specification page does not mention cardinality. **`list` is not written**: it d
 and a multiplicity that the RDF image cannot hold, so the mapping would silently discard what the
 files promise.
 
-**The writer refuses duplicates**, as `write/duplicate-value`. Two elements of a set are duplicates
+**The writer refuses duplicates**, as [`write/duplicate-value`](/docs/errors/write/duplicate-value). Two elements of a set are duplicates
 when they are the same RDF term: for a tagged value, the same lexical form with the same tag after
 the tag is lower-cased. A NULL element is refused the same way. The mapping unnests the column once
 ([the mapping](/docs/format/reading/rdf#a-multi-valued-property)).

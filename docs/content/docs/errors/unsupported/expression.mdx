@@ -19,7 +19,7 @@ When it can, the `help` names the kind of node the parser built, so the gap can 
 
 Because the alternative was silence, and silence happened. The lowering once read a handful of node
 kinds and dropped the rest; the checker said nothing because it never saw the expression, and the
-compiler declared success over a corpus with a property missing. `n = 42` produced no property and
+compiler declared success over a graph with a property missing. `n = 42` produced no property and
 no diagnostic until it was found. The fallback is now this diagnostic — see
 [the drop is loud](/docs/design/expressions#the-drop-is-loud).
 

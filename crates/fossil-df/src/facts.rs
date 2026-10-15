@@ -338,7 +338,7 @@ async fn render(ctx: &SessionContext, ask: &Ask) -> Result<DataFrame> {
 }
 
 /// The batches as rows of text cells — every value cast to text, which is the
-/// natural lexical form a corpus's `triples` gives it.
+/// natural lexical form a graph's `triples` gives it.
 fn text_rows(batches: Vec<RecordBatch>) -> Result<Rows> {
     let mut rows = Vec::new();
     for batch in batches {

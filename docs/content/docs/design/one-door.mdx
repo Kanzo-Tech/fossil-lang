@@ -1,49 +1,60 @@
 ---
 title: One door
-description: "A corpus is attached to the host's engine by `attach` and detached by the attachment it answers; every read after that is the host's SQL, and each thing the door does is done once, by one layer."
+description: "A graph is attached to the host's engine by `attachGraph` and detached by the attachment it answers; every read after that is the host's SQL, and each thing the door does is done once, by one layer."
 ---
 
-A consumer reads a corpus through one door, and the whole of it is one function and what it answers:
+A consumer reads a graph through one door, and the whole of it is one function and what it answers:
 
 ```ts
-await using corpus = await attach(job, { engine, host });   // or { engine, url } for a corpus at a URL
-// SELECT * FROM "<job>".fossil_tables WHERE kind = 'vertex'
-// SELECT dense_id, name FROM "<job>"."Person"
-// and leaving the block — or `corpus.detach()` — detaches the catalog
+import * as graphar from '@kanzo-tech/graphar-duckdb';
+
+await using graph = await graphar.attachGraph(engine, 'job', (paths) => paths.map((p) => `${url}${p}`), {
+  entry: 'fossil.graph.yml',
+  signal,
+});
+// SELECT * FROM "job".graphar_vertex_types
+// SELECT _graphArVertexIndex, name FROM "job"."Person"
+// and leaving the block — or `graph.detach()` — detaches the catalog
 ```
 
-`attach` (`packages/corpus/src/attach.ts, attach`) reads `fossil.json`, rejects a `format` that is
-not `fossil/1` before a byte of Parquet is read, and attaches the corpus to the host's engine as the
-catalog it is given: one view per table, and the manifest itself as relations —
-`fossil_tables`, a row per table with its kind, its `record_count`, the sources it was derived from
-and, for a vertex table, the first id of its range; `fossil_columns`, a row per column with its
-`data_type` and its writer's role; and the annotations and the counts beside them.
-The `Attachment` it answers detaches the catalog. What every relation carries, and a corpus attached
-from the files a run answered in memory, are [the corpus's own facts](/docs/design/facts) and
-[A run off the page](/docs/design/off-the-page). The contract is [the corpus](/docs/design/corpus); the format
-underneath is [/docs/format](/docs/format).
+`attachGraph` reads the graph document and the information files it names through the engine,
+refuses a graph whose indices have a gap before any view is made, and attaches the graph to the host's
+engine as the catalog it is given: one view per vertex type and per edge type, and the information
+files as five relations — `graphar_vertex_types`, `graphar_edge_types`, `graphar_properties`,
+`graphar_extra_info` and `graphar_chunks`. The `GraphAttachment` it answers detaches the catalog.
+What every relation carries is [the graph's own facts](/docs/design/facts); a graph a run answered in
+memory is attached the same way once its files are registered with the engine
+([A run off the page](/docs/design/off-the-page)); the credential is `@fossil-lang/storage`'s `mount`,
+which the host calls. The contract is [the corpus](/docs/design/corpus) and Apache GraphAr's; the
+format underneath is [/docs/format](/docs/format).
+
+**The door is not fossil's.** fossil publishes no reader: `@kanzo-tech/graphar-duckdb` is
+`Kanzo-Tech/graphar`'s, knows no RDF and no fossil, and a host composes it with `mount` in about twenty
+lines ([the corpus as Apache GraphAr](/docs/design/graphar#reading-a-graph)). The package that wrapped
+both was deleted, and why is on [what was discarded](/docs/design/discarded#the-corpus-as-apache-graphar).
 
 **Every read is the host's SQL.** Structure and data alike go through the engine the host already
 has — in keasy, Mosaic's coordinator over DuckDB-WASM — so a chart, a crossfilter and the graph view
 read the same views through one connection, and pruning is the engine's, from the Parquet footers.
-The door has no query API of its own; the one it had, and why it went, is in
+The door has no query API of its own; the one the earlier reader had, and why it went, is in
 [what was discarded](/docs/design/discarded#the-corpus).
 
-**What would reverse it.** A reader that cannot hold a SQL engine and still has to read a corpus.
-[A door for a camera](/docs/design/later/one-door-camera) keeps what a tiled corpus would need.
+**What would reverse it.** A reader that cannot hold a SQL engine and still has to read a graph.
+[A door for a camera](/docs/design/later/one-door-camera) keeps what a tiled graph would need.
 
-## `attach` and `detach`, because that is what it runs
+## `attachGraph` and `detach`, because that is what it runs
 
 The door runs `ATTACH ':memory:' AS <name>`, every view it makes lives under that alias, and giving
-it back runs `DETACH DATABASE`. So it is named with DuckDB's own pair: `attach(name, options)`
-answers an `Attachment` — its `name`, `detach()`, and `[Symbol.asyncDispose]`, the hook TC39's
-explicit resource management calls, so `await using` gives it back on every path out of a block.
-It was `open`, answering a bare function: `open` is the file-system sense, and nothing is opened as
-a file. Keeping `open` and `close` is [a discarded alternative](/docs/design/discarded#the-corpus).
+it back runs `DETACH DATABASE`. So it is named with DuckDB's own pair: `attachGraph(engine, name,
+resolve, options)` answers a `GraphAttachment` — its `catalog`, the parsed `graph`, `detach()`, and
+`[Symbol.asyncDispose]`, the hook TC39's explicit resource management calls, so `await using` gives it
+back on every path out of a block. It is not `open`, which is the file-system sense: nothing is opened
+as a file. Keeping `open` and `close` is
+[a discarded alternative](/docs/design/discarded#the-corpus).
 
-**What would reverse it.** A door that stops being an `ATTACH` — a reader that opens a corpus as a
+**What would reverse it.** A door that stops being an `ATTACH` — a reader that opens a graph as a
 handle with no catalog of its own, say a single-table reader with no alias to detach. Then the pair
-is `open`/`close` again, and the dispose hook stays.
+is `open`/`close`, and the dispose hook stays.
 
 ## One door, and one layer behind it
 
@@ -51,16 +62,15 @@ One door is half of the rule. The other half is what stands behind it: **each th
 is done once, by one layer.** A layer that parses what the layer below already parsed, or forwards a
 call it could have made itself, is a second implementation with a longer path, and it is deleted.
 
-**The measurement that made it a rule, 2026-09-30 at `ac1801d4`.** One read crossed four layers
-that each knew the manifest: the TypeScript door scanned it line by line, a WASM crate resolved it
-again (twice per `open(job)`, as the door was called then), a Rust verb path loaded it once more on every call, and the verb it
-served ended as SQL that DuckDB could have been sent directly. keasy's discover view parsed the
-manifest six times before it drew anything. The first repair made `fossil.json` a TypeScript parse
-and a read one statement; the second took the reader's own `scan` and `Filter` away, because they
-were a second query language over the engine every view already spoke SQL to, and keasy still read
-the manifest in TypeScript while its charts read the tables through Mosaic. Now
-`packages/corpus/src/manifest.ts, parseManifest` reads `fossil.json` once, into the catalog's relations,
-and nothing else restates it. Writing is held to the same rule: one writer,
+**The measurement that made it a rule, 2026-09-30 at `ac1801d4`.** One read of the earlier manifest
+crossed four layers that each knew it: the TypeScript door scanned it line by line, a WASM crate
+resolved it again (twice per open, as the door was called then), a Rust verb path loaded it once more
+on every call, and the verb it served ended as SQL that DuckDB could have been sent directly. keasy's
+discover view parsed the manifest six times before it drew anything. The first repair made the
+manifest a TypeScript parse and a read one statement; the second took the reader's own `scan` and
+`Filter` away, because they were a second query language over the engine every view already spoke SQL
+to. Now the information files are parsed once, by `attachGraph`, into the catalog's relations, and
+nothing else restates them. Writing is held to the same rule: one writer,
 `crates/fossil-df/src/write.rs, write`, and one host that calls it, the wasm executor, in a browser and
 in Node.
 
@@ -69,4 +79,4 @@ case: for every capability, count the layers that implement it, and keep one.
 
 **What would reverse it.** A layer that is the only place a capability can run — the WASM build is
 the only way the browser can *write* — earns its place for that capability and no other. Reading is
-not such a case: it is a small manifest and SQL, which the engine does without Rust.
+not such a case: it is a small YAML parse and SQL, which the engine does without Rust.

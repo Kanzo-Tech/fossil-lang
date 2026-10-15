@@ -10,8 +10,8 @@
 //! a column. Nothing guesses it by matching a string template against every
 //! mapping's subject template.
 //!
-//! And `fossil.json` carries what the governance layer reads off a corpus: the
-//! full type IRI per vertex table, and each property's storage type.
+//! And `mapping.ttl` carries what the governance layer reads off a graph: the
+//! full type IRI per vertex type, and each property's predicate.
 
 #[path = "support/native.rs"]
 mod native;

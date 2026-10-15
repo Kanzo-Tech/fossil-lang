@@ -3,9 +3,9 @@ title: Cells
 description: The second reader — a mipmap over the corpus that does not fit on the GPU; why a cell is a texel and not a community, why the partition is arbitrary while the aggregation is exact, why the base of the pyramid has to be declared because no writer can derive it, the three properties a rung has to hold, and why the corpus carries one multiscale structure rather than two.
 ---
 
-> **Deferred, not reversed.** A `fossil/1` corpus carries no cell pyramid and no quotients; a far
+> **Deferred, not reversed.** A graph carries no cell pyramid and no quotients; a far
 > view draws every vertex. The code existed at commit `ac1801d4` (main `e5b2113f`), and every path
-> on this page is spelled against that commit. What brings it back: a `fossil/1` corpus that fails
+> on this page is spelled against that commit. What brings it back: a graph that fails
 > the in-browser thresholds — open over 1.5 s, first paint over 3 s, or heap over 1.5 GB at a
 > million vertices over HTTP.
 
@@ -104,7 +104,7 @@ per cell, a rung-1 cell ran from 4,676 square units to 4,764,880,428 — **1,019
 one count** — because sixteen consecutive ids inside the 20,459-member group are sixteen members of
 one phyllotaxis disc and sixteen out where the median group is are five whole groups in five whole
 grid cells. A mipmap level whose texels differ in area by six orders of magnitude is not a mipmap
-level, and `corpus.bnf` was calling a cell row *one texel: a region of the plane, summarised* on the
+level, and `ac1801d4:corpus.bnf` was calling a cell row *one texel: a region of the plane, summarised* on the
 strength of an addressing argument that never reached the plane.
 
 What repaired it is a change to the placement and to nothing here:
@@ -293,7 +293,7 @@ fall in a single run of `dense_id`, and the id axis is monotone in group order.*
 of the dendrogram is therefore a contiguous interval as well, and a cell — a fixed count of
 consecutive ranks — is a window onto that same order rather than onto something orthogonal to it.
 
-`corpus.bnf` already says the half of this that reaches the plane, in the comment over the pyramid's
+`ac1801d4:corpus.bnf` already says the half of this that reaches the plane, in the comment over the pyramid's
 own columns: a cell «is an area only because every group is placed in a block sized to its own
 membership». The graph is in the addressing before any rung is cut.
 
@@ -774,7 +774,7 @@ payload's columns this is true of.
 **That constant is a fact about fossil's writer, not about the corpus in front of you**, and until
 the channel was declared it was the closest thing to an answer the document had. A cell row's `mode`
 is a bare `uint32`. `ac1801d4:crates/fossil-sinks/src/manifest.rs, CellRung` said *the mode and purity of the
-payload's categorical* in prose, `corpus.bnf`'s `mode` role said *the majority value of a categorical
+payload's categorical* in prose, `ac1801d4:corpus.bnf`'s `mode` role said *the majority value of a categorical
 over the rows summarised*, and neither named **which** categorical — because until
 [`channels:`](/docs/design/position) there was nothing to name. So a reader colouring a rung by
 `mode` had to guess which palette the values belonged to, and could not know the domain at all. That
@@ -858,7 +858,7 @@ sentence at the top of this page gives up. The partition is cut on `dense_id` an
 meaning, so a name that promises meaning worked against every reader who looked it up; the argument
 was never about taste, and [prior art](/docs/design/prior-art) keeps the source cited for that
 reason. The pyramid is spelled **`cell`** now, everywhere — a region of the plane, summarised —
-which is what `corpus.bnf` had been calling its columns all along.
+which is what `ac1801d4:corpus.bnf` had been calling its columns all along.
 
 The rename waited on one condition, and the condition was met before it was taken: *a writer that
 partitions spatially, so that nothing in the tree is a community any more*. That writer exists — the
@@ -872,7 +872,7 @@ page made before taking it were wrong.
 
 ### Half of it was already paid, and the half that was paid is the half a reader sees
 
-`corpus.bnf` writes this pyramid's columns as `cell_id`, `count`, `internal`, `mode` and `purity`,
+`ac1801d4:corpus.bnf` writes this pyramid's columns as `cell_id`, `count`, `internal`, `mode` and `purity`,
 in a container it names `cell`, and the quotient's as `src_cell` and `dst_cell`. Both generated
 projections of that file — `ac1801d4:crates/fossil-sinks/src/generated.rs` and
 `ac1801d4:packages/corpus/src/vocabulary.generated.ts` — carried **zero** occurrences of the old word. So the
@@ -898,14 +898,14 @@ remaining 548 by what a rename actually had to do to each:
 | guard code under `ac1801d4:packages/corpus/guards/` | 22 | 4 | **two of these read the manifest key** |
 | a corpus on disk — the conformance manifest and one snapshot | 7 | 2 | **the format change, and the whole of it** |
 | TypeScript and JavaScript comments | 3 | 3 | prose |
-| `corpus.bnf` | 2 | 1 | prose; its columns already said `cell` |
+| `ac1801d4:corpus.bnf` | 2 | 1 | prose; its columns already said `cell` |
 | `docs/content/docs/design/meta.json` | 1 | 1 | this page's slug |
 
 **The route moved first, and in its own commit.** `docs/design/holons` — named here without its
 leading slash, because `content.test.ts` now reads a route out of any file in the tree and a dead one
 fails the build wherever it is written — was cited **56 times in 22 files**, and only nineteen of those files are MDX, where `content.test.ts` had been failing the
 build on a `/docs/…` link that does not resolve since the format site was folded in. The rest — Rust
-doc comments, `corpus.bnf`, `ac1801d4:packages/corpus/src/corpus.ts` — were held by nothing at all, which is
+doc comments, `ac1801d4:corpus.bnf`, `ac1801d4:packages/corpus/src/corpus.ts` — were held by nothing at all, which is
 why the guard was widened to read the whole tree before a single citation moved. Moving a page and
 leaving its route behind is the exact failure this site's guards were built out of, one directory
 along.

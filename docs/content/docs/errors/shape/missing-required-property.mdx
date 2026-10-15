@@ -18,7 +18,7 @@ document that requires it and the count it requires — *exactly one*, *1 or mor
 
 ## Why fossil refuses it
 
-A shape that says `shop:email xsd:string ;` is a promise the corpus makes to its readers: every
+A shape that says `shop:email xsd:string ;` is a promise the graph makes to its readers: every
 `Person` node has an email. A mapping that never writes one produces nodes that do not conform to the
 shape they claim, and a validator run afterwards would say so — after the mapping has gone over
 every row. fossil reads the shape as a type, so it can say it before anything runs.
