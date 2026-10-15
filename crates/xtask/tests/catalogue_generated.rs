@@ -130,7 +130,8 @@ fn a_new_native_reader_is_a_row_and_nothing_else() {
 #[test]
 fn the_duckdb_table_is_projected_to_typescript_in_file_order() {
     let cat = catalogue::parse(
-        "duckdb integer = \"INT\" \"BIGINT\" .\n\
+        "row avro = extensions \"avro\" ; reads native read_avro_scan option sep .\n\
+         duckdb integer = \"INT\" \"BIGINT\" .\n\
          duckdb date_time = \"TIMESTAMP*\" .\n\
          duckdb string = \"*\" .\n",
     );
