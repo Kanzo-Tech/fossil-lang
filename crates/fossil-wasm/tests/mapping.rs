@@ -18,6 +18,9 @@ type Prize
     @iri("https://nobel.example/vocab/category") category: String
 "#;
 
+// `result_large_err`: `fossil_graph_schema::Failure` is over clippy's 128 bytes; this test
+// helper hands it straight to an `expect`, as `src/lib.rs` allows for the crate.
+#[allow(clippy::result_large_err)]
 fn mapping(program: &str) -> Result<String, fossil_graph_schema::Failure> {
     let mut ws = FossilWorkspace::new();
     let handle = ws.open_file_native("declared.fossil".into(), program.into());
