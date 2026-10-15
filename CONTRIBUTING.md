@@ -91,8 +91,10 @@ the rows whose behaviour the compiler can link, `fossil_hir::providers` the ones
 needing a shape-language parser, `fossil-hir` the stdlib table the checker
 resolves every call against, `profile` the ones with a table function to
 `DESCRIBE` through (`io.rdf` has none), `executor` every row that reads data
-(`io.rdf` included — the host fetches its bytes like any other source). Which
-projection a row lands in is derived from its clauses, never configured.
+(`io.rdf` included — the host fetches its bytes like any other source). The
+`duckdb` type table is projected too, to `fossil-profile` as the matcher and to
+`packages/wasm` as `DUCKDB_TYPES`, the rows alone, for a host that stands in for an
+engine. Which projection a row lands in is derived from its clauses, never configured.
 
 The MDX one had a SECOND source until the move — `fossil-hir`'s
 `FunctionRegistry`, because only the `io.` half of the catalogue was a file, and

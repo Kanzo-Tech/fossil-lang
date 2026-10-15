@@ -54,8 +54,8 @@ fn parse_year_fills_a_gyear_slot_and_writes_the_year_under_its_datatype() {
         ("awards.json", AWARDS),
         ("award.fossil", PROGRAM),
     ]);
-    let corpus = native::run_dir(dir.path(), "award.fossil", &[]).expect("the program runs");
-    let award = corpus.vertex("Award");
+    let ran = native::run_dir(dir.path(), "award.fossil", &[]).expect("the program runs");
+    let award = ran.vertex("Award");
     let year = award.property_groups[0]
         .properties
         .iter()
@@ -65,12 +65,12 @@ fn parse_year_fills_a_gyear_slot_and_writes_the_year_under_its_datatype() {
     // mapping's (`rml:datatype`), which has its own tests.
     assert_eq!(year.data_type.to_string(), "int32");
 
-    let root = corpus.materialise();
+    let root = ran.materialise();
     let conn = duckdb::Connection::open_in_memory().expect("duckdb");
     let years: Vec<i32> = conn
         .prepare(&format!(
             "SELECT year FROM read_parquet('{}') ORDER BY 1",
-            root.path().join(corpus.chunk("Award")).display()
+            root.path().join(ran.chunk("Award")).display()
         ))
         .expect("prepare")
         .query_map([], |row| row.get(0))

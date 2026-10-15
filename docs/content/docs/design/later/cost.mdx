@@ -11,9 +11,9 @@ description: Every claim fossil makes about what something costs, as a shape rat
 > million vertices over HTTP.
 
 A window that returns the right answer looks exactly like a window that returns it cheaply. That is
-not a figure of speech: `open` opened every tile in the corpus on every window for as long as
+not a figure of speech: `open` opened every tile in the graph on every window for as long as
 it existed, answered correctly each time, and eighty-eight green tests never saw it. It was found by
-someone outside the repository timing the same rectangle against two corpus sizes.
+someone outside the repository timing the same rectangle against two graph sizes.
 
 So the claims are collected here, and each one is written as a **shape** — a relationship to N —
 rather than a number. A pinned number would not have caught that defect, because the number was
@@ -23,11 +23,11 @@ always correct; only the slope was wrong.
 
 | # | obligation | shape | today |
 | --- | --- | --- | --- |
-| R1 | A window opens a bounded number of files | O(1) in N | met, asserted; opening a corpus too |
+| R1 | A window opens a bounded number of files | O(1) in N | met, asserted; opening a graph too |
 | R2 | A window is one query per orientation | constant | met, asserted |
 | R3 | A window's cost follows its answer | O(rows) | met |
 | R4 | An answer names every gap in it | exact | met |
-| W1 | The write path's peak is independent of the corpus | O(1) in N | **not met** |
+| W1 | The write path's peak is independent of the graph | O(1) in N | **not met** |
 | W2 | The declared budget encloses the whole write path | — | **not met**, and decided: the number is per stage |
 | W3 | Every stage declares what it holds | — | partial |
 
@@ -35,11 +35,11 @@ The reading half is nearly a system; the writing half is a budget around one sta
 
 ## R1 · A window opens a bounded number of files
 
-One rectangle covering 1% of the extent, best of three, warm, against corpora this writer produced
+One rectangle covering 1% of the extent, best of three, warm, against graphs this writer produced
 at `chunk_size` 4,096 with both orientations tiled. Measured from kanzo-ui with DuckDB-WASM under
 `NODE_RUNTIME`, 2026-08-25.
 
-| corpus | answer | files, before | files, now | warm, before | warm, now |
+| graph | answer | files, before | files, now | warm, before | warm, now |
 | --- | --- | --- | --- | --- | --- |
 | 1,000,000 | 812 v / 7,293 e | 245 | **1** | 75.6 ms | **13.6 ms** |
 | 5,000,000 | 771 v / 5,316 e | 1,221 | **1** | 1,000.8 ms | **15.2 ms** |
@@ -52,7 +52,7 @@ and still opened each footer. A window reads only the tiles whose boxes meet it 
 native `duckdb` CLI with httpfs against a plain file origin — ranges, a 206, no listing, no
 coalescing, which is what a bucket looks like from the reader's side:
 
-| corpus | tiles | opening it | one window |
+| graph | tiles | opening it | one window |
 | --- | --- | --- | --- |
 | 2,000 | 1 | 10 req · 0.03 MB | 17 req · 0.21 MB |
 | 50,000 | 13 | 34 req · 0.23 MB | 22 req · 0.40 MB |
@@ -61,8 +61,8 @@ coalescing, which is what a bucket looks like from the reader's side:
 | 5,000,000 | 1,221 | 2,450 req · 20.02 MB | 61 req · 0.89 MB |
 | 10,000,000 | 2,442 | **4,892 req · 40.03 MB** | **71 req · 0.97 MB** |
 
-**A window is bounded and opening a corpus is not.** Seventeen requests to seventy-one across a
-five-thousandfold range of corpus, against ten to 4,892 — two range requests and about 16 kB per
+**A window is bounded and opening a graph is not.** Seventeen requests to seventy-one across a
+five-thousandfold range of graph, against ten to 4,892 — two range requests and about 16 kB per
 tile, because reading a footer is a length read and then the footer. At ten million that is forty
 megabytes and nearly five thousand round trips before a single vertex can be drawn.
 
@@ -85,17 +85,17 @@ one statement per part — the vertices, `by_source` and `by_target`, each addre
 tiles. The measurements below were taken when a window was three statements in all, which is the
 one-run case.
 
-With R1 met, the clock follows the answer rather than the corpus: 812 vertices cost 13.6 ms at a
+With R1 met, the clock follows the answer rather than the graph: 812 vertices cost 13.6 ms at a
 million and 771 cost 15.2 at five, while 3,152 cost 64.7 at ten — 4.7× the answer for 4.3× the time.
 
 ## R4 · An answer names every gap
 
 Nothing truncates, so a gap is an orientation or a relation that was not read, and `edges` names
-each beside its batches with a reason. On a corpus whose `by_target` is not tiled, every tile asked
+each beside its batches with a reason. On a graph whose `by_target` is not tiled, every tile asked
 in `dst` declines the relation as `not-declared` — loudly enough that a viewer counted 19–32% fewer
 incident edges and could say so.
 
-## W1, W2 · The peak follows the corpus, and the budget does not reach it
+## W1, W2 · The peak follows the graph, and the budget does not reach it
 
 On the native host `--memory-gib` was a `FairSpillPool` around `execute_graph`, and for a long time
 it was nothing after it: `enrich_layout` took the run's `memory_bytes` and discarded it, so three
@@ -118,7 +118,7 @@ The whole build, `/usr/bin/time -l` over the generator plus `fossil run`, unboun
 | 5,000,000 | 11.91 GiB | 154.5 s |
 | 10,000,000 | **20.72 GiB** | 404.4 s |
 
-For 1.5 GB of corpus. There is no spill path in the pass, so exceeding the machine is a failed run
+For 1.5 GB of graph. There is no spill path in the pass, so exceeding the machine is a failed run
 rather than a slow one, which is the opposite of what [streaming](/docs/design/later/streaming) promises.
 
 **The line got shallower twice, and that row above predates both.** The layout pass on its own was
@@ -209,7 +209,7 @@ deleted the staged files when it was done:
 | | |
 | --- | --- |
 | written in total | **115.9 MB** |
-| the corpus that survives | **72.6 MB** in 15 files |
+| the graph that survives | **72.6 MB** in 15 files |
 | staged — `vertex/Person.parquet` 17.3 MB, `by_source.parquet` 13.0 MB, `by_target.parquet` 13.0 MB | **43.3 MB**, written, re-read and deleted |
 
 That was **37.4% of everything written**, and a write amplification of **1.60×** over the artefact.
@@ -231,7 +231,7 @@ there is a test asserting the absence: `ac1801d4:crates/fossil-df/tests/sink.rs`
 
 Two consequences worth separating, because only one of them is measured:
 
-- **The corpus is unchanged, byte for byte.** Two runs of one program over a 20,000-vertex
+- **The graph is unchanged, byte for byte.** Two runs of one program over a 20,000-vertex
   self-relation — a vertex pyramid, an edge pyramid, both orientations and the identity index, 11
   files — produce identical SHA-256 digests across the change. That is the property the whole
   inversion had to preserve and it is the reason it could be made at all: the pass was already
@@ -260,32 +260,32 @@ estimated, which is the only reason it belonged on this page — and it is what 
 **The reader's bill is the tile, and it is published before a read.** A tile's cost is its row
 count and its box, both in the tile manifest `tileMatrix` hands back at `open`, so a view knows what
 a window will read before it reads it. What a read costs over the wire is measured per statement on
-[the backend](/docs/design/later/backend#a-read-does-not-cost-the-corpus), not reported per answer:
+[the backend](/docs/design/later/backend#a-read-does-not-cost-the-graph), not reported per answer:
 `bytes` out of `parquet_metadata` is footer arithmetic and never bytes weighed on a wire, because the
 engine reads inside its own process, a Worker in the browser.
 
 **R1 is asserted through the seam, by `e5b2113f:packages/corpus/integration/cost.test.ts`.** The one
 capability this package asks a host for is an `Engine`, so everything a reader does passes through
 `Engine.query` and the test counts the statements that reach *its own* engine — a wrapper in the
-test file, not a mechanism this package publishes. Two corpora an order of magnitude apart and one
+test file, not a mechanism this package publishes. Two graphs an order of magnitude apart and one
 comparison: it writes both with the checker's own fixture — JavaScript against the published
 conventions, importing nothing of ours — at 20 and 196 tiles, and asks the same rectangle of each,
 fixed ground and ten times the density, through `scan` and `edges`.
 
 Four assertions, and not one of them compares against a recorded figure:
 
-- the vertex statements **never name every tile in the corpus**
+- the vertex statements **never name every tile in the graph**
 - they name exactly the tiles the plan chose, and at most two more than the answer landed in — the
   overshoot is a tile whose box meets the rectangle and whose rows do not, which is geometry and
   not a term in N
-- **the share of the corpus a rectangle opens falls as the corpus grows**
+- **the share of the graph a rectangle opens falls as the graph grows**
 - a read is one statement per run of tiles, for the vertices and for each orientation
 
 A guard nobody has watched fail is a sentence rather than a guard, and three of the four went red
 when the defect they were written against — every tile URL handed to one statement — was put back.
 
 **And one bench, which was not a test, and is gone.** The playground's `scripts/measure-frame.mjs`
-(deleted after `2fa5f22`) walked ten written-down rectangles over a bench corpus and reported the
+(deleted after `2fa5f22`) walked ten written-down rectangles over a bench graph and reported the
 door's ledger per frame, asking each three times and exiting 1 if any cost column but the clock
 moved, because a bench that flaps is not evidence. It left with the viewer it ran through; under
 [the backend](/docs/design/later/backend) the unit it would measure is one tile, whose cost is its row

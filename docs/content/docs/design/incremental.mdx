@@ -105,7 +105,7 @@ ty, rust-analyzer and Cairo put the Salsa substrate in one small crate at the bo
 its inputs, the file abstraction — the parser in a crate of its own, the semantic analysis in one or
 a few, the editor functions in one with no protocol in it, and each transport in a thin crate over
 those. fossil's crates are cut that way, and a crate that is none of those folds into the one whose
-subject it is. Six are modules of that crate now:
+subject it is. Seven are modules of those crates now:
 
 | module | because |
 | --- | --- |
@@ -113,7 +113,8 @@ subject it is. Six are modules of that crate now:
 | `fossil_base::sources` | the columns a host found for a source are the value of an input, so the type is the input's; the trait beside it, its schema and its stub had no caller |
 | `fossil_hir::lineage` | what a program reads is a question about its def map, asked by every host |
 | `fossil_hir::shex`, `fossil_hir::shacl` | a shape document becomes a type, and the types are here — the decoders and the `providers` rows that install them; what the executor was handed beside them, an enum whose one live method returned a `GraphSchema`, is a `GraphSchema` |
-| `fossil_df::layout`, `fossil_df::describe` | the graph's layout and its mapping are the writer's: nothing else lays out a GraphAr graph, and neither module exports anything |
+| `fossil_df::layout` | the graph's layout is the writer's: nothing else lays out a GraphAr graph, and the module exports nothing |
+| `fossil_mir::describe` | the graph's mapping is a function of the types, so the editor's module links it and a host asks before a run ([the graph as Apache GraphAr](/docs/design/graphar)) |
 
 One is still a crate of its own:
 
@@ -172,6 +173,16 @@ linked into nothing: no symbol of either is in the editor's module.
 **What would reverse it:** a measurement of the editor's `update` on a program of a real size that shows the
 `opt-level = "z"` cost in a keystroke, in which case the editor takes `opt-level = "s"` in a profile of its own: with the change above, 3,448,192 bytes
 (1,098,275 gzipped) after `wasm-opt -O3`, against 2,884,232 (971,688) for `"z"` after the same.
+
+**The editor's module links the mapping.** `describe` moved to `fossil-mir` ([the graph as Apache
+GraphAr](/docs/design/graphar), D6) so that `program.mapping()` can answer before a run, which puts `rml`'s AST and its
+Turtle writer in the editor's module, beside `vocabularyOf` and `subjectOf`. Built with `--profile wasm-release` and
+`wasm-bindgen --target web`, before `wasm-opt`, at the fork's `889cb741` on 2026-10-15, it is 4,360,297 bytes (1,244,285
+gzipped) against the 4,164,703 (1,185,693 gzipped) above, which was not measured again: 195,594 bytes more (+4.7%) and
+58,592 more gzipped (+4.9%). `wasm-opt` was not run. The module is still under the 2 MB compressed ceiling `build-wasm.sh` asserts.
+
+**What would reverse it:** that growth showing in first paint. Then `mapping()` is the executor's module's and the
+editor's is what it was, at the price of a host loading the larger module to ask for a shape before a run.
 
 **What would reverse it:** a growth of that module that shows in first paint and that the fork
 cannot trim (a parser the fork's features cannot drop, say), or its additions not reaching an upstream

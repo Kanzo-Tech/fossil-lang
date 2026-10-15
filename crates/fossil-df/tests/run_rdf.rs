@@ -55,17 +55,16 @@ Projects : ProjectShape from Project
 "#;
 
 /// The edge type from `source` to `destination`.
-fn edge(corpus: &native::Corpus, source: &str, destination: &str) -> graphar_info::EdgeInfo {
-    corpus
-        .graph()
+fn edge(ran: &native::Written, source: &str, destination: &str) -> graphar_info::EdgeInfo {
+    ran.graph()
         .edges
         .into_iter()
         .find(|e| e.src_type == source && e.dst_type == destination)
         .unwrap_or_else(|| panic!("no {source}→{destination} edge type"))
 }
 
-fn columns(corpus: &native::Corpus, ty: &str) -> Vec<String> {
-    corpus.vertex(ty).property_groups[0]
+fn columns(ran: &native::Written, ty: &str) -> Vec<String> {
+    ran.vertex(ty).property_groups[0]
         .properties
         .iter()
         .map(|p| p.name.clone())
@@ -79,28 +78,27 @@ fn run_rdf_writes_typed_multi_shape_graph_with_multivalued_edges() {
         ("graph.shex", GRAPH_SHEX),
         ("cpi.fossil", CPI_FOSSIL),
     ]);
-    let corpus = native::run_dir(dir.path(), "cpi.fossil", &[]).expect("the RDF program runs");
+    let ran = native::run_dir(dir.path(), "cpi.fossil", &[]).expect("the RDF program runs");
 
     // Two vertex types, each materialised from ITS shape (multi-shape: the `KB`
     // member did not get the `Project` shape's columns or vice-versa).
-    assert_eq!(corpus.vertex_count("KB"), 1);
+    assert_eq!(ran.vertex_count("KB"), 1);
     assert_eq!(
-        columns(&corpus, "KB"),
+        columns(&ran, "KB"),
         ["subject", "label"],
         "KB carries its own column after its subject"
     );
-    assert_eq!(corpus.vertex_count("Project"), 2);
-    assert_eq!(columns(&corpus, "Project"), ["subject", "title"]);
+    assert_eq!(ran.vertex_count("Project"), 2);
+    assert_eq!(columns(&ran, "Project"), ["subject", "title"]);
 
     // The shape-ref `hasProject` is a TYPED edge KB→Project, NOT a column on KB;
     // kb/1 references two projects → the LIST UNNESTs to two edges.
-    let has_project = edge(&corpus, "KB", "Project");
+    let has_project = edge(&ran, "KB", "Project");
     assert_eq!(has_project.edge_type, "hasProject");
-    assert_eq!(corpus.edge_count(&has_project.triple()), 2);
+    assert_eq!(ran.edge_count(&has_project.triple()), 2);
     // Both objects named a Project the graph carries, so nothing was discarded.
     assert_eq!(
-        corpus
-            .report
+        ran.report
             .dropped
             .iter()
             .find(|d| d.table == has_project.triple())
@@ -108,11 +106,11 @@ fn run_rdf_writes_typed_multi_shape_graph_with_multivalued_edges() {
         Some(0)
     );
     for path in [
-        corpus.chunk("KB"),
-        corpus.chunk("Project"),
-        corpus.adjacency(&has_project.triple()),
+        ran.chunk("KB"),
+        ran.chunk("Project"),
+        ran.adjacency(&has_project.triple()),
     ] {
-        assert!(corpus.files.contains_key(&path), "{path} is not there");
+        assert!(ran.files.contains_key(&path), "{path} is not there");
     }
 }
 
@@ -144,19 +142,16 @@ fn run_rdf_resolves_schema_through_a_connection() {
     ]);
     let data = format!("{}data", native::AUTHORITY);
     let vocab = format!("{}vocab", native::AUTHORITY);
-    let corpus = native::run_dir(
+    let ran = native::run_dir(
         dir.path(),
         "cpi.fossil",
         &[("data", data.as_str()), ("vocab", vocab.as_str())],
     )
     .expect("the @conn program runs");
 
-    assert_eq!(corpus.vertex_count("KB"), 1);
-    assert_eq!(corpus.vertex_count("Project"), 2);
-    assert_eq!(
-        corpus.edge_count(&edge(&corpus, "KB", "Project").triple()),
-        2
-    );
+    assert_eq!(ran.vertex_count("KB"), 1);
+    assert_eq!(ran.vertex_count("Project"), 2);
+    assert_eq!(ran.edge_count(&edge(&ran, "KB", "Project").triple()), 2);
     // The graph names no input: where a table was read from is not in it, so
     // repointing `@data` cannot change what a run wrote (`/docs/design/graphar`, D1).
 }
@@ -197,11 +192,11 @@ fn run_rdf_resolves_edges_to_a_property_less_leaf_shape() {
         ("graph.shex", LEAF_SHEX),
         ("cpi.fossil", LEAF_FOSSIL),
     ]);
-    let corpus = native::run_dir(dir.path(), "cpi.fossil", &[]).expect("the leaf program runs");
+    let ran = native::run_dir(dir.path(), "cpi.fossil", &[]).expect("the leaf program runs");
 
-    assert_eq!(corpus.vertex_count("Tag"), 1, "one leaf Tag");
+    assert_eq!(ran.vertex_count("Tag"), 1, "one leaf Tag");
     assert_eq!(
-        corpus.edge_count(&edge(&corpus, "Item", "Tag").triple()),
+        ran.edge_count(&edge(&ran, "Item", "Tag").triple()),
         1,
         "an edge to a property-less leaf shape resolves to its row, not to zero"
     );

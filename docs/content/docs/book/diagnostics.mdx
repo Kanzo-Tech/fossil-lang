@@ -107,7 +107,7 @@ see [naming what you produce](/docs/book/what-you-produce#declaring-the-type).
 perfectly good `Bool`. What it is not is a relationship between two relations. A condition that
 mentions only one side is either true for every pairing or false for every pairing, so the join
 degenerates into the product of the two — every order against every user — with a filter on top. On
-two CSVs that is a wrong answer delivered quickly. On two corpora it is a wrong answer that never
+two CSVs that is a wrong answer delivered quickly. On two graphs it is a wrong answer that never
 arrives.
 
 **The fix.** `on = Purchase.user_id == User.id`. The key that connects two files lives in one of

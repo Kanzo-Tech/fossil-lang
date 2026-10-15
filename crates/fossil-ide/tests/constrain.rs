@@ -6,9 +6,10 @@ use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
 use fossil_base::{FossilDb, SourceFile, System};
+use fossil_graph_schema::Primitive;
 use fossil_ide::constrain::{
-    DeclaredField, DeclaredType, Import, ImportedType, SourceVocabulary, Vocabulary, grammar_for,
-    prelude,
+    DeclaredField, DeclaredType, Import, ImportedType, Model, ModelEdge, ModelField, ModelType,
+    SourceVocabulary, Vocabulary, grammar_for, prelude, subject_of, vocabulary_of,
 };
 use fossil_syntax::parse;
 
@@ -256,4 +257,152 @@ fn the_prelude_declares_what_the_program_declares() {
         "{prelude}"
     );
     assert!(syntax_errors(&prelude).is_empty(), "{prelude}");
+}
+
+const BASE: &str = "https://acme.example";
+
+fn laureate(identity: &[&str]) -> ModelType {
+    ModelType {
+        name: "Laureate".into(),
+        source: "laureates".into(),
+        identity: identity.iter().map(|c| (*c).to_string()).collect(),
+        fields: vec![
+            ModelField {
+                name: "name".into(),
+                primitive: Primitive::String,
+                optional: false,
+            },
+            ModelField {
+                name: "born".into(),
+                primitive: Primitive::Date,
+                optional: true,
+            },
+        ],
+    }
+}
+
+fn edge(name: &str, many: bool, optional: bool) -> ModelEdge {
+    ModelEdge {
+        name: name.into(),
+        from: "Laureate".into(),
+        to: "Institution".into(),
+        on: "affiliations".into(),
+        many,
+        optional,
+    }
+}
+
+#[test]
+fn a_subject_is_the_workspaces_prefix_the_types_words_and_the_identitys_holes() {
+    let id = |t: &ModelType| subject_of(t, BASE);
+    assert_eq!(
+        id(&laureate(&["id"])),
+        "https://acme.example/id/laureate/{laureates.id}"
+    );
+    assert_eq!(
+        subject_of(&laureate(&["id"]), "https://acme.example/"),
+        id(&laureate(&["id"])),
+        "a trailing slash on the base is not a second slash"
+    );
+    assert_eq!(
+        id(&laureate(&["laureate_id", "institution_id"])),
+        "https://acme.example/id/laureate/{laureates.laureate_id}-{laureates.institution_id}"
+    );
+    let named = |name: &str| {
+        id(&ModelType {
+            name: name.into(),
+            ..laureate(&["id"])
+        })
+    };
+    assert_eq!(
+        named("LaureateAward"),
+        "https://acme.example/id/laureate-award/{laureates.id}"
+    );
+    assert_eq!(
+        named("birth_date.2nd"),
+        "https://acme.example/id/birth-date-2nd/{laureates.id}"
+    );
+}
+
+#[test]
+fn a_vocabulary_declares_the_types_with_the_workspaces_iris_and_reads_only_what_they_use() {
+    let model = Model {
+        types: vec![laureate(&["id"])],
+        edges: vec![edge("affiliation", true, false)],
+    };
+    let sources = [
+        source("laureates", "laureates.csv", None, &["id", "name", "born"]),
+        source("affiliations", "affiliations.csv", Some("|"), &["l", "i"]),
+        source("countries", "countries.csv", None, &["code"]),
+    ];
+    let vocabulary = vocabulary_of(&model, &sources, BASE);
+
+    let [declared] = &vocabulary.declared[..] else {
+        panic!("one type: {vocabulary:?}")
+    };
+    assert_eq!(declared.iri, "https://acme.example/vocab/Laureate");
+    assert_eq!(
+        declared.fields,
+        [
+            field("name", "https://acme.example/vocab/name", "String"),
+            field("born", "https://acme.example/vocab/born", "Option<Date>"),
+            field(
+                "affiliation",
+                "https://acme.example/vocab/affiliation",
+                "Seq<Ref<Institution>>"
+            ),
+        ]
+    );
+    let names: Vec<&str> = vocabulary.sources.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(
+        names,
+        ["laureates", "affiliations"],
+        "the countries are read by nothing"
+    );
+    assert!(vocabulary.imports.is_empty());
+}
+
+#[test]
+fn a_relation_is_a_ref_an_optional_ref_or_a_sequence() {
+    let ty = |many, optional| {
+        let model = Model {
+            types: vec![laureate(&["id"])],
+            edges: vec![edge("e", many, optional)],
+        };
+        vocabulary_of(&model, &[], BASE).declared[0]
+            .fields
+            .last()
+            .expect("the relation is a field")
+            .ty
+            .clone()
+    };
+    assert_eq!(ty(false, false), "Ref<Institution>");
+    assert_eq!(ty(false, true), "Option<Ref<Institution>>");
+    assert_eq!(ty(true, false), "Seq<Ref<Institution>>");
+    assert_eq!(ty(true, true), "Seq<Ref<Institution>>");
+}
+
+/// Every primitive is written as the checker prints it, so a declared type reads back.
+#[test]
+fn every_primitive_is_a_type_the_prelude_declares() {
+    let fields: Vec<ModelField> = Primitive::ALL
+        .into_iter()
+        .map(|primitive| ModelField {
+            name: format!("f{primitive}"),
+            primitive,
+            optional: false,
+        })
+        .collect();
+    let model = Model {
+        types: vec![ModelType {
+            fields,
+            ..laureate(&["id"])
+        }],
+        edges: Vec::new(),
+    };
+    let text = prelude(&vocabulary_of(&model, &[], BASE));
+    assert!(text.contains("fGYear: GYear"), "{text}");
+    assert!(text.contains("fAnyUri: AnyUri"), "{text}");
+    assert!(text.contains("fLangString: LangString"), "{text}");
+    assert!(syntax_errors(&text).is_empty(), "{text}");
 }

@@ -29,7 +29,7 @@ common prefix of their ids, an `XOR` and a count of leading zeros. **A reader co
 wants before it emits the first request.**
 
 The cut is a shift because `chunk_size` is a power of two. Anything else forces a division and the
-two marked bits stop being positions in one diagram. `chunk_size` is a power of two or the corpus
+two marked bits stop being positions in one diagram. `chunk_size` is a power of two or the graph
 does not have an address. Guard: `declared-tiling`.
 
 ## The order that makes an interval mean something
@@ -68,7 +68,7 @@ vertices intersects **5 tiles at the median and 7 at p90** where 4 and 6 hold on
 
 The community hierarchy rides on the same runs rather than producing them: the placement gives every
 group an aligned square of the quaternary, and an aligned square is one interval of codes, so every
-`cluster_id` is one run of `dense_id` — 995 of 995 on that corpus. The hierarchy gives the levels
+`cluster_id` is one run of `dense_id` — 995 of 995 on that graph. The hierarchy gives the levels
 of *aggregation*; the curve gives the ranges of *bytes*.
 
 **A new placement produces a new numbering**, so `dense_id` cannot also be the identity — that is
@@ -103,7 +103,7 @@ The `hilbert2` vectors were published in `ac1801d4:packages/corpus/guards/vector
 
 `x = 65535, y = 32767` and `x = 32768, y = 32768` are the rows that matter most: one step adds
 `3 · 2^30`, the total reaches bit 31, and a port that keeps `d` in a signed 32-bit integer sorts the
-second half of the curve first. That corpus satisfies every count-based check ever written and
+second half of the curve first. That graph satisfies every count-based check ever written and
 addresses nothing. The pair `x = 32768, y = 0` and `x = 65535, y = 32767` is the reflection: a port
 that swaps without reflecting gives each the other's index. The table is written by the engine's own
 curve (`ac1801d4:crates/fossil-layout/examples/hilbert_vectors.rs`) and held against it by a Rust test, so
@@ -123,9 +123,9 @@ SQL, or the bounding box the layout derives before quantising.
 </Callout>
 
 Two guards ask different questions of the result. `hilbert-order` recomputes the code from the
-corpus's own `x` and `y` and asserts it **never decreases** as `dense_id` increases — non-decreasing,
+graph's own `x` and `y` and asserts it **never decreases** as `dense_id` increases — non-decreasing,
 because two vertices can quantise to the same cell. `spatial-tiles` asks what the order was *for*,
-using only the footer: the average tile's box covers at most half the corpus extent. On the fixture,
+using only the footer: the average tile's box covers at most half the graph extent. On the fixture,
 70,000 vertices in 18 tiles, Hilbert-ordered measures **8.0%** and the same vertices renumbered at
 random measure **99%**. It separates having a spatial order from not having one, and is not a quality
 target.
@@ -158,7 +158,7 @@ completeness only for those — `src` for the drawable set, `dst` for every edge
 in the window, both for every edge incident to it.
 
 A missing orientation has two causes that are not one fact. *The caller did not ask* is a choice.
-*The corpus does not publish it* is a property of the artefact: an edge type with no projection
+*The graph does not publish it* is a property of the artefact: an edge type with no projection
 `aligned_by` that direction, or one declaring it with no `path`, has tiles nobody can address, and the
 answer says so rather than composing a URL that 404s. And an orientation applies to a window only if
 its **own `dense_id` space is that window's** — on `Author authored Paper`, `by_target` tile `k`
@@ -351,12 +351,12 @@ graph LR
 
 A request is one file when a tile is a file, and a **maximal run of consecutive row groups** when it
 is not. The file boundary is the only thing preventing the merge: **one file per tile costs 4× the
-requests and does not save a byte.** Guard: `tile-of`, in whichever form the corpus uses.
+requests and does not save a byte.** Guard: `tile-of`, in whichever form the graph uses.
 
-**Which one a corpus is, it declares.** `graph.graph.yml` carries `container: files` or
-`container: rowgroups`, and it applies to every payload set in the corpus — the vertex tiles, the
+**Which one a graph is, it declares.** `graph.graph.yml` carries `container: files` or
+`container: rowgroups`, and it applies to every payload set in the graph — the vertex tiles, the
 identity index, and each orientation of each edge type. A reader cannot work it out: working it out
-means listing a directory, and there is no listing over HTTP. Absent is `files`, because a corpus
+means listing a directory, and there is no listing over HTTP. Absent is `files`, because a graph
 written before the field existed is that one. **fossil writes `rowgroups`**, and its file is
 `tiles.parquet` in the set's own prefix, one per set; the addresses are published as vectors below.
 The conformance corpus is the other one and says so, for a reason that belongs to a writer rather
@@ -390,7 +390,7 @@ ascend and do not overlap, so a tile is a contiguous run of row groups.
 <Callout type="warn" title="DuckDB cannot write a row group under 2,048 rows, and arrow-rs can">
 Row groups come out in multiples of DuckDB's 2,048-row vector, and a smaller `ROW_GROUP_SIZE` is
 clamped without a warning: 300 rows written at `ROW_GROUP_SIZE 64` come back as **one** row group of
-300. So a corpus whose `chunk_size` is under 2,048 cannot be put in the row-group container by
+300. So a graph whose `chunk_size` is under 2,048 cannot be put in the row-group container by
 DuckDB at all — which is why the conformance corpus, at `chunk_size` 64, is the file-per-tile one,
 declares `container: files`, and the two-container comparison runs on a fixture at 4,096.
 
@@ -406,7 +406,7 @@ generator can produce.
 A tree of tiles would only earn its keep by **containing** something that does not fit in a leaf. The
 one candidate was the edge that crosses tiles, and hoisting it to the deepest tile holding both
 endpoints costs more than it saves by a wide margin
-([Adjacency](/docs/design/discarded#the-corpus)). With nothing to hoist, the interior
+([Adjacency](/docs/design/discarded#the-graph)). With nothing to hoist, the interior
 nodes are empty.
 
 **The coarse zooms are not that tree either.** They are the cell tree: rung `k` is a partition of
@@ -418,7 +418,7 @@ not a projection.
 
 ### `projections:` — the payload and the adjacencies in one list
 
-A corpus is an order, a cut, and **projections of that sequence** — one block, in which the payload
+A graph is an order, a cut, and **projections of that sequence** — one block, in which the payload
 is the entry whose `scale` is `1` rather than a special case:
 
 ```yaml
@@ -429,7 +429,7 @@ projections:
 and an edge type's two adjacencies are the same entries with an `aligned_by`
 ([Adjacency](/docs/format/conventions/adjacency)).
 
-`path` is where the tiles are, relative to the type's own `prefix`, and inside it the corpus's
+`path` is where the tiles are, relative to the type's own `prefix`, and inside it the graph's
 [container](#two-containers-one-address) spells the filenames — `chunk0.parquet` under `files`,
 `tiles.parquet` under `rowgroups`. **`scale` is how many `dense_id`s one row stands for**, so a
 projection holds `vertex_count.div_ceil(scale)` rows and its tile `j` covers
@@ -456,7 +456,7 @@ million vertices, uncompressed pages:
 
 On `dense_id` and `x` — nearly unique within a tile — the dictionary and its indices cost **37% more
 than PLAIN**; on `cluster_id` it wins by **280×**. Off everywhere is worse than on everywhere (80.73
-MB against 75.81 MB) because it destroys `cluster_id`; per column lands at **60.78 MB**. The corpus
+MB against 75.81 MB) because it destroys `cluster_id`; per column lands at **60.78 MB**. The graph
 mandates no encoding, only the consequence: one decision applied to every column costs a quarter of
 the bytes.
 
@@ -468,28 +468,28 @@ and 36.0 kB** against **4 requests and 37.0 kB** for all six columns, from 68.8 
 
 All of the above is arithmetic over four manifest fields — `prefix`, `chunk_size`, `aligned_by` and
 the projection's own `path` — and a reader that re-derives it from this page has copied a convention
-no compiler compares against the corpus. Change a prefix or a shift and the copy composes URLs that
+no compiler compares against the graph. Change a prefix or a shift and the copy composes URLs that
 404 at runtime, in a browser, with no type error and nothing red.
 
 A 404 is the loud half. A copy of `chunk_size` that is **too large** fails in the other direction and
-says nothing at all: it names fewer tiles than the corpus has, and every name it composes is real. A
+says nothing at all: it names fewer tiles than the graph has, and every name it composes is real. A
 reader holding 122,880 — fossil's own earlier default, chosen when a chunk was thought to be a row
-group — against a corpus written at 4,096 composes `ceil(1_000_000 / 122_880) = 9` URLs where the
-corpus publishes 245. All nine resolve, because `chunk0…chunk8` are the corpus's own first nine
+group — against a graph written at 4,096 composes `ceil(1_000_000 / 122_880) = 9` URLs where the
+graph publishes 245. All nine resolve, because `chunk0…chunk8` are the graph's own first nine
 tiles; each holds 4,096 rows, not 122,880. The window opens `dense_id` 0..36,863, **3.7% of the
-corpus**, and reports a first paint over it — a latency flattering in exact proportion to what it
+graph**, and reports a first paint over it — a latency flattering in exact proportion to what it
 skipped, with nothing red anywhere. What a reader can check is not the cause but the count: *fewer
 vertices arrived than the manifest declares* is one comparison against a number the manifest already
 carries. What would reverse this whole argument is fixing `chunk_size` in the specification instead
-of declaring it per corpus: a copied constant could not drift, and the composition would not need the
-manifest. The declared field is what buys a corpus the freedom to be addressed at the size its writer
+of declaring it per graph: a copied constant could not drift, and the composition would not need the
+manifest. The declared field is what buys a graph the freedom to be addressed at the size its writer
 chose, and the arithmetic above is what that freedom costs a reader who guesses instead of reading.
 
 So the composition ships as code, in `@fossil-lang/corpus`, reading the manifest and nothing else:
 
 ```text
-const corpus = await attach('/bench/1000000', { manifestFiles });
-const { vertexUrls, edgeUrls, complete, gaps } = corpus.tilesFor({ tiles, directions: ['src'] });
+const graph = await attach('/bench/1000000', { manifestFiles });
+const { vertexUrls, edgeUrls, complete, gaps } = graph.tilesFor({ tiles, directions: ['src'] });
 ```
 
 **The resolution reaches no network, and the module it runs in is up before the first address.** The
@@ -497,16 +497,16 @@ arithmetic is `fossil_graph::plan` at wasm32 — one implementation, not a secon
 caller's language — and the boot is the price. It is not a call to sequence: `open` awaits it,
 the module's `.wasm` is an asset the host's bundler already emitted, and that is why composing a
 URL out of manifests already in hand is `await`ed. A caller holding an engine passes `query` instead and gets
-the whole corpus from the same name; the manifests are the one thing every depth reads. Bytes, tile
+the whole graph from the same name; the manifests are the one thing every depth reads. Bytes, tile
 caches, debounce, supersede-cancellation and sampling stay in whatever draws. It refuses to compose
-three things the manifest does not say: an orientation the corpus does not publish (`adjacency('dst')`
+three things the manifest does not say: an orientation the graph does not publish (`adjacency('dst')`
 is `null`, never a string), a tile size that disagrees with the vertex type addressing it, and which
 tiles a rectangle touches, which comes from the footer boxes.
 
 The seam is tested by the question it exists to answer: **can a reader that is not fossil's open the
-same corpus with only what fossil publishes?** `e5b2113f:packages/corpus/conformance/reader.mjs` is that reader —
+same graph with only what fossil publishes?** `e5b2113f:packages/corpus/conformance/reader.mjs` is that reader —
 plain Node, no npm, no build. `verify.mjs` runs it against the same table of addresses the module
-does; `writer.mjs` runs it against a corpus `fossil run` has just written, because the first cannot
+does; `writer.mjs` runs it against a graph `fossil run` has just written, because the first cannot
 catch two readers being wrong *together*.
 
 ## The published vectors
@@ -518,7 +518,7 @@ copied. Every value below is a border, they live in `ac1801d4:packages/corpus/gu
 The `tile_of` vectors were published in `ac1801d4:packages/corpus/guards/vectors.json`, read by the guard and rendered here as a table while the convention held.
 
 The last three rows are the marked bits of the diagram at the top of this page. All three exceed the
-width a `dense_id` column carries in any corpus that has been written, and that is why they are
+width a `dense_id` column carries in any graph that has been written, and that is why they are
 published: they are where a wrong implementation is still right.
 
 Which tile an id is in is one question; **how many tiles there are** is the other, and it is the
@@ -546,13 +546,13 @@ to match.
 ## The payload format is open
 
 **This is a design question, not a settled convention.** A tile's payload is Parquet because the
-corpus is Parquet and one format is simpler than two. But a tile is read to be drawn, and drawing
+graph is Parquet and one format is simpler than two. But a tile is read to be drawn, and drawing
 wants contiguous typed arrays that upload to a GPU without decoding. **Arrow IPC gives exactly that
 and Parquet does not** — Parquet's encodings are the reason its bytes are small, and decoding them is
 work a drawing path pays on every tile.
 
 What settles it is where the cost lands on a real link: Parquet moves fewer bytes and decodes them,
-Arrow IPC moves more and does not, and which wins depends on the link, which a corpus does not
+Arrow IPC moves more and does not, and which wins depends on the link, which a graph does not
 control. The addressing does not care — `tile = dense_id >> 12` is true of a row group, of a file and
 of an IPC record batch alike. What would change is the footer: an IPC file's metadata is not laid out
 to answer "which batches intersect this box", and replacing that is a design cost, not a swap. That

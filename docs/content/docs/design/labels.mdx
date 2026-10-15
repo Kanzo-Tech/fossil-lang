@@ -173,7 +173,7 @@ document of their own, generated like the shapes, never mixed into the data's.
 
 **The format changes in place.** The annotations are absent when there is nothing to say, and the
 reader that reads them ships in the same release as the writer that writes them — the rule
-[the corpus](/docs/design/corpus#one-format-changed-in-place) states for every change to the format,
+[the graph](/docs/design/graph#one-format-changed-in-place) states for every change to the format,
 this one and the language column below alike.
 
 ## Back out as ShEx
@@ -263,7 +263,7 @@ knows it is `rml:languageMap`, and the graph is written together with its mappin
 **GraphAr's C++ and Java readers do not parse a user-defined type**, so a graph with a `langString`
 property is not opened by them at the revision read; the alternatives, which either lose the tag or
 admit a state where the values and the tags disagree, are
-[discarded](/docs/design/discarded#the-corpus-as-apache-graphar).
+[discarded](/docs/design/discarded#the-graph-as-apache-graphar).
 
 ### The RDF view
 

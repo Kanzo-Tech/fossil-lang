@@ -13,7 +13,7 @@ import { source } from "@/lib/source";
  *
  * **The `.mdx` is part of the emitted path**, and that is what lets a static export hold it. The
  * export writes one file per route, and `/docs/design` is a page AND the parent of
- * `/docs/design/corpus`, so without the suffix it asks for `docs/design` to be a file and a
+ * `/docs/design/graph`, so without the suffix it asks for `docs/design` to be a file and a
  * directory at once and dies with `EISDIR`. With it, `docs/design.mdx` is a file and `docs/design/`
  * a directory.
  * The index page, whose slug is empty, is `../../docs-index/route.ts`'s for the same reason: an

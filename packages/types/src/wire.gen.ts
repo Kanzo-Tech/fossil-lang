@@ -11,6 +11,9 @@ export type Access = 'read' | 'write';
  */
 export interface ColumnRef {
   column: string;
+  /**
+   * The source's binding.
+   */
   source: string;
 }
 
@@ -423,6 +426,69 @@ export interface MissingDocument {
 }
 
 /**
+ * What a host has decided a graph holds, before any program is written: the types, each over one
+ * source and identified by some of its columns, and the relations between them. The vocabulary and
+ * the subjects of the program that maps it are computed from it (`vocabulary_of`, `subject_of`) and
+ * not written by whoever proposes the mappings.
+ */
+export interface Model {
+  edges?: ModelEdge[];
+  types: ModelType[];
+}
+
+/**
+ * A relation of a `Model`, from one type to another.
+ */
+export interface ModelEdge {
+  from: string;
+  /**
+   * Zero or more per `from`: `Seq<Ref<…>>`.
+   */
+  many?: boolean;
+  /**
+   * The field of `from` that holds it.
+   */
+  name: string;
+  /**
+   * The binding of the source that holds the `to`'s key.
+   */
+  on: string;
+  /**
+   * Some `from` has none: `Option<Ref<…>>`.
+   */
+  optional?: boolean;
+  to: string;
+}
+
+/**
+ * A column of a source, kept as a field of a `ModelType`.
+ */
+export interface ModelField {
+  name: string;
+  /**
+   * Some rows have none: the field is `Option<…>`.
+   */
+  optional?: boolean;
+  primitive: Primitive;
+}
+
+/**
+ * A type of a `Model`.
+ */
+export interface ModelType {
+  fields: ModelField[];
+  /**
+   * The columns of `source` that identify one: a key, or a link file's two ends.
+   */
+  identity: string[];
+  name: string;
+  /**
+   * The binding of the source its rows are read from.
+   */
+  source: string;
+}
+
+/**
  * Zero-based line and UTF-16 column — LSP's `Position`.
  */
 export interface Position {
@@ -469,7 +535,7 @@ export type ProfileDepth = 'types' | 'whole';
 export interface ProfileFailure {
   reason: string;
   /**
-   * The source it was about: for an inclusion, the dependent side's.
+   * The binding of the source it was about: for an inclusion, the dependent side's.
    */
   source: string;
 }
@@ -508,6 +574,11 @@ export interface ProfileQuery {
  */
 export interface ProfileSource {
   /**
+   * The name the program binds it to (`users` in `users := io.csv(…)`): what every part of the
+   * profile that names a source names it by.
+   */
+  binding: string;
+  /**
    * The host's validator for the bytes it read: carried into the descriptor.
    */
   etag?: string;
@@ -516,14 +587,15 @@ export interface ProfileSource {
    */
   format: string;
   /**
-   * What the program wrote — what the descriptor is keyed by.
+   * The reference as the program wrote it — what the descriptor is keyed by, so two bindings of
+   * one file share a descriptor.
    */
   key: string;
   /**
    * What the host's `DuckDB` reads: the location, or the name the host attached it under. Storage
    * is the host's; this is only the name.
    */
-  name: string;
+  location: string;
   /**
    * The reader option the binding wrote (`delimiter = "|"`), verbatim.
    */
@@ -599,6 +671,11 @@ export interface SemanticToken {
  * One source, profiled.
  */
 export interface SourceProfile {
+  /**
+   * The binding it was given: what `ColumnRef::source` and `Failure::source` name it by. The
+   * descriptor's `key` is the reference, which a second binding of the same file shares.
+   */
+  binding: string;
   /**
    * The columns that are candidate keys: of a type a key can be, never null, never repeated.
    */

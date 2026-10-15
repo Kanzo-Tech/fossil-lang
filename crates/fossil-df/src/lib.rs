@@ -35,7 +35,6 @@
 // boxing it would put `Box<Failure>` in every signature a host reads.
 #![allow(clippy::result_large_err)]
 
-mod describe;
 /// The output descriptor a program names, decoded from the document the
 /// checker read — the one resolution every host runs with.
 pub mod descriptor;
@@ -66,7 +65,7 @@ pub mod write;
 pub use descriptor::output_descriptor;
 /// The executor a host drives. Named at the crate root because it is the
 /// crate's answer, not a detail of the module it is written in.
-pub use executor::{CorpusFile, Executor, Output, Ran};
+pub use executor::{Executor, GraphFile, Output, Ran};
 /// The relation an op index produces — the seam a host (or a test that builds a
 /// [`fossil_mir::MirGraph`] by hand) uses to materialise an intermediate.
 pub use plan::plan_relation;
@@ -95,6 +94,8 @@ use fossil_graph_schema::{
 };
 use fossil_hir::shapes::inner_primitive;
 use fossil_hir::{MappingLoc, def_map::def_map};
+// `PAYLOAD_IDENTITY` is the column of a vertex's IRI, which the mapping reads: `fossil-mir` names it.
+use fossil_mir::describe::PAYLOAD_IDENTITY;
 use fossil_mir::{Expr, Op, SourceFormat, VProp, apply_output_shape, lower_to_mir_pg};
 
 /// The columns of the tables the engine holds between the executor and the
@@ -105,8 +106,6 @@ use fossil_mir::{Expr, Op, SourceFormat, VProp, apply_output_shape, lower_to_mir
 /// The rank of a vertex in the whole graph, `u32`: the types in schema order,
 /// each one a contiguous range of it.
 const PAYLOAD_ADDRESS: &str = "dense_id";
-/// What a vertex is: its IRI.
-const PAYLOAD_IDENTITY: &str = "subject";
 /// The `dense_id` of the vertex a multi-valued property's value belongs to.
 const ENDPOINT_SRC: &str = "src";
 /// The BCP 47 tag of a language-tagged value, beside it.

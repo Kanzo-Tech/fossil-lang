@@ -5,7 +5,7 @@
  */
 import { FossilExecutor } from '../pkg/fossil_df_wasm.js';
 import { resolveDocuments } from '@fossil-lang/storage';
-import { FossilError, isFossilError, type CorpusFile, type Host, type Profiled, type RunReport } from '@fossil-lang/types';
+import { FossilError, isFossilError, type GraphFile, type Host, type Profiled, type RunReport } from '@fossil-lang/types';
 import { until, type MissingDocument, type Related, type UnreadDocument } from '@fossil-lang/types/internal';
 
 import { bootHere } from './load.js';
@@ -36,7 +36,7 @@ export interface HostRun extends Common {
 export interface FilesRun extends Common {
   /** Every document and source the program reads, as bytes, by its location. */
   files: Readonly<Record<string, Uint8Array>>;
-  /** Where the program lives — a URL such as `https://corpus.invalid/hello.fossil` — so the
+  /** Where the program lives — a URL such as `https://graph.invalid/hello.fossil` — so the
    *  relative documents and sources it names resolve beside it. */
   path: string;
   into?: 'memory';
@@ -48,7 +48,7 @@ export type RunOptions = HostRun | FilesRun;
 /** What a run into memory answers: the report and every file of the graph. */
 export interface InMemoryRun {
   report: RunReport;
-  files: CorpusFile[];
+  files: GraphFile[];
 }
 
 /**

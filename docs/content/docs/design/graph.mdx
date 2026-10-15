@@ -1,13 +1,22 @@
 ---
-title: The corpus
+title: The graph
 description: "What a run writes is an Apache GraphAr graph and the RML-Core mapping of its tables, as plain files with no service in the path: one table per vertex type, one per relation, one index space per type; why a reader keys on the subject, why the format changes in place, and what the graph can carry."
 ---
 
-A fossil program produces a **corpus**: a property graph written as columnar files, with the
+A fossil program produces a **graph**: a property graph written as columnar files, with the
 mapping that says what its tables mean as RDF. Not a database to connect to, not a stream to
-consume, not an endpoint. Files. The corpus is an
+consume, not an endpoint. Files. The graph is an
 [Apache GraphAr](/docs/design/graphar) graph — YAML information files and Parquet chunks — and
 `mapping.ttl`, laid out as [/docs/format](/docs/format) specifies.
+
+**The word is *graph*** (owner decision, 15 October 2026). What a run writes was called a corpus while its
+format was fossil's own, and it is an Apache GraphAr graph now, so `GraphFile`, `memory://graph/`,
+`SinkRef::Graph` and the pages that say what a run writes say graph; the in-memory location of a
+run, `memory://corpus/`, was a consumer-visible string and changed with them. *Corpus* is kept where
+it is a different thing: the body of programs the documentation and the tests run
+(`docs/programs/`), and the names of what was deleted (`@fossil-lang/corpus`, `corpus.bnf`), which a
+page cites by the name it had. **What would reverse it:** nothing about the word; a consumer that
+cannot edit a string would, and there is none at `0.x`.
 
 A reader opens the graph document and reads the tables it names — from a local path, an object
 store, or a plain web server. **There is no service in the path**, so no query language between
@@ -132,7 +141,7 @@ not load in DuckDB-WASM 1.5.x, the engine a browser reader has. A traversal is S
 
 **What would reverse it.** A host engine that runs SQL/PGQ where the reader runs. Then the attaching
 reader issues the `CREATE PROPERTY GRAPH` the information files already describe, and nothing in the
-format moves. The alternatives are [discarded](/docs/design/discarded#the-corpus), with what would
+format moves. The alternatives are [discarded](/docs/design/discarded#the-graph), with what would
 bring each back.
 
 ## The width of an address, and what actually runs out first
@@ -152,7 +161,7 @@ numbers the ids.
 The cost of the other choice is on the column every read takes, and it is in memory more than on
 disk. GraphAr's index is `int64`; delta-encoded as the writer writes it, it costs 1–3% more on disk
 than a 32-bit one, but a reader that does not cast it back holds twice the Arrow: 32 MB instead of
-16 MB for two million edges ([the corpus as Apache GraphAr](/docs/design/graphar) has the
+16 MB for two million edges ([the graph as Apache GraphAr](/docs/design/graphar) has the
 measurement). So the reader casts the global id to `UINTEGER`, and the Arrow stays at 16 MB.
 
 ### The contiguous `0..V−1`, and the price of keeping it
@@ -163,7 +172,7 @@ handing each partition a **preassigned range** removes that — at the price of 
 partition does not fill its range. A hole in a type's indices makes the reader's prefix sum
 non-injective, and `attachGraph` refuses such a graph as `invalid`.
 
-Both exits were priced on the ten-million corpus before any code was written, and neither is taken.
+Both exits were priced on the ten-million graph before any code was written, and neither is taken.
 
 - **How many holes.** The split is a hash's, not the data's: fourteen partitions on `subject` come
   out within **0.526%** of each other. A quantum sized to the largest leaves **35,200 holes, 0.35% of
@@ -200,7 +209,7 @@ owns the bytes and the files that name them.**
 A graph is drawn whole, every vertex and every edge, at a place the view chooses
 ([where x and y come from](/docs/design/position)). At two million edges the read was measured in
 DuckDB-WASM, one thread, a local file: `src` and `dst` to **16 MB of Arrow in 51–127 ms**. The tiled
-read it replaced is on [the tiled corpus](/docs/design/later/corpus-tiles), and what brings it back is
+read it replaced is on [the tiled graph](/docs/design/later/graph-tiles), and what brings it back is
 a graph that does not fit the tab, measured.
 
 ## Conformance reads the bytes with an engine nobody here wrote
@@ -222,7 +231,7 @@ row carries it and nothing else is written. It is the form GraphAr has a slot fo
 logical source unnests the list once, so the standard reader still reads one cell as one term at the
 point where the term is made ([the mapping](/docs/format/reading/rdf#a-multi-valued-property)). The
 form it replaced, a table of its own with a row per value, and the other forms not taken, are on
-[what was discarded](/docs/design/discarded#the-corpus-as-apache-graphar), with what brings each back.
+[what was discarded](/docs/design/discarded#the-graph-as-apache-graphar), with what brings each back.
 
 ## The graph does not say what it was derived from
 
@@ -233,7 +242,7 @@ keeps. The executor's `Graph` still computes it from the MIR DAG
 **What would reverse it.** A reader of lineage: then it is PROV-O when an RDF reader appears, or an
 OpenLineage `RunEvent` if the reader is a Marquez or a DataHub, generated by `describe` and never
 passed through; column-level lineage, the `ColumnLineageDatasetFacet`, is the next step and would need
-the `ColRef`s behind each property. Both are [discarded for now](/docs/design/discarded#the-corpus),
+the `ColRef`s behind each property. Both are [discarded for now](/docs/design/discarded#the-graph),
 with what brings each back.
 
 ## What the reader's relations are named

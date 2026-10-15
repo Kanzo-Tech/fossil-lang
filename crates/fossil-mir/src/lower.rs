@@ -6,7 +6,7 @@
 //! body invalidates neither the file's signatures nor its sibling mappings —
 //! and the per-mapping TYPES from
 //! [`fossil_hir::check::typecheck_mapping`]. Emits a [`MirGraph`] of the shape
-//! `Source → (pipeline verbs) → EmitVertex → Sink(Corpus)`;
+//! `Source → (pipeline verbs) → EmitVertex → Sink(Graph)`;
 //! [`apply_output_shape`] is the pass that adds [`Op::EmitEdge`].
 //!
 //! # Reachability
@@ -352,7 +352,7 @@ fn lower_mapping<'db>(
     let sink_input = ops.len() - 1;
     ops.push(Op::Sink {
         input: sink_input,
-        sink: SinkRef::Corpus,
+        sink: SinkRef::Graph,
     });
 
     Ok(ops)
@@ -964,7 +964,7 @@ fn resolve_edges(
 /// It re-derives rather than reads because a `VProp` is built from the HIR and
 /// the checker's per-expression types are keyed by `(mapping, ExprId)`, which
 /// this walk does not carry. That duplication is real and is the reason both
-/// sides cite each other: if they ever disagree, the corpus declares one type
+/// sides cite each other: if they ever disagree, the graph declares one type
 /// and holds another, and nothing downstream compares them.
 fn operator_ty<'db>(
     db: &'db dyn fossil_base::Db,
@@ -1296,7 +1296,7 @@ fn lower_property_value<'db>(
         // survived. This arm is that invariant written down.
         //
         // It emits rather than returning an empty string, and that is the whole
-        // point of the arm: an edge silently lowered to `''` produces a corpus
+        // point of the arm: an edge silently lowered to `''` produces a graph
         // whose `by_source.parquet` is EMPTY and whose every conformance check
         // — each of them a count of violations — passes vacuously. A wrong
         // answer that reads as a green test is the one failure this file cannot
@@ -1459,7 +1459,7 @@ mod tests {
     /// `input: 0` was correct while a source was exactly one op, and it is the
     /// thing that silently drops a filter the day it stops being one: the graph
     /// still has the `Filter`, the vertices are still written, and every row the
-    /// predicate excluded is in the corpus. So the assertion is on the wiring,
+    /// predicate excluded is in the graph. So the assertion is on the wiring,
     /// not on the op list.
     #[test]
     fn a_mapping_over_a_pipeline_reads_the_last_op_of_the_chain() {

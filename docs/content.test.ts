@@ -534,7 +534,7 @@ const workspaceCitations: WorkspaceCitation[] = contentPages.flatMap((file) => {
 
 describe("every workspace citation names a file that is there", () => {
   // Without these two a regex that stopped matching would report a clean sweep of nothing.
-  // Five and not twenty: `fossil/1` moved the tiled corpus's citations to `design/later/`, where they
+  // Five and not twenty: `fossil/1` moved the tiled graph's citations to `design/later/`, where they
   // are spelled against a commit and not checked here. The bound is vacuity, never a floor.
   it("finds citations at all", () => {
     expect(workspaceCitations.length).toBeGreaterThan(5);
@@ -571,8 +571,8 @@ describe("every workspace citation names a file that is there", () => {
  * written on has no argument, it has a restatement. Both failures are silent in prose and neither is
  * visible in a diff.
  *
- * Routes are resolved the way fumadocs resolves them, which is not `join`: `/docs/design/corpus` is
- * `content/docs/design/corpus.mdx`, a group folder in brackets is invisible in the URL, and a
+ * Routes are resolved the way fumadocs resolves them, which is not `join`: `/docs/design/graph` is
+ * `content/docs/design/graph.mdx`, a group folder in brackets is invisible in the URL, and a
  * section index may be either `x/index.mdx` or `x.mdx`. All three shapes are in this tree today.
  */
 function pageFileForRoute(route: string): string | null {
@@ -599,7 +599,7 @@ function pageFileForRoute(route: string): string | null {
  *
  * The fragment half is the one that matters more, because it is the one nobody can see coming.
  * Renaming a `##` is an ordinary edit — it is prose — and five pages currently point at
- * `design/corpus#what-is-borrowed-from-graphar-and-where-borrowing-stops`. Nothing else in this
+ * `design/later/graph-tiles#what-is-borrowed-from-graphar-and-where-borrowing-stops`. Nothing else in this
  * repository would notice that heading being reworded.
  *
  * **It read this app's own MDX, and only the markdown-link spelling.** That left two holes and both
@@ -693,7 +693,7 @@ const routeCitations: RouteCitation[] = routeCitingFiles.flatMap((file) => {
         const after = line.slice((m.index as number) + m[0].length);
         if (after.startsWith("…") || after.startsWith("...")) return [];
 
-        // Prose ends a sentence on a route: `see /docs/design/corpus.` is a citation of the page.
+        // Prose ends a sentence on a route: `see /docs/design/graph.` is a citation of the page.
         const route = m[0].replace(/[.,;:)]+$/, "");
         if (/\.[A-Za-z0-9]+$/.test((route.split("#")[0] as string).replace(/\/$/, ""))) return [];
 

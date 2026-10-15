@@ -10,7 +10,7 @@
 //!
 //! - **That a reader reads them.** `@kanzo-tech/graphar-duckdb`'s views are held
 //!   by its own tests.
-//! - **That the counts fit the budget on a large corpus.** Nothing here is
+//! - **That the counts fit the budget on a large graph.** Nothing here is
 //!   measured; `/docs/design/facts` says what would be.
 
 use std::path::Path;
@@ -21,7 +21,7 @@ use graphar_info::{Cardinality, DataType};
 mod native;
 mod support;
 
-fn labels() -> native::Corpus {
+fn labels() -> native::Written {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/programs/labels");
     native::run_dir(&dir, "labels.fossil", &[]).expect("labels.fossil runs")
 }
@@ -31,9 +31,9 @@ fn labels() -> native::Corpus {
 /// count; and the document that uses it declares it on its version line.
 #[test]
 fn a_lang_string_is_a_set_of_structs_on_its_vertex_type() {
-    let corpus = labels();
+    let ran = labels();
     for (ty, property) in [("Person", "name"), ("Prize", "motivation")] {
-        let info = corpus.vertex(ty);
+        let info = ran.vertex(ty);
         let p = info.property_groups[0]
             .properties
             .iter()
@@ -44,16 +44,16 @@ fn a_lang_string_is_a_set_of_structs_on_its_vertex_type() {
         assert_eq!(info.version.to_string(), "gar/v1 (langString)");
     }
     assert_eq!(
-        corpus.graph().version.to_string(),
+        ran.graph().version.to_string(),
         "gar/v1",
         "the graph document declares nothing it does not use"
     );
-    assert_eq!(corpus.vertex_count("Person"), 2);
-    assert_eq!(corpus.vertex_count("Prize"), 3);
-    let root = corpus.materialise();
+    assert_eq!(ran.vertex_count("Person"), 2);
+    assert_eq!(ran.vertex_count("Prize"), 3);
+    let root = ran.materialise();
     let names = native::rows(&format!(
         "SELECT n.value || '@' || n.lang AS v FROM (SELECT unnest(name) AS n FROM read_parquet({})) ORDER BY 1",
-        native::at(root.path(), &corpus.chunk("Person")),
+        native::at(root.path(), &ran.chunk("Person")),
     ));
     assert_eq!(
         names
@@ -68,7 +68,7 @@ fn a_lang_string_is_a_set_of_structs_on_its_vertex_type() {
     );
     let tags = native::rows(&format!(
         "SELECT n.lang FROM (SELECT unnest(motivation) AS n FROM read_parquet({})) ORDER BY 1",
-        native::at(root.path(), &corpus.chunk("Prize")),
+        native::at(root.path(), &ran.chunk("Prize")),
     ));
     assert_eq!(
         tags.into_iter().map(|r| r[0].clone()).collect::<Vec<_>>(),
@@ -84,9 +84,9 @@ fn a_lang_string_is_a_set_of_structs_on_its_vertex_type() {
 /// candidate key is stored.
 #[test]
 fn the_writer_counts_what_it_wrote() {
-    let corpus = labels();
-    let root = corpus.materialise();
-    let chunk = native::at(root.path(), &corpus.chunk("Prize"));
+    let ran = labels();
+    let root = ran.materialise();
+    let chunk = native::at(root.path(), &ran.chunk("Prize"));
 
     let footer = native::rows(&format!(
         "SELECT decode(value) FROM parquet_kv_metadata({chunk}) WHERE key::VARCHAR = 'fossil:stats'"
@@ -157,7 +157,7 @@ fn the_writer_counts_what_it_wrote() {
         "the greatest motivation is longer than 64 bytes, and cut and marked inexact"
     );
 
-    let edge = native::at(root.path(), &corpus.adjacency("Person_awarded_Prize"));
+    let edge = native::at(root.path(), &ran.adjacency("Person_awarded_Prize"));
     let none = native::rows(&format!(
         "SELECT count(*)::VARCHAR FROM parquet_kv_metadata({edge}) WHERE key::VARCHAR = 'fossil:stats'"
     ));

@@ -210,7 +210,7 @@ mod tests {
             },
             Op::Sink {
                 input: 3,
-                sink: SinkRef::Corpus,
+                sink: SinkRef::Graph,
             },
         ];
         // Both Emit ops + Sink pass the input schema (post-Extend) through.

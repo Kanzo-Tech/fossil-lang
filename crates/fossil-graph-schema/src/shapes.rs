@@ -152,7 +152,7 @@ pub struct Shape {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct PropertyConstraint {
     /// The bare name a program writes for this predicate — a body's property
-    /// key, and the column the corpus names.
+    /// key, and the column the graph names.
     ///
     /// A decoder writes [`local_name`] of [`Self::predicate`]: a document says
     /// nothing else a name could come from. A declared type writes the field's

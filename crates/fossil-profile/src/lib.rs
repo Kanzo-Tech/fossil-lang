@@ -19,10 +19,10 @@
 //! Each query is an [`Ask`] — the counts of a relation, the commonest values of
 //! a column, an inclusion between two, a sample — and SQL is one rendering of
 //! it, [`Ask::sql`], `DuckDB`'s, which the two hosts that profile SOURCES run.
-//! The corpus writer counts the TABLES it wrote with the same plan
+//! The graph writer counts the TABLES it wrote with the same plan
 //! ([`Profiler::over_tables`]) on `DataFusion`, which has no SQL in this build,
 //! and renders the same `Ask` as a `DataFusion` plan. A table plan stops at the
-//! counts: a corpus carries no inclusions (`/docs/design/facts`). Which queries to run, how
+//! counts: a graph carries no inclusions (`/docs/design/facts`). Which queries to run, how
 //! to prune them and what a count means stay here; only the rendering is per
 //! engine (`/docs/design/facts`).
 //!
@@ -69,12 +69,17 @@ pub const TOP_VALUES: usize = 10;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[schemars(rename = "ProfileSource")]
 pub struct Source {
-    /// What the program wrote — what the descriptor is keyed by.
+    /// The name the program binds it to (`users` in `users := io.csv(…)`):
+    /// what every part of the profile that names a source names it by.
+    #[schemars(with = "String")]
+    pub binding: SmolStr,
+    /// The reference as the program wrote it — what the descriptor is keyed
+    /// by, so two bindings of one file share a descriptor.
     #[schemars(with = "String")]
     pub key: SmolStr,
     /// What the host's `DuckDB` reads: the location, or the name the host
     /// attached it under. Storage is the host's; this is only the name.
-    pub name: String,
+    pub location: String,
     /// The catalogue row its constructor names (`csv`), which picks the reader.
     pub format: String,
     /// The reader option the binding wrote (`delimiter = "|"`), verbatim.
@@ -86,7 +91,7 @@ pub struct Source {
 }
 
 /// A table the host already holds, with no reader: the columns and their
-/// types are known, so it is not described. What the corpus writer counts.
+/// types are known, so it is not described. What the graph writer counts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Table {
     /// The name the host's engine holds it under.
@@ -128,7 +133,7 @@ impl Options {
         depth: Depth::Types,
     };
 
-    /// Every row, and no sample kept: what the corpus writer counts with.
+    /// Every row, and no sample kept: what the graph writer counts with.
     pub const WHOLE: Self = Self {
         sample: 0,
         shown: 0,
@@ -320,6 +325,11 @@ pub struct TopValue {
 /// One source, profiled.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct SourceProfile {
+    /// The binding it was given: what [`ColumnRef::source`] and
+    /// [`Failure::source`] name it by. The descriptor's `key` is the
+    /// reference, which a second binding of the same file shares.
+    #[schemars(with = "String")]
+    pub binding: SmolStr,
     /// Its columns and their types: what the compiler's cache takes.
     pub descriptor: InferredDescriptor,
     /// The rows the counts read, and whether that was a sample.
@@ -337,6 +347,7 @@ pub struct SourceProfile {
 /// A column of one source and a column of the same or another.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 pub struct ColumnRef {
+    /// The source's binding.
     #[schemars(with = "String")]
     pub source: SmolStr,
     #[schemars(with = "String")]
@@ -355,7 +366,8 @@ pub struct Inclusion {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[schemars(rename = "ProfileFailure")]
 pub struct Failure {
-    /// The source it was about: for an inclusion, the dependent side's.
+    /// The binding of the source it was about: for an inclusion, the dependent
+    /// side's.
     #[schemars(with = "String")]
     pub source: SmolStr,
     pub reason: String,
@@ -422,6 +434,7 @@ fn kept(cell: Option<&Option<String>>) -> Option<String> {
 
 #[derive(Debug)]
 struct State {
+    binding: SmolStr,
     key: SmolStr,
     etag: String,
     format: Option<String>,
@@ -469,16 +482,18 @@ pub struct Profiler {
     pending: HashMap<u32, Pending>,
     next_id: u32,
     /// Whether the inclusions between the relations are tested: between
-    /// sources, and never between the tables of a corpus.
+    /// sources, and never between the tables of a graph.
     between: bool,
     inclusions: Vec<Inclusion>,
     failed: Vec<Failure>,
 }
 
 impl Profiler {
-    /// A plan over `sources`. One per key: a second source with a key already
-    /// given is the same file and is not read again. A source whose format reads
-    /// through no native function is left out — there is nothing to describe.
+    /// A plan over `sources`. One per binding: a program binds a name once, so
+    /// a second source with a binding already given is the same source and is
+    /// not read again. Two bindings of one file are two sources, each profiled
+    /// under its own name. A source whose format reads through no native
+    /// function is left out — there is nothing to describe.
     #[must_use]
     pub fn new(sources: impl IntoIterator<Item = Source>, options: Options) -> Self {
         let mut states: Vec<State> = Vec::new();
@@ -486,11 +501,13 @@ impl Profiler {
             let Some(reader) = native_reader(&source.format) else {
                 continue;
             };
-            if states.iter().any(|s| s.key == source.key) {
+            if states.iter().any(|s| s.binding == source.binding) {
                 continue;
             }
-            let relation = Relation::Read(relation(reader, &source.name, source.option.as_deref()));
+            let relation =
+                Relation::Read(relation(reader, &source.location, source.option.as_deref()));
             states.push(State {
+                binding: source.binding,
                 key: source.key,
                 etag: source.etag,
                 format: Some(source.format),
@@ -512,14 +529,15 @@ impl Profiler {
 
     /// A plan over tables the host already holds, whose columns are known: no
     /// `DESCRIBE`, and no inclusion — the counts, the commonest values and the
-    /// keys they make. What the corpus writer counts what it wrote with: a
-    /// corpus carries no inclusions, which were measured and dropped
+    /// keys they make. What the graph writer counts what it wrote with: a
+    /// graph carries no inclusions, which were measured and dropped
     /// (`/docs/design/facts`).
     #[must_use]
     pub fn over_tables(tables: impl IntoIterator<Item = Table>, options: Options) -> Self {
         let states = tables
             .into_iter()
             .map(|t| State {
+                binding: t.name.clone(),
                 key: t.name.clone(),
                 etag: String::new(),
                 format: None,
@@ -783,7 +801,7 @@ impl Profiler {
                 };
                 if values > 0 && missing == 0 {
                     let at = |(s, c): (usize, usize)| ColumnRef {
-                        source: self.states[s].key.clone(),
+                        source: self.states[s].binding.clone(),
                         column: self.states[s].columns[c].name.clone(),
                     };
                     self.inclusions.push(Inclusion {
@@ -806,7 +824,7 @@ impl Profiler {
             Pending::Inclusion { from: (a, _), .. } => a,
         };
         self.failed.push(Failure {
-            source: self.states[i].key.clone(),
+            source: self.states[i].binding.clone(),
             reason: reason.into(),
         });
     }
@@ -825,6 +843,7 @@ impl Profiler {
             .zip(keys)
             .filter(|(s, _)| s.described)
             .map(|(s, candidate_keys)| SourceProfile {
+                binding: s.binding,
                 sampled: sampled > 0 && s.rows.is_some_and(|r| r >= sampled),
                 rows: s.rows,
                 columns: s.stats,
@@ -867,10 +886,12 @@ pub fn run(
 mod tests {
     use super::*;
 
+    /// A CSV file bound by its stem: `awards.csv` is `awards`.
     fn csv(key: &str) -> Source {
         Source {
+            binding: key.trim_end_matches(".csv").into(),
             key: key.into(),
-            name: key.into(),
+            location: key.into(),
             format: "csv".into(),
             option: None,
             etag: String::new(),
@@ -901,7 +922,7 @@ mod tests {
     }
 
     #[test]
-    fn a_materialised_source_and_a_repeated_key_are_not_read() {
+    fn a_materialised_source_and_a_repeated_binding_are_not_read() {
         let mut plan = Profiler::new(
             [
                 csv("a.csv"),
@@ -918,6 +939,30 @@ mod tests {
             plan.next_query().is_none(),
             "one DESCRIBE: the repeat and the graph are left out"
         );
+    }
+
+    #[test]
+    fn two_bindings_of_one_file_are_two_sources_under_their_own_names() {
+        let mut plan = Profiler::new(
+            [
+                csv("people.csv"),
+                Source {
+                    binding: "staff".into(),
+                    ..csv("people.csv")
+                },
+            ],
+            Options::TYPES,
+        );
+        while let Some(query) = plan.next_query() {
+            plan.feed(query.id, &rows(&[&["id", "BIGINT"]]));
+        }
+        let profile = plan.finish();
+        let named: Vec<(&str, &str)> = profile
+            .sources
+            .iter()
+            .map(|s| (s.binding.as_str(), s.descriptor.key.as_str()))
+            .collect();
+        assert_eq!(named, [("people", "people.csv"), ("staff", "people.csv")]);
     }
 
     #[test]
@@ -1052,11 +1097,11 @@ mod tests {
             profile.inclusions,
             [Inclusion {
                 from: ColumnRef {
-                    source: "awards.csv".into(),
+                    source: "awards".into(),
                     column: "laureate".into()
                 },
                 to: ColumnRef {
-                    source: "laureates.csv".into(),
+                    source: "laureates".into(),
                     column: "id".into()
                 },
             }],
@@ -1168,7 +1213,7 @@ mod tests {
         assert_eq!(
             profile.failed,
             [Failure {
-                source: "gone.csv".into(),
+                source: "gone".into(),
                 reason: "No files found that match the pattern".into()
             }]
         );

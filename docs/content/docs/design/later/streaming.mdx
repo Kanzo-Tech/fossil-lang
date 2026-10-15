@@ -13,10 +13,10 @@ description: A budget bounds the operators inside the pool; a stream bounds ever
 > has the pool and its measured ceiling.
 
 "Efficient" is a comparison. **Larger than RAM is a guarantee**: exceeding the machine is a slower
-run, not a failed one, and the corpus that comes out is the same corpus. Two mechanisms produce it
+run, not a failed one, and the graph that comes out is the same graph. Two mechanisms produce it
 and neither suffices alone. **A budget bounds the operators inside the pool** — they reserve before
 they allocate and spill when told no. **A stream bounds everything outside it** — a batch arrives, is
-transformed, is handed on and is dropped, so peak memory follows the working set and not the corpus.
+transformed, is handed on and is dropped, so peak memory follows the working set and not the graph.
 A boundary that holds a whole value is memory the pool never sees, and the process dies with the
 budget honoured. One mechanism, two halves, one page.
 
@@ -35,10 +35,10 @@ graph LR
 ```
 
 **Seam 2 forked, and that is the change.** It used to be the only edge out of `Graph`: the
-whole corpus was encoded to Parquet, written, and then re-read by the pass, which rewrote it as tiles
+whole graph was encoded to Parquet, written, and then re-read by the pass, which rewrote it as tiles
 and deleted what it had read. The manifests still take that edge; the payload takes the second one,
 straight from the same batches. [cost](/docs/design/later/cost#the-redesign-and-what-is-left-of-the-table)
-has the bytes that made the case — 43.3 MB of 115.9 written and then unlinked, on a corpus of 72.6 —
+has the bytes that made the case — 43.3 MB of 115.9 written and then unlinked, on a graph of 72.6 —
 and the digests that say the tree it writes is unchanged.
 
 The box used to be the whole finding. `enrich_written_layout` took the run's `memory_bytes` and
@@ -70,7 +70,7 @@ that the number means something; what it does not buy is the run.
 rather than cautious. `fossil run` and the wasm executor write the same tree byte for byte through
 one `LayoutIo`, and only one of them has a flag to declare a budget with — so a budget that degraded
 the output would make the two paths disagree exactly when somebody declared one.
-`ac1801d4:crates/fossil-layout/tests/budget.rs` runs one input corpus twice, once unbounded and once under a
+`ac1801d4:crates/fossil-layout/tests/budget.rs` runs one input graph twice, once unbounded and once under a
 budget, and compares every byte of every file.
 </Callout>
 
@@ -95,14 +95,14 @@ back, so it dies. A sort-merge join spills. `bounded_context` therefore clears
 `datafusion.optimizer.prefer_hash_join` alongside the pool: a plan free to pick an operator that
 cannot obey is a budget in name.
 
-**The floor belongs to the machine, not the corpus.** Each sort partition reserves
+**The floor belongs to the machine, not the graph.** Each sort partition reserves
 `sort_spill_reservation_bytes` (10 MB) and declares it non-spillable, so the smallest viable pool
 grows with `target_partitions`. On ten cores, 384 MiB dies with five `ExternalSorterMerge` holding
 10 MB each; 480 MiB runs and spills, and it still spills at 2 GiB. A hundred-megabyte budget is not
-viable at any corpus size.
+viable at any graph size.
 
 So `ac1801d4:crates/fossil-df/tests/spill.rs` asks for 64 MiB *per core*.
-`a_ridiculous_budget_spills_and_writes_the_same_corpus` writes one corpus twice, once unbounded as a
+`a_ridiculous_budget_spills_and_writes_the_same_corpus` writes one graph twice, once unbounded as a
 control and once under the budget; the bounded run must open a spill directory and the two trees must
 come out byte-identical. The control is what makes it evidence — the default pool has no disk manager
 and cannot spill. It measures no RSS, so nothing below this line is in CI, and widening it is not
@@ -117,7 +117,7 @@ cheap: spill files are deleted when the job ends and per-plan metrics do not out
 | process peak | ~21 GiB | **9.87 GiB** |
 | wall clock | 256.3 s | 290.9 s |
 
-Eleven gigabytes off the peak for 13% more wall clock, corpus byte-identical across 87 files. Then
+Eleven gigabytes off the peak for 13% more wall clock, graph byte-identical across 87 files. Then
 the layout stopped asking for two more (`97efc79`):
 
 | ten million, 4 GiB budget | before | with the CSR |
@@ -133,7 +133,7 @@ phase that makes the process ask the OS for more, and by the time the layout run
 gigabytes of freed pages in hand. The step did not stop asking; it stopped showing. See
 [the cost model](/docs/design/later/cost). The peak still grows
 with N, which is the gap to the direction above: on the pre-CSR binary under the same budget, ten
-times the corpus cost 4.1× the peak (2.43 → 9.87 GiB) and 10.3× the retained Arrow (0.16 → 1.64).
+times the graph cost 4.1× the peak (2.43 → 9.87 GiB) and 10.3× the retained Arrow (0.16 → 1.64).
 
 <Callout title="Two baselines, 0.23 GiB apart, and that is the resolution">
 The first table puts the pre-CSR peak at 9.87 GiB; the second measures the same binary at 10.10. Two
@@ -184,7 +184,7 @@ The quotient CSR built out of them is another +1.04.
 The maps are gone. Group the nodes by community with a counting sort first, then build one row at a
 time into a sparse accumulator and emit it before the next row starts: `k` hash tables live at once
 becomes one dense array of `k`. The output is **bit-identical** — the counting sort is stable, so
-every `f64` is the same sequence of additions — and a 300,000-vertex corpus written both ways is
+every `f64` is the same sequence of additions — and a 300,000-vertex graph written both ways is
 equal over all seven files and 130 MB.
 
 <Callout title="The 1.78× was real, and it was the smaller half">
@@ -235,7 +235,7 @@ measures 1.07 / 1.23 / **1.17** GiB at degree 6 / 14 / 28: it goes *down* at the
 a slope through the three is 1.2 B/row — below what `read CSR + CSC` is measured to hold in the same
 runs.
 
-The confound is the fixture, not the pass. `examples/enrich_memory` builds the corpus in the process
+The confound is the fixture, not the pass. `examples/enrich_memory` builds the graph in the process
 that then measures the pass, so the baseline already contains the generator's retained heap — 0.36,
 0.72 and 1.01 GiB at those three degrees — and the pass reuses those pages instead of asking the OS
 for more. **`peak − start` is biased low, and increasingly so with degree.** A delta taken from
@@ -243,16 +243,16 @@ inside the pass is not.
 
 Which is why the constant was *not* lowered to what the regression suggests. What would let the
 total be fitted again is a measurement whose process did not build the fixture: a second binary
-handed a corpus already on disk. That is the next thing this calibration is owed.
+handed a graph already on disk. That is the next thing this calibration is owed.
 </Callout>
 
 There is also a floor now, `LAYOUT_BASE_BYTES`, **32 MiB**. Three proportional terms make a small
-enough corpus cost nothing, and the writer's row-group buffers are the size they are: a
-ten-thousand-vertex corpus holds 6.21 MB against 4.00 MB of linear terms. Without it the guard that
+enough graph cost nothing, and the writer's row-group buffers are the size they are: a
+ten-thousand-vertex graph holds 6.21 MB against 4.00 MB of linear terms. Without it the guard that
 samples the bound was admitting a sixty-thousand-vertex run on 22.8 MB and watching it hold 30.1.
 
 It was 16 MiB, and what re-fitted it is the pass taking Arrow instead of opening Parquet — **not a
-change in what the pass holds.** The fixture used to write its corpus to disk and drop the arrays, so
+change in what the pass holds.** The fixture used to write its graph to disk and drop the arrays, so
 the guard's baseline was taken with those pages freed and the pass reused them; the batches are live
 now, as they are in a real run, and `peak − baseline` stopped being biased low. Seven debug runs at
 sixty thousand vertices put the constant term at 12.5–16.5 MB alone and **19.9 MB in a loaded
@@ -312,7 +312,7 @@ runs and its own spread swamps everything this change touched.
 
 **The output is bit-identical**, and that is checked rather than argued: the ordering is the same
 ordering, ties are pairs equal in both columns and therefore the whole row, and a 300,000-vertex
-corpus written by the two binaries is equal over all seven files and 136 MB.
+graph written by the two binaries is equal over all seven files and 136 MB.
 
 <Callout title="Three of four runs agree to 0.01 GiB, and the fourth says what the resolution depends on">
 Both before-runs report `community_hierarchy` at +1.92 and +1.93 GiB and a 4.98 GiB peak, to the
@@ -355,7 +355,7 @@ budget charges per adjacency row**, which is what `--memory-gib` admits. What it
 scan per sweep, and that is the number nobody has: thirty-two sweeps against a CSR that is currently
 free to read.
 
-The other route is unchanged and still open — a corpus whose level-zero contraction survives at a
+The other route is unchanged and still open — a graph whose level-zero contraction survives at a
 much higher ratio than the 79% measured here. Both are measurable before anything is written.
 </Callout>
 
@@ -378,7 +378,7 @@ meaning that depends on a ratio nobody can see.
 **Sequencing it — the layout told what the executor left resident — is the one that is right in
 principle, and it is refused for now on three grounds, in the order that decides it:**
 
-1. **What is resident at the seam is not the executor's transient.** It is `Graph`: the corpus
+1. **What is resident at the seam is not the executor's transient.** It is `Graph`: the graph
    as a value, 1.64 GiB of Arrow at ten million, and it is held by the *caller* for the whole
    duration of the layout pass — `fossil-cli`'s `run` keeps `graph` alive across
    `enrich_written_layout` because `RunReport::of(&graph)` comes after it. Adding that to the
@@ -460,7 +460,7 @@ gigabytes while three parity tests stayed green. So it is written in the registe
 one from the code. **Unknown:** whether streaming the edge half moves the peak at all, and by how
 much.
 
-The process peak on the ten-million corpus, before and after, is the acceptance criterion, and
+The process peak on the ten-million graph, before and after, is the acceptance criterion, and
 both numbers are owed: the Arrow count at the boundary *and* the process peak. It is written down so
 the next attempt starts from something sharper than *the boundary holds a value*.
 </Callout>

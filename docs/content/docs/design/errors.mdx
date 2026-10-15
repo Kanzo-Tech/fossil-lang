@@ -2,7 +2,7 @@
 title: One error, from Rust to the screen
 description: "One catalogue of stable codes shared by compile diagnostics and run failures, one serialized shape across the wasm boundary, a typed `FossilError` in TypeScript, a page per code, and a host that branches on the code and never parses the message."
 direction:
-  summary: "Every failure that reaches a host — a compile diagnostic, a refused run, a corpus that will not open — carries a stable code from one catalogue, typed data generated from Rust, and a page of its own."
+  summary: "Every failure that reaches a host — a compile diagnostic, a refused run, a graph that will not open — carries a stable code from one catalogue, typed data generated from Rust, and a page of its own."
 ---
 
 The request, in the owner's words: *una forma de mostrar mensajes de error, que venga de Rust, y que
@@ -27,7 +27,7 @@ own errors excluded:
 | `@fossil-lang/corpus` — `CorpusManifestError`, `CorpusReadError`, one `TypeError` | 17 | 17, by class — and then by message |
 | **Total** | **71** | **18** |
 
-**53 of 71 are a string and nothing else.** The 18 that are not are barely better: the two corpus
+**53 of 71 are a string and nothing else.** The 18 that are not are barely better: the two graph
 classes say *which package* refused, not *what* — `CorpusReadError` covers an unknown table, an
 unknown column, a bad limit, an inverted box and a NaN, and the only way to tell them apart is the
 message. The one real discriminant was `run_error` in

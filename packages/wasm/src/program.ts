@@ -81,6 +81,18 @@ export interface FossilProgram {
    */
   inputs(): Promise<Input[]>;
   /**
+   * The RML-Core mapping the program's types describe, as Turtle: what `mapping.ttl` is, before any
+   * run. A pure function of the types the program declares and imports — it reads no source, so it
+   * needs no {@link describe} first — and the document a reader parses with rudof's `Mapping.parse`.
+   * A program with no type describes nothing and answers an empty mapping.
+   *
+   * It differs from the document a run writes in one way: a column the engine produces as a
+   * decimal or as bytes is `xsd:string` here, because only a run knows. Rejects with
+   * `write/ambiguous-iri` when two types, or two columns of one type, share an IRI — what the run
+   * would refuse.
+   */
+  mapping(): Promise<string>;
+  /**
    * Profile what the program reads, on `engine`, under the credentials the program's host vends —
    * {@link inputs}, then `profile` — and give the answer to the checker. Answers the profile, which
    * is what a run takes as `profiled`.
@@ -155,6 +167,10 @@ export async function openProgram(uri: string, options: OpenProgramOptions): Pro
     async inputs() {
       await settle();
       return workspace.inputs(handle);
+    },
+    async mapping() {
+      await settle();
+      return workspace.mapping(handle);
     },
     async describe(io) {
       await settle(io.signal);

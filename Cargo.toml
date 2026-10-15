@@ -91,7 +91,7 @@ bytes = "1"
 
 # === The native engine — NATIVE ONLY ===
 # No crate links it on a normal edge; `fossil-df` and `fossil-profile` keep it as a
-# dev-dependency, to read a written corpus back or to bring an engine to a test.
+# dev-dependency, to read a written graph back or to bring an engine to a test.
 # `deny.toml`'s
 # `duckdb` wrappers list is the enforced version of that sentence.
 duckdb = { version = "1.10502", features = ["bundled"] }

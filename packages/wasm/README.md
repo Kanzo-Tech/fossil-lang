@@ -18,7 +18,17 @@ artefacts. Every door boots the module itself:
   is their loop.
 - `profile(inputs, { host, engine, options, etag, signal })` — what some sources are, on the host's
   DuckDB, under the credentials the host vends: before there is a program, the files an assistant is
-  shown. `program.describe` is the same over a program's own inputs.
+  shown. `program.describe` is the same over a program's own inputs. Every source in the answer is
+  named by its `binding`; the descriptor inside is keyed by the reference the program wrote.
+- `program.mapping()` — the RML-Core mapping the program's types describe, as Turtle, before any
+  run: what `mapping.ttl` is, from the types the program declares and imports, with nothing read.
+  rudof's `Mapping.parse` reads it, and `Mapping.model()` is the pre-run shape of the graph.
+- `vocabularyOf(model, sources, base)` and `subjectOf(type, base)` — the names a model's mappings
+  are written in, computed from what a host decided: a `Model` (types over one source each, their
+  identity and the relations between them) and the profiled `SourceVocabulary`s give the
+  `Vocabulary` `grammarFor` takes, every IRI under `base`, and each type's `@subject`.
+- `DUCKDB_TYPES` — what a DuckDB `DESCRIBE` column type means on the lattice, from `catalogue.bnf`,
+  in precedence order.
 - `grammarFor(vocabulary)` — the grammar of Fossil for these names: the `prelude` the request
   already says (the types imported and declared, the sources bound), and the `grammar` of the
   mappings after it, as the EBNF a constrained decoder (WebLLM's xgrammar) takes. Every name in it

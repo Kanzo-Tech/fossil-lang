@@ -294,7 +294,7 @@ async fn an_edge_to_a_vertex_outside_the_sample_is_dropped_and_counted() {
 }
 
 /// **Into memory, a run asks its host for no `write`.** The sources are read
-/// through the storage the host's run is handed; the corpus goes into an
+/// through the storage the host's run is handed; the graph goes into an
 /// `InMemory`, and a host that may only read can still preview.
 ///
 /// What this cannot prove: that a source is read through a credential the host
