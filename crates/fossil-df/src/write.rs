@@ -8,7 +8,8 @@
 //! has the argument and `/docs/design/discarded` the nine placements before it.
 //!
 //! **`mapping.ttl` is written with the graph, after the tables it describes**
-//! ([`crate::describe`]): the RML-Core mapping that says what they mean as RDF.
+//! ([`fossil_mir::describe`]): the RML-Core mapping that says what they mean as
+//! RDF.
 //!
 //! **The graph document goes last, and that is the commit.** Every table is in
 //! the store before the document that names it, so a reader that finds
@@ -28,15 +29,16 @@ use datafusion::parquet::file::properties::WriterProperties;
 use datafusion::parquet::schema::types::ColumnPath;
 use datafusion::prelude::SessionContext;
 use fossil_graph_schema::{Failure, Problem};
+use fossil_mir::describe::{self, DescribeError};
 use fossil_storage::{Storage, StorageError};
 use graphar_info::{AdjListType, GraphInfo};
 use graphar_parquet::{Options, SRC_INDEX_COL, VERTEX_INDEX_COL};
 use object_store::{ObjectStore, PutOptions, PutPayload};
 
+use crate::Graph;
 use crate::facts::{self, FOOTER_KEY};
 use crate::layout::{self, user_types};
 use crate::report::EdgeDrops;
-use crate::{Graph, describe};
 
 /// What [`write`](fn@write) answers: the graph it wrote, and what the edge join
 /// discarded — the one fact the graph cannot hold about itself.
@@ -87,16 +89,10 @@ pub enum WriteError {
         vertex_type: String,
         subject: String,
     },
-    /// One IRI that names two things the mapping needs it to name one of (A2).
-    #[error("`{iri}` names both `{first}` and `{second}`")]
-    AmbiguousIri {
-        iri: String,
-        first: String,
-        second: String,
-    },
-    /// The mapping `describe` built is not one `rml` writes: fossil's fault.
-    #[error("the mapping: {0}")]
-    Mapping(rml::Error),
+    /// The mapping could not be built: an IRI that names two things the
+    /// mapping needs it to name one of (A2), or fossil's fault.
+    #[error(transparent)]
+    Describe(#[from] DescribeError),
     /// A value `GraphAr`'s types cannot hold.
     #[error("`{property}` holds `{value}`, of type {datatype}, which GraphAr cannot hold")]
     Unrepresentable {
@@ -158,9 +154,7 @@ impl From<WriteError> for Failure {
                 vertex_type,
                 subject,
             }),
-            WriteError::AmbiguousIri { iri, first, second } => {
-                Self::new(Problem::WriteAmbiguousIri { iri, first, second })
-            }
+            WriteError::Describe(e) => Self::from(e),
             WriteError::Unrepresentable {
                 property,
                 datatype,
@@ -187,7 +181,6 @@ impl From<WriteError> for Failure {
                 bug("a relation names a vertex type with no table").caused_by(e)
             }
             e @ WriteError::Internal(_) => bug("a table is not in the order promised").caused_by(e),
-            WriteError::Mapping(e) => bug("the mapping is not valid").caused_by(e),
             WriteError::Arrow(e) => bug("an Arrow kernel refused a batch").caused_by(e),
             WriteError::Info(e) => bug("the graph's information files are not valid").caused_by(e),
             WriteError::Graph { source, .. } => bug("a chunk did not encode").caused_by(source),
@@ -226,8 +219,7 @@ pub async fn write(
     laid.info.validate()?;
     // The mapping is built, and A2 held, before a chunk is written: a graph
     // whose image would be ambiguous leaves nothing behind.
-    let described = describe::describe(&graph.schema, &laid.info, &laid.natural())?;
-    let mapping = rml::rdf::write_turtle(&described.mapping).map_err(WriteError::Mapping)?;
+    let mapping = describe::turtle(&describe::describe(&graph.schema, &laid.natural())?)?;
     let (store, root) = storage.at(dest).map_err(|source| WriteError::Store {
         path: dest.to_string(),
         source,

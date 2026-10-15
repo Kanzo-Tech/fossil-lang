@@ -125,6 +125,30 @@ fn a_new_native_reader_is_a_row_and_nothing_else() {
     );
 }
 
+/// The `duckdb` table reaches TypeScript whole and in file order, which is
+/// precedence: a host that stands in for an engine states no row of it.
+#[test]
+fn the_duckdb_table_is_projected_to_typescript_in_file_order() {
+    let cat = catalogue::parse(
+        "duckdb integer = \"INT\" \"BIGINT\" .\n\
+         duckdb date_time = \"TIMESTAMP*\" .\n\
+         duckdb string = \"*\" .\n",
+    );
+    let ts = catalogue::emit_ts_profile(&cat);
+    let lines: Vec<&str> = ts
+        .lines()
+        .filter(|l| l.starts_with("  { primitive:"))
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            "  { primitive: \"integer\", spellings: [\"INT\", \"BIGINT\"] },",
+            "  { primitive: \"date_time\", spellings: [\"TIMESTAMP*\"] },",
+            "  { primitive: \"string\", spellings: [\"*\"] },",
+        ]
+    );
+}
+
 // ── The round trip ─────────────────────────────────────────────────────────
 //
 // These are what make `fossil-hir` a DEV-dependency rather than none at all.

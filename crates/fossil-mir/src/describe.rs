@@ -1,5 +1,5 @@
 //! What the graph's tables mean as RDF: [`describe`] builds the RML-Core
-//! mapping that `mapping.ttl` is, with rudof's `rml` AST, and `rml::rdf`
+//! mapping that `mapping.ttl` is, with rudof's `rml` AST, and [`turtle`]
 //! writes it.
 //!
 //! **The reference is RML-Core** (Draft Community Group Report, 16 March 2026)
@@ -9,13 +9,18 @@
 //! a datatype (`GraphAr` has no word for them), so the mapping is where the
 //! program's IRIs are.
 //!
-//! **It is a pure function of the compiled schema and the layout**: it reads no
-//! data and no engine. One triples map per vertex type, over the table of that
-//! name (`rml:SQL2008Table`); one per relation, over a query that joins the
-//! adjacency list to the two end tables on the index and reads the two
-//! subjects; one per multi-valued or language-tagged property, over a query
+//! **It is a pure function of the types**, the [`GraphSchema`] a program
+//! declares or imports (`fossil_hir::shapes::program_shapes`) or a run
+//! produced: it reads no data and no engine, so a host asks it before any run
+//! (`/docs/design/graphar`, D6). One triples map per vertex type, over the
+//! table of that name (`rml:SQL2008Table`); one per relation, over a query that
+//! joins the adjacency list to the two end tables on the index and reads the
+//! two subjects; one per multi-valued or language-tagged property, over a query
 //! that unnests the list once so each row is one element. The tables are SQL
-//! names, which the host resolves.
+//! names, which the host resolves, and their names and columns are the layout's
+//! (`fossil-df`'s `layout`): a vertex type's table is its label, a relation's is
+//! `<Src>_<label>_<Dst>`, and the columns are the properties' names beside the
+//! `subject` and the three index columns.
 //!
 //! **No term map reads an index, a row position or a blank node**, which is
 //! what makes the image layout independent (R1, `/docs/format/round-trip`): the
@@ -29,82 +34,119 @@
 //! checked before a chunk is written (`write` calls this beside the layout).
 //! A column or a type with no IRI is not mapped: a graph of a program that
 //! names no shape has tables and no RDF meaning.
-
-// `pub(crate)`: this module exports nothing, as `layout` does not.
-#![allow(clippy::redundant_pub_crate)]
+//!
+//! **What only a run knows** is [`Natural`]: the columns the engine produced as
+//! a decimal or as bytes, which the layout stores as text and the mapping must
+//! then datatype. A host that describes before a run passes none, and the
+//! mapping then differs from the run's in exactly those columns.
 
 use std::collections::HashMap;
 
 use fossil_graph_schema::{
-    Annotation as Declared, AnnotationObject, EdgeType, GraphSchema, NodeType, Primitive, Property,
-    Term,
+    Annotation as Declared, AnnotationObject, Cardinality, EdgeType, Failure, GraphSchema,
+    NodeType, Primitive, Problem, Property, Term,
 };
-use graphar_info::{Cardinality as Several, DataType as Stored, GraphInfo, VertexInfo};
-use graphar_parquet::{DST_INDEX_COL, SRC_INDEX_COL, VERTEX_INDEX_COL};
 use rml::{
     Annotation, Constant, Iterable, LanguageMap, Literal, LiteralKind, LogicalSource, Mapping,
     Node, ObjectMap, PredicateObjectMap, SubjectMap, TermMap, TermType, TriplesMap,
 };
 use rudof_iri::IriS;
 
-use crate::PAYLOAD_IDENTITY;
-use crate::layout::LANG_STRING;
-use crate::write::WriteError;
+/// What a vertex is: the column of its IRI, the first of every vertex table.
+pub const PAYLOAD_IDENTITY: &str = "subject";
+
+/// `GraphAr`'s name for the column of a vertex's index within its type
+/// (`graphar_parquet::VERTEX_INDEX_COL`, which `fossil-df` holds this to).
+pub const VERTEX_INDEX_COL: &str = "_graphArVertexIndex";
+/// `GraphAr`'s name for the column of a relation's source index
+/// (`graphar_parquet::SRC_INDEX_COL`).
+pub const SRC_INDEX_COL: &str = "_graphArSrcIndex";
+/// `GraphAr`'s name for the column of a relation's destination index
+/// (`graphar_parquet::DST_INDEX_COL`).
+pub const DST_INDEX_COL: &str = "_graphArDstIndex";
 
 /// The XSD namespace, for the datatype a column keeps that `GraphAr` has no
 /// type for.
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 
-/// What a run says about the tables it writes, beside the tables. Only the
-/// mapping today; the shapes and the lineage come with a reader
-/// (`/docs/design/graphar`, D1).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct Description {
-    pub mapping: Mapping,
-}
-
 /// The datatype of a column that was stored as text, by the XSD local name,
 /// keyed by `(vertex type, column)`.
-pub(crate) type Natural = HashMap<(String, String), &'static str>;
+pub type Natural = HashMap<(String, String), &'static str>;
 
-/// The mapping of the graph `info` describes, from the program's `schema`.
+/// Why a mapping could not be built.
+#[derive(Debug, thiserror::Error)]
+pub enum DescribeError {
+    /// One IRI that names two things the mapping needs it to name one of (A2).
+    #[error("`{iri}` names both `{first}` and `{second}`")]
+    AmbiguousIri {
+        iri: String,
+        first: String,
+        second: String,
+    },
+    /// An IRI that is not one: no compiled schema holds it, so fossil's fault.
+    #[error("`{0}` is not an IRI: {1}")]
+    NotAnIri(String, String),
+    /// The mapping is not one `rml` accepts or writes: fossil's fault.
+    #[error("the mapping: {0}")]
+    Mapping(rml::Error),
+}
+
+/// Two IRIs that are one, the only way a refusal reaches a user; the rest is
+/// `internal/bug`, with the error as cause.
+impl From<DescribeError> for Failure {
+    fn from(e: DescribeError) -> Self {
+        match e {
+            DescribeError::AmbiguousIri { iri, first, second } => {
+                Self::new(Problem::WriteAmbiguousIri { iri, first, second })
+            }
+            e @ DescribeError::NotAnIri(..) => Self::new(Problem::Bug {
+                what: "an IRI of the schema is not one".to_string(),
+            })
+            .caused_by(e),
+            DescribeError::Mapping(e) => Self::new(Problem::Bug {
+                what: "the mapping is not valid".to_string(),
+            })
+            .caused_by(e),
+        }
+    }
+}
+
+/// The mapping of the graph `schema` describes.
 ///
-/// `natural` holds the columns the layout stored as text that are not text.
+/// `natural` holds the columns the layout stored as text that are not text; a
+/// host that has not run passes `&Natural::new()`.
 ///
 /// # Errors
 ///
-/// [`WriteError::AmbiguousIri`] when the graph is not admissible by A2, and
-/// [`WriteError::Mapping`] when an IRI is not one (which no compiled schema
-/// holds).
-pub(crate) fn describe(
-    schema: &GraphSchema,
-    info: &GraphInfo,
-    natural: &Natural,
-) -> Result<Description, WriteError> {
+/// [`DescribeError::AmbiguousIri`] when the graph is not admissible by A2, and
+/// [`DescribeError::NotAnIri`] or [`DescribeError::Mapping`] when an IRI is not
+/// one or the mapping is not valid (which no compiled schema holds).
+pub fn describe(schema: &GraphSchema, natural: &Natural) -> Result<Mapping, DescribeError> {
     admissible(schema)?;
 
     let mut mapping = Mapping::default();
     let mut notes = Vec::new();
-    for vertex in &info.vertices {
-        let Some(node) = schema.node(&vertex.r#type) else {
-            continue;
-        };
-        vertex_maps(node, vertex, natural, &mut mapping, &mut notes)?;
+    for node in &schema.nodes {
+        vertex_maps(node, natural, &mut mapping, &mut notes)?;
     }
-    for edge in &info.edges {
-        let declared = schema.edges.iter().find(|e| {
-            (&e.source, &e.label, &e.destination)
-                == (&edge.src_type, &edge.edge_type, &edge.dst_type)
-        });
-        if let Some(declared) = declared {
-            relation_map(declared, &edge.triple(), &mut mapping, &mut notes)?;
-        }
+    for edge in &schema.edges {
+        let table = format!("{}_{}_{}", edge.source, edge.label, edge.destination);
+        relation_map(edge, &table, &mut mapping, &mut notes)?;
     }
     notes.sort();
     notes.dedup();
     mapping.annotations = notes;
-    mapping.validate().map_err(WriteError::Mapping)?;
-    Ok(Description { mapping })
+    mapping.validate().map_err(DescribeError::Mapping)?;
+    Ok(mapping)
+}
+
+/// `mapping.ttl`: the mapping, as the Turtle document a reader parses.
+///
+/// # Errors
+///
+/// [`DescribeError::Mapping`] when `rml` cannot write it.
+pub fn turtle(mapping: &Mapping) -> Result<String, DescribeError> {
+    rml::rdf::write_turtle(mapping).map_err(DescribeError::Mapping)
 }
 
 // ───────────────────────────────────────────────────────────────── A2
@@ -113,8 +155,8 @@ pub(crate) fn describe(
 /// within a class distinct columns have distinct predicate IRIs, and no
 /// relation's predicate is a column predicate of its source class. Each of
 /// them is two things the RDF image would make one.
-fn admissible(schema: &GraphSchema) -> Result<(), WriteError> {
-    let ambiguous = |iri: &str, first: String, second: String| WriteError::AmbiguousIri {
+fn admissible(schema: &GraphSchema) -> Result<(), DescribeError> {
+    let ambiguous = |iri: &str, first: String, second: String| DescribeError::AmbiguousIri {
         iri: iri.to_string(),
         first,
         second,
@@ -155,61 +197,61 @@ fn admissible(schema: &GraphSchema) -> Result<(), WriteError> {
 
 fn vertex_maps(
     node: &NodeType,
-    vertex: &VertexInfo,
     natural: &Natural,
     mapping: &mut Mapping,
     notes: &mut Vec<Annotation>,
-) -> Result<(), WriteError> {
+) -> Result<(), DescribeError> {
     let label = node.label.as_str();
     let class = node.iri.as_deref().map(iri).transpose()?;
     if let Some(class) = &class {
         annotate(class, &node.annotations, notes)?;
     }
 
-    // The properties the program mapped to a predicate, in the information
-    // file's order: the scalars are the table's own columns, and the others are
+    // The properties the program mapped to a predicate, in the table's column
+    // order — the single-valued ones, then the multi-valued, as the layout
+    // stores them. The scalars are the table's own columns, and the others are
     // lists or structs a reference cannot read, so each has a map over a query.
     let mut scalars = Vec::new();
     let mut nested = Vec::new();
-    for group in &vertex.property_groups {
-        for stored in &group.properties {
-            if stored.name == PAYLOAD_IDENTITY {
-                continue;
-            }
-            let Some(declared) = node.properties.iter().find(|p| p.name == stored.name) else {
-                continue;
-            };
-            let Some(predicate) = declared.iri.as_deref() else {
-                continue;
-            };
-            let predicate = iri(predicate)?;
-            annotate(&predicate, &declared.annotations, notes)?;
-            let tagged = stored.data_type == Stored::UserDefined(LANG_STRING.to_string());
-            let text = natural
-                .get(&(label.to_string(), stored.name.clone()))
-                .copied();
-            let object = if tagged {
-                TermMap::reference("value").with_language(LanguageMap::Reference("lang".into()))
-            } else {
-                object(
-                    if stored.cardinality == Several::Set {
-                        "value".to_string()
-                    } else {
-                        reference(&stored.name)
-                    },
-                    declared,
-                    text,
-                )?
-            };
-            let pom = PredicateObjectMap {
-                predicates: vec![TermMap::iri(predicate)],
-                objects: vec![ObjectMap::Term(object)],
-            };
-            if tagged || stored.cardinality == Several::Set {
-                nested.push((stored.name.as_str(), tagged, stored.cardinality, pom));
-            } else {
-                scalars.push(pom);
-            }
+    let single = |p: &&Property| p.cardinality == Cardinality::Single;
+    let columns = node
+        .properties
+        .iter()
+        .filter(single)
+        .chain(node.properties.iter().filter(|p| !single(p)));
+    for declared in columns {
+        let Some(predicate) = declared.iri.as_deref() else {
+            continue;
+        };
+        let name = declared.name.as_str();
+        let predicate = iri(predicate)?;
+        annotate(&predicate, &declared.annotations, notes)?;
+        // A language-tagged value is a struct of the form and its tag, whatever
+        // its cardinality; a set is a list of values.
+        let tagged = declared.datatype == Primitive::LangString;
+        let several = declared.cardinality == Cardinality::Multi;
+        let text = natural.get(&(label.to_string(), name.to_string())).copied();
+        let object = if tagged {
+            TermMap::reference("value").with_language(LanguageMap::Reference("lang".into()))
+        } else {
+            object(
+                if several {
+                    "value".to_string()
+                } else {
+                    reference(name)
+                },
+                declared,
+                text,
+            )?
+        };
+        let pom = PredicateObjectMap {
+            predicates: vec![TermMap::iri(predicate)],
+            objects: vec![ObjectMap::Term(object)],
+        };
+        if tagged || several {
+            nested.push((name, tagged, several, pom));
+        } else {
+            scalars.push(pom);
         }
     }
 
@@ -224,15 +266,15 @@ fn vertex_maps(
             predicate_object_maps: scalars,
         });
     }
-    for (name, tagged, cardinality, pom) in nested {
+    for (name, tagged, several, pom) in nested {
         let column = quoted(name);
         let table = quoted(label);
-        let query = match (cardinality, tagged) {
-            (Several::Set, true) => format!(
+        let query = match (several, tagged) {
+            (true, true) => format!(
                 "SELECT subject, n.value AS value, n.lang AS lang \
                  FROM (SELECT subject, unnest({column}) AS n FROM {table})"
             ),
-            (Several::Set, false) => {
+            (true, false) => {
                 format!("SELECT subject, unnest({column}) AS value FROM {table}")
             }
             // A single-valued tagged property is a bare struct.
@@ -258,7 +300,7 @@ fn object(
     column: String,
     declared: &Property,
     text: Option<&'static str>,
-) -> Result<TermMap, WriteError> {
+) -> Result<TermMap, DescribeError> {
     let map = TermMap::reference(column);
     Ok(match &declared.term {
         // The shape's term, verbatim: `xsd:gYear` over an `int32` stays
@@ -290,7 +332,7 @@ fn relation_map(
     table: &str,
     mapping: &mut Mapping,
     notes: &mut Vec<Annotation>,
-) -> Result<(), WriteError> {
+) -> Result<(), DescribeError> {
     let Some(predicate) = edge.iri.as_deref() else {
         return Ok(());
     };
@@ -346,10 +388,10 @@ fn id(name: &str) -> Node {
     Node::Iri(IriS::new_unchecked(&format!("#{name}")))
 }
 
-fn iri(text: &str) -> Result<IriS, WriteError> {
+fn iri(text: &str) -> Result<IriS, DescribeError> {
     oxrdf::NamedNode::new(text)
         .map(|_| IriS::new_unchecked(text))
-        .map_err(|e| WriteError::Internal(format!("`{text}` is not an IRI: {e}")))
+        .map_err(|e| DescribeError::NotAnIri(text.to_string(), e.to_string()))
 }
 
 /// A column as a reference: its name, and a SQL delimited identifier where the
@@ -380,7 +422,7 @@ fn annotate(
     about: &IriS,
     annotations: &[Declared],
     notes: &mut Vec<Annotation>,
-) -> Result<(), WriteError> {
+) -> Result<(), DescribeError> {
     for note in annotations {
         let object = match &note.object {
             AnnotationObject::Iri(object) => Constant::Iri(iri(object)?),
@@ -408,7 +450,7 @@ fn push_string(
     note: &Declared,
     value: String,
     notes: &mut Vec<Annotation>,
-) -> Result<(), WriteError> {
+) -> Result<(), DescribeError> {
     notes.push(Annotation {
         subject: about.clone(),
         predicate: iri(&note.predicate)?,
@@ -419,8 +461,6 @@ fn push_string(
 
 #[cfg(test)]
 mod tests {
-    use fossil_graph_schema::Cardinality;
-
     use super::*;
 
     const X: &str = "https://example.org/X";
@@ -459,7 +499,7 @@ mod tests {
 
     fn refusal(nodes: Vec<NodeType>, edges: Vec<EdgeType>) -> (String, String, String) {
         match admissible(&GraphSchema { nodes, edges }).expect_err("A2 refuses it") {
-            WriteError::AmbiguousIri { iri, first, second } => (iri, first, second),
+            DescribeError::AmbiguousIri { iri, first, second } => (iri, first, second),
             other => panic!("{other:?}"),
         }
     }

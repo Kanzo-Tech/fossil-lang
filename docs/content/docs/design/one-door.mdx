@@ -25,19 +25,19 @@ files as five relations — `graphar_vertex_types`, `graphar_edge_types`, `graph
 What every relation carries is [the graph's own facts](/docs/design/facts); a graph a run answered in
 memory is attached the same way once its files are registered with the engine
 ([A run off the page](/docs/design/off-the-page)); the credential is `@fossil-lang/storage`'s `mount`,
-which the host calls. The contract is [the corpus](/docs/design/corpus) and Apache GraphAr's; the
+which the host calls. The contract is [the graph](/docs/design/graph) and Apache GraphAr's; the
 format underneath is [/docs/format](/docs/format).
 
 **The door is not fossil's.** fossil publishes no reader: `@kanzo-tech/graphar-duckdb` is
 `Kanzo-Tech/graphar`'s, knows no RDF and no fossil, and a host composes it with `mount` in about twenty
-lines ([the corpus as Apache GraphAr](/docs/design/graphar#reading-a-graph)). The package that wrapped
-both was deleted, and why is on [what was discarded](/docs/design/discarded#the-corpus-as-apache-graphar).
+lines ([the graph as Apache GraphAr](/docs/design/graphar#reading-a-graph)). The package that wrapped
+both was deleted, and why is on [what was discarded](/docs/design/discarded#the-graph-as-apache-graphar).
 
 **Every read is the host's SQL.** Structure and data alike go through the engine the host already
 has — in keasy, Mosaic's coordinator over DuckDB-WASM — so a chart, a crossfilter and the graph view
 read the same views through one connection, and pruning is the engine's, from the Parquet footers.
 The door has no query API of its own; the one the earlier reader had, and why it went, is in
-[what was discarded](/docs/design/discarded#the-corpus).
+[what was discarded](/docs/design/discarded#the-graph).
 
 **What would reverse it.** A reader that cannot hold a SQL engine and still has to read a graph.
 [A door for a camera](/docs/design/later/one-door-camera) keeps what a tiled graph would need.
@@ -50,7 +50,7 @@ resolve, options)` answers a `GraphAttachment` — its `catalog`, the parsed `gr
 `[Symbol.asyncDispose]`, the hook TC39's explicit resource management calls, so `await using` gives it
 back on every path out of a block. It is not `open`, which is the file-system sense: nothing is opened
 as a file. Keeping `open` and `close` is
-[a discarded alternative](/docs/design/discarded#the-corpus).
+[a discarded alternative](/docs/design/discarded#the-graph).
 
 **What would reverse it.** A door that stops being an `ATTACH` — a reader that opens a graph as a
 handle with no catalog of its own, say a single-table reader with no alias to detach. Then the pair

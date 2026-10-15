@@ -105,7 +105,7 @@ ty, rust-analyzer and Cairo put the Salsa substrate in one small crate at the bo
 its inputs, the file abstraction — the parser in a crate of its own, the semantic analysis in one or
 a few, the editor functions in one with no protocol in it, and each transport in a thin crate over
 those. fossil's crates are cut that way, and a crate that is none of those folds into the one whose
-subject it is. Six are modules of that crate now:
+subject it is. Seven are modules of those crates now:
 
 | module | because |
 | --- | --- |
@@ -113,7 +113,8 @@ subject it is. Six are modules of that crate now:
 | `fossil_base::sources` | the columns a host found for a source are the value of an input, so the type is the input's; the trait beside it, its schema and its stub had no caller |
 | `fossil_hir::lineage` | what a program reads is a question about its def map, asked by every host |
 | `fossil_hir::shex`, `fossil_hir::shacl` | a shape document becomes a type, and the types are here — the decoders and the `providers` rows that install them; what the executor was handed beside them, an enum whose one live method returned a `GraphSchema`, is a `GraphSchema` |
-| `fossil_df::layout`, `fossil_df::describe` | the graph's layout and its mapping are the writer's: nothing else lays out a GraphAr graph, and neither module exports anything |
+| `fossil_df::layout` | the graph's layout is the writer's: nothing else lays out a GraphAr graph, and the module exports nothing |
+| `fossil_mir::describe` | the graph's mapping is a function of the types, so the editor's module links it and a host asks before a run ([the graph as Apache GraphAr](/docs/design/graphar)) |
 
 One is still a crate of its own:
 

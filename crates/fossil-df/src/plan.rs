@@ -393,7 +393,7 @@ pub(crate) fn column(source: &str, column: &str) -> DfExpr {
 
 /// The sources the relation at `index` is derived from — PROV-O's
 /// `prov:wasDerivedFrom` — as the program wrote each one: `Op::Source`'s `uri`,
-/// the key, and never its location, so a corpus names no storage prefix and
+/// the key, and never its location, so a graph names no storage prefix and
 /// repointing a connection does not change it. Sorted and without repeats: it
 /// is a set, and a self-join reads one source twice.
 ///

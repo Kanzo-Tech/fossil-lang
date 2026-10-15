@@ -78,7 +78,7 @@ What [Annotations and language-tagged strings](/docs/design/labels) takes, each 
 | **[SPARQL 1.1 Query](https://www.w3.org/TR/sparql11-query/) §17.4.2.11, `STRLANG`, and production [145] `LANGTAG`** | The constructor `str.lang` is named for, and the lexical rule of `"…"@en`, which Turtle and ShExC share. |
 | **The Rust Reference, literal suffixes** | That a suffix is part of its literal's token, which is why the `@` of a tag must touch the quote and never lexes as an attribute. |
 | **[RDFa Core Initial Context](https://www.w3.org/2011/rdfa-context/rdfa-1.1)** | The W3C's list of predefined prefixes, which a predicate's CURIE is checked against and refused with — and whose `schema:` is `http://schema.org/`, the measured reason not to expand through it. |
-| **Delta Lake's protocol, *Protocol Evolution* and *Table Features*** | The version rule a format with readers outside its release needs: unrecognised fields are «never required in order to correctly interpret» a table, and a change that is not forward-compatible raises the version — for the tables that use it. It is the rule [the corpus](/docs/design/corpus#one-format-changed-in-place) takes up when such a reader exists, and the reason a version string of fossil's own is discarded until then. |
+| **Delta Lake's protocol, *Protocol Evolution* and *Table Features*** | The version rule a format with readers outside its release needs: unrecognised fields are «never required in order to correctly interpret» a table, and a change that is not forward-compatible raises the version — for the tables that use it. It is the rule [the graph](/docs/design/graph#one-format-changed-in-place) takes up when such a reader exists, and the reason a version string of fossil's own is discarded until then. |
 | **`shex_ast` 0.3.1** (rudof) | That its AST carries annotations and its compact printer prints them as `//`, and that its conversion to `SchemaIR` drops them (`cnv_annotations` is a `TODO`) — so the decoder reads the AST. |
 
 ## RDF 1.2
@@ -90,9 +90,9 @@ What [Annotations and language-tagged strings](/docs/design/labels) takes, each 
 | **MillenniumDB** | The reference for a discriminator in the identifier space: 8-byte identifiers whose first byte declares the class, with edge ids dense and consecutive by row position. |
 | **The Wikidata singleton-property study** | A distinct predicate per statement broke four of five engines. It is the first-principles argument against singleton property in a dictionary-encoded column. |
 | **StarBench** | Double nesting alone broke two of four engines, which is the evidence for an explicit nesting cap with a number rather than unbounded recursion. |
-| **ISO GQL and openCypher** | `N ∩ E = ∅` — an edge cannot be the endpoint of another edge *by definition*, which is why the corpus question is ours and not a lookup. |
+| **ISO GQL and openCypher** | `N ∩ E = ∅` — an edge cannot be the endpoint of another edge *by definition*, which is why the graph question is ours and not a lookup. |
 
-## The corpus, and how a format ships
+## The graph, and how a format ships
 
 | source | what it settles |
 | --- | --- |
@@ -104,25 +104,25 @@ What [Annotations and language-tagged strings](/docs/design/labels) takes, each 
 | **PMTiles** | The counterexample: a Hilbert curve dispatched with a link to an encyclopedia, and every port re-deriving it. |
 | **H3 against S2** | One compiled oracle almost nobody reimplements, against four oracles in a chain with no shared vectors and divergences open for years. H3 also settles the 64-bit boundary by decree, typing its index as a string before anyone could get it wrong. |
 | **`node-s2`** | A *binding* — not a port — that returned wrong cell ids anyway, because JavaScript's `number` holds 53 bits and a cell id holds 64. It is why `BigInt` at the TypeScript boundary is a rule and not a precaution. |
-| **Arrow, Parquet, Delta, Zarr, MVT, GraphAr** | The nine-format survey behind [the corpus](/docs/design/corpus). GraphAr is the one the tiled corpus's YAML manifest borrowed *from* and the one the graph now *is*, and the borrowing had a measured edge: its specification defines **no count and no data-file path**, and its reference implementation supplies both — a count as raw native-endian bytes in a file the specification never names. The eight divergences that produced are on [the tiled corpus](/docs/design/later/corpus-tiles#what-is-borrowed-from-graphar-and-where-borrowing-stops); the vocabulary of the graph is [GraphAr's](/docs/design/corpus#the-vocabulary-is-graphars-and-sqlpgqs-is-declared-nowhere). |
+| **Arrow, Parquet, Delta, Zarr, MVT, GraphAr** | The nine-format survey behind [the graph](/docs/design/graph). GraphAr is the one the tiled graph's YAML manifest borrowed *from* and the one the graph now *is*, and the borrowing had a measured edge: its specification defines **no count and no data-file path**, and its reference implementation supplies both — a count as raw native-endian bytes in a file the specification never names. The eight divergences that produced are on [the tiled graph](/docs/design/later/graph-tiles#what-is-borrowed-from-graphar-and-where-borrowing-stops); the vocabulary of the graph is [GraphAr's](/docs/design/graph#the-vocabulary-is-graphars-and-sqlpgqs-is-declared-nowhere). |
 | **Parquet's `LogicalType` against its deprecated `ConvertedType`** | What settles that an unsigned address is expressible at all, and what it costs to read one back. Unsignedness is an *annotation* on a signed physical `INT32`, so `uint32` is not an exotic type — but the format's original `min`/`max` statistics were defined by **signed** byte comparison and are therefore meaningless for it. A writer that gets this right leaves them empty and fills `min_value`/`max_value`; a reader that only knows the deprecated pair concludes the footer carries no box for exactly the column the whole address is built on. That is not hypothetical here: four checks in this repository passed over NULL for that reason before the fallback was written. |
 | **dbt, Delta, Lance, Malloy** | Five projects that have already been through "does the specification get its own repository". None of them separates the implementation. Delta shows co-location does not prevent drift and that what fixes it is a **process** (`protocol_rfcs/`, specification PR before implementation PR); Malloy is the counterexample, with twenty-five satellite repositories and one frozen 159 releases behind. |
 
-## The corpus as RDF
+## The graph as RDF
 
 | source | what it settles |
 | --- | --- |
 | **SPARQL 1.1 Query Results JSON Format**, W3C Recommendation 2013, §3.2.2 | The names of an RDF term's parts — `type`, `value`, `datatype` and the language — that `triples` spells its columns with. |
-| **R2RML**, W3C Recommendation 2012 | The **natural mapping** of SQL types to XSD datatypes and lexical forms (§10.2) that [the mapping](/docs/format/reading/rdf) leaves a literal in where the shape declares no term — every integer `xsd:integer`, every float `xsd:double` — and the vocabulary of term types. Its mapping language was dropped for RML-Core, which has the per-row language ([discarded](/docs/design/discarded#the-corpus-as-rdf)). |
-| **RML — RML-Core, RML-IO and RML-LV**, the W3C KG-Construct Community Group's drafts | RML-LV's logical views, which state the join in RDF, were not taken: a draft with few implementations ([discarded](/docs/design/discarded#the-corpus-as-rdf)). **RML-Core is taken** by [the corpus as Apache GraphAr](/docs/design/graphar): `rml:languageMap` reads a language tag from a column, which R2RML's constant `rr:language` cannot; its KG-Construct test cases, SQL subset, are the conformance of rudof's `rml` crate. |
-| **AlgeMapLoom**, an algebra for knowledge-graph construction mappings | The intermediate layer between the language and its consumers that was not taken: a research artefact and no standard ([discarded](/docs/design/discarded#the-corpus-as-rdf)). |
+| **R2RML**, W3C Recommendation 2012 | The **natural mapping** of SQL types to XSD datatypes and lexical forms (§10.2) that [the mapping](/docs/format/reading/rdf) leaves a literal in where the shape declares no term — every integer `xsd:integer`, every float `xsd:double` — and the vocabulary of term types. Its mapping language was dropped for RML-Core, which has the per-row language ([discarded](/docs/design/discarded#the-graph-as-rdf)). |
+| **RML — RML-Core, RML-IO and RML-LV**, the W3C KG-Construct Community Group's drafts | RML-LV's logical views, which state the join in RDF, were not taken: a draft with few implementations ([discarded](/docs/design/discarded#the-graph-as-rdf)). **RML-Core is taken** by [the graph as Apache GraphAr](/docs/design/graphar): `rml:languageMap` reads a language tag from a column, which R2RML's constant `rr:language` cannot; its KG-Construct test cases, SQL subset, are the conformance of rudof's `rml` crate. |
+| **AlgeMapLoom**, an algebra for knowledge-graph construction mappings | The intermediate layer between the language and its consumers that was not taken: a research artefact and no standard ([discarded](/docs/design/discarded#the-graph-as-rdf)). |
 | **Ontop** | The virtual-graph reading of the same idea: the triples produced at query time over tables that stay where they are, by unfolding the mapping into SQL. `triples` is that, as a view: the consumer runs it on its own engine and nothing is materialised. |
 
-## The corpus as Apache GraphAr
+## The graph as Apache GraphAr
 
-What [the corpus as Apache GraphAr](/docs/design/graphar) was read against. PROV-O and OpenLineage
-are under [the corpus](#the-corpus-and-how-a-format-ships); RML-Core and Ontop under [the corpus as
-RDF](#the-corpus-as-rdf). **Every entry here was read for the clause it is cited for, and none is
+What [the graph as Apache GraphAr](/docs/design/graphar) was read against. PROV-O and OpenLineage
+are under [the graph](#the-graph-and-how-a-format-ships); RML-Core and Ontop under [the graph as
+RDF](#the-graph-as-rdf). **Every entry here was read for the clause it is cited for, and none is
 cited for a clause it was not read for.** GraphAr's C++ and Java sources were re-read at
 `apache/incubator-graphar@06dddb1` on 2026-10-14 (`types.cc`, `chunk_writer.cc`, `DataType.java`).
 
@@ -171,7 +171,7 @@ against.
 
 ## Multiscale readers
 
-The corpus already had the three parts every multiscale reader has — a declared list of what each
+The graph already had the three parts every multiscale reader has — a declared list of what each
 scale holds, an address that is arithmetic, and a client that picks the scale — before the backend
 named its references; these are the systems the list and the container were read against.
 
@@ -184,7 +184,7 @@ named its references; these are the systems the list and the container were read
 
 ## The partition, and where its levels come from
 
-[Cells](/docs/design/later/cells) decided, for the tiled corpus, that it carries one multiscale structure
+[Cells](/docs/design/later/cells) decided, for the tiled graph, that it carries one multiscale structure
 and that it is the cell pyramid, and the decision turns on what a community hierarchy's levels *are*: measured
 stopping points of a greedy optimisation rather than a declared sequence. Three sources carry the
 weight of that sentence, and the third carries the name the block is still called by.
@@ -242,9 +242,9 @@ parameter it takes is argued in [the dot](/docs/design/the-dot).
 | **SPIDER** (Bauckmann, Leser & Naumann, ICDE 2006) and the **Metanome** profiling platform (Papenbrock et al., PVLDB 2015) | What an edge candidate is: an inclusion dependency between two sources' columns, tested over the pairs a type prunes. |
 | **RML** (Dimou et al., *RML: A Generic Language for Integrated RDF Mappings of Heterogeneous Data*, LDOW 2014) | The shape of the mapping spec a model fills: a source, a subject template, and per property a column, an expression or a join — from which Fossil is emitted. |
 
-## The corpus's own facts
+## The graph's own facts
 
-What [the corpus's own facts](/docs/design/facts) takes, each for one decision.
+What [the graph's own facts](/docs/design/facts) takes, each for one decision.
 
 | source | what it settles |
 | --- | --- |

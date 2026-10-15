@@ -75,7 +75,7 @@ asserts the values, not the plan).
 
 This is the failure mode the whole project exists to prevent, and it happened: the lowering read a
 handful of node kinds and dropped the rest, the checker raised nothing because the HIR never saw the
-expression, and the compiler declared success over a corpus with a property missing. The fallback
+expression, and the compiler declared success over a graph with a property missing. The fallback
 arm is a diagnostic now — it quotes the source text, points at it, names the node kind the parser
 built — and every `*_EXPR` kind has an arm, so what still arrives there is the parser's own `ERROR`
 node.

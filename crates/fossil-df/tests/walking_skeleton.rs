@@ -27,17 +27,17 @@ mod support;
 #[test]
 fn walking_skeleton_writes_5_person_vertices_with_expected_content() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-    let corpus = native::run_dir(&examples, "hello.fossil", &[]).expect("hello.fossil runs");
+    let ran = native::run_dir(&examples, "hello.fossil", &[]).expect("hello.fossil runs");
 
     // The graph: one vertex type, `Person` — the local name of the shape's IRI,
     // never the mapping's own name — in one property group, `subject` first and
     // the key, then the program's `name`.
-    let graph = corpus.graph();
+    let graph = ran.graph();
     assert_eq!(graph.vertices.len(), 1);
     assert!(graph.edges.is_empty());
     let person = &graph.vertices[0];
     assert_eq!(person.r#type, "Person");
-    assert_eq!(corpus.vertex_count("Person"), 5);
+    assert_eq!(ran.vertex_count("Person"), 5);
     let properties: Vec<(&str, bool)> = person.property_groups[0]
         .properties
         .iter()
@@ -47,8 +47,8 @@ fn walking_skeleton_writes_5_person_vertices_with_expected_content() {
 
     // The bytes: the chunk the information file names, read back by `DuckDB`
     // and never through the writer's own types.
-    let root = corpus.materialise();
-    let chunk = corpus.chunk("Person");
+    let root = ran.materialise();
+    let chunk = ran.chunk("Person");
     assert_eq!(chunk, "vertex/Person/subject_name/chunk0");
     assert_eq!(
         native::column(root.path(), &chunk, "subject"),

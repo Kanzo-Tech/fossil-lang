@@ -10,11 +10,11 @@
 //!   editor's view of a program: forward-propagated source types, every
 //!   diagnostic, and [`render_diagnostics`] drawing them as a terminal host
 //!   would.
-//! - **run** — [`fossil_df::Executor`], the one host that writes a corpus. The
+//! - **run** — [`fossil_df::Executor`], the one host that writes a graph. The
 //!   program's directory is loaded into an in-memory store under [`AUTHORITY`],
 //!   the program is compiled AT its URL there, so every relative source and
 //!   document resolves beside it as it would for any reader of that file, and the
-//!   corpus is written into memory (`Output::Memory`). The executor reads no file
+//!   graph is written into memory (`Output::Memory`). The executor reads no file
 //!   and introspects nothing; what the checker sees and what the run sees differ
 //!   exactly as the browser's two workspaces do.
 
@@ -243,12 +243,12 @@ pub(crate) const AUTHORITY: &str = "https://programs.test/";
 
 /// What a run answered and every file it wrote, by path under its root.
 #[derive(Debug)]
-pub(crate) struct Corpus {
+pub(crate) struct Written {
     pub(crate) report: RunReport,
     pub(crate) files: BTreeMap<String, Vec<u8>>,
 }
 
-impl Corpus {
+impl Written {
     fn read(&self) -> impl Fn(&str) -> Option<Vec<u8>> + '_ {
         |path| self.files.get(path).cloned()
     }
@@ -341,7 +341,7 @@ impl Corpus {
             .expect("rows")
     }
 
-    /// The corpus copied into a fresh directory, so `DuckDB` can read it.
+    /// The graph copied into a fresh directory, so `DuckDB` can read it.
     pub(crate) fn materialise(&self) -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("tempdir");
         for (rel, bytes) in &self.files {
@@ -390,7 +390,7 @@ pub(crate) fn run_dir(
     dir: &Path,
     program: &str,
     connections: &[(&str, &str)],
-) -> Result<Corpus, String> {
+) -> Result<Written, String> {
     tokio::runtime::Builder::new_current_thread()
         .build()
         .expect("a current-thread runtime")
@@ -401,7 +401,7 @@ async fn run_dir_async(
     dir: &Path,
     program: &str,
     connections: &[(&str, &str)],
-) -> Result<Corpus, String> {
+) -> Result<Written, String> {
     let text = std::fs::read_to_string(dir.join(program))
         .unwrap_or_else(|e| panic!("read {program}: {e}"));
 
@@ -457,7 +457,7 @@ async fn run_dir_async(
         .into_iter()
         .map(|file| (file.path, file.bytes.to_vec()))
         .collect();
-    Ok(Corpus { report, files })
+    Ok(Written { report, files })
 }
 
 /// A fresh directory holding each `(relative path, text)`.
@@ -471,7 +471,7 @@ pub(crate) fn write_dir(files: &[(&str, &str)]) -> tempfile::TempDir {
     dir
 }
 
-/// One column of one table of a materialised corpus, read back by `DuckDB` and
+/// One column of one table of a materialised graph, read back by `DuckDB` and
 /// sorted — never through the writer's own types.
 pub(crate) fn column(root: &Path, table: &str, column: &str) -> Vec<String> {
     let conn = duckdb::Connection::open_in_memory().expect("duckdb");

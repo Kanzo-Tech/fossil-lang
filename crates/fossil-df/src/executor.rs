@@ -71,7 +71,7 @@ pub enum Output {
 }
 
 /// Where an [`Output::Memory`] run writes; its [`RunReport::location`].
-pub const MEMORY: &str = "memory://corpus/";
+pub const MEMORY: &str = "memory://graph/";
 
 /// What a run answers, one variant per [`Output`].
 #[derive(Debug)]
@@ -81,7 +81,7 @@ pub enum Ran {
     /// Written into memory, and every file of it.
     Memory {
         report: RunReport,
-        files: Vec<CorpusFile>,
+        files: Vec<GraphFile>,
     },
 }
 
@@ -97,7 +97,7 @@ impl Ran {
 
 /// One file of a graph written into memory.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CorpusFile {
+pub struct GraphFile {
     /// Relative to the graph's root: `fossil.graph.yml`,
     /// `vertex/<Type>/vertex_count`, `vertex/<Type>/<group>/chunk0`, …
     pub path: String,
@@ -321,7 +321,7 @@ async fn granted(storage: &mut Storage, job: &str) -> Result<String, Failure> {
 
 /// Every file of the graph written into `memory`, by its path under
 /// [`MEMORY`] — which is the store's root, so a key is the path.
-async fn held(memory: &InMemory) -> Result<Vec<CorpusFile>, Failure> {
+async fn held(memory: &InMemory) -> Result<Vec<GraphFile>, Failure> {
     let unreadable = |e: object_store::Error| {
         Failure::new(Problem::Unreachable {
             location: MEMORY.to_string(),
@@ -338,7 +338,7 @@ async fn held(memory: &InMemory) -> Result<Vec<CorpusFile>, Failure> {
             .bytes()
             .await
             .map_err(unreadable)?;
-        files.push(CorpusFile {
+        files.push(GraphFile {
             path: meta.location.to_string(),
             bytes,
         });

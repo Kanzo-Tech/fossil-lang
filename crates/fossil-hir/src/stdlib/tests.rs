@@ -289,7 +289,7 @@ fn the_deleted_names_are_gone() {
         //
         // Six needed `error()`, which has no DataFusion equivalent: there is no
         // way to raise from an expression, so "this value or stop the run" has
-        // no spelling on the engine that writes a corpus. The whole `validate.`
+        // no spelling on the engine that writes a graph. The whole `validate.`
         // namespace goes with them.
         "core.require",
         "validate.email",

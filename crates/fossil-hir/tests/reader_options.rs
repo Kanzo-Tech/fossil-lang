@@ -120,7 +120,7 @@ fn a_delimiter_on_a_row_that_has_none_is_reported_and_names_the_row_that_does() 
     );
 }
 
-/// **A delimiter has to be one ASCII character**, because both readers a corpus
+/// **A delimiter has to be one ASCII character**, because both readers a graph
 /// is written through take one byte: `DuckDB`'s `delim=` and `DataFusion`'s
 /// `CsvReadOptions::delimiter`. A wider one would mean something different to
 /// each, which is the disagreement this whole parameter exists to remove.

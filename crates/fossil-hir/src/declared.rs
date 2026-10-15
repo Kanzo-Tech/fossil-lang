@@ -22,7 +22,7 @@
 //! That is the whole grammar, and what it leaves out is decided rather than
 //! missing. The vocabulary carries ONE `(min, max)` per property, so a
 //! cardinality is said once, outermost: `Option<Seq<T>>` would be a second
-//! spelling of `Seq<T>`, `Seq<Option<T>>` a list with holes the corpus has no
+//! spelling of `Seq<T>`, `Seq<Option<T>>` a list with holes the graph has no
 //! way to write, and `Option<Option<T>>` nothing at all. `Ref<String>` refers
 //! to a value, which is not a node. Each is refused as
 //! `type/invalid-field-type`, naming the rule.

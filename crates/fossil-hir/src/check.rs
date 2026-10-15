@@ -314,7 +314,7 @@ impl Checker<'_> {
     /// `name`, and a name no predicate ends in is an error with a did-you-mean
     /// over the ones that do. That is not a lookup failure to swallow: the shape
     /// document is mandatory, so a key it does not declare is a property that
-    /// would be written into a corpus nothing describes.
+    /// would be written into a graph nothing describes.
     pub fn check_property(&mut self, expr_id: ExprId, prop: &HirProperty) {
         // The identity is not a shape predicate: a `.shex` describes the
         // predicates of a node, and in RDF the subject IS the node. A key the
@@ -539,7 +539,7 @@ impl Checker<'_> {
     /// the body HAS, so a body that simply omits a required predicate would
     /// pass every check there. A shape that says
     /// `shop:email xsd:string ;` — cardinality exactly one — is a promise the
-    /// corpus makes to its readers, and a mapping that does not keep it writes
+    /// graph makes to its readers, and a mapping that does not keep it writes
     /// a node that does not conform to the shape it declares.
     ///
     fn check_required_properties(&mut self, properties: &[HirProperty]) {

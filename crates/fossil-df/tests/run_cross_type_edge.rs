@@ -58,27 +58,27 @@ fn a_type_call_writes_a_cross_type_edge_from_two_mappings() {
             "order_id,user_id,amount\no1,1,10\no2,2,20\no3,1,30\n",
         ),
     ]);
-    let corpus = native::run_dir(dir.path(), "prog.fossil", &[]).expect("the program runs");
+    let ran = native::run_dir(dir.path(), "prog.fossil", &[]).expect("the program runs");
 
-    let order = corpus.vertex("Order");
-    let person = corpus.vertex("Person");
+    let order = ran.vertex("Order");
+    let person = ran.vertex("Person");
     assert_eq!(
-        (corpus.vertex_count("Person"), corpus.vertex_count("Order")),
+        (ran.vertex_count("Person"), ran.vertex_count("Order")),
         (3, 3)
     );
 
     // Three orders, each naming a real person: three edges, none dropped —
     // stated rather than omitted, because «no key» and «nothing dropped» are
     // not the same answer.
-    let graph = corpus.graph();
+    let graph = ran.graph();
     let placed_by = graph
         .edges
         .iter()
         .find(|e| e.src_type == "Order" && e.dst_type == "Person")
         .unwrap_or_else(|| panic!("no Order→Person edge: {graph:?}"));
     assert_eq!(placed_by.edge_type, "placedBy");
-    assert_eq!(corpus.edge_count(&placed_by.triple()), 3);
-    let drops = corpus
+    assert_eq!(ran.edge_count(&placed_by.triple()), 3);
+    let drops = ran
         .report
         .dropped
         .iter()

@@ -16,6 +16,7 @@
 //! | [`WasmWorkspace::missing_documents`] | `Array<{ key, location, connection? }>` | `resolveDocuments` |
 //! | [`WasmWorkspace::register_document`] | `()`                           | `resolveDocuments` |
 //! | [`WasmWorkspace::inputs`]      | `Array<Input>`                       | introspection, lineage |
+//! | [`WasmWorkspace::mapping`]     | `string` (Turtle)                    | the graph's RML mapping before a run |
 //! | [`WasmWorkspace::register_inferred_descriptor`] | `()`                | introspection, a source described |
 //! | [`WasmWorkspace::register_undescribed`] | `()`                        | introspection, a source that was not |
 //! | [`WasmWorkspace::diagnostics`] | `Array<Diagnostic>`                  | `textDocument/diagnostic`, workspace-wide |
@@ -196,7 +197,8 @@ fn busy(method: &str) -> Failure {
 // The types the signatures above name, from the one place they are declared.
 #[wasm_bindgen(typescript_custom_section)]
 const WIRE_TYPES: &str = "import type { Diagnostic, CompletionItem, Format, Hover, Input, \
-    Location, Profile, ProfileOptions, ProfileQuery, ProfileSource, SemanticToken, Token, Vocabulary } \
+    Location, Model, ModelType, Profile, ProfileOptions, ProfileQuery, ProfileSource, SemanticToken, \
+    SourceVocabulary, Token, Vocabulary } \
     from '@fossil-lang/types';\n\
     import type { MissingDocument } from '@fossil-lang/types/internal';";
 
@@ -404,6 +406,21 @@ impl WasmWorkspace {
         let ws = self.inner.try_borrow().map_err(|_| busy("inputs"))?;
         let rows = ws.inputs_native(*handle).ok_or_else(unknown_handle)?;
         to_value("the inputs", &rows)
+    }
+
+    /// The RML-Core mapping the program's types describe — what `mapping.ttl` is, as Turtle, before
+    /// any run ([`fossil_mir::describe`]). The types are the program's declarations and the
+    /// documents it imports; a program with none describes nothing, and the mapping is empty.
+    ///
+    /// # Errors
+    ///
+    /// Returns a JS error if `handle` is unknown, if the workspace is busy, or with
+    /// `write/ambiguous-iri` when two types or two columns of one share an IRI, the refusal a run
+    /// would meet.
+    #[wasm_bindgen]
+    pub fn mapping(&self, handle: &FileHandle) -> Result<String, JsValue> {
+        let ws = self.inner.try_borrow().map_err(|_| busy("mapping"))?;
+        Ok(ws.mapping_native(*handle).ok_or_else(unknown_handle)??)
     }
 
     // ----- The main-thread IDE surface (see the `ide` module) -----
@@ -689,6 +706,22 @@ impl FossilWorkspace {
     pub fn inputs_native(&self, handle: FileHandle) -> Option<Vec<fossil_hir::lineage::Input>> {
         let file = self.files.get(handle)?;
         Some(fossil_hir::lineage::inputs(&self.db, file))
+    }
+
+    /// Pure-Rust mirror of [`WasmWorkspace::mapping`]; `None` for an unknown handle.
+    #[must_use]
+    pub fn mapping_native(&self, handle: FileHandle) -> Option<Result<String, Failure>> {
+        let file = self.files.get(handle)?;
+        Some(self.mapping_of(file))
+    }
+
+    fn mapping_of(&self, file: SourceFile) -> Result<String, Failure> {
+        let schema = fossil_hir::shapes::program_shapes(&self.db, file)?
+            .map(|shapes| shapes.to_graph_schema())
+            .unwrap_or_default();
+        let mapping =
+            fossil_mir::describe::describe(&schema, &fossil_mir::describe::Natural::new())?;
+        Ok(fossil_mir::describe::turtle(&mapping)?)
     }
 
     // ----- Accessors for the editor surface in [`ide`] (pub(crate)) -----

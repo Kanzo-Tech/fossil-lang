@@ -155,7 +155,7 @@ impl fossil_storage::Host for Vending {
 }
 
 /// Where [`write_in_memory`] writes.
-pub(crate) const MEMORY_DEST: &str = "mem://out/corpus/";
+pub(crate) const MEMORY_DEST: &str = "mem://out/graph/";
 
 /// [`fossil_df::write`] into an in-memory store, and every file it wrote, by
 /// path under [`MEMORY_DEST`].
@@ -193,7 +193,7 @@ pub(crate) async fn write_in_memory(
         let path = meta
             .location
             .as_ref()
-            .strip_prefix("corpus/")
+            .strip_prefix("graph/")
             .expect("under the destination")
             .to_string();
         files.insert(path, bytes.to_vec());

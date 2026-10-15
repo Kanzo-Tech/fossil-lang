@@ -9,7 +9,7 @@ executes it, writing an
 [Apache GraphAr](https://graphar.apache.org) graph — a Parquet chunk per vertex type and per
 relation under YAML information files — and `mapping.ttl`, the RML-Core mapping that says what its
 tables mean as RDF. DataFusion runs the mapping, and any SQL engine that reads Parquet reads the
-result — `/docs/design/corpus` is the argument.
+result — `/docs/design/graph` is the argument.
 
 **Status:** alpha. The `@fossil-lang/*` packages are published to npm under the
 `alpha` dist-tag, one version per git tag; the surface is still changing.

@@ -81,11 +81,11 @@ fn a_quoted_column_reads_a_header_an_identifier_cannot_spell() {
         .collect();
     assert!(messages.is_empty(), "{messages:#?}");
 
-    let corpus = native::run_dir(dir.path(), "snb.fossil", &[]).expect("the program runs");
-    let root = corpus.materialise();
+    let ran = native::run_dir(dir.path(), "snb.fossil", &[]).expect("the program runs");
+    let root = ran.materialise();
     let person = |id: u8| format!("https://example.org/person/{id}");
     assert_eq!(
-        corpus.pairs(root.path(), "Person_knows_Person"),
+        ran.pairs(root.path(), "Person_knows_Person"),
         [
             (person(1), person(2)),
             (person(1), person(3)),
@@ -98,12 +98,12 @@ fn a_quoted_column_reads_a_header_an_identifier_cannot_spell() {
 #[test]
 fn two_mappings_of_one_type_write_each_shared_edge_once_with_both_contributions() {
     let dir = dir(PROGRAM);
-    let corpus = native::run_dir(dir.path(), "snb.fossil", &[]).expect("the program runs");
+    let ran = native::run_dir(dir.path(), "snb.fossil", &[]).expect("the program runs");
 
     // `People` and `Friends` both write `livesIn`. One edge type, listed once.
-    let names = corpus.edge_types();
+    let names = ran.edge_types();
     assert_eq!(names, ["Person_livesIn_City", "Person_knows_Person"]);
-    let reported: Vec<&str> = corpus
+    let reported: Vec<&str> = ran
         .report
         .dropped
         .iter()
@@ -113,12 +113,12 @@ fn two_mappings_of_one_type_write_each_shared_edge_once_with_both_contributions(
 
     // `People` alone has Alan (4), who knows nobody and is in no `Friends` row:
     // the table is the union of both mappings, not whichever ran last or first.
-    assert_eq!(corpus.edge_count("Person_livesIn_City"), 4);
-    let root = corpus.materialise();
+    assert_eq!(ran.edge_count("Person_livesIn_City"), 4);
+    let root = ran.materialise();
     let city = |id: &str| format!("https://example.org/city/{id}");
     let person = |id: u8| format!("https://example.org/person/{id}");
     assert_eq!(
-        corpus.pairs(root.path(), "Person_livesIn_City"),
+        ran.pairs(root.path(), "Person_livesIn_City"),
         [
             (person(1), city("c1")),
             (person(2), city("c2")),
@@ -134,22 +134,18 @@ fn an_optional_property_one_mapping_writes_survives_the_merge_with_one_that_does
     // for the same three subjects, and each vertex keeps the value one of them
     // wrote — never the other mapping's null.
     let dir = dir(PROGRAM);
-    let corpus = native::run_dir(dir.path(), "snb.fossil", &[]).expect("the program runs");
-    let person = corpus.vertex("Person");
-    assert_eq!(corpus.vertex_count("Person"), 4);
+    let ran = native::run_dir(dir.path(), "snb.fossil", &[]).expect("the program runs");
+    let person = ran.vertex("Person");
+    assert_eq!(ran.vertex_count("Person"), 4);
     assert!(
         person.property_groups[0]
             .properties
             .iter()
             .any(|p| p.name == "email")
     );
-    let root = corpus.materialise();
+    let root = ran.materialise();
     let conn = duckdb::Connection::open_in_memory().expect("duckdb");
-    let path = root
-        .path()
-        .join(corpus.chunk("Person"))
-        .display()
-        .to_string();
+    let path = root.path().join(ran.chunk("Person")).display().to_string();
     let mut stmt = conn
         .prepare(&format!(
             "SELECT subject, coalesce(email, '∅') FROM read_parquet('{path}') ORDER BY subject"
@@ -197,10 +193,10 @@ Elsewhere : Person from PersonRow.where(PersonRow.city != "c1")
     livesIn  = City(PersonRow.city)
 "#;
     let dir = dir(program);
-    let corpus = native::run_dir(dir.path(), "snb.fossil", &[]).expect("the program runs");
-    assert_eq!(corpus.edge_types().len(), 1, "{:?}", corpus.edge_types());
-    assert_eq!(corpus.edge_count(&corpus.edge_types()[0]), 4);
-    assert_eq!(corpus.report.dropped.len(), 1);
+    let ran = native::run_dir(dir.path(), "snb.fossil", &[]).expect("the program runs");
+    assert_eq!(ran.edge_types().len(), 1, "{:?}", ran.edge_types());
+    assert_eq!(ran.edge_count(&ran.edge_types()[0]), 4);
+    assert_eq!(ran.report.dropped.len(), 1);
 }
 
 #[test]
@@ -281,12 +277,12 @@ Knowings : Knowing from KnowsRow
         .collect();
     assert!(messages.is_empty(), "{messages:#?}");
 
-    let corpus = native::run_dir(dir.path(), "snb.fossil", &[]).expect("the program runs");
-    let root = corpus.materialise();
+    let ran = native::run_dir(dir.path(), "snb.fossil", &[]).expect("the program runs");
+    let root = ran.materialise();
     let knowing = |a: u8, b: u8| format!("https://example.org/knowing/{a}-{b}");
     let person = |id: u8| format!("https://example.org/person/{id}");
     assert_eq!(
-        corpus.pairs(root.path(), "Knowing_known_Person"),
+        ran.pairs(root.path(), "Knowing_known_Person"),
         [
             (knowing(1, 2), person(2)),
             (knowing(1, 3), person(3)),

@@ -3,7 +3,7 @@
 #![allow(clippy::literal_string_with_formatting_args)]
 
 //! A source pipeline through the executor: one that compiles,
-//! types, and produces the corpus the program describes — not the one the
+//! types, and produces the graph the program describes — not the one the
 //! source has.
 //!
 //! Every layer below this one is already tested where it lives: the HIR shape in
@@ -32,7 +32,7 @@ ex:Person {
 /// Five people, three of them adults; three cities, two of which match a person
 /// (and one, `9`, matching nobody). So the answers are all different numbers:
 /// 5 rows in, 3 after the filter, 2 after the join, and `Eve` is the row the
-/// join drops but the filter keeps. Answers the corpus, materialised.
+/// join drops but the filter keeps. Answers the graph, materialised.
 fn run(program: &str) -> tempfile::TempDir {
     let dir = native::write_dir(&[
         ("person.shex", PERSON_SHEX),
@@ -51,7 +51,7 @@ fn run(program: &str) -> tempfile::TempDir {
         .materialise()
 }
 
-/// `where` reaches the corpus: two of five people are under 18 and are not in it.
+/// `where` reaches the graph: two of five people are under 18 and are not in it.
 #[test]
 fn a_filtered_pipeline_writes_only_the_rows_that_pass() {
     let root = run("\
@@ -74,7 +74,7 @@ User : Person from adultos
     );
 }
 
-/// `join` reaches the corpus, and brings a column with it: `city` reads
+/// `join` reaches the graph, and brings a column with it: `city` reads
 /// `ciudades.ciudad`, which is not a column of `users` at all. Eve passes the
 /// filter and has no city, so the inner join drops her.
 #[test]
@@ -112,6 +112,6 @@ User : Person from localizados
             [],
             |r| r.get(0),
         )
-        .expect("the joined column is in the corpus");
+        .expect("the joined column is in the graph");
     assert_eq!(cities, "Oviedo,Gijon");
 }

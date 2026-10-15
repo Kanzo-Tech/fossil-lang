@@ -35,20 +35,19 @@ const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 
-fn hello() -> native::Corpus {
+fn hello() -> native::Written {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     native::run_dir(&examples, "hello.fossil", &[]).expect("hello.fossil runs")
 }
 
-fn labels() -> native::Corpus {
+fn labels() -> native::Written {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/programs/labels");
     native::run_dir(&dir, "labels.fossil", &[]).expect("labels.fossil runs")
 }
 
-fn mapping_text(corpus: &native::Corpus) -> String {
+fn mapping_text(ran: &native::Written) -> String {
     String::from_utf8(
-        corpus
-            .files
+        ran.files
             .get("mapping.ttl")
             .expect("the run wrote mapping.ttl")
             .clone(),
@@ -217,11 +216,11 @@ fn tagged(s: &str, p: &str, o: &str, tag: &str) -> Triple {
 /// mapping parsed from its text, rendered to a view by `rml::sql` and read by
 /// `DuckDB`, which resolves each table name the mapping uses to the chunk the
 /// information files name.
-fn triples(corpus: &native::Corpus) -> BTreeSet<Triple> {
-    let root = corpus.materialise();
-    let mapping = rml::rdf::parse_turtle(&mapping_text(corpus), None).expect("the mapping parses");
+fn triples(ran: &native::Written) -> BTreeSet<Triple> {
+    let root = ran.materialise();
+    let mapping = rml::rdf::parse_turtle(&mapping_text(ran), None).expect("the mapping parses");
     let conn = duckdb::Connection::open_in_memory().expect("duckdb");
-    let graph = corpus.graph();
+    let graph = ran.graph();
     let view = |name: &str, relative: String| {
         conn.execute_batch(&format!(
             "CREATE VIEW \"{name}\" AS SELECT * FROM read_parquet({})",
@@ -236,7 +235,7 @@ fn triples(corpus: &native::Corpus) -> BTreeSet<Triple> {
         );
     }
     for edge in &graph.edges {
-        view(&edge.triple(), corpus.adjacency(&edge.triple()));
+        view(&edge.triple(), ran.adjacency(&edge.triple()));
     }
     let create = rml::sql::create_view(&mapping, None, "triples", |t| Ok(format!("\"{t}\"")))
         .expect("the mapping renders");
@@ -330,13 +329,76 @@ fn the_triples_of_labels_are_the_triples_of_its_program() {
     assert_eq!(triples(&labels()), expected);
 }
 
+// ──────────────────────────────────────────────────────────── before a run
+
+/// The mapping of the types a program declares and imports, with no run: what a
+/// host asks for before it has data. `documents` are read from `dir` beside the
+/// program.
+fn described(dir: &Path, program: &str, documents: &[&str]) -> String {
+    let documents: Vec<(String, String)> = documents
+        .iter()
+        .map(|name| {
+            let text = std::fs::read_to_string(dir.join(name)).expect("the document");
+            ((*name).to_string(), text)
+        })
+        .collect();
+    let documents: Vec<(&str, &str)> = documents
+        .iter()
+        .map(|(name, text)| (name.as_str(), text.as_str()))
+        .collect();
+    let text = std::fs::read_to_string(dir.join(program)).expect("the program");
+    let (db, file) = support::db_with_shapes(&text, program, &documents);
+    let schema = fossil_df::output_descriptor(&db, file).expect("the program's types");
+    let mapping = fossil_mir::describe::describe(&schema, &fossil_mir::describe::Natural::new())
+        .expect("the mapping");
+    fossil_mir::describe::turtle(&mapping).expect("the document")
+}
+
+/// **The mapping a program's types describe is the mapping its run writes**, for
+/// a program whose mappings write every field its types declare: the same triples
+/// maps over the same tables, so a host that asks before the run and one that
+/// reads `mapping.ttl` after it are shown one thing. One program imports its type
+/// from a shape document, and the other declares its own, with a relation, a
+/// language-tagged set and annotations.
+///
+/// It does not hold for a field no mapping writes: the types declare it, so the
+/// description has its predicate, and the run has no column to read it from.
+#[test]
+fn the_mapping_a_programs_types_describe_is_the_mapping_its_run_writes() {
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    assert_eq!(
+        render(&described(&examples, "hello.fossil", &["hello.shex"])),
+        render(&mapping_text(&hello())),
+    );
+    let labels_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/programs/labels");
+    assert_eq!(
+        render(&described(&labels_dir, "labels.fossil", &[])),
+        render(&mapping_text(&labels())),
+    );
+}
+
+/// The mapping names the index columns as `GraphAr` does: they are restated in
+/// `fossil-mir`, which links no Parquet, and this is what holds them.
+#[test]
+fn the_mapping_names_the_index_columns_graphar_does() {
+    use fossil_mir::describe::{DST_INDEX_COL, SRC_INDEX_COL, VERTEX_INDEX_COL};
+    assert_eq!(
+        (VERTEX_INDEX_COL, SRC_INDEX_COL, DST_INDEX_COL),
+        (
+            graphar_parquet::VERTEX_INDEX_COL,
+            graphar_parquet::SRC_INDEX_COL,
+            graphar_parquet::DST_INDEX_COL
+        )
+    );
+}
+
 // ──────────────────────────────────────────────────────────── the document
 
 #[test]
 fn the_document_parses_and_writes_back_to_itself() {
-    for corpus in [hello(), labels()] {
+    for ran in [hello(), labels()] {
         let mapping =
-            rml::rdf::parse_turtle(&mapping_text(&corpus), None).expect("the mapping parses");
+            rml::rdf::parse_turtle(&mapping_text(&ran), None).expect("the mapping parses");
         let written = rml::rdf::write_turtle(&mapping).expect("the mapping writes");
         assert_eq!(
             rml::rdf::parse_turtle(&written, None).expect("it parses again"),

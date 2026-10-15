@@ -86,9 +86,9 @@ which works because the entries are generic — and an entry lands when the seco
 it arrives and not before, an admission rule that is
 [in the discard list](/docs/design/discarded) with the evidence that produced it.
 
-This design has one price, paid in the corpus rather than in the compiler: **one entry is reachable
+This design has one price, paid in the graph rather than in the compiler: **one entry is reachable
 by two paths.** `x.trim()` and `str.trim(x)` are both correct and both appear in real programs, so a
-corpus of fossil carries two spellings of one idea — a genuine exception to the house rule against
+graph of fossil carries two spellings of one idea — a genuine exception to the house rule against
 exactly that. What makes it acceptable is that it is a **resolution rule** rather than two
 constructs: one entry, one signature, one implementation, which is `s.len()` ≡ `str::len(&s)` in Rust
 and `s.upper()` ≡ `str.upper(s)` in Python. It is spelled out once, in
@@ -99,7 +99,7 @@ and `s.upper()` ≡ `str.upper(s)` in Python. It is spelled out once, in
 1. **A type whose members cannot be decided statically** — a source whose columns vary per row, a
    dynamically assembled record. That breaks the premise under the syntax rather than the syntax.
 2. **The two paths used for different things.** The moment `str.lower(x)` means something `x.lower()`
-   does not, they are two spellings rather than one entry. Observable in the corpus, not arguable.
+   does not, they are two spellings rather than one entry. Observable in the graph, not arguable.
 3. **A vocabulary whose short names collide so often that declaring the type is the norm.** Then the
    short name has stopped being the name, and [the naming rule](/docs/design/type-providers) goes
    with it.

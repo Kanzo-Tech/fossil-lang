@@ -119,8 +119,8 @@ fn walk(dir: &Path, out: &mut Vec<Program>) {
 /// are declared and a reader gets them. What each mapping wrote is the section
 /// above this one; this section is what the graph says. The type's IRI is the
 /// mapping's, and is not here.
-fn render_run(corpus: &native::Corpus) -> String {
-    let graph = corpus.graph();
+fn render_run(ran: &native::Written) -> String {
+    let graph = ran.graph();
     let mut out = String::from("\n── run ──\n");
     if graph.vertices.is_empty() {
         out.push_str("NO VERTEX TYPE was written\n");
@@ -139,7 +139,7 @@ fn render_run(corpus: &native::Corpus) -> String {
             out,
             "vertex {} × {} — {}",
             v.r#type,
-            corpus.vertex_count(&v.r#type),
+            ran.vertex_count(&v.r#type),
             columns.join(", "),
         );
     }
@@ -147,7 +147,7 @@ fn render_run(corpus: &native::Corpus) -> String {
         out.push_str("NO EDGE TYPE was written\n");
     }
     for e in &graph.edges {
-        let dropped = corpus
+        let dropped = ran
             .report
             .dropped
             .iter()
@@ -157,7 +157,7 @@ fn render_run(corpus: &native::Corpus) -> String {
             out,
             "edge {} × {}{}",
             e.triple(),
-            corpus.edge_count(&e.triple()),
+            ran.edge_count(&e.triple()),
             // Silent on a clean run: an artefact that says «0 dropped» on every
             // program stops being read, and the one program that drops a row is
             // the whole reason the number exists.
@@ -174,14 +174,14 @@ fn render_run(corpus: &native::Corpus) -> String {
 /// Invariant 5: the store holds `fossil.graph.yml`, the mapping beside it and
 /// exactly the files the information files name — each document, each chunk,
 /// each count and each offset table.
-fn unnamed_or_missing(corpus: &native::Corpus) -> Vec<String> {
+fn unnamed_or_missing(ran: &native::Written) -> Vec<String> {
     use graphar_parquet::paths;
-    let graph = corpus.graph();
+    let graph = ran.graph();
     let mut named: Vec<String> = vec!["fossil.graph.yml".to_string(), "mapping.ttl".to_string()];
     for v in &graph.vertices {
         named.push(v.file_name());
         named.push(paths::vertex_count(v));
-        let count = corpus.vertex_count(&v.r#type);
+        let count = ran.vertex_count(&v.r#type);
         for group in &v.property_groups {
             named.extend(
                 (0..count.div_ceil(v.chunk_size)).map(|k| paths::vertex_chunk(v, group, k)),
@@ -192,12 +192,12 @@ fn unnamed_or_missing(corpus: &native::Corpus) -> Vec<String> {
         let adj = &e.adj_lists[0];
         named.push(e.file_name());
         named.push(paths::edge_vertex_count(e, adj));
-        let sources = corpus.vertex_count(&e.src_type);
+        let sources = ran.vertex_count(&e.src_type);
         for part in 0..sources.div_ceil(e.src_chunk_size) {
             named.push(paths::edge_count(e, adj, part));
             named.push(paths::offset_chunk(e, adj, part));
         }
-        let edges = corpus.edge_count(&e.triple());
+        let edges = ran.edge_count(&e.triple());
         if edges > 0 {
             named.push(paths::adj_list_chunk(e, adj, 0, 0));
             assert!(
@@ -209,13 +209,13 @@ fn unnamed_or_missing(corpus: &native::Corpus) -> Vec<String> {
     }
     let mut findings = Vec::new();
     for path in &named {
-        if !corpus.files.contains_key(path) {
+        if !ran.files.contains_key(path) {
             findings.push(format!(
                 "  RUN `{path}` is what the information files tell a reader to fetch, and it is not there"
             ));
         }
     }
-    for path in corpus.files.keys() {
+    for path in ran.files.keys() {
         if !named.contains(path) {
             findings.push(format!(
                 "  RUN `{path}` was written and no information file names it"
@@ -281,7 +281,7 @@ fn the_clean_programs_compile_and_keep_what_they_say() {
         //
         // A property can be lost two ways and they are not the same defect.
         // `lower_binary` refuses arithmetic with a diagnostic naming the
-        // expression and THEN returns `None`: the author is told, the corpus is
+        // expression and THEN returns `None`: the author is told, the graph is
         // short a column, and the language owes an implementation.
         // `lower_property` returns `None` for a form it cannot read and
         // `body.rs`'s bare `if let Some(prop)` skips it with no diagnostic and
@@ -299,7 +299,7 @@ fn the_clean_programs_compile_and_keep_what_they_say() {
                 .find(|d| d.span.start < end && d.span.end > start);
             match announced {
                 Some(d) => findings.push(format!(
-                    "  DROPPED `{mapping}.{key}` is not written to the corpus, and the \
+                    "  DROPPED `{mapping}.{key}` is not written to the graph, and the \
                      compiler said so: {}",
                     d.message(),
                 )),
@@ -346,15 +346,15 @@ fn the_clean_programs_compile_and_keep_what_they_say() {
                 // beside the program, and nothing consults a working directory.
                 let dir = program.source.parent().expect("a program has a directory");
                 match native::run_dir(dir, &file_name, &[]) {
-                    Ok(corpus) => {
-                        compiled.push_str(&render_run(&corpus));
-                        if corpus.graph().vertices.is_empty() {
+                    Ok(ran) => {
+                        compiled.push_str(&render_run(&ran));
+                        if ran.graph().vertices.is_empty() {
                             findings.push(
                                 "  RUN it ran and wrote no vertex type — the artefact is empty"
                                     .to_string(),
                             );
                         }
-                        findings.extend(unnamed_or_missing(&corpus));
+                        findings.extend(unnamed_or_missing(&ran));
                     }
                     Err(e) => {
                         let _ = write!(compiled, "\n── run ──\nREFUSED: {e}\n");

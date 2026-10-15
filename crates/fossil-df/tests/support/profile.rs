@@ -39,14 +39,15 @@ pub(crate) fn profile_and_register(db: &mut dyn Db, sources: &[Input]) {
             // A materialised row (`io.rdf`) takes its schema from its shape.
             let format = input.format.as_deref()?;
             fossil_profile::native_reader(format)?;
-            input.binding.as_ref()?;
+            let binding = input.binding.as_ref()?;
             if !std::path::Path::new(&input.location).is_file() || !seen.insert(input.key.as_str())
             {
                 return None;
             }
             Some(Source {
+                binding: binding.as_str().into(),
                 key: input.key.as_str().into(),
-                name: input.location.clone(),
+                location: input.location.clone(),
                 format: format.to_string(),
                 option: input.option.clone(),
                 etag: String::new(),

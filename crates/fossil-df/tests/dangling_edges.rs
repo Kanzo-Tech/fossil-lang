@@ -2,7 +2,7 @@
 //! many.**
 //!
 //! `execute_edge` resolves both endpoints with an inner join, so a row naming a
-//! subject no vertex carries never becomes an edge — a corpus cannot hold an
+//! subject no vertex carries never becomes an edge — a graph cannot hold an
 //! edge to a vertex that is not there. It is not silent: without the count the
 //! only trace would be an `edge_count` smaller than the source's row count,
 //! which nobody has to compare against anything. `docs/programs/reviews/` is

@@ -221,7 +221,7 @@ describe('run into memory, through a host', () => {
 
     const { report, files } = await run(PROGRAM, { host, into: 'memory' });
 
-    expect(report.location).toBe('memory://corpus/');
+    expect(report.location).toBe('memory://graph/');
     expect(files.map((f) => f.path).sort()).toEqual([
       'Order.vertex.yml',
       'Order_placedBy_Person.edge.yml',

@@ -1691,7 +1691,6 @@ dependencies = [
  "object_store",
  "oxrdf",
  "rml",
- "rudof_iri",
  "rudof_rdf",
  "salsa",
  "schemars",
@@ -1795,8 +1794,12 @@ dependencies = [
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-syntax",
+ "oxrdf",
+ "rml",
+ "rudof_iri",
  "salsa",
  "smol_str",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

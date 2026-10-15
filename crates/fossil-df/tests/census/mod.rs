@@ -116,7 +116,7 @@ pub(crate) struct MappingCensus {
     /// property is lost: was anything SAID about it? `lower_binary` refuses
     /// arithmetic with a diagnostic and then returns `None`; `lower_property`
     /// refuses a form it cannot read by returning `None` and nothing else. Both
-    /// end with the property missing from the corpus, and only one of them tells
+    /// end with the property missing from the graph, and only one of them tells
     /// the author. Without the span the two are indistinguishable from here.
     pub(crate) spans: Vec<(u32, u32)>,
     /// The key of every property that reached [`fossil_hir::body::HirBody`].

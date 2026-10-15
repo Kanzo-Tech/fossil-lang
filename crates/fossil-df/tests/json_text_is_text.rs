@@ -63,8 +63,8 @@ fn parse_date_over_it_checks_and_writes_a_date() {
     assert!(messages(&program).is_empty(), "{:#?}", messages(&program));
 
     let dir = dir(&program);
-    let corpus = native::run_dir(dir.path(), "person.fossil", &[]).expect("the program runs");
-    let person = corpus.vertex("Person");
+    let ran = native::run_dir(dir.path(), "person.fossil", &[]).expect("the program runs");
+    let person = ran.vertex("Person");
     let birthday = person.property_groups[0]
         .properties
         .iter()

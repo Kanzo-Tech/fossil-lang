@@ -6,7 +6,7 @@
  * credential the host vends for that connection (`@fossil-lang/storage`), and `fossil-profile`'s
  * plan runs on the host's engine ({@link runProfiler}): the columns and their types, and — unless
  * the host asks for types alone — the counts, candidate keys, inclusions between sources and a
- * sample. The plan is Rust, the same one `fossil-df`'s tests run on native DuckDB, so only the
+ * sample. Every source in the answer is named by its binding, the name the program writes. The plan is Rust, the same one `fossil-df`'s tests run on native DuckDB, so only the
  * engine differs. The engine is the host's, which is why DuckDB-WASM is not a peer.
  *
  * `FossilProgram.describe` is this over the program's own inputs; {@link profile} is it over sources
@@ -31,12 +31,16 @@ import { attachCause } from "@fossil-lang/types/internal";
 import { NATIVE_ROWS, type NativeRow } from "./catalogue.generated.js";
 import { runProfiler, type ProfileRows } from "./profile.js";
 
-/** A data input a host can DESCRIBE — the rows `catalogue.bnf` gives a `reads native <fn>`. A
- *  materialised row (`io.rdf`) takes its schema from its shape instead. */
-type NativeInput = Input & { format: NativeRow };
+/** A data input a host can DESCRIBE — the rows `catalogue.bnf` gives a `reads native <fn>`, bound to
+ *  a name. A materialised row (`io.rdf`) takes its schema from its shape instead. */
+type NativeInput = Input & { format: NativeRow; binding: string };
 
 function isNative(input: Input): input is NativeInput {
-  return input.role === "data" && (NATIVE_ROWS as readonly (string | undefined)[]).includes(input.format);
+  return (
+    input.role === "data" &&
+    input.binding !== undefined &&
+    (NATIVE_ROWS as readonly (string | undefined)[]).includes(input.format)
+  );
 }
 
 /** What a host gives a profile: its credentials, the page's engine, and how far to go. */
@@ -112,7 +116,7 @@ export async function profile(inputs: readonly Input[], io: ProfileIO): Promise<
             throw FossilError.of("storage/no-route", { location: source.location });
           }
           const etag = (await io.etag?.(source)) ?? "";
-          return { key: source.key, name, format: source.format, option: source.option, etag };
+          return { binding: source.binding, key: source.key, location: name, format: source.format, option: source.option, etag };
         } catch (err) {
           signal?.throwIfAborted();
           const problem = isFossilError(err) ? err.problem : FossilError.of("engine/failed", {}, { cause: err }).problem;

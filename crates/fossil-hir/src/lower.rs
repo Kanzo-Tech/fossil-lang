@@ -151,7 +151,7 @@ pub enum HirSourceOp {
     /// `distinct()` — keep one of each identical row. It takes nothing: a
     /// `distinct(on = …)` is `DISTINCT ON`, which picks an arbitrary row per
     /// group until `sort` exists to order them, and an arbitrary pick is a
-    /// program whose corpus differs between two runs.
+    /// program whose graph differs between two runs.
     Distinct,
     /// `union(Contractor)` — every row of both sides, duplicates kept.
     ///
@@ -443,7 +443,7 @@ pub enum HirExpr {
     ///    while `-(0.0)` is `-0.0`: same value under `==`, different bits
     ///    (`0x0000…` vs `0x8000…`), and different again under division
     ///    (`+inf` vs `-inf`). A `xsd:float` column written from the desugaring
-    ///    loses the sign of every zero, and the corpus is a file — the bits are
+    ///    loses the sign of every zero, and the graph is a file — the bits are
     ///    what a reader gets. `-NaN` and `0 - NaN` differ in the sign bit too.
     /// 2. **A desugaring makes the IDE report an operator nobody wrote.**
     ///    `ProvenanceKind::BinaryOp` carries the operator's source spelling, and
@@ -671,7 +671,7 @@ fn check_reader_option(
                     value: Some(value.to_string()),
                 },
                 Some(
-                    "both readers a corpus is written through take a single BYTE, so a wider one \
+                    "both readers a graph is written through take a single BYTE, so a wider one \
                  would mean something different to each"
                         .to_string(),
                 ),
@@ -2040,7 +2040,7 @@ fn lower_property(
 /// The parser builds seven kinds of node in a value position and this function
 /// reads all seven. A silent `None` here would mean `lower_property` drops the
 /// whole property, which `body()` skips without a word — a program that
-/// type-checks clean, runs, and emits a corpus with a column missing
+/// type-checks clean, runs, and emits a graph with a column missing
 /// (`/docs/design/expressions`).
 ///
 /// That is the worst failure mode available to a tool whose stated principle is
@@ -3190,7 +3190,7 @@ prop https://example.org/name - 1 1
     /// A call is a `Call` in the HIR.
     ///
     /// Dropped from `HirBody`, `slug = str.slug(User.name)` would check *ok*,
-    /// run, and leave the column absent from the corpus. The property survives
+    /// run, and leave the column absent from the graph. The property survives
     /// lowering, carrying the function's name and its argument, and no
     /// diagnostic is raised at all.
     #[test]
