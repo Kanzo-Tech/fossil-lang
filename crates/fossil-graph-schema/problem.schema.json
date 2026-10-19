@@ -3057,6 +3057,45 @@
       "x-detail": "\"`{at}` holds `{value}` twice\""
     },
     {
+      "description": "A subject with more than one value for a property, or more than one destination for a relation, that its shape declares single-valued (`maxCount 1`, `ShEx` `?` or bare). The rows offered the values, typically through a join that repeats the subject; keeping one would keep whichever the engine read first.",
+      "properties": {
+        "code": {
+          "enum": [
+            "write/too-many-values"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "at": {
+              "type": "string"
+            },
+            "subject": {
+              "type": "string"
+            },
+            "values": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "at",
+            "subject",
+            "values"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "A single-valued property has more than one value",
+      "type": "object",
+      "x-detail": "\"`{at}` is single-valued, and `{subject}` has {values} values for it\""
+    },
+    {
       "description": "A vertex whose `subject` is null or not an absolute IRI (admissibility A1): the identity of a vertex is its IRI, and a graph without one for a vertex has no vertex to name.",
       "properties": {
         "code": {

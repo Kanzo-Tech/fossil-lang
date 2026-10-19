@@ -93,7 +93,8 @@ and our checker types the result end to end, which is what neither of the other 
 
 `Adults := User.where(User.age >= 18)` is a **relation**, not a value. `join` is in the first version
 as an inner join, and the checker gained its first two-input rule with it — the joined row is the
-two sides' scopes side by side, each column addressed by the binding that owns it — because a join
+two sides' scopes side by side, each column addressed by the binding that owns it, and its condition typed as any `==` is, so an
+`Integer` key against a `String` one is `type/incomparable` — because a join
 is where an operator set stops being a list and starts being an algebra. Ten of the thirteen are
 what the lowering emits today; the other three are defined and unreached, which is a different
 problem from being over-designed and takes a different fix:

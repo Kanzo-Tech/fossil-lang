@@ -852,6 +852,15 @@ catalogue! {
     #[error("`{at}` holds `{value}` twice")]
     WriteDuplicateValue { at: String, value: String },
 
+    /// A subject with more than one value for a property, or more than one
+    /// destination for a relation, that its shape declares single-valued
+    /// (`maxCount 1`, `ShEx` `?` or bare). The rows offered the values, typically
+    /// through a join that repeats the subject; keeping one would keep whichever
+    /// the engine read first.
+    "write/too-many-values", "A single-valued property has more than one value",
+    #[error("`{at}` is single-valued, and `{subject}` has {values} values for it")]
+    WriteTooManyValues { at: String, subject: String, values: u64 },
+
     /// A vertex whose `subject` is null or not an absolute IRI (admissibility
     /// A1): the identity of a vertex is its IRI, and a graph without one for a
     /// vertex has no vertex to name.

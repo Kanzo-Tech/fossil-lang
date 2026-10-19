@@ -232,7 +232,7 @@ pub async fn execute_graph<'db>(
     let mut edges = Vec::with_capacity(edge_groups.len());
     let mut edge_types = Vec::with_capacity(edge_groups.len());
     for (edge_type, group) in edge_groups {
-        edges.push(finalize_edge(&edge_type, group).await?);
+        edges.push(finalize_edge(ctx, &edge_type, group).await?);
         edge_types.push(edge_type);
     }
 
@@ -463,7 +463,7 @@ async fn finalize_vertex(
     first_id: u64,
 ) -> datafusion::error::Result<(VertexTable, NodeType)> {
     use datafusion::common::ScalarValue;
-    use datafusion::functions_aggregate::expr_fn::first_value;
+    use datafusion::functions_aggregate::expr_fn::{count_distinct, first_value};
     use datafusion::logical_expr::{ExprFunctionExt as _, expr::NullTreatment};
 
     let first = group.first().expect("a type group is never empty");
@@ -568,20 +568,38 @@ async fn finalize_vertex(
                 .map(|e| e.alias(format!("__merged_{i}")))
             })
             .collect::<datafusion::error::Result<_>>()?;
+        // Beside each merged column, how many distinct values the subject's
+        // rows offered it. `first_value` is the merge only while that is at
+        // most one: past it, the property is single-valued and the subject has
+        // several, and which one survives depends on the order the engine
+        // happened to read the rows in. See [`single_valued`].
+        let counted: Vec<DfExpr> = columns[1..]
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _))| count_distinct(column(name)).alias(format!("__values_{i}")))
+            .collect();
         let renamed: Vec<DfExpr> = std::iter::once(col(PAYLOAD_IDENTITY))
             .chain(columns[1..].iter().enumerate().map(|(i, (name, _))| {
                 DfExpr::Column(Column::new_unqualified(format!("__merged_{i}")))
                     .alias(name.as_str())
             }))
+            .chain((1..columns.len()).map(|i| col(format!("__values_{}", i - 1))))
             .collect();
-        row.aggregate(vec![col(PAYLOAD_IDENTITY)], merged)?
+        let batches = row
+            .aggregate(
+                vec![col(PAYLOAD_IDENTITY)],
+                merged.into_iter().chain(counted).collect(),
+            )?
             .select(renamed)?
             .sort(by_subject)?
+            .collect()
+            .await?;
+        single_valued(&node.label, &columns, batches)?
     } else {
-        row.sort(by_subject)?
+        row.sort(by_subject)?.collect().await?
     };
 
-    let batches = prepend_dense_id(sorted.collect().await?, first_id)?;
+    let batches = prepend_dense_id(sorted, first_id)?;
     register_batches(ctx, &node.label, &batches)?;
 
     let mut properties = Vec::with_capacity(values.len());
@@ -981,6 +999,57 @@ async fn execute_edge(
     })
 }
 
+/// Refuse a subject with more than one value for a single-valued property,
+/// and drop the counts [`finalize_vertex`] computed to find it.
+///
+/// A shape's `maxCount 1` is not a type: no value type carries «at most one»,
+/// so the checker cannot see it, and nothing in a program is multi-valued
+/// until the rows are — a mapping over a join repeats its subject once per
+/// matching row, and two mappings of one type mint the same subject from two
+/// sources. Merged by `first_value`, a subject offered `Countess` and
+/// `Enchantress` for a `nickname ?` kept whichever row came first, so the
+/// graph held one of them by chance and the run said nothing.
+///
+/// Counted as distinct NON-NULL values, because a mapping that does not write
+/// the property offers a null for it, and that is not a second value: the
+/// `People` row with an `email` and the `knows` row without one are one
+/// vertex with one email.
+///
+/// `batches` carry `subject`, the merged columns in `columns[1..]`'s order, and
+/// then one `Int64` count per merged column.
+fn single_valued(
+    label: &str,
+    columns: &[(String, DataType)],
+    batches: Vec<RecordBatch>,
+) -> datafusion::error::Result<Vec<RecordBatch>> {
+    use datafusion::arrow::array::AsArray as _;
+    use datafusion::arrow::datatypes::Int64Type;
+    use datafusion::arrow::util::display::array_value_to_string;
+
+    let kept: Vec<usize> = (0..columns.len()).collect();
+    let mut out = Vec::with_capacity(batches.len());
+    for batch in batches {
+        for (i, (name, _)) in columns.iter().enumerate().skip(1) {
+            let counts = batch
+                .column(columns.len() + i - 1)
+                .as_primitive::<Int64Type>();
+            if let Some(row) = (0..counts.len()).find(|&r| counts.value(r) > 1) {
+                return Err(DataFusionError::External(Box::new(
+                    fossil_graph_schema::Failure::new(
+                        fossil_graph_schema::Problem::WriteTooManyValues {
+                            at: format!("{label}.{name}"),
+                            subject: array_value_to_string(batch.column(0), row)?,
+                            values: u64::try_from(counts.value(row)).unwrap_or_default(),
+                        },
+                    ),
+                )));
+            }
+        }
+        out.push(batch.project(&kept)?);
+    }
+    Ok(out)
+}
+
 /// Merge every mapping's pairs for one edge table into the table: `UNION ALL`,
 /// then the set, then the order.
 ///
@@ -1006,6 +1075,7 @@ async fn execute_edge(
 /// `Multi` arm is the one that changes.
 #[tracing::instrument(skip_all, fields(edge = %edge.label))]
 async fn finalize_edge(
+    ctx: &SessionContext,
     edge: &GraphEdge,
     group: Vec<PreparedEdge>,
 ) -> datafusion::error::Result<EdgeTable> {
@@ -1030,6 +1100,9 @@ async fn finalize_edge(
         ])?
         .collect()
         .await?;
+    if edge.cardinality == Cardinality::Single {
+        single_valued_edge(ctx, edge, &batches).await?;
+    }
 
     Ok(EdgeTable {
         label: edge.label.clone(),
@@ -1039,6 +1112,67 @@ async fn finalize_edge(
         derived_from,
         dropped,
     })
+}
+
+/// Refuse a source vertex with more than one destination for a single-valued
+/// relation — [`single_valued`]'s rule, for the other half of a shape.
+///
+/// The pairs arrive distinct and sorted by `(src, dst)`, so a source with two
+/// destinations is two adjacent rows with one `src_dense`, and the run of them
+/// is how many it has. The set dedup above is not this: it removes a pair
+/// written twice, and two different pairs from one source are two edges a
+/// `{1,1}` predicate cannot hold.
+async fn single_valued_edge(
+    ctx: &SessionContext,
+    edge: &GraphEdge,
+    batches: &[RecordBatch],
+) -> datafusion::error::Result<()> {
+    use datafusion::arrow::array::AsArray as _;
+    use datafusion::arrow::datatypes::UInt32Type;
+    use datafusion::arrow::util::display::array_value_to_string;
+
+    let sources = batches.iter().flat_map(|b| {
+        b.column(0)
+            .as_primitive::<UInt32Type>()
+            .values()
+            .iter()
+            .copied()
+    });
+    let mut run: Option<(u32, u64)> = None;
+    let mut over: Option<(u32, u64)> = None;
+    for src in sources {
+        run = match run {
+            Some((s, n)) if s == src => Some((s, n + 1)),
+            Some(done) if done.1 > 1 => {
+                over = Some(done);
+                break;
+            }
+            _ => Some((src, 1)),
+        };
+    }
+    let Some((src, values)) = over.or_else(|| run.filter(|(_, n)| *n > 1)) else {
+        return Ok(());
+    };
+    let subject = ctx
+        .table(edge.source.as_str())
+        .await?
+        .filter(col(PAYLOAD_ADDRESS).eq(lit(src)))?
+        .select(vec![col(PAYLOAD_IDENTITY)])?
+        .collect()
+        .await?;
+    let subject = subject
+        .iter()
+        .find(|b| b.num_rows() > 0)
+        .map(|b| array_value_to_string(b.column(0), 0))
+        .transpose()?
+        .unwrap_or_else(|| src.to_string());
+    Err(DataFusionError::External(Box::new(
+        fossil_graph_schema::Failure::new(fossil_graph_schema::Problem::WriteTooManyValues {
+            at: format!("{}_{}_{}", edge.source, edge.label, edge.destination),
+            subject,
+            values,
+        }),
+    )))
 }
 
 /// The union of several [`plan::derived_from`] sets, as one: sorted, no repeats.

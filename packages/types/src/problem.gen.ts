@@ -100,6 +100,7 @@ export type Code =
   | 'write/invalid-language-tag'
   | 'write/language-not-allowed'
   | 'write/duplicate-value'
+  | 'write/too-many-values'
   | 'write/invalid-subject'
   | 'write/ambiguous-iri'
   | 'write/unrepresentable'
@@ -211,6 +212,7 @@ export const CODES: readonly Code[] = [
   'write/invalid-language-tag',
   'write/language-not-allowed',
   'write/duplicate-value',
+  'write/too-many-values',
   'write/invalid-subject',
   'write/ambiguous-iri',
   'write/unrepresentable',
@@ -898,6 +900,17 @@ export interface ProblemData {
     value: string;
   };
   /**
+   * A subject with more than one value for a property, or more than one destination for a relation,
+   * that its shape declares single-valued (`maxCount 1`, `ShEx` `?` or bare). The rows offered the
+   * values, typically through a join that repeats the subject; keeping one would keep whichever the
+   * engine read first.
+   */
+  'write/too-many-values': {
+    at: string;
+    subject: string;
+    values: number;
+  };
+  /**
    * A vertex whose `subject` is null or not an absolute IRI (admissibility A1): the identity of a
    * vertex is its IRI, and a graph without one for a vertex has no vertex to name.
    */
@@ -1116,6 +1129,7 @@ export const TITLES: { readonly [C in Code]: string } = {
   'write/invalid-language-tag': 'A value\'s language tag is not well-formed',
   'write/language-not-allowed': 'A value in a language the shape does not admit',
   'write/duplicate-value': 'A value appears twice where it must be unique',
+  'write/too-many-values': 'A single-valued property has more than one value',
   'write/invalid-subject': 'A vertex has no absolute IRI as its subject',
   'write/ambiguous-iri': 'One IRI names two things',
   'write/unrepresentable': 'A value GraphAr cannot hold',
@@ -1206,6 +1220,7 @@ export type DetailedCode =
   | 'write/failed'
   | 'write/invalid-language-tag'
   | 'write/duplicate-value'
+  | 'write/too-many-values'
   | 'write/invalid-subject'
   | 'write/ambiguous-iri'
   | 'write/unrepresentable'
@@ -1295,6 +1310,7 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'write/failed': (d) => `\`${d.path}\` could not be written`,
   'write/invalid-language-tag': (d) => `\`${d.property}\` has a value tagged \`${d.tag}\`, which is not a well-formed BCP 47 language tag`,
   'write/duplicate-value': (d) => `\`${d.at}\` holds \`${d.value}\` twice`,
+  'write/too-many-values': (d) => `\`${d.at}\` is single-valued, and \`${d.subject}\` has ${d.values} values for it`,
   'write/invalid-subject': (d) => `a \`${d.vertex_type}\` vertex has the subject ${d.subject}, which is not an absolute IRI`,
   'write/ambiguous-iri': (d) => `\`${d.iri}\` names both \`${d.first}\` and \`${d.second}\``,
   'write/unrepresentable': (d) => `\`${d.property}\` holds \`${d.value}\`, of type ${d.datatype}, which GraphAr cannot hold`,
