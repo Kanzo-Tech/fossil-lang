@@ -26,6 +26,7 @@ ignore = [
 
     # --- A build script's code path that the `bundled` feature compiles out ---
     { id = "RUSTSEC-2026-0368", reason = "zip 6.0.0: `ZipArchive::extract` follows an entry's symlink target outside the destination. zip is a build-dependency of libduckdb-sys, and its one call, `extract_libduckdb` in libduckdb-sys's build.rs, is inside `mod build_linked`, which is `#[cfg(not(feature = \"bundled\"))]`; every duckdb dependency here is `features = [\"bundled\"]`, so the build compiles DuckDB from source and never unpacks an archive. Not a lockfile fix — the patch is zip >=9 and libduckdb-sys 1.10502 requires ^6. FAILS AGAIN / DELETE ME: the day a duckdb dependency drops `bundled`, or libduckdb-sys moves to zip >=9." },
+    { id = "RUSTSEC-2026-0367", reason = "zip 6.0.0: `extract` keeps SUID/SGID/sticky bits from an entry's attributes. Same crate, same compiled-out call, same expiry as RUSTSEC-2026-0368 above." },
     { id = "RUSTSEC-2026-0369", reason = "zip 6.0.0: `extract` applies Unix permissions through an extracted symlink. Same crate, same compiled-out call, same expiry as RUSTSEC-2026-0368 above." },
 
     # --- Unmaintained, compile-time only, and there is no upgrade to take ---
