@@ -7,11 +7,12 @@ The run executed, and merging each subject's rows found one with more values tha
 
 ```text
 write/too-many-values
-  × `Person.nickname` is single-valued, and `https://example.org/person/1` has 2 values for it
+  × `Person.nickname` is single-valued, and `https://example.org/person/1` has both `Countess` and `Enchantress`
 ```
 
 `data.at` says where — `<Type>.<property>` for a property, `<Src>_<label>_<Dst>` for a relation —
-`data.subject` is the subject, and `data.values` how many distinct values its rows offered.
+`data.subject` is the subject, and `data.first` and `data.second` are two of the values its rows
+offered it — the least and the greatest, or for a relation two destination subjects.
 
 ## Why fossil refuses it
 
@@ -28,8 +29,8 @@ Nicknamed : Person from PersonRow.join(NickRow, on = PersonRow.id == NickRow.id)
 
 A person with two rows in `NickRow` is one vertex offered two nicknames. Keeping one would keep
 whichever row the engine read first, so the graph would depend on the order of the input and the run
-would say nothing about the value it dropped. The count is of distinct values that are not null: a
-mapping that does not write the property offers no value, and the same value twice is one value.
+would say nothing about the value it dropped. Only values that are not null are compared: a mapping
+that does not write the property offers no value, and the same value twice is one value.
 
 A relation is held to the same rule. `ex:isLocatedIn @ex:Place`, bare, is exactly one place, and a
 person the rows place in two is refused rather than written with two edges its shape does not allow.

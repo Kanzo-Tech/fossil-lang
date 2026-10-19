@@ -56,7 +56,7 @@ fn two_values_for_a_single_valued_property_refuse_the_run() {
         .expect_err("two nicknames for a `?` property must refuse");
     for part in [
         "`Person.nickname` is single-valued",
-        "`https://example.org/person/1` has 2 values",
+        "`https://example.org/person/1` has both `Countess` and `Enchantress`",
     ] {
         assert!(refused.contains(part), "missing {part:?} in {refused}");
     }
@@ -119,7 +119,7 @@ fn two_destinations_for_a_single_valued_relation_refuse_the_run() {
         .expect_err("two places for a bare `@ex:Place` must refuse");
     for part in [
         "`Person_isLocatedIn_Place` is single-valued",
-        "`https://example.org/person/1` has 2 values",
+        "`https://example.org/person/1` has both `https://example.org/place/1` and `https://example.org/place/2`",
     ] {
         assert!(refused.contains(part), "missing {part:?} in {refused}");
     }

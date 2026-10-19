@@ -3057,7 +3057,7 @@
       "x-detail": "\"`{at}` holds `{value}` twice\""
     },
     {
-      "description": "A subject with more than one value for a property, or more than one destination for a relation, that its shape declares single-valued (`maxCount 1`, `ShEx` `?` or bare). The rows offered the values, typically through a join that repeats the subject; keeping one would keep whichever the engine read first.",
+      "description": "A subject with more than one value for a property, or more than one destination for a relation, that its shape declares single-valued (`maxCount 1`, `ShEx` `?` or bare). The rows offered the values, typically through a join that repeats the subject; keeping one would keep whichever the engine read first. `first` and `second` are two of them: for a relation, two destination subjects.",
       "properties": {
         "code": {
           "enum": [
@@ -3070,19 +3070,21 @@
             "at": {
               "type": "string"
             },
-            "subject": {
+            "first": {
               "type": "string"
             },
-            "values": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
+            "second": {
+              "type": "string"
+            },
+            "subject": {
+              "type": "string"
             }
           },
           "required": [
             "at",
-            "subject",
-            "values"
+            "first",
+            "second",
+            "subject"
           ],
           "type": "object"
         }
@@ -3093,7 +3095,7 @@
       ],
       "title": "A single-valued property has more than one value",
       "type": "object",
-      "x-detail": "\"`{at}` is single-valued, and `{subject}` has {values} values for it\""
+      "x-detail": "\"`{at}` is single-valued, and `{subject}` has both `{first}` and `{second}`\""
     },
     {
       "description": "A vertex whose `subject` is null or not an absolute IRI (admissibility A1): the identity of a vertex is its IRI, and a graph without one for a vertex has no vertex to name.",

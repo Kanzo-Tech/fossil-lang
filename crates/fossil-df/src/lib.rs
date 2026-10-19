@@ -443,15 +443,15 @@ async fn prepare_vertex_ops<'db>(
 /// `UNION` would refuse two lists of different lengths.
 ///
 /// And a subject two mappings both mint is ONE vertex whose value for each
-/// property is the one somebody wrote: `first_value(… IGNORE NULLS)` per
-/// column, grouped by `subject`. Picking one whole ROW per subject, as
+/// property is the one somebody wrote: `min` per column, which skips nulls,
+/// grouped by `subject`, and refused if `max` disagrees ([`single_valued`]). Picking one whole ROW per subject, as
 /// `DISTINCT ON` did, would keep the `knows` mapping's row and its null `email`
 /// as often as the `People` row that has it.
 ///
 /// # A multi-valued property is a table of its own
 ///
 /// Merging a subject's rows is right for a single-valued column and wrong for a
-/// multi-valued one: `first_value` kept the first of a person's three
+/// multi-valued one: a merge to one value kept the first of a person's three
 /// nicknames from a CSV and dropped the other two without a word. So a
 /// [`Cardinality::Multi`] property leaves the vertex row and keeps every
 /// value, a row each ([`PropertyValues`]) — the shape a relational source
@@ -463,8 +463,7 @@ async fn finalize_vertex(
     first_id: u64,
 ) -> datafusion::error::Result<(VertexTable, NodeType)> {
     use datafusion::common::ScalarValue;
-    use datafusion::functions_aggregate::expr_fn::{count_distinct, first_value};
-    use datafusion::logical_expr::{ExprFunctionExt as _, expr::NullTreatment};
+    use datafusion::functions_aggregate::expr_fn::{max, min};
 
     let first = group.first().expect("a type group is never empty");
     let dedup = first.dedup;
@@ -555,41 +554,42 @@ async fn finalize_vertex(
         // «duplicate unqualified field name `customer`» over the `group-by`
         // program, whose rows already come out of an aggregate keyed on that
         // column.
+        //
+        // A subject's value is the least its rows offer and the greatest is
+        // kept beside it: the two are equal exactly when the rows offered one
+        // value, which is the only case a single-valued column can merge. Both
+        // skip nulls, so the `knows` row with no `email` adds nothing. Two
+        // accumulators of one value each, where counting distinct values held
+        // a set per subject and did not fit 600,000 orders in the executor's
+        // budget. See [`single_valued`].
+        let k = columns.len() - 1;
         let merged: Vec<DfExpr> = columns[1..]
             .iter()
             .enumerate()
-            .map(|(i, (name, _))| {
-                first_value(
-                    DfExpr::Column(Column::new_unqualified(name.as_str())),
-                    vec![],
-                )
-                .null_treatment(NullTreatment::IgnoreNulls)
-                .build()
-                .map(|e| e.alias(format!("__merged_{i}")))
+            .flat_map(|(i, (name, _))| {
+                [
+                    min(column(name)).alias(format!("__merged_{i}")),
+                    max(column(name)).alias(format!("__greatest_{i}")),
+                ]
             })
-            .collect::<datafusion::error::Result<_>>()?;
-        // Beside each merged column, how many distinct values the subject's
-        // rows offered it. `first_value` is the merge only while that is at
-        // most one: past it, the property is single-valued and the subject has
-        // several, and which one survives depends on the order the engine
-        // happened to read the rows in. See [`single_valued`].
-        let counted: Vec<DfExpr> = columns[1..]
-            .iter()
-            .enumerate()
-            .map(|(i, (name, _))| count_distinct(column(name)).alias(format!("__values_{i}")))
             .collect();
         let renamed: Vec<DfExpr> = std::iter::once(col(PAYLOAD_IDENTITY))
             .chain(columns[1..].iter().enumerate().map(|(i, (name, _))| {
                 DfExpr::Column(Column::new_unqualified(format!("__merged_{i}")))
                     .alias(name.as_str())
             }))
-            .chain((1..columns.len()).map(|i| col(format!("__values_{}", i - 1))))
+            .chain((0..k).map(|i| col(format!("__greatest_{i}"))))
+            .chain((0..k).map(|i| {
+                binary_expr(
+                    col(format!("__merged_{i}")),
+                    Operator::IsDistinctFrom,
+                    col(format!("__greatest_{i}")),
+                )
+                .alias(format!("__several_{i}"))
+            }))
             .collect();
         let batches = row
-            .aggregate(
-                vec![col(PAYLOAD_IDENTITY)],
-                merged.into_iter().chain(counted).collect(),
-            )?
+            .aggregate(vec![col(PAYLOAD_IDENTITY)], merged)?
             .select(renamed)?
             .sort(by_subject)?
             .collect()
@@ -1000,54 +1000,65 @@ async fn execute_edge(
 }
 
 /// Refuse a subject with more than one value for a single-valued property,
-/// and drop the counts [`finalize_vertex`] computed to find it.
+/// and drop the columns [`finalize_vertex`] computed to find it.
 ///
 /// A shape's `maxCount 1` is not a type: no value type carries «at most one»,
 /// so the checker cannot see it, and nothing in a program is multi-valued
 /// until the rows are — a mapping over a join repeats its subject once per
 /// matching row, and two mappings of one type mint the same subject from two
-/// sources. Merged by `first_value`, a subject offered `Countess` and
+/// sources. Merged by `first_value`, as it was, a subject offered `Countess` and
 /// `Enchantress` for a `nickname ?` kept whichever row came first, so the
 /// graph held one of them by chance and the run said nothing.
 ///
-/// Counted as distinct NON-NULL values, because a mapping that does not write
+/// Only NON-NULL values are compared, because a mapping that does not write
 /// the property offers a null for it, and that is not a second value: the
 /// `People` row with an `email` and the `knows` row without one are one
-/// vertex with one email.
+/// vertex with one email. The least and the greatest are the two values the
+/// refusal names.
 ///
-/// `batches` carry `subject`, the merged columns in `columns[1..]`'s order, and
-/// then one `Int64` count per merged column.
+/// `batches` carry `subject`, the merged (least) columns in `columns[1..]`'s
+/// order, then the greatest of each, then one `Boolean` per column saying the
+/// two differ.
 fn single_valued(
     label: &str,
     columns: &[(String, DataType)],
     batches: Vec<RecordBatch>,
 ) -> datafusion::error::Result<Vec<RecordBatch>> {
-    use datafusion::arrow::array::AsArray as _;
-    use datafusion::arrow::datatypes::Int64Type;
+    use datafusion::arrow::array::{Array as _, AsArray as _};
     use datafusion::arrow::util::display::array_value_to_string;
 
+    let k = columns.len() - 1;
     let kept: Vec<usize> = (0..columns.len()).collect();
     let mut out = Vec::with_capacity(batches.len());
     for batch in batches {
         for (i, (name, _)) in columns.iter().enumerate().skip(1) {
-            let counts = batch
-                .column(columns.len() + i - 1)
-                .as_primitive::<Int64Type>();
-            if let Some(row) = (0..counts.len()).find(|&r| counts.value(r) > 1) {
-                return Err(DataFusionError::External(Box::new(
-                    fossil_graph_schema::Failure::new(
-                        fossil_graph_schema::Problem::WriteTooManyValues {
-                            at: format!("{label}.{name}"),
-                            subject: array_value_to_string(batch.column(0), row)?,
-                            values: u64::try_from(counts.value(row)).unwrap_or_default(),
-                        },
-                    ),
-                )));
+            let several = batch.column(columns.len() + k + i - 1).as_boolean();
+            if let Some(row) = (0..several.len()).find(|&r| several.is_valid(r) && several.value(r))
+            {
+                return Err(too_many_values(
+                    format!("{label}.{name}"),
+                    array_value_to_string(batch.column(0), row)?,
+                    array_value_to_string(batch.column(i), row)?,
+                    array_value_to_string(batch.column(columns.len() + i - 1), row)?,
+                ));
             }
         }
         out.push(batch.project(&kept)?);
     }
     Ok(out)
+}
+
+/// `write/too-many-values`, as a `Failure` the executor finds in whatever
+/// `DataFusion` wraps it in — the way [`source_not_found`] carries its own.
+fn too_many_values(at: String, subject: String, first: String, second: String) -> DataFusionError {
+    DataFusionError::External(Box::new(fossil_graph_schema::Failure::new(
+        fossil_graph_schema::Problem::WriteTooManyValues {
+            at,
+            subject,
+            first,
+            second,
+        },
+    )))
 }
 
 /// Merge every mapping's pairs for one edge table into the table: `UNION ALL`,
@@ -1119,7 +1130,7 @@ async fn finalize_edge(
 ///
 /// The pairs arrive distinct and sorted by `(src, dst)`, so a source with two
 /// destinations is two adjacent rows with one `src_dense`, and the run of them
-/// is how many it has. The set dedup above is not this: it removes a pair
+/// names two of its destinations. The set dedup above is not this: it removes a pair
 /// written twice, and two different pairs from one source are two edges a
 /// `{1,1}` predicate cannot hold.
 async fn single_valued_edge(
@@ -1131,48 +1142,49 @@ async fn single_valued_edge(
     use datafusion::arrow::datatypes::UInt32Type;
     use datafusion::arrow::util::display::array_value_to_string;
 
-    let sources = batches.iter().flat_map(|b| {
-        b.column(0)
-            .as_primitive::<UInt32Type>()
-            .values()
-            .iter()
-            .copied()
+    let pairs = batches.iter().flat_map(|b| {
+        let (src, dst) = (
+            b.column(0).as_primitive::<UInt32Type>(),
+            b.column(1).as_primitive::<UInt32Type>(),
+        );
+        (0..b.num_rows()).map(move |i| (src.value(i), dst.value(i)))
     });
-    let mut run: Option<(u32, u64)> = None;
-    let mut over: Option<(u32, u64)> = None;
-    for src in sources {
-        run = match run {
-            Some((s, n)) if s == src => Some((s, n + 1)),
-            Some(done) if done.1 > 1 => {
-                over = Some(done);
-                break;
-            }
-            _ => Some((src, 1)),
-        };
+    let mut previous: Option<(u32, u32)> = None;
+    let mut found = None;
+    for (src, dst) in pairs {
+        if let Some((s, d)) = previous
+            && s == src
+        {
+            found = Some((src, d, dst));
+            break;
+        }
+        previous = Some((src, dst));
     }
-    let Some((src, values)) = over.or_else(|| run.filter(|(_, n)| *n > 1)) else {
+    let Some((src, first, second)) = found else {
         return Ok(());
     };
-    let subject = ctx
-        .table(edge.source.as_str())
-        .await?
-        .filter(col(PAYLOAD_ADDRESS).eq(lit(src)))?
-        .select(vec![col(PAYLOAD_IDENTITY)])?
-        .collect()
-        .await?;
-    let subject = subject
-        .iter()
-        .find(|b| b.num_rows() > 0)
-        .map(|b| array_value_to_string(b.column(0), 0))
-        .transpose()?
-        .unwrap_or_else(|| src.to_string());
-    Err(DataFusionError::External(Box::new(
-        fossil_graph_schema::Failure::new(fossil_graph_schema::Problem::WriteTooManyValues {
-            at: format!("{}_{}_{}", edge.source, edge.label, edge.destination),
-            subject,
-            values,
-        }),
-    )))
+    // The subject a `dense_id` numbers, read back from the table that numbered it.
+    let subject = async |label: &str, id: u32| -> datafusion::error::Result<String> {
+        let batches = ctx
+            .table(label)
+            .await?
+            .filter(col(PAYLOAD_ADDRESS).eq(lit(id)))?
+            .select(vec![col(PAYLOAD_IDENTITY)])?
+            .collect()
+            .await?;
+        Ok(batches
+            .iter()
+            .find(|b| b.num_rows() > 0)
+            .map(|b| array_value_to_string(b.column(0), 0))
+            .transpose()?
+            .unwrap_or_else(|| id.to_string()))
+    };
+    Err(too_many_values(
+        format!("{}_{}_{}", edge.source, edge.label, edge.destination),
+        subject(&edge.source, src).await?,
+        subject(&edge.destination, first).await?,
+        subject(&edge.destination, second).await?,
+    ))
 }
 
 /// The union of several [`plan::derived_from`] sets, as one: sorted, no repeats.
