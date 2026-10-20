@@ -15,7 +15,7 @@
 //! [`RunReport::dropped`] — how many rows of each relation's input did not
 //! become an edge, because an endpoint named a subject no vertex carries. That
 //! is provenance: a fact about the write, not about the bytes. See
-//! [`EdgeDrops`], which every sink is handed with the graph.
+//! [`EdgeDrops`](fossil_sinks::EdgeDrops), which every sink is handed with the graph.
 //!
 //! What would put the description back: a consumer that needs the counts without
 //! reading the store — then the report gains `graph`, of the type
