@@ -298,7 +298,7 @@ fn constraint(predicate: &str, datatype: Option<Primitive>, occurs: Occurs) -> P
     PropertyConstraint {
         name: fossil_graph_schema::local_name(predicate).to_string(),
         predicate: predicate.to_string(),
-        term: datatype.map(|p: Primitive| Term::Literal(Some(p.to_xsd_iri().into()))),
+        term: datatype.map(|p: Primitive| Term::Literal(Some(p.into()))),
         targets: Vec::new(),
         occurs,
         // A test fixture, not a document: no text to point into.

@@ -304,10 +304,7 @@ fn value_type(
                 format!("`{p}` is a primitive and takes no argument"),
             ));
         }
-        return Ok((
-            Some(Term::Literal(Some(p.to_xsd_iri().to_string()))),
-            Vec::new(),
-        ));
+        return Ok((Some(Term::Literal(Some(p.into()))), Vec::new()));
     }
     if dm.lookup_type(db, &name).is_some() || dm.lookup_type_error(db, &name).is_some() {
         return Err(invalid(

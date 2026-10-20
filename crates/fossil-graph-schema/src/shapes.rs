@@ -524,7 +524,7 @@ mod tests {
         PropertyConstraint {
             name: local_name(predicate).into(),
             predicate: predicate.into(),
-            term: datatype.map(|p| Term::Literal(Some(p.to_xsd_iri().into()))),
+            term: datatype.map(|p| Term::Literal(Some(p.into()))),
             targets: Vec::new(),
             occurs,
             span: None,
