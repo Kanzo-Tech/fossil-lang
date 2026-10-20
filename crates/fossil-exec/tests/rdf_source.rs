@@ -36,8 +36,7 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
 
     // The seam fossil exposes: enumerate the provider sources (MIR-derived) so
     // the host knows what to read + how to pivot it.
-    let accept_all = fossil_graph_schema::GraphSchema::default();
-    let bindings = fossil_exec::provider_bindings(&db, file, &accept_all);
+    let bindings = fossil_exec::provider_bindings(&db, file);
     assert_eq!(bindings.len(), 1, "one io.rdf source");
     let b = &bindings[0];
     assert_eq!(b.binding, "people");
@@ -60,9 +59,9 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
     // The host reads the bytes (here: from the filesystem) and registers the
     // decoded relation. Then the executor scans it.
     let ctx = SessionContext::new();
-    support::register_provider_sources(&ctx, &db, file, &accept_all);
+    support::register_provider_sources(&ctx, &db, file);
 
-    let graph = fossil_exec::execute_graph(&ctx, &db, file, &accept_all)
+    let graph = fossil_exec::execute_graph(&ctx, &db, file)
         .await
         .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
@@ -134,29 +133,14 @@ Project : Project from Project
 
 const KB_GRAPH_SHEX: &str = include_str!("fixtures/kb-graph.shex");
 
-const KB_SHEX: &str = r#"{ "@context": "http://www.w3.org/ns/shex.jsonld", "type": "Schema", "shapes": [
-  {"type":"ShapeDecl","id":"https://ex.org/KB","shapeExpr":{"type":"Shape","expression":{"type":"EachOf","expressions":[
-     {"type":"TripleConstraint","predicate":"https://ex.org/label","valueExpr":{"type":"NodeConstraint","datatype":"http://www.w3.org/2001/XMLSchema#string"}},
-     {"type":"TripleConstraint","predicate":"https://ex.org/hasProject","valueExpr":"https://ex.org/Project","min":0,"max":-1}
-  ]}}},
-  {"type":"ShapeDecl","id":"https://ex.org/Project","shapeExpr":{"type":"Shape","expression":{
-     "type":"TripleConstraint","predicate":"https://ex.org/title","valueExpr":{"type":"NodeConstraint","datatype":"http://www.w3.org/2001/XMLSchema#string"}}}}
-] }"#;
-
 #[tokio::test]
 async fn io_rdf_shex_descriptor_yields_typed_multivalued_edges() {
-    use fossil_hir::shex::ShExDescriptor;
-
     let (db, file) =
         support::db_with_shapes(KB_PROGRAM, "kb.fossil", &[("kb-graph.shex", KB_GRAPH_SHEX)]);
 
-    let descriptor = ShExDescriptor::from_reader(KB_SHEX.as_bytes())
-        .expect("parse ShEx")
-        .to_graph_schema();
-
     let ctx = SessionContext::new();
-    support::register_provider_sources(&ctx, &db, file, &descriptor);
-    let graph = fossil_exec::execute_graph(&ctx, &db, file, &descriptor)
+    support::register_provider_sources(&ctx, &db, file);
+    let graph = fossil_exec::execute_graph(&ctx, &db, file)
         .await
         .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 

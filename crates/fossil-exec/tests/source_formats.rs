@@ -53,14 +53,9 @@ async fn three_users_from(program: &str, name: &str) -> Vec<String> {
         .first()
         .expect("one mapping");
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_exec::execute_vertex(
-        &ctx,
-        &db,
-        mapping,
-        &fossil_graph_schema::GraphSchema::default(),
-    )
-    .await
-    .unwrap_or_else(|e| panic!("{name}: {e}; {:#?}", support::diagnostics(&db, file)));
+    let (vertex, node) = fossil_exec::execute_vertex(&ctx, &db, mapping)
+        .await
+        .unwrap_or_else(|e| panic!("{name}: {e}; {:#?}", support::diagnostics(&db, file)));
     assert_eq!(node.label, "Person");
     vertex
         .batches
@@ -95,19 +90,14 @@ async fn reads_an_ndjson_source() {
         .expect("one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_exec::execute_vertex(
-        &ctx,
-        &db,
-        mapping,
-        &fossil_graph_schema::GraphSchema::default(),
-    )
-    .await
-    .unwrap_or_else(|e| {
-        panic!(
-            "io.json reads via read_json: {e}; {:#?}",
-            support::diagnostics(&db, file)
-        )
-    });
+    let (vertex, node) = fossil_exec::execute_vertex(&ctx, &db, mapping)
+        .await
+        .unwrap_or_else(|e| {
+            panic!(
+                "io.json reads via read_json: {e}; {:#?}",
+                support::diagnostics(&db, file)
+            )
+        });
 
     assert_eq!(node.label, "Person");
     let total: usize = vertex
@@ -160,19 +150,14 @@ async fn reads_a_pipe_delimited_csv_source() {
         .expect("one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_exec::execute_vertex(
-        &ctx,
-        &db,
-        mapping,
-        &fossil_graph_schema::GraphSchema::default(),
-    )
-    .await
-    .unwrap_or_else(|e| {
-        panic!(
-            "io.csv reads the delimiter the binding named: {e}; {:#?}",
-            support::diagnostics(&db, file)
-        )
-    });
+    let (vertex, node) = fossil_exec::execute_vertex(&ctx, &db, mapping)
+        .await
+        .unwrap_or_else(|e| {
+            panic!(
+                "io.csv reads the delimiter the binding named: {e}; {:#?}",
+                support::diagnostics(&db, file)
+            )
+        });
 
     assert_eq!(node.label, "Person");
     let batch = vertex.batches.first().expect("one batch");

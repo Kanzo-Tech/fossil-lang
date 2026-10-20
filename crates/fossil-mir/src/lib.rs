@@ -33,7 +33,7 @@ pub mod schema;
 pub use diagnostics::program_diagnostics;
 pub use fossil_hir::stdlib::AggFn;
 pub use graph::MirGraph;
-pub use lower::{apply_output_shape, lower_to_mir_pg};
+pub use lower::lower_to_mir_pg;
 pub use op::{
     AggSpec, Expr, JoinKind, JoinSide, Op, ProjectedColumn, SinkRef, SourceFormat, VProp,
 };

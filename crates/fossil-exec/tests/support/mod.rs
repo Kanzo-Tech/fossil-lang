@@ -208,9 +208,8 @@ pub(crate) fn register_provider_sources(
     ctx: &datafusion::prelude::SessionContext,
     db: &FossilDb,
     file: SourceFile,
-    descriptor: &fossil_graph_schema::GraphSchema,
 ) {
-    for binding in fossil_exec::provider_bindings(db, file, descriptor) {
+    for binding in fossil_exec::provider_bindings(db, file) {
         let turtle = std::fs::read_to_string(&binding.uri)
             .unwrap_or_else(|e| panic!("read RDF source `{}`: {e}", binding.uri));
         fossil_exec::register_rdf(ctx, &binding, &turtle).expect("register the RDF source");

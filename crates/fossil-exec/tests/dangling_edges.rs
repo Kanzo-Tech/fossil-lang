@@ -59,16 +59,9 @@ async fn run(program: &str) -> fossil_sinks::Graph {
     let (db, file) =
         support::db_with_shapes(program, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
     let ctx = SessionContext::new();
-    fossil_exec::execute_graph(
-        &ctx,
-        &db,
-        file,
-        &fossil_hir::shex::ShExDescriptor::from_shex_source(GRAPH_SHEX)
-            .expect("parse graph.shex")
-            .to_graph_schema(),
-    )
-    .await
-    .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)))
+    fossil_exec::execute_graph(&ctx, &db, file)
+        .await
+        .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)))
 }
 
 #[tokio::test]

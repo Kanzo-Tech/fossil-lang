@@ -44,19 +44,14 @@ async fn a_call_produces_its_column() {
         .expect("one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_exec::execute_vertex(
-        &ctx,
-        &db,
-        mapping,
-        &fossil_graph_schema::GraphSchema::default(),
-    )
-    .await
-    .unwrap_or_else(|e| {
-        panic!(
-            "execute_vertex runs the DataFusion plan: {e}; {:?}",
-            support::diagnostics(&db, file)
-        )
-    });
+    let (vertex, node) = fossil_exec::execute_vertex(&ctx, &db, mapping)
+        .await
+        .unwrap_or_else(|e| {
+            panic!(
+                "execute_vertex runs the DataFusion plan: {e}; {:?}",
+                support::diagnostics(&db, file)
+            )
+        });
 
     let props: Vec<&str> = node.properties.iter().map(|p| p.name.as_str()).collect();
     assert_eq!(
@@ -106,19 +101,14 @@ User : Person from users
         .expect("one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, _) = fossil_exec::execute_vertex(
-        &ctx,
-        &db,
-        mapping,
-        &fossil_graph_schema::GraphSchema::default(),
-    )
-    .await
-    .unwrap_or_else(|e| {
-        panic!(
-            "execute_vertex runs the nested plan: {e}; {:?}",
-            support::diagnostics(&db, file)
-        )
-    });
+    let (vertex, _) = fossil_exec::execute_vertex(&ctx, &db, mapping)
+        .await
+        .unwrap_or_else(|e| {
+            panic!(
+                "execute_vertex runs the nested plan: {e}; {:?}",
+                support::diagnostics(&db, file)
+            )
+        });
 
     let batch = vertex.batches.first().expect("at least one RecordBatch");
     let tag = column::<StringArray>(batch, 2);
@@ -159,19 +149,14 @@ User : Person from users
         .expect("one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_exec::execute_vertex(
-        &ctx,
-        &db,
-        mapping,
-        &fossil_graph_schema::GraphSchema::default(),
-    )
-    .await
-    .unwrap_or_else(|e| {
-        panic!(
-            "execute_vertex runs the comparison plan: {e}; {:?}",
-            support::diagnostics(&db, file)
-        )
-    });
+    let (vertex, node) = fossil_exec::execute_vertex(&ctx, &db, mapping)
+        .await
+        .unwrap_or_else(|e| {
+            panic!(
+                "execute_vertex runs the comparison plan: {e}; {:?}",
+                support::diagnostics(&db, file)
+            )
+        });
 
     assert_eq!(node.properties[0].name, "senior");
     assert_eq!(
@@ -213,19 +198,14 @@ User : Person from users
         .expect("one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_exec::execute_vertex(
-        &ctx,
-        &db,
-        mapping,
-        &fossil_graph_schema::GraphSchema::default(),
-    )
-    .await
-    .unwrap_or_else(|e| {
-        panic!(
-            "execute_vertex runs the conditional plan: {e}; {:?}",
-            support::diagnostics(&db, file)
-        )
-    });
+    let (vertex, node) = fossil_exec::execute_vertex(&ctx, &db, mapping)
+        .await
+        .unwrap_or_else(|e| {
+            panic!(
+                "execute_vertex runs the conditional plan: {e}; {:?}",
+                support::diagnostics(&db, file)
+            )
+        });
 
     assert_eq!(node.properties[0].name, "band");
     let batch = vertex.batches.first().expect("at least one RecordBatch");
@@ -268,19 +248,14 @@ User : Person from users
         .expect("one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, _) = fossil_exec::execute_vertex(
-        &ctx,
-        &db,
-        mapping,
-        &fossil_graph_schema::GraphSchema::default(),
-    )
-    .await
-    .unwrap_or_else(|e| {
-        panic!(
-            "execute_vertex runs both paths: {e}; {:?}",
-            support::diagnostics(&db, file)
-        )
-    });
+    let (vertex, _) = fossil_exec::execute_vertex(&ctx, &db, mapping)
+        .await
+        .unwrap_or_else(|e| {
+            panic!(
+                "execute_vertex runs both paths: {e}; {:?}",
+                support::diagnostics(&db, file)
+            )
+        });
 
     let batch = vertex.batches.first().expect("at least one RecordBatch");
     let piped = column::<StringArray>(batch, 2);

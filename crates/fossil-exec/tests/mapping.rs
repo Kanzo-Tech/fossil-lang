@@ -295,7 +295,7 @@ fn described(dir: &Path, program: &str, documents: &[&str]) -> String {
         .collect();
     let text = std::fs::read_to_string(dir.join(program)).expect("the program");
     let (db, file) = support::db_with_shapes(&text, program, &documents);
-    let schema = fossil_exec::output_descriptor(&db, file).expect("the program's types");
+    let schema = fossil_hir::graph_type::graph_type(&db, file).expect("the program's types");
     let mapping = fossil_mir::describe::describe(&schema, &fossil_mir::describe::Natural::new())
         .expect("the mapping");
     fossil_mir::describe::turtle(&mapping).expect("the document")

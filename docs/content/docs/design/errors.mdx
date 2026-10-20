@@ -333,7 +333,7 @@ codes above (`provider/unknown`, `provider/wrong-capability`, `document/not-regi
 | Area | Codes | From |
 | --- | --- | --- |
 | `run` | `over-budget`, `does-not-compile`, `too-large` | `RunError`, `refuse_if_poisoned`, the numbering of `dense_id` |
-| `shape` (+1) | `more-than-one-output` | the executor's descriptor |
+| `shape` (+1) | `more-than-one-output` | the program's graph type (`graph_type`) |
 | `document` (+1) | `unread` | the executor's `run`, over the documents it could not read |
 | `source` (2) | `not-found`, `unparseable` | a CSV, JSON or Parquet source that names no file; the RDF sources a run decodes |
 | `engine` (1) | `failed` — DataFusion or DuckDB, the engine's error as `cause` | `execute_graph`, the profile's queries |

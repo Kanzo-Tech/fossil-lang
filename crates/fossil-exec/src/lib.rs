@@ -35,9 +35,6 @@
 // boxing it would put `Box<Failure>` in every signature a host reads.
 #![allow(clippy::result_large_err)]
 
-/// The output descriptor a program names, decoded from the document the
-/// checker read — the one resolution every host runs with.
-pub mod descriptor;
 /// The run a host drives: one compiled program, its documents, its sources,
 /// and the graph it writes.
 pub mod executor;
@@ -58,7 +55,6 @@ pub mod session;
 /// stdlib entry becomes, and which rows this engine cannot render.
 pub mod stdlib;
 
-pub use descriptor::output_descriptor;
 /// The executor a host drives. Named at the crate root because it is the
 /// crate's answer, not a detail of the module it is written in.
 pub use executor::{Executor, GraphFile, Output, Ran};
@@ -92,7 +88,7 @@ use fossil_hir::shapes::inner_primitive;
 use fossil_hir::{MappingLoc, def_map::def_map};
 // `PAYLOAD_IDENTITY` is the column of a vertex's IRI, which the mapping reads: `fossil-mir` names it.
 use fossil_mir::describe::PAYLOAD_IDENTITY;
-use fossil_mir::{Expr, Op, SourceFormat, VProp, apply_output_shape, lower_to_mir_pg};
+use fossil_mir::{Expr, Op, SourceFormat, VProp, lower_to_mir_pg};
 use fossil_sinks::{
     ENDPOINT_SRC, EdgeTable, Graph, PAYLOAD_ADDRESS, PROPERTY_LANGUAGE, PropertyValues, VertexTable,
 };
@@ -118,7 +114,6 @@ pub async fn execute_graph<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     file: SourceFile,
-    descriptor: &GraphSchema,
 ) -> datafusion::error::Result<Graph> {
     // The run's anchor, derived from the PROGRAM and not from the caller: a
     // source URI is a path the program wrote, so the directory it resolves
@@ -138,7 +133,7 @@ pub async fn execute_graph<'db>(
     // `MemTable`.
     let mut groups: Vec<(String, Vec<PreparedVertex>)> = Vec::new();
     for &mapping in &mappings {
-        let prepared = prepare_vertex(ctx, db, mapping, descriptor, anchor).await?;
+        let prepared = prepare_vertex(ctx, db, mapping, anchor).await?;
         match groups.iter_mut().find(|(t, _)| *t == prepared.node.label) {
             Some((_, group)) => group.push(prepared),
             None => groups.push((prepared.node.label.clone(), vec![prepared])),
@@ -169,7 +164,7 @@ pub async fn execute_graph<'db>(
     // twice and the other's not at all.
     let mut edge_groups: Vec<(GraphEdge, Vec<PreparedEdge>)> = Vec::new();
     for &mapping in &mappings {
-        let produced = execute_edges(ctx, db, mapping, descriptor, anchor).await?;
+        let produced = execute_edges(ctx, db, mapping, anchor).await?;
         for (prepared, edge_type) in produced {
             let key = |e: &GraphEdge| (e.source.clone(), e.label.clone(), e.destination.clone());
             match edge_groups
@@ -192,7 +187,12 @@ pub async fn execute_graph<'db>(
         nodes,
         edges: edge_types,
     };
-    carry_from_descriptor(&mut schema, descriptor);
+    // A type that does not decode is refused before a run reaches here
+    // (`Executor::execute`); the plan's schema then stands as written.
+    carry_from_graph_type(
+        &mut schema,
+        &fossil_hir::graph_type::graph_type(db, file).unwrap_or_default(),
+    );
     Ok(Graph {
         schema,
         vertices,
@@ -221,16 +221,15 @@ pub async fn execute_vertex<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
-    descriptor: &GraphSchema,
 ) -> datafusion::error::Result<(VertexTable, NodeType)> {
     let program_dir = fossil_base::location::program_dir(mapping.file(db).path(db));
     let anchor = SourceAnchor::new(&program_dir, fossil_base::connections(db));
-    let prepared = prepare_vertex(ctx, db, mapping, descriptor, anchor).await?;
+    let prepared = prepare_vertex(ctx, db, mapping, anchor).await?;
     finalize_vertex(ctx, vec![prepared], 0).await
 }
 
 /// Materialise the VERTEX of an op list that is already lowered and already
-/// descriptor-refined — [`execute_vertex`] without the `MappingLoc`.
+/// typed by `G` — [`execute_vertex`] without the `MappingLoc`.
 ///
 /// This is the seam for an op list built by hand rather than by
 /// [`lower_to_mir_pg`]. The operator algebra is defined whole and lowered in
@@ -284,13 +283,11 @@ async fn prepare_vertex<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
-    descriptor: &GraphSchema,
     anchor: SourceAnchor<'_>,
 ) -> datafusion::error::Result<PreparedVertex> {
     let mir = lower_to_mir_pg(db, mapping);
     refuse_if_poisoned(mir, db)?;
-    let ops = apply_output_shape(mir.ops(db), descriptor);
-    prepare_vertex_ops(ctx, db, &ops, anchor).await
+    prepare_vertex_ops(ctx, db, mir.ops(db), anchor).await
 }
 
 /// [`prepare_vertex`] over an op list that is already lowered and refined.
@@ -647,13 +644,13 @@ fn node_property(db: &dyn fossil_base::Db, prop: &VProp<'_>) -> NodeProp {
     }
 }
 
-/// What the descriptor says of each type, field and relation that the plan
-/// does not carry: their annotations, and the languages a tagged field admits.
+/// What `G`, the program's graph type, says of each type, field and relation
+/// that the plan does not carry: their annotations, and the languages a tagged field admits.
 /// The plan's schema is built from what the mappings wrote; these are facts of
 /// the shape, read off it by name.
-fn carry_from_descriptor(schema: &mut GraphSchema, descriptor: &GraphSchema) {
+fn carry_from_graph_type(schema: &mut GraphSchema, g: &GraphSchema) {
     for node in &mut schema.nodes {
-        let Some(declared) = descriptor.node(&node.label) else {
+        let Some(declared) = g.node(&node.label) else {
             continue;
         };
         node.annotations.clone_from(&declared.annotations);
@@ -665,7 +662,7 @@ fn carry_from_descriptor(schema: &mut GraphSchema, descriptor: &GraphSchema) {
         }
     }
     for edge in &mut schema.edges {
-        if let Some(d) = descriptor.edges.iter().find(|d| {
+        if let Some(d) = g.edges.iter().find(|d| {
             (&d.source, &d.label, &d.destination) == (&edge.source, &edge.label, &edge.destination)
         }) {
             edge.annotations.clone_from(&d.annotations);
@@ -765,13 +762,11 @@ async fn execute_edges<'db>(
     ctx: &SessionContext,
     db: &'db dyn fossil_base::Db,
     mapping: MappingLoc<'db>,
-    descriptor: &GraphSchema,
     anchor: SourceAnchor<'_>,
 ) -> datafusion::error::Result<Vec<(PreparedEdge, GraphEdge)>> {
     let mir = lower_to_mir_pg(db, mapping);
     refuse_if_poisoned(mir, db)?;
-    let ops = apply_output_shape(mir.ops(db), descriptor);
-    let ops = ops.as_slice();
+    let ops = mir.ops(db).as_slice();
 
     let mut out = Vec::new();
     for op in ops {
@@ -1306,18 +1301,14 @@ pub struct ProviderBinding {
 /// bytes and calls [`register_rdf`] to put the pivoted relation in the ctx
 /// before running [`execute_graph`].
 #[must_use]
-pub fn provider_bindings(
-    db: &dyn fossil_base::Db,
-    file: SourceFile,
-    descriptor: &GraphSchema,
-) -> Vec<ProviderBinding> {
+pub fn provider_bindings(db: &dyn fossil_base::Db, file: SourceFile) -> Vec<ProviderBinding> {
     let program_dir = fossil_base::location::program_dir(file.path(db));
     let anchor = SourceAnchor::new(&program_dir, fossil_base::connections(db));
     let mappings = def_map(db, file).mappings(db).clone();
     let mut out = Vec::new();
     for mapping in mappings {
         let mir = lower_to_mir_pg(db, mapping);
-        let ops = apply_output_shape(mir.ops(db), descriptor);
+        let ops = mir.ops(db);
 
         let Some((uri, binding)) = ops.iter().find_map(|o| match o {
             Op::Source {
@@ -1347,13 +1338,13 @@ pub fn provider_bindings(
             binding,
             uri,
             type_iri,
-            columns: rdf_columns(&ops),
+            columns: rdf_columns(ops),
         });
     }
     out
 }
 
-/// The RDF pivot columns a mapping reads, derived from the descriptor-refined
+/// The RDF pivot columns a mapping reads, derived from the `G`-typed
 /// ops: each vertex prop AND each edge endpoint whose source value is a `ColRef`
 /// contributes `{ name: <that column>, predicate: <its IRI>, multi: <not single
 /// valued> }`. The column name is the value `ColRef` (what the projection / edge

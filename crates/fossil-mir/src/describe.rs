@@ -9,9 +9,8 @@
 //! a datatype (`GraphAr` has no word for them), so the mapping is where the
 //! program's IRIs are.
 //!
-//! **It is a pure function of the types**, the [`GraphSchema`] a program
-//! declares or imports (`fossil_hir::shapes::program_shapes`) or a run
-//! produced: it reads no data and no engine, so a host asks it before any run
+//! **It is a pure function of the types**, the [`GraphSchema`] of the program
+//! (`fossil_hir::graph_type::graph_type`) or the one a run produced: it reads no data and no engine, so a host asks it before any run
 //! (`/docs/design/graphar`, D6). One triples map per vertex type, over the
 //! table of that name (`rml:SQL2008Table`); one per relation, over a query that
 //! joins the adjacency list to the two end tables on the index and reads the

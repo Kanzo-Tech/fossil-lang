@@ -57,6 +57,8 @@ pub mod didyoumean;
 /// only version of the artefact that can be wrong.
 pub mod display;
 pub mod documents;
+/// `G`, the type of the graph a program writes ([`graph_type::graph_type`]).
+pub mod graph_type;
 /// The identity of a TYPE: one `@subject` template per shape, file-keyed.
 ///
 /// The identity is unique per type — one `@subject` per shape, declared by the

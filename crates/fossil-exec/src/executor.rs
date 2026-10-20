@@ -5,8 +5,8 @@
 //! reports the documents the program names and does not hold
 //! ([`Executor::missing_documents`]), the host reads them and registers each
 //! one, and only then are the sources listed and the run executed — against the
-//! output descriptor decoded from those registered documents, which is what the
-//! checker read. The host's profile is written in the same way the editor's
+//! program's graph type ([`fossil_hir::graph_type::graph_type`]), decoded from
+//! those registered documents, which is what the checker read. The host's profile is written in the same way the editor's
 //! workspace takes it ([`Executor::register_inferred_descriptor`],
 //! [`Executor::register_undescribed`]), so the run checks the program against
 //! the columns the editor checked it against. [`Executor::execute`] builds a `DataFusion` plan
@@ -135,7 +135,7 @@ impl System for ExecutorSystem {
 ///
 /// The order is forced: parse → ask which
 /// documents the program names → register them → list sources and run. The
-/// output descriptor is decoded from the registry on each call, so it is always
+/// graph type is the checker's own query over the registry, so it is always
 /// the document the checker read.
 pub struct Executor {
     db: FossilDb,
@@ -233,8 +233,10 @@ impl Executor {
         Ok(())
     }
 
-    fn descriptor(&self) -> Result<GraphSchema, Failure> {
-        crate::output_descriptor(&self.db, self.file)
+    /// `G`, the type of the graph the program writes, or the problem of a
+    /// document it names that does not decode.
+    fn graph_type(&self) -> Result<GraphSchema, Failure> {
+        Ok(fossil_hir::graph_type::graph_type(&self.db, self.file)?)
     }
 
     /// Run the program on `DataFusion`, reading through `storage`, and write
@@ -260,7 +262,8 @@ impl Executor {
         limit: Option<usize>,
     ) -> Result<Ran, Failure> {
         let (db, file) = (&self.db, self.file);
-        let descriptor = self.descriptor()?;
+        // Refused before anything is routed or read.
+        self.graph_type()?;
         let (dest, memory) = match output {
             Output::Storage { job } => (granted(storage, job).await?, None),
             Output::Memory => {
@@ -288,9 +291,9 @@ impl Executor {
         for (authority, store) in storage.stores() {
             ctx.register_object_store(authority, store);
         }
-        register_rdf_sources(&ctx, db, file, &descriptor, storage).await?;
+        register_rdf_sources(&ctx, db, file, storage).await?;
 
-        let graph = crate::execute_graph(&ctx, db, file, &descriptor)
+        let graph = crate::execute_graph(&ctx, db, file)
             .await
             .map_err(|e| engine_failure(e, budget.refusal(), db, file))?;
 
@@ -376,10 +379,9 @@ async fn register_rdf_sources(
     ctx: &SessionContext,
     db: &dyn fossil_base::Db,
     file: SourceFile,
-    descriptor: &GraphSchema,
     storage: &Storage,
 ) -> Result<(), Failure> {
-    for binding in crate::provider_bindings(db, file, descriptor) {
+    for binding in crate::provider_bindings(db, file) {
         let bytes = storage.get(&binding.uri).await?;
         let turtle = std::str::from_utf8(&bytes).map_err(|e| {
             Failure::new(Problem::NotUtf8 {

@@ -39,19 +39,13 @@ Order : Order from orders
 
 const GRAPH_SHEX: &str = include_str!("fixtures/graph.shex");
 
-fn descriptor() -> fossil_graph_schema::GraphSchema {
-    fossil_hir::shex::ShExDescriptor::from_shex_source(GRAPH_SHEX)
-        .expect("parse graph.shex")
-        .to_graph_schema()
-}
-
 #[tokio::test]
 async fn execute_graph_resolves_edges_to_dense_ids() {
     let (db, file) =
         support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
 
     let ctx = SessionContext::new();
-    let graph = fossil_exec::execute_graph(&ctx, &db, file, &descriptor())
+    let graph = fossil_exec::execute_graph(&ctx, &db, file)
         .await
         .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
@@ -97,7 +91,7 @@ async fn the_write_emits_one_information_file_per_type_and_relation() {
         support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
 
     let ctx = SessionContext::new();
-    let graph = fossil_exec::execute_graph(&ctx, &db, file, &descriptor())
+    let graph = fossil_exec::execute_graph(&ctx, &db, file)
         .await
         .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
