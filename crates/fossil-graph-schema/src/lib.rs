@@ -212,6 +212,55 @@ pub enum Cardinality {
     Multi,
 }
 
+/// How a constraint is enforced — SHACL's three severities (SHACL §2.1.5,
+/// `sh:Violation`, `sh:Warning`, `sh:Info`), written as the argument of
+/// `@assert(…, severity = warning)` and as a field's `@severity(info)`.
+///
+/// A violation refuses: an error when the checker can decide it, a refused run
+/// when only the data can. A warning or an info is reported and the graph is
+/// still written.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConstraintSeverity {
+    /// The default: a constraint nothing qualifies is a violation.
+    #[default]
+    Violation,
+    Warning,
+    Info,
+}
+
+impl ConstraintSeverity {
+    /// Every severity, strongest first.
+    pub const ALL: [Self; 3] = [Self::Violation, Self::Warning, Self::Info];
+
+    /// The name a program writes — `violation`, `warning`, `info`.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Violation => "violation",
+            Self::Warning => "warning",
+            Self::Info => "info",
+        }
+    }
+
+    /// The severity a program writes as `name`, if it is one.
+    #[must_use]
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|s| s.name() == name)
+    }
+
+    /// The severity of the diagnostic a constraint of this severity raises
+    /// when the checker can decide it.
+    #[must_use]
+    pub const fn diagnostic(self) -> Severity {
+        match self {
+            Self::Violation => Severity::Error,
+            Self::Warning => Severity::Warning,
+            Self::Info => Severity::Info,
+        }
+    }
+}
+
 /// The name a program reads: in a hover, a diagnostic, a completion's
 /// signature. The variant's own name — `AnyUri`, not the `snake_case` the wire
 /// carries.

@@ -3,7 +3,7 @@
 //! Only the wrappers a downstream consumer needs to walk the program:
 //! `SourceDef`, `Mapping`, `MappingHeader`, `MappingBody`, `Property`,
 //! `ImportMember` for `fossil-hir`, and the declaration's `TypeDecl`, `Field`,
-//! `IriAttr`, `TypeExpr`. Each is a thin newtype around `SyntaxNode` with `cast`
+//! `IriAttr`, `AssertAttr`, `SeverityAttr`, `TypeExpr`. Each is a thin newtype around `SyntaxNode` with `cast`
 //! (kind-checking constructor) + `syntax` (back-edge accessor) and a few
 //! convenience accessors for child tokens. A view is added when a consumer needs it, never ahead of one.
 //!
@@ -13,7 +13,8 @@
 
 pub mod items;
 pub use items::{
-    AnnotationAttr, Field, ImportMember, IriAttr, ShapeExpr, TypeDecl, TypeExpr, split_lang_string,
+    AnnotationAttr, AssertAttr, Field, ImportMember, IriAttr, SeverityAttr, ShapeExpr, TypeDecl,
+    TypeExpr, split_lang_string,
 };
 
 use crate::kind::{SyntaxKind, SyntaxNode};

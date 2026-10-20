@@ -30,6 +30,12 @@ pub mod attr {
     pub const IRI: &str = "@iri";
     /// `@annotation("…", …)` — wherever `@iri` goes, any number of times.
     pub const ANNOTATION: &str = "@annotation";
+    /// `@assert(expr)` — wherever `@iri` goes, any number of times: what a
+    /// value or a node must satisfy that its type does not say.
+    pub const ASSERT: &str = "@assert";
+    /// `@severity(warning)` — before a field, at most once: how its count is
+    /// enforced.
+    pub const SEVERITY: &str = "@severity";
 }
 pub use parser::{Cst, CstRoot, parse};
 

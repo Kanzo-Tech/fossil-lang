@@ -275,7 +275,7 @@ fn seq.group_by = (rows: Rows, keys: Column+, aggregations: Aggregate+) -> Rows
 (* -------------------------------------------------------------------- str/ *)
 (* Every operation on a string. There is no `clean/`: no principle separates
    cleaning a string from operating on one, so `trim`, `lower`, `upper`, `slug`
-   and `strip_html` live here with the other eight.
+   and `strip_html` live here with the other nine.
 
    `normalize_unicode` is NOT among them and is not in the language: DuckDB has
    `nfc_normalize` and therefore NFC only, and a `normalize_unicode(x, 'NFKD')`
@@ -286,6 +286,11 @@ fn str.slice       = (text: String, start: Integer) -> String   ; expr "substrin
 fn str.contains    = (text: String, needle: String) -> Bool     ; expr "contains(%0, %1)" .
 fn str.starts_with = (text: String, prefix: String) -> Bool     ; expr "starts_with(%0, %1)" .
 fn str.ends_with   = (text: String, suffix: String) -> Bool     ; expr "ends_with(%0, %1)" .
+(* `matches` is a search, not a whole-string match: SHACL's `sh:pattern` is
+   XPath's `fn:matches`, which succeeds when the pattern matches any substring,
+   and a decoded `sh:pattern` has to mean what it meant. Anchor it with `^…$`
+   to match the whole. *)
+fn str.matches     = (text: String, pattern: String) -> Bool    ; expr "regexp_matches(%0, %1)" .
 fn str.replace     = (text: String, needle: String, replacement: String) -> String
                                                                 ; expr "replace(%0, %1, %2)" .
 fn str.split       = (text: String, separator: String) -> SeqString

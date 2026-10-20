@@ -220,6 +220,25 @@ pub(super) fn rows() -> Vec<RegistryEntry> {
             LoweringKind::Expr(SmolStr::new("ends_with(%0, %1)")),
         ),
         RegistryEntry::new(
+            "str.matches",
+            vec![
+                ParamSpec {
+                    name: SmolStr::new("text"),
+                    ty: SigTy::Scalar(ScalarTy::String),
+                    arity: Arity::One,
+                    named: false,
+                },
+                ParamSpec {
+                    name: SmolStr::new("pattern"),
+                    ty: SigTy::Scalar(ScalarTy::String),
+                    arity: Arity::One,
+                    named: false,
+                },
+            ],
+            SigTy::Scalar(ScalarTy::Bool),
+            LoweringKind::Expr(SmolStr::new("regexp_matches(%0, %1)")),
+        ),
+        RegistryEntry::new(
             "str.replace",
             vec![
                 ParamSpec {

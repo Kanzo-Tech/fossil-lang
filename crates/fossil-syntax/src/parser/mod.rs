@@ -17,10 +17,13 @@
 //! TypeDecl      := DeclAttrs 'type' IDENT NEWLINE INDENT Field+ DEDENT
 //! Field         := DeclAttrs IDENT SHAPE_SEP TypeExpr NEWLINE
 //! DeclAttrs     := DeclAttr+ (NEWLINE DeclAttr+)* NEWLINE?
-//! DeclAttr      := IriAttr | AnnotationAttr
+//! DeclAttr      := IriAttr | AnnotationAttr | AssertAttr | SeverityAttr
 //! IriAttr       := AT_ATTR LPAREN STRING RPAREN
 //! AnnotationAttr:= AT_ATTR LPAREN STRING COMMA (STRING | LANG_STRING) RPAREN
-//! TypeExpr      := IDENT (LT TypeExpr GT)?
+//! AssertAttr    := AT_ATTR LPAREN Expression
+//!                  (COMMA 'severity' ASSIGN IDENT)? RPAREN
+//! SeverityAttr  := AT_ATTR LPAREN IDENT RPAREN
+//! TypeExpr      := IDENT (LT TypeExpr (COMMA INTEGER (COMMA INTEGER)?)? GT)?
 //! Mapping       := MappingHeader INDENT MappingBody DEDENT
 //! MappingHeader := IDENT SHAPE_SEP ShapeExpr KW_FROM Expression
 //! ShapeExpr     := IDENT
