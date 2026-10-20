@@ -1,0 +1,24 @@
+# docs/programs/reviews in RML-Core. `author = Person(Note.email)` is the
+# subject template of `People` over the review's own column: no join.
+@base <https://bench.fossil.test/mapping> .
+@prefix rml:  <http://w3id.org/rml/> .
+@prefix shop: <https://shop.example/voc#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+<#People> a rml:TriplesMap ;
+  rml:logicalSource [
+    rml:source [ a rml:RelativePathSource ; rml:root rml:MappingDirectory ; rml:path "data/users.csv" ] ;
+    rml:referenceFormulation rml:CSV ] ;
+  rml:subjectMap [ rml:template "https://shop.example/user/{email}" ; rml:class shop:Person ] ;
+  rml:predicateObjectMap [ rml:predicate shop:name ;
+    rml:objectMap [ rml:reference "name" ; rml:datatype xsd:string ] ] .
+
+<#Reviews> a rml:TriplesMap ;
+  rml:logicalSource [
+    rml:source [ a rml:RelativePathSource ; rml:root rml:MappingDirectory ; rml:path "data/reviews.csv" ] ;
+    rml:referenceFormulation rml:CSV ] ;
+  rml:subjectMap [ rml:template "https://shop.example/review/{id}" ; rml:class shop:Review ] ;
+  rml:predicateObjectMap [ rml:predicate shop:body ;
+    rml:objectMap [ rml:reference "body" ; rml:datatype xsd:string ] ] ;
+  rml:predicateObjectMap [ rml:predicate shop:author ;
+    rml:objectMap [ rml:template "https://shop.example/user/{email}" ] ] .

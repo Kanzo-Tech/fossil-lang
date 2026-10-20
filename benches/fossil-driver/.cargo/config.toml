@@ -1,0 +1,3 @@
+# Build into the workspace's target directory, so the crates both resolve to are compiled once.
+[build]
+target-dir = "../../target"

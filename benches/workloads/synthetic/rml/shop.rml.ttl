@@ -1,0 +1,28 @@
+# docs/programs/shop in RML-Core. RML-Core has no filter, so `User.where(User.age >= 18)`
+# has no counterpart: the generator makes every user an adult, and the two define one graph.
+# `buyer` is a referencing object map joined on `user_id = id`, as the program's join is.
+@base <https://bench.fossil.test/mapping> .
+@prefix rml:  <http://w3id.org/rml/> .
+@prefix shop: <https://shop.example/voc#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+<#Users> a rml:TriplesMap ;
+  rml:logicalSource [
+    rml:source [ a rml:RelativePathSource ; rml:root rml:MappingDirectory ; rml:path "data/users.csv" ] ;
+    rml:referenceFormulation rml:CSV ] ;
+  rml:subjectMap [ rml:template "https://shop.example/user/{email}" ; rml:class shop:Person ] ;
+  rml:predicateObjectMap [ rml:predicate shop:email ;
+    rml:objectMap [ rml:reference "email" ; rml:datatype xsd:string ] ] ;
+  rml:predicateObjectMap [ rml:predicate shop:name ;
+    rml:objectMap [ rml:reference "name" ; rml:datatype xsd:string ] ] .
+
+<#Orders> a rml:TriplesMap ;
+  rml:logicalSource [
+    rml:source [ a rml:RelativePathSource ; rml:root rml:MappingDirectory ; rml:path "data/orders.csv" ] ;
+    rml:referenceFormulation rml:CSV ] ;
+  rml:subjectMap [ rml:template "https://shop.example/order/{id}" ; rml:class shop:Order ] ;
+  rml:predicateObjectMap [ rml:predicate shop:total ;
+    rml:objectMap [ rml:reference "amount" ; rml:datatype xsd:float ] ] ;
+  rml:predicateObjectMap [ rml:predicate shop:buyer ;
+    rml:objectMap [ rml:parentTriplesMap <#Users> ;
+      rml:joinCondition [ rml:child "user_id" ; rml:parent "id" ] ] ] .
