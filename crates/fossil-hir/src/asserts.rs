@@ -14,10 +14,10 @@
 //!
 //! # What is decided here and what waits for the data
 //!
-//! [`check_asserts`] decides what the program alone decides: that a condition
+//! [`check_asserts`](crate::asserts::check_asserts) decides what the program alone decides: that a condition
 //! is a `Bool` and reads only names in scope. The checker
 //! ([`crate::check::Checker::check_property`]) folds a CONSTANT a mapping
-//! writes through the field's assertions, at that line ([`fold`]). Everything
+//! writes through the field's assertions, at that line ([`fold`](crate::asserts::fold)). Everything
 //! else is a per-value check the run makes, and there are no facts about the
 //! data here: the checker reads the program and its documents, nothing else.
 
