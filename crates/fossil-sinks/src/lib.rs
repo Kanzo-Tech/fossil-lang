@@ -9,7 +9,7 @@
 //! - [`graphar`] (feature `graphar`): an Apache `GraphAr` graph, the chunks
 //!   through `graphar-parquet`, `mapping.ttl` after them and `fossil.graph.yml`
 //!   last.
-//! - [`ntriples`] (feature `ntriples`): the triples, one line each, which is
+//! - `ntriples` (feature `ntriples`): the triples, one line each, which is
 //!   what a program means as RDF.
 
 // The writer is single-threaded by construction, as the engine is: the browser
@@ -37,7 +37,7 @@ pub enum Sink {
     /// [`graphar`]: the graph's tables as Apache `GraphAr`'s.
     #[cfg(feature = "graphar")]
     GraphAr,
-    /// [`ntriples`]: the graph's triples.
+    /// `ntriples`: the graph's triples.
     #[cfg(feature = "ntriples")]
     NTriples,
 }
