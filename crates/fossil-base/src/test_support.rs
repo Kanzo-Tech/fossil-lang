@@ -56,7 +56,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use fossil_graph_schema::{
-    Occurs, OutputShapes, Primitive, PropertyConstraint, Rejection, Shape, Term,
+    Occurs, OutputShapes, Primitive, PropertyConstraint, Rejection, Shape, Term, Xsd,
 };
 
 use crate::db::{Db, FossilDb};
@@ -152,7 +152,8 @@ pub fn decode_lines(_uri: &str, text: &str) -> Result<OutputShapes, Rejection> {
                     .map_or(Some(1), |t| (t != "*").then(|| t.parse().unwrap_or(1)));
                 let (term, targets) = value.strip_prefix('@').map_or_else(
                     || {
-                        let datatype = format!("http://www.w3.org/2001/XMLSchema#{value}");
+                        let datatype =
+                            Xsd::new(format!("http://www.w3.org/2001/XMLSchema#{value}"));
                         (
                             (value != "-").then_some(Term::Literal(Some(datatype))),
                             Vec::new(),

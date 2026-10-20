@@ -67,7 +67,7 @@ use std::collections::HashMap;
 
 use fossil_graph_schema::{
     Annotation, AnnotationObject, GraphSchema, ObjectLiteral, Occurs, OutputShapes,
-    PropertyConstraint, RDF_LANG_STRING, Rejection, Shape as OutputShape, Term,
+    PropertyConstraint, RDF_LANG_STRING, Rejection, Shape as OutputShape, Term, Xsd,
 };
 use prefixmap::{IriRef, PrefixMap};
 use rudof_iri::IriS;
@@ -197,12 +197,12 @@ fn term_of(
         return Ok(None);
     };
     if language_set(value_expr).is_some() {
-        return Ok(Some(Term::Literal(Some(RDF_LANG_STRING.to_string()))));
+        return Ok(Some(Term::Literal(Some(Xsd::new(RDF_LANG_STRING)))));
     }
     Ok(match (nc.datatype(), nc.node_kind()) {
-        (Some(dt), _) => Some(Term::Literal(Some(
+        (Some(dt), _) => Some(Term::Literal(Some(Xsd::new(
             resolve_iri_ref(&dt, prefixmap)?.to_string(),
-        ))),
+        )))),
         (None, Some(NodeKind::Iri)) => Some(Term::Iri),
         (None, Some(NodeKind::Literal)) => Some(Term::Literal(None)),
         _ => None,
@@ -1511,9 +1511,9 @@ ex:Person {
         );
         assert_eq!(
             by_predicate("code").term,
-            Some(Term::Literal(Some(
-                "http://www.w3.org/2001/XMLSchema#hexBinary".into()
-            ))),
+            Some(Term::Literal(Some(Xsd::new(
+                "http://www.w3.org/2001/XMLSchema#hexBinary"
+            )))),
             "the term keeps the datatype the lattice cannot read, verbatim"
         );
         assert_eq!(by_predicate("note").datatype(), None, "no valueExpr at all");
@@ -1708,9 +1708,9 @@ ex:Person {
 
         // The term the document declares, verbatim, beside the lattice's reading.
         let xsd = |local: &str| {
-            Some(Term::Literal(Some(format!(
+            Some(Term::Literal(Some(Xsd::new(format!(
                 "http://www.w3.org/2001/XMLSchema#{local}"
-            ))))
+            )))))
         };
         let term = |name: &str| match name {
             "total" => xsd("integer"),

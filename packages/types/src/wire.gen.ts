@@ -503,8 +503,8 @@ export interface Position {
  * with no single definition.
  *
  * Materializers map it to their own vocabulary (`GraphAr` `string/int64/double/…`, `DataFusion`
- * scalars, `DuckDB` column types) next to the materializer; only the xsd direction lives here,
- * because xsd is the RDF border every side reads.
+ * scalars, `DuckDB` column types) next to the materializer. XSD is one of those vocabularies, the
+ * RDF border's, and `Xsd` is where the lattice meets it: this enum names no datatype IRI.
  */
 export type Primitive = 'string' | 'integer' | 'float' | 'bool' | 'date' | 'date_time' | 'time' | 'g_year' | 'any_uri' | 'lang_string';
 
