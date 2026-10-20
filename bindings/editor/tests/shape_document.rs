@@ -213,7 +213,7 @@ fn a_document_opened_after_the_program_is_still_found_by_it() {
 /// **The document is `ShExC` and it has to be.** Every other fixture in this
 /// file is `ShExJ`, which carries no positions — offsets in JSON are not the
 /// text anyone is reading a report about — so the compact form is the one that
-/// can say where it declares a predicate (`fossil_hir::shex::spans`). A `ShExJ`
+/// can say where it declares a predicate (`fossil_shapes::shex::spans`). A `ShExJ`
 /// fixture here would assert the ABSENCE of the label and pass forever.
 #[test]
 fn a_violated_constraint_points_at_the_document_that_declares_it() {

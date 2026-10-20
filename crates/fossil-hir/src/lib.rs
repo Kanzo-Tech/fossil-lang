@@ -30,7 +30,7 @@
 //!   span-free and only the layers that emit diagnostics pay for them (same
 //!   rationale as the provenance side table).
 //! - The shape-document decoders a host installs: [`providers::PROVIDERS`],
-//!   whose type-reading rows are [`shex`] over `shex_ast` and [`shacl`] over
+//!   whose type-reading rows are [`fossil_shapes::shex`] over `shex_ast` and [`fossil_shapes::shacl`] over
 //!   `shacl`'s `ShaclParser`. A document becomes the same [`fossil_graph_schema::OutputShapes`]
 //!   a declared type lowers to.
 //!
@@ -78,10 +78,8 @@ pub mod providers;
 /// sentences, shared by every path that raises one. They were methods on `fossil_base::Provider`,
 /// which put English Fossil compiler errors in the trait-and-db substrate.
 pub mod refusals;
-pub mod shacl;
 pub mod shape_documents;
 pub mod shapes;
-pub mod shex;
 pub mod spans;
 /// The stdlib catalog: every function the language declares, its signature and
 /// how it compiles. It lives here because the checker resolves a call against

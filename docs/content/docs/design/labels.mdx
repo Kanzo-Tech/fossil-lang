@@ -104,8 +104,8 @@ for `@iri`; never an implicit context.
 ## Reading one from a shape document
 
 **ShEx.** `shex_ast` parses annotations on a shape and on a triple constraint into its AST
-(`Shape::annotations`, `TripleExpr::TripleConstraint { annotations, … }`), and `fossil_hir::shex`
-walks that AST already (`crates/fossil-hir/src/shex.rs, ShapeBinding`) and drops them. Reading them
+(`Shape::annotations`, `TripleExpr::TripleConstraint { annotations, … }`), and `fossil_shapes::shex`
+walks that AST already (`crates/fossil-shapes/src/shex.rs, ShapeBinding`) and drops them. Reading them
 is carrying them: a shape's onto the type, a triple constraint's onto the property or the relation it
 lowers to. `EachOf` and `OneOf` annotations are not carried, because a group is not a type, a field or a
 relation — and `OneOf` is refused anyway. One finding constrains the
@@ -114,7 +114,7 @@ compiled `SchemaIR` drops every annotation (`cnv_annotations` in `ast2ir.rs` is 
 an empty list), so a decoder written as a `TryFrom` over `SchemaIR` loses them until rudof fills that
 in. The reading stays on the AST.
 
-**SHACL.** `crates/fossil-hir/src/shacl.rs, decode_shacl` reads a shape's triples into the same pair:
+**SHACL.** `crates/fossil-shapes/src/shacl.rs, decode_shacl` reads a shape's triples into the same pair:
 on a property shape, `sh:name` and `sh:description`, SHACL's own two, as `rdfs:label` and `rdfs:comment`; on any shape, every triple whose
 predicate is outside SHACL's namespace and is not `rdf:type` — `rdfs:label`, `rdfs:comment`,
 `skos:prefLabel` — because §2.3.2 says a processor ignores them and ShEx admits any predicate.

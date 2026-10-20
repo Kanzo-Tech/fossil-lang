@@ -112,7 +112,7 @@ subject it is. Seven are modules of those crates now:
 | `fossil_base::location` | where a written reference points is the file abstraction, which ty keeps in `ruff_db` beside the inputs |
 | `fossil_base::sources` | the columns a host found for a source are the value of an input, so the type is the input's; the trait beside it, its schema and its stub had no caller |
 | `fossil_hir::lineage` | what a program reads is a question about its def map, asked by every host |
-| `fossil_hir::shex`, `fossil_hir::shacl` | a shape document becomes a type, and the types are here — the decoders and the `providers` rows that install them; what the executor was handed beside them, an enum whose one live method returned a `GraphSchema`, is a `GraphSchema` |
+| `fossil_shapes::shex`, `fossil_shapes::shacl` | a shape document becomes a type — the decoders, in their own crate, and the `providers` rows of `fossil_hir` that install them; what the executor was handed beside them, an enum whose one live method returned a `GraphSchema`, is a `GraphSchema` |
 | `fossil_sinks::graphar::layout` | the graph's layout is the writer's: nothing else lays out a GraphAr graph, and the module exports nothing |
 | `fossil_mir::describe` | the graph's mapping is a function of the types, so the editor's module links it and a host asks before a run ([the graph as Apache GraphAr](/docs/design/graphar)) |
 
@@ -127,7 +127,7 @@ The ShEx decode still resolves references and labels by hand; reading `shex_ast`
 
 **SHACL is read by rudof's `ShaclParser`.** The graph is parsed by `rudof_rdf`'s in-memory store, the
 parser `io.rdf` reads with, and `shacl`'s AST is projected onto the shape vocabulary in
-`fossil_hir::shacl`. They are the fork's, Kanzo-Tech's rudof at the commit of its PR #33, which is on
+`fossil_shapes::shacl`. They are the fork's, Kanzo-Tech's rudof at the commit of its PR #33, which is on
 `shex_ast`'s line and shares its `IriS`, and whose `rudof_iri` `fetch` and `rudof_rdf` `sparql` features,
 the ones that bring `reqwest` and `tokio`, are off by default: the wasm closure has neither, and
 `cargo xtask wasm-check` fails the day it does. The fork adds what the walk read by hand: the

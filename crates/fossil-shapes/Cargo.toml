@@ -1,0 +1,30 @@
+[package]
+name = "fossil-shapes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "The ShEx and SHACL decoders: a shape document read into Fossil's types"
+# Unpublished, as every crate here: release.yml ships only the npm packages/ family.
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# What a document is decoded into. The decoders know a schema language each;
+# what they produce is the language's own vocabulary, and nothing above this
+# crate names ShEx or SHACL.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
+# AST-only — byte-stream input, never `Schema::from_iri`, which would pull
+# `reqwest`/`tokio` into the wasm closure.
+shex_ast = { workspace = true }
+rudof_iri = { workspace = true }
+prefixmap = { workspace = true }
+# SHACL is read by rudof's `ShaclParser` over `rudof_rdf`'s in-memory graph, whose Turtle
+# parser is the one `io.rdf` reads with (`/docs/design/incremental`).
+shacl = { workspace = true }
+rudof_rdf = { workspace = true }
+oxrdf = { workspace = true }
