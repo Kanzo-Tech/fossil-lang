@@ -109,7 +109,9 @@ fn an_annotation_lowers_onto_the_type_and_the_field_it_is_written_above() {
     let name = &laureate.properties[0];
     assert_eq!(
         name.term,
-        Some(Term::Literal(Some(RDF_LANG_STRING.to_string())))
+        Some(Term::Literal(Some(fossil_graph_schema::Xsd::new(
+            RDF_LANG_STRING
+        ))))
     );
     assert!(name.annotations.is_empty());
     let alias = &laureate.properties[1];

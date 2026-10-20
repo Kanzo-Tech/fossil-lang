@@ -56,8 +56,3 @@ packages/storage/pkg/
 .claude/worktrees/
 .claude/settings.local.json
 REVIEW.local.md
-
-# The benchmark's generated inputs and outputs (`benches/run.py --work`).
-/benches/.work/
-/benches/.tools/
-/benches/**/__pycache__/

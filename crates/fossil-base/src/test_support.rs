@@ -57,7 +57,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use fossil_graph_schema::{
-    Occurs, OutputShapes, Primitive, PropertyConstraint, Rejection, Shape, Term,
+    Occurs, OutputShapes, Primitive, PropertyConstraint, Rejection, Shape, Term, Xsd,
 };
 
 use crate::db::{Db, FossilDb};
@@ -156,9 +156,9 @@ pub fn decode_lines(_uri: &str, text: &str) -> Result<OutputShapes, Rejection> {
                         let term = match value {
                             "-" => None,
                             "iri" => Some(Term::Iri),
-                            _ => Some(Term::Literal(Some(format!(
+                            _ => Some(Term::Literal(Some(Xsd::new(format!(
                                 "http://www.w3.org/2001/XMLSchema#{value}"
-                            )))),
+                            ))))),
                         };
                         (term, Vec::new())
                     },
