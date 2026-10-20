@@ -69,8 +69,8 @@ class Synthetic:
 
 class Gtfs:
     """GTFS-Madrid-Bench's CSV distribution at scale factor `rows`, from its own generator
-    (`gtfs/generate.sh`, Docker); the mapping is the upstream one cut to what fossil's program
-    defines (`gtfs/fragment.py`), in legacy RML (`http://semweb.mmlab.be/ns/rml#`)."""
+    (`gtfs/generate.sh`, Docker); the mapping is the upstream one reading its data beside it
+    (`gtfs/fragment.py`), in legacy RML (`http://semweb.mmlab.be/ns/rml#`)."""
     name = "gtfs"
     program = "gtfs.fossil"
     rml = "legacy"

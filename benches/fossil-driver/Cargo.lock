@@ -1511,6 +1511,7 @@ name = "fossil-df"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "csv-core",
  "datafusion",
  "fossil-base",
  "fossil-graph-schema",

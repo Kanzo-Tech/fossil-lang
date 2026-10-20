@@ -9,9 +9,7 @@
 //   quadratic in the points of a shape (107 million pairs at scale 1) and defines the triples
 //   reading each point once does; `Shapes` reads each point once;
 // - `serviceRule` points at a rule built from the same row, which the upstream mapping spells
-//   as a join of a file with itself on `service_id`, and this as an edge to that rule;
-// - five predicates whose object is an IRI minted from a code column are left out, on both
-//   sides (`gtfs.shex` says which and why).
+//   as a join of a file with itself on `service_id`, and this as an edge to that rule.
 
 type { Agency, CalendarDateRule, CalendarRule, Feed, Frequency, Route, Service, ShapePoint, Shape, Stop, StopTime, Trip } := io.shex("gtfs.shex")
 
@@ -74,6 +72,7 @@ Routes : Route from RouteRow
     shortName   = RouteRow.route_short_name
     longName    = RouteRow.route_long_name
     description = RouteRow.route_desc
+    routeType   = "http://transport.linkeddata.es/resource/RouteType/{RouteRow.route_type}"
     routeUrl    = RouteRow.route_url
     color       = RouteRow.route_color
     textColor   = RouteRow.route_text_color
@@ -107,8 +106,10 @@ Stops : Stop from StopRow
     lat                  = StopRow.stop_lat
     long                 = StopRow.stop_lon
     zone                 = StopRow.zone_id
+    locationType         = "http://transport.linkeddata.es/resource/LocationType/{StopRow.location_type}"
     page                 = StopRow.stop_url
     timeZone             = StopRow.stop_timezone
+    wheelchairAccessible = "http://transport.linkeddata.es/resource/WheelchairBoardingStatus/{StopRow.wheelchair_boarding}"
     parentStation        = Stop(StopRow.parent_station)
 
 StopTimes : StopTime from TimeRow
@@ -117,6 +118,8 @@ StopTimes : StopTime from TimeRow
     departureTime    = TimeRow.departure_time
     stopSequence     = TimeRow.stop_sequence
     headsign         = TimeRow.stop_headsign
+    pickupType       = "http://transport.linkeddata.es/resource/PickupType/{TimeRow.pickup_type}"
+    dropOffType      = "http://transport.linkeddata.es/resource/DropOffType/{TimeRow.drop_off_type}"
     distanceTraveled = TimeRow.shape_dist_traveled
     trip             = Trip(TimeRow.trip_id)
     stop             = Stop(TimeRow.stop_id)
@@ -127,6 +130,7 @@ Trips : Trip from TripRow
     shortName            = TripRow.trip_short_name
     direction            = "{TripRow.direction_id}"
     block                = TripRow.block_id
+    wheelchairAccessible = "http://transport.linkeddata.es/resource/WheelchairBoardingStatus/{TripRow.wheelchair_accessible}"
     service              = Service(TripRow.service_id)
     route                = Route(TripRow.route_id)
     shape                = Shape(TripRow.shape_id)

@@ -2,11 +2,6 @@
 # One shape per class the upstream mapping types its subjects with, one triple constraint per
 # predicate it writes, and every value optional: the generated CSV leaves columns empty, and an
 # RML processor writes nothing for an empty value.
-#
-# Five predicates are left out, here and in `fragment.py`'s cut of the upstream mapping:
-# `routeType`, `locationType`, `wheelchairAccessible`, `pickupType` and `dropOffType` are IRIs
-# minted from a template over a code column (`.../RouteType/{route_type}`), and fossil has no
-# way yet to turn text into an IRI that is not a subject. They come back when it does.
 PREFIX gtfs:   <http://vocab.gtfs.org/terms#>
 PREFIX foaf:   <http://xmlns.com/foaf/0.1/>
 PREFIX dct:    <http://purl.org/dc/terms/>
@@ -61,6 +56,7 @@ gtfs:Route {
   gtfs:shortName  xsd:string ? ;
   gtfs:longName   xsd:string ? ;
   dct:description xsd:string ? ;
+  gtfs:routeType  IRI ? ;
   gtfs:routeUrl   IRI ? ;
   gtfs:color      xsd:string ? ;
   gtfs:textColor  xsd:string ? ;
@@ -90,8 +86,10 @@ gtfs:Stop {
   geo:lat                   xsd:double ? ;
   geo:long                  xsd:double ? ;
   gtfs:zone                 xsd:string ? ;
+  gtfs:locationType         IRI ? ;
   foaf:page                 IRI ? ;
   gtfs:timeZone             xsd:string ? ;
+  gtfs:wheelchairAccessible IRI ? ;
   gtfs:parentStation        @gtfs:Stop ?
 }
 
@@ -100,6 +98,8 @@ gtfs:StopTime {
   gtfs:departureTime    xsd:string ? ;
   gtfs:stopSequence     xsd:integer ? ;
   gtfs:headsign         xsd:string ? ;
+  gtfs:pickupType       IRI ? ;
+  gtfs:dropOffType      IRI ? ;
   gtfs:distanceTraveled xsd:double ? ;
   gtfs:trip             @gtfs:Trip ? ;
   gtfs:stop             @gtfs:Stop ?
@@ -110,6 +110,7 @@ gtfs:Trip {
   gtfs:shortName            xsd:string ? ;
   gtfs:direction            xsd:string ? ;
   gtfs:block                xsd:string ? ;
+  gtfs:wheelchairAccessible IRI ? ;
   gtfs:service              @gtfs:Service ? ;
   gtfs:route                @gtfs:Route ? ;
   gtfs:shape                @gtfs:Shape ?

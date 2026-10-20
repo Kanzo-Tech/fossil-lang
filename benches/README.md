@@ -74,13 +74,8 @@ Semantics* 65, 2020), in its CSV distribution:
 Materialisation only: the benchmark's queries evaluate virtual knowledge graphs and are out of
 scope. At scale 1 the input is ten files and 63,250 rows.
 
-Two departures, both on both sides, so the processors still run the upstream mapping:
+One departure, on fossil's side only:
 
-- **Five predicates are cut** (`fragment.py`): `routeType`, `locationType`, `wheelchairAccessible`
-  (on two maps), `pickupType` and `dropOffType`. Each is an IRI minted from a template over a code
-  column (`…/RouteType/{route_type}`). fossil cannot turn text into an IRI that is not a subject,
-  and the checker refuses the program with `PropertyMismatch { expected: AnyUri, actual: String }`.
-  The cut is what fossil can express today, and the five come back when it can mint such an IRI.
 - **`shapes_0` is a quadratic self-join.** It links a shape to its points by joining `SHAPES.csv`
   to itself on `shape_id`: 107 million pairs at scale 1, for 58,540 distinct triples. The
   processors run it as published. `gtfs.fossil` reads each point once, which defines the same
@@ -136,18 +131,22 @@ changes three things here:
 ## Divergences the first runs found
 
 At 1,000 rows and at GTFS scale 1 (one repetition each), every engine writes the same number of
-triples, and these are the differences between them:
+triples (388,558 at GTFS scale 1), every one of them the same value, and these are the differences
+in spelling between them:
 
-| divergence | where | same value? | who changes |
-|---|---|---|---|
-| `…/user6@shop.example` against `…/user6%40shop.example` | `reviews`, `shop` | yes | fossil, through IRI-safe templates (decided) |
-| `"526.0"` against `"526.00"` (`xsd:float`) | `shop` | yes | fossil, through S5 |
-| `"false"` against `"0"` (`xsd:boolean`) | GTFS | yes | nobody: both are the same `xsd:boolean`; fossil writes the canonical form |
-| `agency/1` against `agency/00000000000000000001` | GTFS: every all-digit identifier, in IRIs and literals (1,495 triples at scale 1) | **no** | fossil: its profiler types an all-digit column as an integer and the leading zeros are gone before the template sees them. A program has no way to keep the column as text |
-| no percent-encoding at all | SDM-RDFizer, `reviews` and `shop` | yes | SDM-RDFizer, against R2RML's IRI-safe rule |
+| divergence | where | who changes |
+|---|---|---|
+| `…/user6@shop.example` against `…/user6%40shop.example` | `reviews`, `shop` | fossil, through IRI-safe templates (decided) |
+| `"526.0"` against `"526.00"` (`xsd:float`) | `shop` | fossil, through S5 |
+| `"false"` against `"0"` (`xsd:boolean`) | GTFS, against Morph-KGC (960 triples) | nobody: both are the same `xsd:boolean`; fossil writes the canonical form |
+| no percent-encoding in a template, and `https:%2F%2F…` for an IRI read from a column | SDM-RDFizer: `reviews`, `shop`, GTFS (2,238 triples) | SDM-RDFizer, against R2RML's IRI-safe rule |
 
-The fourth is the only one that changes the graph, and on GTFS it changes identifiers. It has to be
-fixed in fossil before GTFS figures go into a paper.
+Two differences that changed the graph were fixed in fossil before these figures. An all-digit
+identifier lost its leading zeros (`agency/1` for `agency/00000000000000000001`, 1,495 triples at
+scale 1), because the CSV reader typed the column as an integer; it now reads such a column as
+text, as `DuckDB` does. And a program could not build an IRI outside `@subject`, so five
+predicates minted from a code column (`…/RouteType/{route_type}`) were cut from both sides; a
+string in a slot the shape declares `IRI` now denotes that IRI.
 
 Once the engine has spill (M2), a run larger than RAM is a `hello` or GTFS size past the machine's
 memory, with `--timeout` raised to match. Comparing runs with and without the elimination of
@@ -158,7 +157,7 @@ switch.
 
 ```sh
 bash benches/setup.sh                                                   # into benches/.tools
-cargo build --release --manifest-path benches/fossil-driver/Cargo.toml  # target/release/fossil-bench
+(cd benches/fossil-driver && cargo build --release)                   # target/release/fossil-bench
 python3 benches/run.py --tools benches/.tools
 python3 benches/run.py --tools benches/.tools --workloads gtfs --sizes 1,5,10
 python3 benches/summarise.py benches/results > benches/results/summary.md
