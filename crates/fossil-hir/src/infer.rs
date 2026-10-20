@@ -1310,7 +1310,7 @@ mod tests {
             |predicate: &str, datatype: Option<Primitive>, targets: &[&str]| PropertyConstraint {
                 name: fossil_graph_schema::local_name(predicate).to_string(),
                 predicate: predicate.to_string(),
-                term: datatype.map(|p: Primitive| Term::Literal(Some(p.to_xsd_iri().into()))),
+                term: datatype.map(|p: Primitive| Term::Literal(Some(p.into()))),
                 targets: targets.iter().map(|t| (*t).to_string()).collect(),
                 occurs: Occurs::ONE,
                 // A test fixture, not a document: no text to point into.

@@ -54,6 +54,7 @@ pub mod js;
 pub mod problem;
 pub mod shapes;
 pub mod span;
+pub mod xsd;
 
 pub use problem::{CODES, Failure, Foreign, Problem, Related, Severity, TEMPLATES};
 pub use shapes::{
@@ -61,6 +62,7 @@ pub use shapes::{
     local_name,
 };
 pub use span::Span;
+pub use xsd::{OutsideLattice, Xsd};
 
 /// A whole graph's schema: its node types and edge types. The single contract
 /// shared by the producer, every materializer, and the consumer.
@@ -152,20 +154,20 @@ pub struct EdgeType {
 pub enum Term {
     /// An IRI.
     Iri,
-    /// A literal, of the datatype IRI exactly as declared; `None` for a literal
+    /// A literal, of the datatype exactly as declared; `None` for a literal
     /// the document did not give a datatype.
-    Literal(Option<String>),
+    Literal(Option<Xsd>),
 }
 
 impl Term {
     /// The lattice reading of the term: an IRI is [`Primitive::AnyUri`], a
-    /// literal is its datatype's [`Primitive::from_xsd_iri`], and a literal
+    /// literal is its datatype read into the lattice ([`Xsd`]), and a literal
     /// with no datatype, or one outside the lattice, narrows nothing.
     #[must_use]
     pub fn primitive(&self) -> Option<Primitive> {
         match self {
             Self::Iri => Some(Primitive::AnyUri),
-            Self::Literal(datatype) => datatype.as_deref().and_then(Primitive::from_xsd_iri),
+            Self::Literal(datatype) => datatype.as_ref().and_then(|d| Primitive::try_from(d).ok()),
         }
     }
 }
@@ -176,8 +178,9 @@ impl Term {
 /// crosses a crate boundary as a string is a lattice with no single definition.
 ///
 /// Materializers map it to their own vocabulary (`GraphAr` `string/int64/double/…`,
-/// `DataFusion` scalars, `DuckDB` column types) next to the materializer; only the
-/// xsd direction lives here, because xsd is the RDF border every side reads.
+/// `DataFusion` scalars, `DuckDB` column types) next to the materializer. XSD is
+/// one of those vocabularies, the RDF border's, and [`Xsd`] is where the lattice
+/// meets it: this enum names no datatype IRI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Primitive {
@@ -243,57 +246,6 @@ impl Primitive {
     #[must_use]
     pub fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|p| p.to_string() == name)
-    }
-
-    /// Parse an XSD datatype IRI into the lattice. Accepts all three spellings
-    /// the tree carries: the full `http://www.w3.org/2001/XMLSchema#<name>` IRI,
-    /// the `xsd:<name>` prefixed form, and the bare local name.
-    /// The only xsd → [`Primitive`] table in the tree.
-    ///
-    /// `None` for an XSD type outside the lattice — callers decide between a
-    /// diagnostic and a `String` fallback, and they do differ: `ShEx` narrowing
-    /// takes the fallback.
-    #[must_use]
-    pub fn from_xsd_iri(iri: &str) -> Option<Self> {
-        let local = iri.rsplit(['#', '/', ':']).next().unwrap_or(iri);
-        Some(match local {
-            "string" | "normalizedString" | "token" | "language" => Self::String,
-            "integer" | "long" | "int" | "short" | "byte" | "nonNegativeInteger"
-            | "positiveInteger" | "nonPositiveInteger" | "negativeInteger" | "unsignedLong"
-            | "unsignedInt" => Self::Integer,
-            "decimal" | "float" | "double" | "number" => Self::Float,
-            "boolean" => Self::Bool,
-            "date" => Self::Date,
-            "dateTime" | "dateTimeStamp" => Self::DateTime,
-            "time" => Self::Time,
-            "gYear" => Self::GYear,
-            "anyURI" => Self::AnyUri,
-            // RDF's, not XSD's: the one datatype of the lattice outside the
-            // `xsd:` namespace, read by its local name like the rest.
-            "langString" => Self::LangString,
-            _ => return None,
-        })
-    }
-
-    /// The canonical XSD datatype IRI for this primitive — the output spec's
-    /// literal datatype, carried into the manifest for the host's governance
-    /// layer (DCAT). The inverse direction of [`Self::from_xsd_iri`], and the
-    /// only one: an alias like `xsd:long` parses in and comes back as
-    /// `xsd:integer`.
-    #[must_use]
-    pub const fn to_xsd_iri(self) -> &'static str {
-        match self {
-            Self::String => "http://www.w3.org/2001/XMLSchema#string",
-            Self::Integer => "http://www.w3.org/2001/XMLSchema#integer",
-            Self::Float => "http://www.w3.org/2001/XMLSchema#double",
-            Self::Bool => "http://www.w3.org/2001/XMLSchema#boolean",
-            Self::Date => "http://www.w3.org/2001/XMLSchema#date",
-            Self::DateTime => "http://www.w3.org/2001/XMLSchema#dateTime",
-            Self::Time => "http://www.w3.org/2001/XMLSchema#time",
-            Self::GYear => "http://www.w3.org/2001/XMLSchema#gYear",
-            Self::AnyUri => "http://www.w3.org/2001/XMLSchema#anyURI",
-            Self::LangString => RDF_LANG_STRING,
-        }
     }
 }
 
@@ -465,129 +417,6 @@ mod tests {
             (e.source.as_str(), e.destination.as_str()),
             ("Order", "Person")
         );
-    }
-
-    #[test]
-    fn datatype_parses_xsd_iris() {
-        assert_eq!(
-            Primitive::from_xsd_iri("http://www.w3.org/2001/XMLSchema#string"),
-            Some(Primitive::String)
-        );
-        assert_eq!(
-            Primitive::from_xsd_iri("xsd:integer"),
-            Some(Primitive::Integer)
-        );
-        assert_eq!(
-            Primitive::from_xsd_iri("http://www.w3.org/2001/XMLSchema#double"),
-            Some(Primitive::Float)
-        );
-        assert_eq!(
-            Primitive::from_xsd_iri("http://www.w3.org/2001/XMLSchema#anyURI"),
-            Some(Primitive::AnyUri)
-        );
-        assert_eq!(Primitive::from_xsd_iri("http://example.org/Custom"), None);
-    }
-
-    /// The three spellings the tree carries reach the same variant: a bare
-    /// local name, a `ShEx` `valueExpr` (full IRI) and a prefixed form are one
-    /// lookup, so there is no second table to disagree with.
-    #[test]
-    fn every_xsd_spelling_reaches_one_lattice() {
-        for (iri, prefixed, bare, want) in [
-            (
-                "http://www.w3.org/2001/XMLSchema#integer",
-                "xsd:integer",
-                "integer",
-                Primitive::Integer,
-            ),
-            (
-                "http://www.w3.org/2001/XMLSchema#dateTime",
-                "xsd:dateTime",
-                "dateTime",
-                Primitive::DateTime,
-            ),
-            (
-                "http://www.w3.org/2001/XMLSchema#anyURI",
-                "xsd:anyURI",
-                "anyURI",
-                Primitive::AnyUri,
-            ),
-            (
-                "http://www.w3.org/2001/XMLSchema#gYear",
-                "xsd:gYear",
-                "gYear",
-                Primitive::GYear,
-            ),
-        ] {
-            assert_eq!(Primitive::from_xsd_iri(iri), Some(want), "full IRI: {iri}");
-            assert_eq!(
-                Primitive::from_xsd_iri(prefixed),
-                Some(want),
-                "prefixed: {prefixed}"
-            );
-            assert_eq!(Primitive::from_xsd_iri(bare), Some(want), "bare: {bare}");
-        }
-    }
-
-    /// The xsd families collapse, and the collapse is the whole point of a
-    /// lattice: v0.1 does not distinguish width or signedness.
-    #[test]
-    fn the_xsd_families_collapse() {
-        for name in [
-            "integer",
-            "long",
-            "int",
-            "short",
-            "byte",
-            "nonNegativeInteger",
-            "positiveInteger",
-            "nonPositiveInteger",
-            "negativeInteger",
-            "unsignedLong",
-            "unsignedInt",
-        ] {
-            assert_eq!(
-                Primitive::from_xsd_iri(name),
-                Some(Primitive::Integer),
-                "{name}"
-            );
-        }
-        for name in ["decimal", "float", "double", "number"] {
-            assert_eq!(
-                Primitive::from_xsd_iri(name),
-                Some(Primitive::Float),
-                "{name}"
-            );
-        }
-        for name in ["string", "normalizedString", "token", "language"] {
-            assert_eq!(
-                Primitive::from_xsd_iri(name),
-                Some(Primitive::String),
-                "{name}"
-            );
-        }
-        assert_eq!(
-            Primitive::from_xsd_iri("dateTimeStamp"),
-            Some(Primitive::DateTime)
-        );
-    }
-
-    /// Outside the lattice is `None`, never a silent `String`. `duration` is a
-    /// real xsd type we do not carry; the caller decides what to do about it.
-    #[test]
-    fn an_xsd_type_outside_the_lattice_is_none() {
-        assert_eq!(Primitive::from_xsd_iri("duration"), None);
-        assert_eq!(Primitive::from_xsd_iri("StringWithCase"), None);
-        assert_eq!(Primitive::from_xsd_iri(""), None);
-    }
-
-    /// Every variant renders to an IRI that parses back to itself — the two
-    /// directions are inverses, not two tables that happen to agree today.
-    #[test]
-    fn to_xsd_iri_round_trips_every_variant() {
-        for p in Primitive::ALL {
-            assert_eq!(Primitive::from_xsd_iri(p.to_xsd_iri()), Some(p), "{p:?}");
-        }
     }
 
     /// A program names a primitive as the checker prints it, and every variant

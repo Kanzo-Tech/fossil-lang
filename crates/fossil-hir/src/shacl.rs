@@ -124,7 +124,7 @@ use std::collections::HashMap;
 
 use fossil_graph_schema::{
     Annotation, AnnotationObject, ObjectLiteral, Occurs, OutputShapes, PropertyConstraint,
-    RDFS_COMMENT, RDFS_LABEL, Rejection, Shape,
+    RDFS_COMMENT, RDFS_LABEL, Rejection, Shape, Xsd,
 };
 use oxrdf::NamedOrBlankNode;
 use oxrdf::vocab::{rdf, xsd};
@@ -378,7 +378,7 @@ fn term_of(components: &[ASTComponent]) -> Option<fossil_graph_schema::Term> {
         .map(rudof_iri::IriS::as_str)
         .min();
     if let Some(dt) = datatype {
-        return Some(Term::Literal(Some(dt.to_string())));
+        return Some(Term::Literal(Some(Xsd::new(dt))));
     }
     let node_kind = components.iter().find_map(|c| match c {
         ASTComponent::NodeKind(kinds) => kinds.first(),
@@ -716,7 +716,7 @@ ex:PersonShape a sh:NodeShape ;
         assert_eq!(
             name.term,
             Some(fossil_graph_schema::Term::Literal(Some(
-                RDF_LANG_STRING.to_string()
+                fossil_graph_schema::Xsd::new(RDF_LANG_STRING)
             )))
         );
         assert_eq!(name.languages, ["en", "es"]);

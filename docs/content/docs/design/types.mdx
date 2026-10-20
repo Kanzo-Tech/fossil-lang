@@ -109,21 +109,17 @@ covariance of `Optional` and of `Seq`, and `Integer <: Float`, all in
 
 ## What is not settled
 
-- **The upper bound of a cardinality.** `check_required_properties` observes a required property
-  that is absent, and the property loop says in its own comment why it does not read
-  `constraint.occurs` (`crates/fossil-hir/src/check.rs, check_property`). Nothing in the language constructs a
-  multi-valued expression, so a `maxCount 1` property has nothing to reject yet; an expression that
-  yields more than one value is what makes the gap reachable, and reachable is when it gets a rule.
-- **What types a `join` condition.** The `on` predicate is checked for the existence of every column
-  it names, under the binding that qualifies it, and for nothing else, so
-  `Orders.person_id == People.person_id` with an `Integer` on one side and a `String` on the other
-  compiles. The header of `crates/fossil-hir/tests/source_pipeline_row.rs` records that rather than
-  an assertion, deliberately: a test pinning today's acceptance would make the gap the contract.
-  What closes it — an equality between two qualified column references is an error unless the two
-  types are compatible under the subtyping rules a property assignment uses — belongs to
-  [the row algebra](/docs/design/algebra), above any shape and reachable by a program that names no
-  shape at all. Typing the whole predicate as `Bool` is the general form, and is [not what to build
-  first](/docs/design/discarded).
+- **The upper bound of a cardinality, before the rows exist.** `check_required_properties` observes
+  a required property that is absent, and the property loop says in its own comment why it does not
+  read `constraint.occurs` (`crates/fossil-hir/src/check.rs, check_property`): no value type carries
+  «at most one», and the one multi-valued expression, `str.split`'s `Seq<String>`, is refused against
+  every single-valued slot (`crates/fossil-hir/tests/several_into_one.rs`). What makes a `maxCount 1` property multi-valued is the ROWS —
+  a mapping over a join repeats its subject once per matching row — and the executor refuses that
+  where it merges a subject's rows, as [`write/too-many-values`](/docs/errors/write/too-many-values),
+  for a property and for a relation alike (`crates/fossil-df/tests/single_valued.rs`). So the bound is
+  enforced, and late: a compile cannot say that a join is one-to-one. What would move it into the
+  checker is a key — the profile already finds candidate keys (`fossil-profile`), and a join whose
+  right side is joined on one of them cannot repeat a left subject.
 - **Which `etag` a host compares before profiling again.** mtime and size from one `stat` today; a host
   with a strong `ETag` writes that instead, and one that cannot cheaply tell writes `""`, which
   reads as *never fresh*. A content hash is ruled out either way: it reads the whole source to
