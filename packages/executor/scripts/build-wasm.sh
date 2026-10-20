@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-wasm.sh — Build packages/executor/pkg/ from crates/fossil-df-wasm/.
+# build-wasm.sh — Build packages/executor/pkg/ from bindings/executor/.
 #
 # The DataFusion executor (datafusion + arrow + parquet-rs). SEPARATE artefact
 # from @fossil-lang/wasm (the LSP shim) so it lazy-loads only when running a job.

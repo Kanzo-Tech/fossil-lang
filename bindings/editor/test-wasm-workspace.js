@@ -4,7 +4,7 @@
 // (openFile / updateFile / closeFile / diagnostics)
 // round-trips through wasm-bindgen + serde-wasm-bindgen
 // correctly in a node process. The native cargo-test mirror is
-// `crates/fossil-wasm/tests/workspace.rs` (catches API regressions on every
+// `bindings/editor/tests/workspace.rs` (catches API regressions on every
 // PR without needing the wasm-bindgen toolchain); this script is the
 // JS-side rehearsal that proves wasm-bindgen serialization actually works
 // in node ≥18: the workspace surface has to be testable from node, not only
@@ -13,10 +13,10 @@
 // Build precondition:
 //   cargo build --release --target wasm32-unknown-unknown -p fossil-wasm
 //   wasm-bindgen target/wasm32-unknown-unknown/release/fossil_wasm.wasm \
-//     --out-dir crates/fossil-wasm/pkg --target nodejs
+//     --out-dir bindings/editor/pkg --target nodejs
 //
 // Run:
-//   node crates/fossil-wasm/test-wasm-workspace.js
+//   node bindings/editor/test-wasm-workspace.js
 //
 // NOTE: this is the `--target nodejs` bindgen target (CommonJS-friendly,
 // `require('fs')`-based .wasm loading) — distinct from the `--target web`
@@ -37,7 +37,7 @@ function fail(msg) {
 }
 
 function readHello() {
-    // __dirname here is crates/fossil-wasm; the fixture lives at <repo-root>/examples/hello.fossil.
+    // __dirname here is bindings/editor; the fixture lives at <repo-root>/examples/hello.fossil.
     const p = path.resolve(__dirname, '..', '..', 'examples', 'hello.fossil');
     if (!fs.existsSync(p)) fail(`fixture missing: ${p}`);
     return fs.readFileSync(p, 'utf8');

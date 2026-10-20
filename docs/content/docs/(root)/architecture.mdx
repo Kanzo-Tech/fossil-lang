@@ -88,6 +88,12 @@ The same three boundaries seen from the tree: `language` and `editor` serve the 
 runs the plan, `graph` is the artefact's storage. Grouped by what each crate is about, because thirteen nodes
 drawn flat show nothing. The ugliness is the finding, not a failure of the drawing.
 
+The three `-wasm` crates live under `bindings/` and not `crates/`: they are the workspace's
+`cdylib`s, the `wasm-bindgen` entry points, one per npm package, which is how swc (`bindings/`) and
+oxc (`napi/`) lay a Rust workspace with JavaScript bindings out. Each keeps its crate name, because
+the name is the stem of the artefact its package loads. A library that only offers a `js` feature,
+as `fossil-storage` and `fossil-graph-schema` do, stays under `crates/`.
+
 ```mermaid
 graph LR
   L["<b>language</b> · 6 crates<br/>base · syntax · hir · mir<br/>graph-schema · profile"]
@@ -103,7 +109,7 @@ graph LR
 ```
 
 **21 cross-group edges**, and no pair runs both ways. Every number above
-is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
+is derived from `crates/*/Cargo.toml` and `bindings/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
 likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
 reads the manifests and fails the build on any figure in this diagram that stops holding.
 

@@ -184,8 +184,8 @@ function readManifest(path: string): Manifest {
  */
 const ARCHITECTURE = join(CONTENT_ROOT, "(root)/architecture.mdx");
 
-const crates: Manifest[] = readdirSync(join(repoRoot, "crates"))
-  .map((dir) => join(repoRoot, "crates", dir, "Cargo.toml"))
+const crates: Manifest[] = ["crates", "bindings"]
+  .flatMap((tree) => readdirSync(join(repoRoot, tree)).map((dir) => join(repoRoot, tree, dir, "Cargo.toml")))
   .filter(existsSync)
   .map(readManifest);
 
@@ -363,7 +363,7 @@ describe("the group diagram is the manifests", () => {
  *     suite from 36 to 35 while the total held at 601, because the link suite grew by one in the
  *     same commit. `design/discarded` carries the rejected floor and what would bring it back.
  */
-const RUST_CITATION = /`(crates\/[\w./-]+\.rs),\s*([A-Za-z_][A-Za-z0-9_]*)`/g;
+const RUST_CITATION = /`((?:crates|bindings)\/[\w./-]+\.rs),\s*([A-Za-z_][A-Za-z0-9_]*)`/g;
 
 /**
  * The banned spelling: any backticked path with a line number after it.
@@ -640,6 +640,7 @@ const ROUTE_CITATION = /(?<![\w.\-/…])\/docs(?:\/[A-Za-z0-9._#-]+)*\/?/g;
  */
 const ROUTE_TREES: ReadonlyArray<readonly [dir: string, exts: readonly string[]]> = [
   ["crates", [".rs", ".toml"]],
+  ["bindings", [".rs", ".toml"]],
   ["docs", [".ts", ".tsx", ".mjs", ".mdx", ".md", ".json"]],
   ["apps", [".ts", ".tsx", ".mjs", ".mdx", ".md", ".json"]],
   ["packages", [".ts", ".tsx", ".mjs", ".md", ".json"]],
@@ -845,6 +846,7 @@ const GRAMMAR = join(repoRoot, "grammar.bnf");
 /** Where a `grammar.bnf` citation may appear. Anything outside this is unchecked, not permitted. */
 const CITED_TREES: ReadonlyArray<readonly [dir: string, ext: string]> = [
   ["crates", ".rs"],
+  ["bindings", ".rs"],
   ["docs/content", ".mdx"],
 ];
 

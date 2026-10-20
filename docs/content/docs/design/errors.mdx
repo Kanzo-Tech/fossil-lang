@@ -53,7 +53,7 @@ What else is lost on the way, each one a place where structure existed and was f
 **Compile diagnostics are the better half, and still have no identity.** `Diagnostic`
 (`crates/fossil-base/src/diagnostic.rs, Diagnostic`) is structured — severity, span and frame, labels,
 `help`, `suggestion_source`, `did_you_mean` — and reaches JavaScript as data, not as a throw:
-`diagnostics()` answers the wire's `Diagnostic[]` (`crates/fossil-wasm/src/lib.rs, Diagnostic`). But that row — `CheckRow` at `8d6114a3` — was
+`diagnostics()` answers the wire's `Diagnostic[]` (`bindings/editor/src/lib.rs, Diagnostic`). But that row — `CheckRow` at `8d6114a3` — was
 `{ uri, range, severity, message, related }`: `help` was appended to `message` as a `\nhelp:` line,
 `did_you_mean` and `suggestion_source` were dropped, and there was no code.
 The `Diagnostic` that `packages/types/src/diagnostic.ts` declared had `code?` and `source?`, and nothing

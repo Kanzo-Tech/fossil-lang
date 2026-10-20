@@ -29,22 +29,22 @@ workspace = true
 # The wasm dep tree is the compiler front-end crates plus WASM glue. NO
 # fossil-df (the graph format and its writer — the editor writes no graph;
 # that is fossil-df-wasm's job).
-fossil-base    = { path = "../fossil-base" }
-fossil-syntax  = { path = "../fossil-syntax" }
-fossil-hir     = { path = "../fossil-hir" }
-fossil-mir     = { path = "../fossil-mir" }
+fossil-base    = { path = "../../crates/fossil-base" }
+fossil-syntax  = { path = "../../crates/fossil-syntax" }
+fossil-hir     = { path = "../../crates/fossil-hir" }
+fossil-mir     = { path = "../../crates/fossil-mir" }
 smol_str = { workspace = true }
 # `Failure` is what every call here refuses with, and `js` the one function
 # that throws it as a `FossilError` — shared by the three wasm crates.
-fossil-graph-schema = { path = "../fossil-graph-schema", features = ["js"] }
+fossil-graph-schema = { path = "../../crates/fossil-graph-schema", features = ["js"] }
 # The `diagnostics()` method converts byte-offset spans to UTF-16 LSP ranges via
 # `fossil_ide::LineIndex` (the rust-analyzer model). fossil-ide is inside the
 # WASM gate — wasm32-clean by construction. Wiring this dep lets `check()`
 # return the same range shape the native LSP publishes.
-fossil-ide = { path = "../fossil-ide" }
+fossil-ide = { path = "../../crates/fossil-ide" }
 # The profiler the browser runs on its own DuckDB-WASM: sans-IO, so it is wasm32
 # like the rest of this tree, and the gate watches it (`/docs/design/profile`).
-fossil-profile = { path = "../fossil-profile" }
+fossil-profile = { path = "../../crates/fossil-profile" }
 # `WasmDb` is a fresh `#[salsa::db]` struct (production hosts own their own db). Needs the
 # `salsa::Storage<Self>` field + the `Database` derive macro at the
 # trait-object level.

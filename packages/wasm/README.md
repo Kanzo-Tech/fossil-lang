@@ -117,6 +117,6 @@ Optionally `wasm-opt` (binaryen) for size reduction.
 
 ## Source of truth
 
-- Rust crate: `crates/fossil-wasm/` — everything here is a wrapper over its
+- Rust crate: `bindings/editor/` — everything here is a wrapper over its
   wasm-bindgen exports, and nothing in this package reimplements it.
 - The grammar the tokenizer follows: `grammar.bnf` at the repo root.

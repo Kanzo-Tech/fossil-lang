@@ -221,7 +221,7 @@ The row is the workspace's and not the TypeScript layer's because only the def m
 source is read. It is one row per key — two bindings over one file are one `DESCRIBE` and one
 failure — at the call right of `:=` in the first binding that reads it, carrying the whole problem as
 every other row does: its code, `data`, `title`, `help`, and the code's page through `helpUrl`.
-`crates/fossil-wasm/tests/undescribed.rs` pins it, and `packages/wasm/tests/program.test.ts` pins it
+`bindings/editor/tests/undescribed.rs` pins it, and `packages/wasm/tests/program.test.ts` pins it
 again across the wasm boundary.
 
 **It is a warning, where an unread document is an error.** What a missing descriptor costs is the

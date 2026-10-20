@@ -17,7 +17,7 @@ use fossil_graph_schema::Problem;
 use fossil_wasm::FossilWorkspace;
 
 /// Read `examples/hello.fossil` from the repo root. The cargo-test cwd is the
-/// crate directory (`crates/fossil-wasm/`), so the fixture is two levels up.
+/// crate directory (`bindings/editor/`), so the fixture is two levels up.
 fn hello_fossil_source() -> String {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")

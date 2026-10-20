@@ -104,7 +104,7 @@ API changes.
 
 ## Project Layout
 
-`ls crates/` and `git ls-files packages` are the lists. This is what each one is for.
+`ls crates/ bindings/` and `git ls-files packages` are the lists. This is what each one is for.
 
 ```
 crates/
@@ -128,7 +128,6 @@ crates/
                            routed by longest prefix and renewed at expires−5min — the one IO path
                            of DataFusion and of every byte fossil reads or writes. `js`: a JS
                            `Host` as its `Host`. The one renderer of a `CREATE SECRET`
-  fossil-storage-wasm/     that, exposed to JS for `@fossil-lang/storage`
   fossil-df/               DataFusion backend for the property-graph MIR, the one graph
                            writer (`write`: `layout` lays the tables out as Apache GraphAr's
                            and holds them to what an RDF reader can recover, `describe` builds
@@ -152,11 +151,6 @@ crates/
                            function every wasm crate throws a failure through
   fossil-ide/              hover, completion, goto-def, outline — every one asking `def_map`,
                            the one name resolver, and the checker; no index of its own
-  fossil-wasm/             WASM host shim (the workspace under `openProgram` + the tokenizer)
-  fossil-df-wasm/          `fossil_df::Executor` exposed to JS — the only host that writes a
-                           graph, in the browser and in Node. There is no native CLI: it
-                           was deleted on 2026-09-30 (`/docs/design/discarded` says what
-                           brings it back)
   xtask/                   repo automation. Two commands: `wasm-check` derives the wasm32
                            subset from the cdylib closure, and `catalogue [--check]`
                            regenerates every projection of `catalogue.bnf`.
@@ -164,6 +158,19 @@ crates/
                            wire type in `@fossil-lang/types` — is
                            the expect test `tests/wire.rs` (`UPDATE_EXPECT=1`), because the
                            binary must not link the crates `catalogue` generates into
+
+bindings/                  the wasm-bindgen cdylibs, one per npm package (swc's `bindings/`,
+                           oxc's `napi/`). Each keeps its crate name, which is the stem of the
+                           artefact its package loads; a library with a `js` feature stays in
+                           `crates/`
+  editor/                  `fossil-wasm`: the workspace under `openProgram` + the tokenizer,
+                           for `@fossil-lang/wasm`
+  executor/                `fossil-df-wasm`: `fossil_df::Executor` exposed to JS, for
+                           `@fossil-lang/executor` — the only host that writes a graph, in the
+                           browser and in Node. There is no native CLI: it was deleted on
+                           2026-09-30 (`/docs/design/discarded` says what brings it back)
+  storage/                 `fossil-storage-wasm`: `fossil-storage` exposed to JS, for
+                           `@fossil-lang/storage`
 
 packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts); `runProfiler`
@@ -234,12 +241,12 @@ over somebody else's editor, and the somebody else is `@kanzo-tech/ui`.
   `dep = { workspace = true }`. Run `cargo deny check` to confirm no advisory or license issue.
   Run WASM gate to confirm no transitive WASM-incompat leak. If the dep is foundational, say why
   on the page whose claim depends on it.
-- **Add a new crate:** `members = ["crates/*"]` picks it up; copy the shape of an existing
-  peer (compiler-core or wasm-shim). Do not
+- **Add a new crate:** `members = ["crates/*", "bindings/*"]` picks it up; copy the shape of an
+  existing peer — a wasm-bindgen cdylib goes under `bindings/`, everything else under `crates/`. Do not
   record the new crate count anywhere — nothing should have one to update.
 - **Run the WASM smoke test:** build the nodejs bindgen target, then
-  `node crates/fossil-wasm/test-wasm-workspace.js` — the build precondition is in that file's
-  header. `crates/fossil-wasm/tests/workspace.rs` is its native mirror and runs on every PR.
+  `node bindings/editor/test-wasm-workspace.js` — the build precondition is in that file's
+  header. `bindings/editor/tests/workspace.rs` is its native mirror and runs on every PR.
 - **There are no apps.** fossil is the backend; the views are `@kanzo-tech/graph` and the rest of kanzo-ui. A second viewer here is the thing `apps/playground` was, and it was deleted for it.
 
 ## Anti-patterns
@@ -248,4 +255,4 @@ over somebody else's editor, and the somebody else is `@kanzo-tech/ui`.
   defaults drag in crates that do not build for wasm32.
 - Putting compiler logic in `fossil-base` — it is the trait + db substrate, no business logic.
 - Skipping the WASM gate locally. CI catches it eventually but the feedback loop is slower.
-- Editing a generated file (`packages/wasm/pkg/*`, `crates/fossil-wasm/pkg/*`, or `target/*`). They are regenerated.
+- Editing a generated file (`packages/wasm/pkg/*`, `bindings/editor/pkg/*`, or `target/*`). They are regenerated.
