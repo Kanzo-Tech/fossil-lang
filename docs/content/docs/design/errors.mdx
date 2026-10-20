@@ -337,7 +337,7 @@ codes above (`provider/unknown`, `provider/wrong-capability`, `document/not-regi
 | `document` (+1) | `unread` | the executor's `run`, over the documents it could not read |
 | `source` (2) | `not-found`, `unparseable` | a CSV, JSON or Parquet source that names no file; the RDF sources a run decodes |
 | `engine` (1) | `failed` — DataFusion or DuckDB, the engine's error as `cause` | `execute_graph`, the profile's queries |
-| `write` | `failed`, `invalid-language-tag`, `language-not-allowed`, `duplicate-value`, `invalid-subject`, `invalid-iri`, `ambiguous-iri`, `unrepresentable` | `WriteError`: the file the store refused, and the graph the writer holds to admissibility ([the round trip](/docs/format/round-trip)); its other variants are `internal/bug` |
+| `write` | `failed`, `invalid-language-tag`, `language-not-allowed`, `duplicate-value`, `invalid-subject`, `invalid-iri`, `ambiguous-iri`, `unrepresentable`, `too-many-values` | `WriteError`: the file the store refused, and the graph the writer holds to admissibility ([the round trip](/docs/format/round-trip)); its other variants are `internal/bug`. `too-many-values` is the executor's, where it merges a subject's rows: a single-valued property or relation offered more than one value |
 | `storage` (9) | `no-credential`, `ambiguous-prefix`, `outside-prefix`, `malformed-credential`, `no-route`, `unreachable`, `no-httpfs`, `host-refused`, `host-silent` | `StorageError`, `@fossil-lang/storage`'s `mount`, `JsHost` — `host-silent` is [failure](/docs/design/failure)'s deadline |
 | `module` (1) | `unreachable` | the three wasm loaders, when a module cannot be fetched |
 | `api` (3) | `invalid-argument`, `busy`, `unknown-handle` | argument shapes on every wasm entry point, `busy` and the executor's borrow, the workspace's `unknown_handle` |
@@ -347,7 +347,7 @@ codes above (`provider/unknown`, `provider/wrong-capability`, `document/not-regi
 fresh object. Nobody branches on it; a host shows it and reports it. A panic stays a
 `WebAssembly.RuntimeError` — it is not a value that can be built at the moment it happens.
 
-**101 codes**, 100 of them a mistake someone other than fossil can repair.
+**102 codes**, 101 of them a mistake someone other than fossil can repair.
 
 **Retired, with no program that reached them.** `write/unknown-type` and `layout/dangling-endpoint`
 were released in `v0.3.0-alpha.18` and are gone: the executor builds the schema it writes

@@ -1,0 +1,45 @@
+---
+title: A single-valued property has more than one value
+description: "`write/too-many-values` — the rows offer a subject several values for a property, or several destinations for a relation, that its shape allows once, so no graph is written."
+---
+
+The run executed, and merging each subject's rows found one with more values than its shape allows:
+
+```text
+write/too-many-values
+  × `Person.nickname` is single-valued, and `https://example.org/person/1` has both `Countess` and `Enchantress`
+```
+
+`data.at` says where — `<Type>.<property>` for a property, `<Src>_<label>_<Dst>` for a relation —
+`data.subject` is the subject, and `data.first` and `data.second` are two of the values its rows
+offered it — the least and the greatest, or for a relation two destination subjects.
+
+## Why fossil refuses it
+
+A shape's upper bound is not a type. `ex:nickname xsd:string ?` says a person has at most one
+nickname, and nothing in a mapping body is multi-valued, so the checker has nothing to compare it
+against: the second value arrives with the rows. A mapping over a join repeats its subject once per
+matching row, and two mappings of one type mint the same subject from two sources:
+
+```fossil
+Nicknamed : Person from PersonRow.join(NickRow, on = PersonRow.id == NickRow.id)
+    @subject = "https://example.org/person/{PersonRow.id}"
+    nickname = NickRow.nickname
+```
+
+A person with two rows in `NickRow` is one vertex offered two nicknames. Keeping one would keep
+whichever row the engine read first, so the graph would depend on the order of the input and the run
+would say nothing about the value it dropped. Only values that are not null are compared: a mapping
+that does not write the property offers no value, and the same value twice is one value.
+
+A relation is held to the same rule. `ex:isLocatedIn @ex:Place`, bare, is exactly one place, and a
+person the rows place in two is refused rather than written with two edges its shape does not allow.
+
+## How to repair it
+
+- **Let the property hold several** if it does: `*` or `+` in ShEx, no `sh:maxCount` in SHACL. Its
+  values become a set (A4 of [the round trip](/docs/format/round-trip)).
+- **Choose one in the program**: a `where` that keeps the row you mean, or, for a number, a
+  `group_by` that aggregates the values to one (`math.min`, `math.max`, …).
+- **Fix the subject** if two different things share it: a template that reads the key of the row, not
+  a column that repeats.

@@ -602,7 +602,7 @@ mod tests {
         PropertyConstraint {
             name: "p".into(),
             predicate: "https://example.org/p".into(),
-            term: datatype.map(|p: Primitive| Term::Literal(Some(p.to_xsd_iri().into()))),
+            term: datatype.map(|p: Primitive| Term::Literal(Some(p.into()))),
             targets: targets.iter().map(|t| (*t).to_string()).collect(),
             occurs: Occurs::ONE,
             // A test fixture, not a document: no text to point into.
