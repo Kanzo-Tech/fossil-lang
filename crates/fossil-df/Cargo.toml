@@ -41,6 +41,8 @@ fossil-storage = { path = "../fossil-storage", features = ["object-store"] }
 object_store = { workspace = true }
 futures = { workspace = true }
 bytes = { workspace = true }
+# A CSV column read as text when its text says it is not a number (`LeadingZeros`).
+csv-core = { workspace = true }
 # The graph a run writes is Apache GraphAr's: the information files and the Parquet chunks
 # are `graphar-*`'s, and this crate lays out and counts what it hands them.
 graphar-info = { workspace = true }
