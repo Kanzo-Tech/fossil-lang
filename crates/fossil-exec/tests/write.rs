@@ -1,7 +1,7 @@
 //! **What a fossil graph promises, checked on the files** — by a second engine.
 //!
 //! Every assertion reads the written files with plain SQL over `DuckDB`, and
-//! never through `fossil-df`'s own types: a test that reads back through the
+//! never through `fossil-exec`'s own types: a test that reads back through the
 //! writer's types proves the types are self-consistent and nothing else. The
 //! information files are parsed by `graphar-info`, because those ARE the format;
 //! the Parquet is read by `read_parquet`.
@@ -180,19 +180,19 @@ fn sources(users: u32, orders: u32) -> Vec<(&'static str, Vec<u8>)> {
     ]
 }
 
-/// Execute `program` over `files` and [`fossil_df::write`] its graph into a
+/// Execute `program` over `files` and [`fossil_sinks::graphar::write`] its graph into a
 /// [`Recording`] store at [`DEST`] that fails at put number `fail_at`. Answers
 /// the write's result and the store.
 ///
 /// The writer is called directly: a run chooses its own store
-/// (`fossil_df::Output`), and these promises are the writer's, so the store
+/// (`fossil_exec::Output`), and these promises are the writer's, so the store
 /// that records and refuses is handed to it here.
 async fn run(
     program: &str,
     files: Vec<(&'static str, Vec<u8>)>,
     fail_at: usize,
 ) -> (
-    Result<fossil_df::Written, fossil_graph_schema::Failure>,
+    Result<fossil_sinks::graphar::Written, fossil_graph_schema::Failure>,
     Arc<Recording>,
 ) {
     let mut storage = Storage::new(Arc::new(support::NoHost));
@@ -217,18 +217,20 @@ async fn run(
         .with_store(DEST, Arc::clone(&out) as Arc<dyn ObjectStore>)
         .expect("route");
     let (db, file) = support::db_with_shapes(program, "write.fossil", &[("executor.shex", SHEX)]);
-    let descriptor = fossil_df::output_descriptor(&db, file).expect("the descriptor");
-    let ctx = fossil_df::session::session_within(
-        Arc::new(fossil_df::memory::Budget::new(fossil_df::memory::BUDGET)),
+    let descriptor = fossil_exec::output_descriptor(&db, file).expect("the descriptor");
+    let ctx = fossil_exec::session::session_within(
+        Arc::new(fossil_exec::memory::Budget::new(
+            fossil_exec::memory::BUDGET,
+        )),
         None,
     );
     for (authority, store) in storage.stores() {
         ctx.register_object_store(authority, store);
     }
-    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor)
+    let graph = fossil_exec::execute_graph(&ctx, &db, file, &descriptor)
         .await
         .expect("the graph");
-    let result = fossil_df::write(
+    let result = fossil_sinks::graphar::write(
         &graph,
         &datafusion::prelude::SessionContext::new(),
         &storage,

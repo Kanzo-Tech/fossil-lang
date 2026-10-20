@@ -168,7 +168,7 @@ function readManifest(path: string): Manifest {
  * vanishes — 46 where the tree has 47.
  *
  * The page carried a `direction:` of *acyclic* and it was one edge away — `fossil-layout →
- * fossil-df`, named in the guard so that removing it had to leave no cycle behind. It is removed:
+ * fossil-exec`, named in the guard so that removing it had to leave no cycle behind. It is removed:
  * the tile writer is a leaf crate, the direction is closed, and the page describes what is there.
  * So the cycle check is no longer conditional on an excused edge, and there is no excused edge to
  * pin. What replaces it is stricter: the group graph must be acyclic as measured, with nothing
@@ -325,7 +325,7 @@ describe("the group diagram is the manifests", () => {
  *
  * The thirteen were not typos. They are what a line number does on its own:
  *
- *   - `fossil-df/src/stdlib.rs:78` was a **blank line**, cited as where a list of "thirteen"
+ *   - `fossil-exec/src/stdlib.rs:78` was a **blank line**, cited as where a list of "thirteen"
  *     functions is pinned. The list is at :103 and holds four. The page contradicted itself six
  *     sections apart and the guard could not see either half.
  *   - `fossil-hir/src/lower.rs:3207` was cited for a test the prose NAMES in the sentence before it.
@@ -754,7 +754,7 @@ describe("every argument that is named is a page of this site", () => {
   );
 
   // Nothing declares one right now: `architecture.mdx` was the last, and its direction closed when
-  // the tile writer left `fossil-df` and the group graph went acyclic. For an optional field that
+  // the tile writer left `fossil-exec` and the group graph went acyclic. For an optional field that
   // is a legal state, but an empty `it.each` is a vitest SUITE ERROR rather than a green vacuum, so
   // the suite carries a test of its own. It asserts nothing about how many pages name an argument,
   // on purpose: a floor there would be the rule that a direction must be argued on another page,

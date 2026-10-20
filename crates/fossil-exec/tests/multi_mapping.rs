@@ -35,7 +35,7 @@ async fn same_type_from_two_sources_merges_into_one_table() {
         support::db_with_shapes(PROGRAM, "merge.fossil", &[("person.shex", PERSON_SHEX)]);
 
     let ctx = SessionContext::new();
-    let graph = fossil_df::execute_graph(
+    let graph = fossil_exec::execute_graph(
         &ctx,
         &db,
         file,

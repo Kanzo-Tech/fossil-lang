@@ -44,7 +44,7 @@ async fn a_call_produces_its_column() {
         .expect("one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_df::execute_vertex(
+    let (vertex, node) = fossil_exec::execute_vertex(
         &ctx,
         &db,
         mapping,
@@ -106,7 +106,7 @@ User : Person from users
         .expect("one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, _) = fossil_df::execute_vertex(
+    let (vertex, _) = fossil_exec::execute_vertex(
         &ctx,
         &db,
         mapping,
@@ -159,7 +159,7 @@ User : Person from users
         .expect("one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_df::execute_vertex(
+    let (vertex, node) = fossil_exec::execute_vertex(
         &ctx,
         &db,
         mapping,
@@ -213,7 +213,7 @@ User : Person from users
         .expect("one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_df::execute_vertex(
+    let (vertex, node) = fossil_exec::execute_vertex(
         &ctx,
         &db,
         mapping,
@@ -268,7 +268,7 @@ User : Person from users
         .expect("one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, _) = fossil_df::execute_vertex(
+    let (vertex, _) = fossil_exec::execute_vertex(
         &ctx,
         &db,
         mapping,

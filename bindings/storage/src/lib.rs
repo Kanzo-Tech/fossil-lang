@@ -8,7 +8,7 @@
 
 // `result_large_err`: the helpers here refuse with `fossil_graph_schema::Failure`
 // (144 bytes, over clippy's 128) on the path that ends the call, where the copy
-// costs nothing measurable — `fossil-df`'s crate root says the same.
+// costs nothing measurable — `fossil-exec`'s crate root says the same.
 #![allow(clippy::result_large_err)]
 
 use std::sync::Arc;

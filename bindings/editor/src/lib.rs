@@ -54,7 +54,7 @@
 
 // `result_large_err`: the pure-Rust half refuses with
 // `fossil_graph_schema::Failure` (144 bytes, over clippy's 128) on the path that
-// ends the call, where the copy costs nothing measurable — `fossil-df`'s crate
+// ends the call, where the copy costs nothing measurable — `fossil-exec`'s crate
 // root says the same.
 #![allow(clippy::result_large_err)]
 

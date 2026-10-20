@@ -53,7 +53,7 @@ async fn three_users_from(program: &str, name: &str) -> Vec<String> {
         .first()
         .expect("one mapping");
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_df::execute_vertex(
+    let (vertex, node) = fossil_exec::execute_vertex(
         &ctx,
         &db,
         mapping,
@@ -95,7 +95,7 @@ async fn reads_an_ndjson_source() {
         .expect("one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_df::execute_vertex(
+    let (vertex, node) = fossil_exec::execute_vertex(
         &ctx,
         &db,
         mapping,
@@ -160,7 +160,7 @@ async fn reads_a_pipe_delimited_csv_source() {
         .expect("one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_df::execute_vertex(
+    let (vertex, node) = fossil_exec::execute_vertex(
         &ctx,
         &db,
         mapping,

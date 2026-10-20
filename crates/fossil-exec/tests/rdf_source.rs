@@ -37,7 +37,7 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
     // The seam fossil exposes: enumerate the provider sources (MIR-derived) so
     // the host knows what to read + how to pivot it.
     let accept_all = fossil_graph_schema::GraphSchema::default();
-    let bindings = fossil_df::provider_bindings(&db, file, &accept_all);
+    let bindings = fossil_exec::provider_bindings(&db, file, &accept_all);
     assert_eq!(bindings.len(), 1, "one io.rdf source");
     let b = &bindings[0];
     assert_eq!(b.binding, "people");
@@ -62,7 +62,7 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
     let ctx = SessionContext::new();
     support::register_provider_sources(&ctx, &db, file, &accept_all);
 
-    let graph = fossil_df::execute_graph(&ctx, &db, file, &accept_all)
+    let graph = fossil_exec::execute_graph(&ctx, &db, file, &accept_all)
         .await
         .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
@@ -109,7 +109,7 @@ async fn io_rdf_runs_end_to_end_via_the_host_seam() {
 
 // ── Multi-shape + multi-valued edges driven by a ShEx descriptor ────────────
 
-// The run_rdf.rs case at the fossil-df level: a destructuring `io.rdf` binds two
+// The run_rdf.rs case at the fossil-exec level: a destructuring `io.rdf` binds two
 // shapes from one file; `hasProject` is a multi-valued (`*`) shape-ref →
 // a typed KB→Project edge that UNNESTs to two edges (kb/1 points at two projects).
 //
@@ -156,7 +156,7 @@ async fn io_rdf_shex_descriptor_yields_typed_multivalued_edges() {
 
     let ctx = SessionContext::new();
     support::register_provider_sources(&ctx, &db, file, &descriptor);
-    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor)
+    let graph = fossil_exec::execute_graph(&ctx, &db, file, &descriptor)
         .await
         .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 

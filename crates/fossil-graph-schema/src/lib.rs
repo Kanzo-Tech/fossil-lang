@@ -21,7 +21,7 @@
 //!
 //! # Why dependency-free
 //!
-//! The schema is spoken by every side at once — the producer (`fossil-df`), each
+//! The schema is spoken by every side at once — the producer (`fossil-exec`), each
 //! materializer, and the wire/manifest. So this
 //! crate depends on `serde` and, for [`problem`], the three error crates
 //! (`thiserror`, `schemars`, `miette`'s trait) — nothing that parses or stores

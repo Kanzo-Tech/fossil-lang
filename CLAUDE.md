@@ -19,7 +19,7 @@ Keep it under 200 lines, rules-not-context.
   `/docs/design` is where an argument lives, with `design/discarded` for every rejected
   alternative and what would bring it back, and `design/prior-art` for every source named.
 - `docs/programs/` — the conformance programs. Documentation transcludes them; nothing
-  retypes a program into prose. No number here: `crates/fossil-df/tests/programs.rs` walks
+  retypes a program into prose. No number here: `crates/fossil-exec/tests/programs.rs` walks
   the directory, and the count in this line was already wrong.
 - `crates/` — the crate list. There is no number to quote; `cargo xtask wasm-check` prints
   the wasm32 subset it derived from the dependency graph.
@@ -75,10 +75,10 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
   timeline means breaks are inevitable, and without the ritual the third one leaves the codebase
   opaque to its own author.
 - **Walking-skeleton invariant:** `examples/hello.fossil`, run through the executor
-  (`fossil_df::Executor`, the one write host), must keep producing a readable Apache GraphAr
+  (`fossil_exec::Executor`, the one write host), must keep producing a readable Apache GraphAr
   graph — 5 `Person` vertices, asserted by content read back with DuckDB through the
   information files, not existence.
-  `crates/fossil-df/tests/walking_skeleton.rs` is the test that goes red. A refactor that
+  `crates/fossil-exec/tests/walking_skeleton.rs` is the test that goes red. A refactor that
   breaks it for >3 days is reverted and broken into smaller steps.
 
 ## Stack Pins
@@ -93,10 +93,10 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
 | duckdb | 1.10502 (`features = ["bundled"]`) | native execution |
 | wasm-bindgen | =0.2.120 | exact pin; CLI must match |
 | wasm-opt (binaryen) | 116 via `cargo install wasm-opt@0.116.1` | NOT apt (ubuntu ships binaryen 108, whose wasm-opt corrupts wasm-bindgen's externref table → `Table.grow(): failed to grow table` instantiating a wasm-bindgen module on Node 20, binaryen #4711; 116 fixes it). `packages/executor/scripts/build-wasm.sh` passes the six wasm32 default features (bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint, reference-types, multivalue — Rust 1.87/LLVM 20). NOT `-all` → no gc/typed-funcref, which break instantiation |
-| arrow + parquet | 58 | the graph writer, `fossil_df::write` (through `datafusion`'s re-export) and `graphar-parquet` |
+| arrow + parquet | 58 | the graph writer, `fossil_sinks::graphar::write` (through `datafusion`'s re-export) and `graphar-parquet` |
 | graphar-info, graphar-parquet | 0.1.0-alpha.1, crates.io | the Apache GraphAr YAML model and chunk writers (Kanzo-Tech/graphar); no `tokio`, builds for wasm32; `serde_yaml_ng`, never `serde_yml` |
 | shex_ast, shacl, rudof_rdf, rudof_iri, prefixmap, rml | Kanzo-Tech/rudof by `git` + `rev` (master after its per-syntax features, R-d; the owner tags it later) | ShEx and SHACL shape documents, the Turtle parser, and `rml`, the RML-Core mapping `describe` builds and writes as `mapping.ttl` (its `sql` feature renders it in tests); one git source for all six, `default-features = false`, and `rudof_rdf` with `features = ["turtle"]`, the one syntax fossil reads — the defaults drag in `reqwest`/`tokio` and what wasm32 cannot build |
-| datafusion | 54, `default-features = false` | pinned in `crates/fossil-df/Cargo.toml`, not the workspace table — see the `zstd`/`arrow-ipc` note there |
+| datafusion | 54, `default-features = false` | the workspace table, for `fossil-exec` and `fossil-sinks` — see the `zstd`/`arrow-ipc` note there |
 
 When bumping: update workspace `Cargo.toml` `[workspace.dependencies]`, run `cargo deny check`,
 verify WASM gate, and write the reason down on the page it affects if it is a major version with
@@ -128,19 +128,22 @@ crates/
                            routed by longest prefix and renewed at expires−5min — the one IO path
                            of DataFusion and of every byte fossil reads or writes. `js`: a JS
                            `Host` as its `Host`. The one renderer of a `CREATE SECRET`
-  fossil-df/               DataFusion backend for the property-graph MIR, the one graph
-                           writer (`write`: `layout` lays the tables out as Apache GraphAr's
-                           and holds them to what an RDF reader can recover, `describe` builds
-                           the RML-Core mapping of them, `graphar-parquet` writes the chunks,
-                           `mapping.ttl` after them and `fossil.graph.yml` last), and `Executor` — the
-                           whole run a host drives, under the 2 GiB pool in `memory.rs` that
-                           refuses as `run/over-budget`. `facts` counts what the footers hold
-                           (`fossil:stats`)
+  fossil-exec/             the engine: the property-graph MIR run on DataFusion into the
+                           `Graph` a sink writes, and `Executor` — the whole run a host drives,
+                           under the 2 GiB pool in `memory.rs` that refuses as
+                           `run/over-budget`. It knows no output format but the sink it calls
+  fossil-sinks/            what a sink is handed (`Graph`, `EdgeDrops`) and one module per
+                           output format, each behind the feature of its name. `graphar`:
+                           `layout` lays the tables out as Apache GraphAr's and holds them to
+                           what an RDF reader can recover, `describe` builds the RML-Core
+                           mapping of them, `graphar-parquet` writes the chunks, `mapping.ttl`
+                           after them and `fossil.graph.yml` last; `facts` counts what the
+                           footers hold (`fossil:stats`)
   fossil-profile/          what a source is — columns and types, counts, candidate keys, the
                            inclusions between sources, a sample — planned as queries and read
                            from their answers, running NOTHING (sans-IO, `run(sources, options,
                            exec)`). Each query is an `Ask`: the browser runs its SQL on DuckDB-WASM,
-                           `fossil-df`'s tests on native `duckdb`, and the writer renders it on
+                           `fossil-exec`'s tests on native `duckdb`, and the writer renders it on
                            DataFusion to count what it wrote; it links no engine, so it is in the
                            wasm closure. There is no native language server: it was deleted on
                            2026-10-12 (`/docs/design/discarded`). `Options::TYPES` is one
@@ -165,7 +168,7 @@ bindings/                  the wasm-bindgen cdylibs, one per npm package (swc's 
                            `crates/`
   editor/                  `fossil-wasm`: the workspace under `openProgram` + the tokenizer,
                            for `@fossil-lang/wasm`
-  executor/                `fossil-df-wasm`: `fossil_df::Executor` exposed to JS, for
+  executor/                `fossil-df-wasm`: `fossil_exec::Executor` exposed to JS, for
                            `@fossil-lang/executor` — the only host that writes a graph, in the
                            browser and in Node. There is no native CLI: it was deleted on
                            2026-09-30 (`/docs/design/discarded` says what brings it back)

@@ -19,8 +19,8 @@
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use fossil_df::executor::MEMORY;
-use fossil_df::{Executor, Output, Ran, RunReport};
+use fossil_exec::executor::MEMORY;
+use fossil_exec::{Executor, Output, Ran, RunReport};
 use fossil_storage::{Access, Host, Scope, Storage};
 use object_store::memory::InMemory;
 use object_store::path::Path;
@@ -277,7 +277,7 @@ async fn an_edge_to_a_vertex_outside_the_sample_is_dropped_and_counted() {
     .await;
     assert_eq!(
         report.dropped,
-        [fossil_df::EdgeDrops {
+        [fossil_sinks::EdgeDrops {
             table: "Order_placedBy_Person".to_string(),
             dropped: 1,
         }]

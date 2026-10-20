@@ -6,7 +6,7 @@
  * credential the host vends for that connection (`@fossil-lang/storage`), and `fossil-profile`'s
  * plan runs on the host's engine ({@link runProfiler}): the columns and their types, and — unless
  * the host asks for types alone — the counts, candidate keys, inclusions between sources and a
- * sample. Every source in the answer is named by its binding, the name the program writes. The plan is Rust, the same one `fossil-df`'s tests run on native DuckDB, so only the
+ * sample. Every source in the answer is named by its binding, the name the program writes. The plan is Rust, the same one `fossil-exec`'s tests run on native DuckDB, so only the
  * engine differs. The engine is the host's, which is why DuckDB-WASM is not a peer.
  *
  * `FossilProgram.describe` is this over the program's own inputs; {@link profile} is it over sources

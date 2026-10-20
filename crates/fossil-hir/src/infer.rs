@@ -480,7 +480,7 @@ fn apply_source_op<'db>(
         }
         // The one verb whose two inputs must agree rather than combine.
         // `Op::Union`'s schema rule is `left`, asserted equal to `right`, and
-        // `fossil-df` unions BY POSITION — so equal names in equal order with
+        // `fossil-exec` unions BY POSITION — so equal names in equal order with
         // equal types is not a stricter rule than the backend's, it is the
         // backend's rule stated where a user can be told about it.
         HirSourceOp::Union { right } => {
@@ -749,7 +749,7 @@ enum ConditionSide {
 ///
 /// # Why here and not one layer down
 ///
-/// `fossil_df::plan::join_equalities` enforces the same rule, and refuses a
+/// `fossil_exec::plan::join_equalities` enforces the same rule, and refuses a
 /// malformed condition with a `DataFusionError::Plan` at run time — late, and
 /// with no span, because by then the author's text is gone. The engine keeps
 /// its copy as a backstop: a MIR reaching it need not have come through this
@@ -882,7 +882,7 @@ fn check_join_condition<'db>(
 /// condition is taken apart by; everything else is a leaf for
 /// [`check_join_condition`] to admit or refuse.
 ///
-/// `fossil_df::plan::conjuncts` is the same function over `fossil_mir::Expr`,
+/// `fossil_exec::plan::conjuncts` is the same function over `fossil_mir::Expr`,
 /// and the two cannot be one: the HIR is where the author's names still are, and
 /// this crate is below the one that owns the MIR.
 fn conjuncts(on: &crate::lower::HirExpr) -> Vec<&crate::lower::HirExpr> {
@@ -992,7 +992,7 @@ fn pipe_error(
 /// **unsatisfiable**. And a type error is not informational — it taints
 /// `typecheck_mapping`, which poisons `lower_to_mir_pg`, which fails the run.
 ///
-/// Nothing downstream of the writer depends on it: `fossil_df` derives the
+/// Nothing downstream of the writer depends on it: `fossil_exec` derives the
 /// physical column with `inner_primitive(...).unwrap_or(Primitive::String)`,
 /// and a reference has no inner primitive, so the column is `string`. What it
 /// buys is that the checker can tell an edge column from a text column — the

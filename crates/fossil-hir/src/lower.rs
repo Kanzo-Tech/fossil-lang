@@ -251,7 +251,7 @@ pub enum PropertyKey {
 ///
 /// [`crate::check`]'s `synth_binop` decides the RESULT TYPE (`Integer` unless
 /// an operand is `Float`, except for [`Self::Div`], which is always `Float`),
-/// and `fossil_df::render` decides what the engine computes. Neither can be
+/// and `fossil_exec::render` decides what the engine computes. Neither can be
 /// read off this enum, which is a tag and nothing else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum BinOp {

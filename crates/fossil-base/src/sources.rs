@@ -160,7 +160,7 @@ pub fn describe_columns(db: &mut dyn Db, descriptor: InferredDescriptor) {
 /// `api/invalid-argument`, the `serde_json` error as its cause, naming
 /// `descriptorJson` — the argument both hosts take it as.
 // `result_large_err`: a host refuses the call with this `Failure` whole, once,
-// on the path that ends it — `fossil-df`'s crate root says the same.
+// on the path that ends it — `fossil-exec`'s crate root says the same.
 #[allow(clippy::result_large_err)]
 pub fn columns_from_json(json: &str) -> Result<InferredDescriptor, Failure> {
     serde_json::from_str(json).map_err(|e| {

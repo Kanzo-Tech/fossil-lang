@@ -9,7 +9,7 @@
 // different answers rather than the same answer spelled twice: read with a
 // comma the file is one column called `id|firstName|lastName|city`, and read
 // with `|` it is four. Both halves of the compile have to agree about which —
-// `fossil-introspect` DESCRIBEs this file before the check and `fossil-df`
+// `fossil-introspect` DESCRIBEs this file before the check and `fossil-exec`
 // reads it during the run, and an empty `expected/diagnostic.txt` beside a
 // four-row vertex table is the two of them saying the same thing.
 

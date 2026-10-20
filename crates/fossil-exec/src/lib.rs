@@ -1,5 +1,5 @@
-//! `DataFusion` backend for the property-graph MIR, and the one writer of a
-//! fossil graph: an Apache `GraphAr` graph.
+//! The engine: the property-graph MIR run on `DataFusion`, into the
+//! [`Graph`] a sink writes (`fossil-sinks`).
 //!
 //! Consumes a [`fossil_mir::lower_to_mir_pg`] graph and materialises each
 //! vertex type on `DataFusion`: read the source, project `id AS subject` + each
@@ -10,7 +10,7 @@
 //! memory (the hard barrier: vertices before edges), and an edge's endpoints
 //! come out global too.
 //!
-//! [`write()`] writes the graph — a vertex type's chunk and a relation's
+//! `fossil_sinks::graphar::write` writes the graph — a vertex type's chunk and a relation's
 //! adjacency list through `graphar-parquet`, `fossil.graph.yml` last — and [`Executor`] is the
 //! whole run a host drives: compile, register documents, read sources through
 //! a [`fossil_storage::Storage`], execute, write. `fossil-df-wasm` is a
@@ -41,8 +41,6 @@ pub mod descriptor;
 /// The run a host drives: one compiled program, its documents, its sources,
 /// and the graph it writes.
 pub mod executor;
-mod facts;
-mod layout;
 /// What a run's operators may reserve, and the compaction that keeps
 /// `DataFusion`'s count of it true.
 pub mod memory;
@@ -59,8 +57,6 @@ pub mod session;
 /// The catalog rendered for this engine: which `DataFusion` function each
 /// stdlib entry becomes, and which rows this engine cannot render.
 pub mod stdlib;
-/// The graph, written: `GraphAr`'s chunks, `fossil.graph.yml` last.
-pub mod write;
 
 pub use descriptor::output_descriptor;
 /// The executor a host drives. Named at the crate root because it is the
@@ -70,9 +66,7 @@ pub use executor::{Executor, GraphFile, Output, Ran};
 /// [`fossil_mir::MirGraph`] by hand) uses to materialise an intermediate.
 pub use plan::plan_relation;
 /// What a run hands its caller.
-pub use report::{EdgeDrops, RunReport};
-/// The graph writer, and what it answers.
-pub use write::{WriteError, Written, write};
+pub use report::RunReport;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -97,55 +91,11 @@ use fossil_hir::{MappingLoc, def_map::def_map};
 // `PAYLOAD_IDENTITY` is the column of a vertex's IRI, which the mapping reads: `fossil-mir` names it.
 use fossil_mir::describe::PAYLOAD_IDENTITY;
 use fossil_mir::{Expr, Op, SourceFormat, VProp, apply_output_shape, lower_to_mir_pg};
+use fossil_sinks::{
+    ENDPOINT_SRC, EdgeTable, Graph, PAYLOAD_ADDRESS, PROPERTY_LANGUAGE, PropertyValues, VertexTable,
+};
 
-/// The columns of the tables the engine holds between the executor and the
-/// writer. They are not the graph's: the writer numbers the rows within their
-/// type, names the identity `subject` as a property, and turns the rest into
-/// `GraphAr`'s columns.
-///
-/// The rank of a vertex in the whole graph, `u32`: the types in schema order,
-/// each one a contiguous range of it.
-const PAYLOAD_ADDRESS: &str = "dense_id";
-/// The `dense_id` of the vertex a multi-valued property's value belongs to.
-const ENDPOINT_SRC: &str = "src";
-/// The BCP 47 tag of a language-tagged value, beside it.
-const PROPERTY_LANGUAGE: &str = "lang";
-
-/// The materialised graph for a program: the canonical [`GraphSchema`] (the
-/// single source of all type/predicate/cardinality metadata) plus the relation
-/// data — vertex tables and edge tables as in-memory `RecordBatch`es.
-///
-/// This is the universal substrate made concrete: **relations + a
-/// graph-schema**. The graph is written *from* this by [`write()`]; the data
-/// carriers hold no metadata of their own — it all lives in
-/// [`schema`](Self::schema).
-#[derive(Debug)]
-pub struct Graph {
-    pub schema: GraphSchema,
-    pub vertices: Vec<VertexTable>,
-    pub edges: Vec<EdgeTable>,
-}
-
-/// A materialised edge's rows, `ORDER BY src_dense, dst_dense`: two `u32`
-/// columns, each its endpoint's global `dense_id`. The `(src_type, label,
-/// dst_type)` triple identifies the edge in the schema; all other metadata is
-/// in the [`GraphSchema`].
-#[derive(Debug)]
-pub struct EdgeTable {
-    pub label: String,
-    pub src_type: String,
-    pub dst_type: String,
-    pub batches: Vec<RecordBatch>,
-    /// The sources its rows were derived from, as [`plan::derived_from`] spells
-    /// them, over every mapping that writes it.
-    pub derived_from: Vec<String>,
-    /// Rows of this edge's input that resolved no endpoint pair, and so are not
-    /// in [`Self::batches`]. See [`execute_edge`] for why they are discarded
-    /// and [`report::EdgeDrops`] for where the number goes.
-    pub dropped: u64,
-}
-
-/// Execute a whole program's mappings into the graph [`write()`] lays out and
+/// Execute a whole program's mappings into the graph a sink lays out and
 /// writes.
 ///
 /// Two phases with a hard barrier between them: **(1)** materialise *every*
@@ -246,36 +196,6 @@ pub async fn execute_graph<'db>(
         vertices,
         edges,
     })
-}
-
-/// A materialised vertex relation: the `label`-named table and its
-/// `RecordBatch`es in the writer-W0b column shape (`dense_id`-prefixed). The
-/// batches are also registered in the executor's [`SessionContext`] under
-/// `label` so the edge phase joins them without re-reading Parquet. The node's
-/// type/property metadata lives in the [`GraphSchema`], keyed by this `label`.
-///
-/// A [`Cardinality::Multi`] property is not a column of it: its values are in
-/// [`Self::properties`], a table each.
-#[derive(Debug)]
-pub struct VertexTable {
-    pub label: String,
-    pub batches: Vec<RecordBatch>,
-    /// The sources its rows were derived from, as [`plan::derived_from`] spells
-    /// them, over every mapping that emits the type.
-    pub derived_from: Vec<String>,
-    pub properties: Vec<PropertyValues>,
-}
-
-/// A multi-valued property's values, in first normal form: `src`, the
-/// `dense_id` of the vertex a value belongs to, and the value under the
-/// property's name — a set, `ORDER BY src, value`.
-#[derive(Debug)]
-pub struct PropertyValues {
-    pub name: String,
-    pub batches: Vec<RecordBatch>,
-    /// The sources of the mappings that write the property — a subset of its
-    /// vertex's [`VertexTable::derived_from`].
-    pub derived_from: Vec<String>,
 }
 
 /// A mapping's vertex projection before the dense-id barrier — the W0b columns
@@ -907,7 +827,7 @@ async fn execute_edges<'db>(
 /// `candidates − resolved`: the extra `count()` is one more pass over the edge's
 /// input relation, which the run already scans twice (once per orientation).
 ///
-/// Both ends are already the global `dense_id`, and `crate::write()` subtracts
+/// Both ends are already the global `dense_id`, and `fossil_sinks::graphar::write` subtracts
 /// the first of each end's type to write the pair as indices within the types.
 async fn execute_edge(
     ctx: &SessionContext,

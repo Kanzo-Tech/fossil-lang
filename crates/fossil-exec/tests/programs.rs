@@ -1,5 +1,5 @@
 //! **The conformance set, executed.** Every program under `docs/programs/`,
-//! compiled by the production path and run through [`fossil_df::Executor`],
+//! compiled by the production path and run through [`fossil_exec::Executor`],
 //! each one's output or diagnostic kept as an artefact the documentation
 //! transcludes.
 //!
@@ -15,7 +15,7 @@
 //!   properties written against the properties lowered, then the types
 //!   `fossil.graph.yml` declares and every relation's dropped count.
 //!
-//! `UPDATE_EXPECT=1 cargo test -p fossil-df --test programs` rewrites them
+//! `UPDATE_EXPECT=1 cargo test -p fossil-exec --test programs` rewrites them
 //! (`expect-test`).
 //!
 //! # The invariants no blessing can satisfy

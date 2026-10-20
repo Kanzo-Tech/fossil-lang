@@ -35,7 +35,7 @@ fossil-base = { path = "../fossil-base" }
 fossil-profile = { path = "../fossil-profile" }
 fossil-ide = { path = "../fossil-ide" }
 fossil-storage = { path = "../fossil-storage" }
-fossil-df = { path = "../fossil-df" }
+fossil-exec = { path = "../fossil-exec" }
 schemars = { workspace = true }
 expect-test = { workspace = true }
 # `tests/engine_reach.rs` reads `deny.toml` — the file that IS the engine-ring

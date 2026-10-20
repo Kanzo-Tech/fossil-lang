@@ -1669,7 +1669,29 @@ dependencies = [
 ]
 
 [[package]]
-name = "fossil-df"
+name = "fossil-df-wasm"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "console_error_panic_hook",
+ "fossil-exec",
+ "fossil-graph-schema",
+ "fossil-storage",
+ "futures",
+ "getrandom 0.2.17",
+ "getrandom 0.3.4",
+ "getrandom 0.4.2",
+ "js-sys",
+ "object_store",
+ "serde",
+ "serde-wasm-bindgen",
+ "url",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "fossil-exec"
 version = "0.1.0"
 dependencies = [
  "async-trait",
@@ -1682,6 +1704,7 @@ dependencies = [
  "fossil-hir",
  "fossil-mir",
  "fossil-profile",
+ "fossil-sinks",
  "fossil-storage",
  "fossil-syntax",
  "futures",
@@ -1699,32 +1722,9 @@ dependencies = [
  "slug",
  "smol_str",
  "tempfile",
- "thiserror 1.0.69",
  "tokio",
  "tracing",
  "unicode-normalization",
-]
-
-[[package]]
-name = "fossil-df-wasm"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "console_error_panic_hook",
- "fossil-df",
- "fossil-graph-schema",
- "fossil-storage",
- "futures",
- "getrandom 0.2.17",
- "getrandom 0.3.4",
- "getrandom 0.4.2",
- "js-sys",
- "object_store",
- "serde",
- "serde-wasm-bindgen",
- "url",
- "wasm-bindgen",
- "wasm-bindgen-futures",
 ]
 
 [[package]]
@@ -1813,6 +1813,28 @@ dependencies = [
  "serde",
  "smol_str",
  "tempfile",
+]
+
+[[package]]
+name = "fossil-sinks"
+version = "0.1.0"
+dependencies = [
+ "datafusion",
+ "fossil-base",
+ "fossil-graph-schema",
+ "fossil-hir",
+ "fossil-mir",
+ "fossil-profile",
+ "fossil-storage",
+ "graphar-info",
+ "graphar-parquet",
+ "object_store",
+ "oxrdf",
+ "schemars",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]
@@ -5491,7 +5513,7 @@ version = "0.1.0"
 dependencies = [
  "expect-test",
  "fossil-base",
- "fossil-df",
+ "fossil-exec",
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-ide",

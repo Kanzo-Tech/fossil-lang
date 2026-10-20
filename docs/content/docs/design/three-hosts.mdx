@@ -47,7 +47,7 @@ Inside the address space the executor declares a **budget**: a 2 GiB pool every 
 operator reserves against, and no disk. An operator told no has nowhere to spill, so the run stops
 while the graph is still executing — before the first byte of the graph is written — and the host
 gets a `FossilError` whose code is `run/over-budget` and whose `data` says which operator asked, for
-how much, and what was already held. `crates/fossil-df/src/memory.rs` is the pool and its reasons.
+how much, and what was already held. `crates/fossil-exec/src/memory.rs` is the pool and its reasons.
 
 The budget is half the address space because the pool only sees what operators *reserve*: the source
 bytes, the collected graph and the encoded Parquet are outside it. Measured on `docs/programs/shop`
@@ -157,7 +157,7 @@ than the host and reads as plain text, so appending stays backwards-compatible a
 being an event at all.
 
 Where an implementation can be shared across the boundary, it is: what reads a source's
-columns — a browser on DuckDB-WASM, `fossil-df`'s tests on native DuckDB — runs one plan,
+columns — a browser on DuckDB-WASM, `fossil-exec`'s tests on native DuckDB — runs one plan,
 `fossil-profile`, and only the engine that answers its queries differs. What
 the plan reads off `catalogue.bnf` — the reader, its option keyword and the DuckDB→primitive table
 — is generated into that one crate.
@@ -230,7 +230,7 @@ await run(program, { files, path });                      // bytes in hand, answ
 - **Writes** are `into`: `{ job }` is the job's cloud store, reached through the `write` credential
   vended on it, and the run answers its `RunReport`; `'memory'` is an `object_store` `InMemory`, and
   the run answers `{ report, files }`. The two values are one-to-one with the two stores, and
-  `fossil_df::Output` is the same enum — `Memory` or `Storage { job }`. Into memory, no `write`
+  `fossil_exec::Output` is the same enum — `Memory` or `Storage { job }`. Into memory, no `write`
   credential is asked for: a host that may only read can still preview. With `files`, `into` is
   `'memory'` and `{ job }` is refused as `api/invalid-argument` — in the types and at run time —
   because there is no host to vend the write. With `host`, `into` has no default. The run chooses

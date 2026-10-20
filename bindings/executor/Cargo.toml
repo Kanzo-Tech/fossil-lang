@@ -1,5 +1,5 @@
 # fossil-df-wasm — wasm-bindgen wrapper exposing the DataFusion executor
-# (`fossil-df`) to JS. Kept SEPARATE from `fossil-wasm` (the LSP shim) so the
+# (`fossil-exec`) to JS. Kept SEPARATE from `fossil-wasm` (the LSP shim) so the
 # editor's wasm stays lean and loads on page-load, while this heavy executor is
 # lazy-loaded only when a job runs.
 [package]
@@ -24,7 +24,7 @@ workspace = true
 [dependencies]
 # The executor itself — compile, documents, sources, execute, layout, write.
 # This crate is its `wasm-bindgen` shell.
-fossil-df = { path = "../../crates/fossil-df" }
+fossil-exec = { path = "../../crates/fossil-exec" }
 # `Failure` and `Problem` — what a run refuses with — and `Foreign`, the error
 # type of the `Host` this crate implements for a run with no storage. `js` is
 # the one function every wasm crate throws a failure through.

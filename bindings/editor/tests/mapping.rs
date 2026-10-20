@@ -1,7 +1,7 @@
 //! `FossilProgram.mapping()`, the Rust half: the RML-Core mapping a program's
 //! types describe, with no run and no description of its sources.
 //!
-//! The mapping's content is `fossil_mir::describe`'s, and `fossil-df`'s
+//! The mapping's content is `fossil_mir::describe`'s, and `fossil-exec`'s
 //! `tests/mapping.rs` holds it to the document a run writes; this holds that the
 //! workspace feeds it the types the program declares and imports.
 

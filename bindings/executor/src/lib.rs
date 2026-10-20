@@ -1,6 +1,6 @@
-//! `fossil-df-wasm` — [`fossil_df::Executor`] exposed to JS.
+//! `fossil-df-wasm` — [`fossil_exec::Executor`] exposed to JS.
 //!
-//! The executor is `fossil-df`'s: compile, register the documents a program
+//! The executor is `fossil-exec`'s: compile, register the documents a program
 //! names, read its sources through a [`Storage`], execute on `DataFusion`, and
 //! write the Apache `GraphAr` graph. This crate only marshals JS values around it,
 //! and it is the one host that writes a graph — in the browser, and in Node
@@ -11,14 +11,14 @@
 #![allow(clippy::future_not_send)]
 // `result_large_err`: the helpers here refuse with `fossil_graph_schema::Failure`
 // (144 bytes, over clippy's 128) on the path that ends the call, where the copy
-// costs nothing measurable — `fossil-df`'s crate root says the same.
+// costs nothing measurable — `fossil-exec`'s crate root says the same.
 #![allow(clippy::result_large_err)]
 
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use fossil_df::{Executor, Output, Ran};
+use fossil_exec::{Executor, Output, Ran};
 use fossil_graph_schema::js::{bug, invalid_argument};
 use fossil_graph_schema::{Failure, Foreign, Problem};
 use fossil_storage::{Access, JsHost, Scope, Storage};
@@ -152,13 +152,13 @@ impl FossilExecutor {
     ///   `host` vends — or `{ files }`, each location the program reads mapped
     ///   to its bytes, for a host with no storage.
     /// - `into` is `{ job }` — the graph written under the one prefix `host`
-    ///   vends `write` on for `job`, answering the [`fossil_df::RunReport`] —
+    ///   vends `write` on for `job`, answering the [`fossil_exec::RunReport`] —
     ///   or `"memory"`, answering `{ report, files: [{ path, bytes }] }` and
     ///   asking for no `write` credential.
     ///
     /// # Errors
     /// `api/invalid-argument` for a `reads`, `into` or `limit` of the wrong
-    /// shape, or the run's own failure ([`fossil_df::Executor::execute`]) —
+    /// shape, or the run's own failure ([`fossil_exec::Executor::execute`]) —
     /// `run/over-budget` when it needed more memory than the executor's budget,
     /// which is raised before anything is written.
     ///

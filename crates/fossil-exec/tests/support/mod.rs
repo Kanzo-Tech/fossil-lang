@@ -157,12 +157,12 @@ impl fossil_storage::Host for Vending {
 /// Where [`write_in_memory`] writes.
 pub(crate) const MEMORY_DEST: &str = "mem://out/graph/";
 
-/// [`fossil_df::write`] into an in-memory store, and every file it wrote, by
+/// [`fossil_sinks::graphar::write`] into an in-memory store, and every file it wrote, by
 /// path under [`MEMORY_DEST`].
 pub(crate) async fn write_in_memory(
-    graph: &fossil_df::Graph,
+    graph: &fossil_sinks::Graph,
 ) -> (
-    fossil_df::Written,
+    fossil_sinks::graphar::Written,
     std::collections::BTreeMap<String, Vec<u8>>,
 ) {
     use futures::TryStreamExt;
@@ -172,7 +172,7 @@ pub(crate) async fn write_in_memory(
     storage
         .with_store("mem://out/", Arc::clone(&out) as Arc<dyn ObjectStore>)
         .expect("route the in-memory store");
-    let written = fossil_df::write(
+    let written = fossil_sinks::graphar::write(
         graph,
         &datafusion::prelude::SessionContext::new(),
         &storage,
@@ -210,10 +210,10 @@ pub(crate) fn register_provider_sources(
     file: SourceFile,
     descriptor: &fossil_graph_schema::GraphSchema,
 ) {
-    for binding in fossil_df::provider_bindings(db, file, descriptor) {
+    for binding in fossil_exec::provider_bindings(db, file, descriptor) {
         let turtle = std::fs::read_to_string(&binding.uri)
             .unwrap_or_else(|e| panic!("read RDF source `{}`: {e}", binding.uri));
-        fossil_df::register_rdf(ctx, &binding, &turtle).expect("register the RDF source");
+        fossil_exec::register_rdf(ctx, &binding, &turtle).expect("register the RDF source");
     }
 }
 

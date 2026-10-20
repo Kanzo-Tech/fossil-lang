@@ -40,7 +40,7 @@ use fossil_profile::{Ask, ColumnStats, Options, Profiler, Relation, Rows, TOP_VA
 use graphar_info::Cardinality;
 use serde::{Serialize, Serializer};
 
-use crate::layout::Vertex;
+use super::layout::Vertex;
 
 /// The footer key a vertex chunk's facts are under: fossil's, namespaced the way
 /// Arrow namespaces its own (`ARROW:schema`).

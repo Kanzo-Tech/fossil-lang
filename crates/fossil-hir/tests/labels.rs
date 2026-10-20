@@ -4,7 +4,7 @@
 //! # What it does NOT prove
 //!
 //! - **That a run writes the language column.** That is the conformance
-//!   program `docs/programs/labels`, executed by `fossil-df`'s
+//!   program `docs/programs/labels`, executed by `fossil-exec`'s
 //!   `tests/programs.rs` and read back with `DuckDB`.
 //! - **That a shape document's annotations are read.** `fossil_hir::shex`'s and
 //!   `fossil_hir::shacl`'s own tests hold the two decoders.

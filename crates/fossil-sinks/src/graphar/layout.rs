@@ -49,11 +49,10 @@ use graphar_info::{
 };
 use graphar_parquet::{DST_INDEX_COL, SRC_INDEX_COL, UserTypes};
 
-use crate::write::WriteError;
-use crate::{
-    ENDPOINT_SRC, EdgeTable, Graph, PAYLOAD_IDENTITY, PROPERTY_LANGUAGE, PropertyValues,
-    VertexTable,
-};
+use fossil_mir::describe::PAYLOAD_IDENTITY;
+
+use super::write::WriteError;
+use crate::{ENDPOINT_SRC, EdgeTable, Graph, PROPERTY_LANGUAGE, PropertyValues, VertexTable};
 
 /// The graph's name, which names its document: `fossil.graph.yml`.
 const GRAPH: &str = "fossil";

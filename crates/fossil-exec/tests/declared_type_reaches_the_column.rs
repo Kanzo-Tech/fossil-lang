@@ -8,7 +8,7 @@
 //! introspects nothing, so an untyped column would be declared `string` over a
 //! `BIGINT`. The property group describes the file a reader opens, so the
 //! writer chooses the `GraphAr` type the written column's values need
-//! (`fossil_df::layout`) and neither disagreement reaches the artefact.
+//! (`fossil_sinks::graphar::layout`) and neither disagreement reaches the artefact.
 //!
 //! The checker's disagreement with the engine is real, and is in
 //! `aggregate_result_types.rs`; it is a question about the language, not about

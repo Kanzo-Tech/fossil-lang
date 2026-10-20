@@ -6,7 +6,7 @@
 //! disagreement is older than `group_by`: the row's template is `sum(%0)` and
 //! the scalar rendering has always had it. What `group_by` added is a place
 //! where the declared type is WRITTEN DOWN in the artefact —
-//! `crates/fossil-df/src/lib.rs`'s `node_property` puts the checker's
+//! `crates/fossil-exec/src/lib.rs`'s `node_property` puts the checker's
 //! `Primitive` into the schema while `layout.rs` stores the engine's Arrow
 //! type as `GraphAr`'s and the Parquet writer encodes it — so this file measures the pair rather than arguing
 //! about it.
@@ -100,7 +100,7 @@ fn table(ctx: &SessionContext, value: DataType, values: ArrayRef) -> DataFrame {
     ctx.read_table(Arc::new(mem)).expect("reading it back")
 }
 
-/// The `DataFusion` call `crates/fossil-df/src/plan.rs::agg_call` makes, spelled
+/// The `DataFusion` call `crates/fossil-exec/src/plan.rs::agg_call` makes, spelled
 /// the same way and by the same enum — a fifth aggregate added to the catalogue
 /// stops compiling here too.
 fn call(f: AggFn, arg: datafusion::prelude::Expr) -> datafusion::prelude::Expr {
@@ -154,7 +154,7 @@ async fn measure() -> Vec<Cell> {
     cells
 }
 
-/// The measurement, printed as the table it is. `cargo test -p fossil-df
+/// The measurement, printed as the table it is. `cargo test -p fossil-exec
 /// --test aggregate_result_types -- --nocapture` is where the numbers in any
 /// argument about this come from.
 #[tokio::test]

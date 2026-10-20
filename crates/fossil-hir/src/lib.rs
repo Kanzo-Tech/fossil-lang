@@ -51,7 +51,7 @@ pub mod def_map;
 pub mod didyoumean;
 /// The source spelling of a lowered node — the HIR said back in surface syntax.
 ///
-/// Its consumer is the conformance census — `fossil-df`'s `tests/census`,
+/// Its consumer is the conformance census — `fossil-exec`'s `tests/census`,
 /// which commits a per-program record of what the compiler UNDERSTOOD. Rendering
 /// that from source text would prove nothing; rendering it from the HIR is the
 /// only version of the artefact that can be wrong.

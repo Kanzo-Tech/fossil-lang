@@ -4,7 +4,7 @@ description: The compiler runs on DataFusion and links no database. Why wasm32 i
 ---
 
 fossil compiles to relational algebra and something has to execute it. Two things did: DataFusion in
-`fossil-df`, and DuckDB — bundled, compiled from C++ — across the layout pass, the engine and the
+`fossil-exec`, and DuckDB — bundled, compiled from C++ — across the layout pass, the engine and the
 hosts. **The compiler runs on DataFusion; DuckDB leaves the compiler and stays in the hosts.** The
 argument is four sentences:
 

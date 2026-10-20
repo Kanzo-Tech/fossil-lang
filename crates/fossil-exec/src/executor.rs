@@ -11,7 +11,7 @@
 //! [`Executor::register_undescribed`]), so the run checks the program against
 //! the columns the editor checked it against. [`Executor::execute`] builds a `DataFusion` plan
 //! (`lower_to_mir_pg` → `execute_graph`), writes the `GraphAr` graph into its
-//! [`Output`] with [`crate::write()`], and answers what it [`Ran`].
+//! [`Output`] with [`fossil_sinks::graphar::write`], and answers what it [`Ran`].
 //!
 //! ## Storage seam
 //! Every byte goes through a [`Storage`](fossil_storage::Storage): the sources `DataFusion` reads, the
@@ -229,7 +229,7 @@ impl Executor {
     /// the graph into `output`: route each source — through its connection's
     /// credential, or as a public URL — register the stores, execute the graph
     /// with at most `limit` rows read from each source scan, and
-    /// [`crate::write()`] it.
+    /// [`fossil_sinks::graphar::write`] it.
     ///
     /// # Errors
     /// A [`Failure`] with its code: for [`Output::Storage`], what the host
@@ -240,7 +240,7 @@ impl Executor {
     /// `run/does-not-compile`, relating the program's diagnostics; a
     /// `storage/…` code for a source that will not route; `source/not-found`
     /// for one whose file is not in its store; `engine/failed`, with
-    /// `DataFusion`'s error as the cause; or what [`crate::write()`] refused.
+    /// `DataFusion`'s error as the cause; or what [`fossil_sinks::graphar::write`] refused.
     pub async fn execute(
         &self,
         storage: &mut Storage,
@@ -285,10 +285,12 @@ impl Executor {
         // The writer counts what it writes on the same session, under the same
         // pool: a profile that does not fit is refused as any operator is,
         // before the chunk it is the footer of.
-        let written = crate::write(&graph, &ctx, storage, &dest)
+        let written = fossil_sinks::graphar::write(&graph, &ctx, storage, &dest)
             .await
             .map_err(|e| match e {
-                crate::WriteError::Engine(e) => engine_failure(e, budget.refusal(), db, file),
+                fossil_sinks::graphar::WriteError::Engine(e) => {
+                    engine_failure(e, budget.refusal(), db, file)
+                }
                 other => other.into(),
             })?;
         drop(ctx);

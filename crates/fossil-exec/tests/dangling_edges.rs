@@ -55,11 +55,11 @@ Order : Order from orders
 // The executor's futures are not `Send` and are not meant to be — see the
 // crate-level allow in `src/lib.rs`. A test that awaits one inherits the lint.
 #[allow(clippy::future_not_send)]
-async fn run(program: &str) -> fossil_df::Graph {
+async fn run(program: &str) -> fossil_sinks::Graph {
     let (db, file) =
         support::db_with_shapes(program, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
     let ctx = SessionContext::new();
-    fossil_df::execute_graph(
+    fossil_exec::execute_graph(
         &ctx,
         &db,
         file,
@@ -96,7 +96,7 @@ async fn a_dangling_endpoint_is_counted_rather_than_swallowed() {
     let (written, files) = support::write_in_memory(&graph).await;
     assert_eq!(
         written.dropped,
-        vec![fossil_df::EdgeDrops {
+        vec![fossil_sinks::EdgeDrops {
             table: "Order_placedBy_Person".to_string(),
             dropped: 1,
         }],

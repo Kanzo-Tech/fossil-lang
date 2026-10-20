@@ -15,12 +15,13 @@
 //! [`RunReport::dropped`] — how many rows of each relation's input did not
 //! become an edge, because an endpoint named a subject no vertex carries. That
 //! is provenance: a fact about the write, not about the bytes. See
-//! [`EdgeDrops`].
+//! [`EdgeDrops`], which every sink is handed with the graph.
 //!
 //! What would put the description back: a consumer that needs the counts without
 //! reading the store — then the report gains `graph`, of the type
 //! `graphar_info::GraphInfo`, and still no second shape.
 
+use fossil_sinks::EdgeDrops;
 use serde::{Deserialize, Serialize};
 
 /// Where a run wrote, and what the write discarded.
@@ -31,26 +32,4 @@ pub struct RunReport {
     /// One entry per relation, in the order `fossil.graph.yml` lists its edge
     /// types.
     pub dropped: Vec<EdgeDrops>,
-}
-
-/// How many rows of one relation's input did not become an edge.
-///
-/// `execute_edge` resolves both endpoints against the vertex tables with an
-/// inner join, so a row naming a subject no vertex carries is discarded. **That
-/// is intended and it stays** — a graph cannot hold an edge to a vertex that is
-/// not there — and it is counted rather than silent.
-///
-/// # Why the count is here and not in the graph
-///
-/// No reader can verify it: a vertex or edge count earns its place in the graph
-/// by being answerable to the Parquet, and a dropped count is about rows that
-/// are not there and never were. And a third-party writer has no such number — it
-/// performs no join — so a field for it would make a conforming graph impossible
-/// to write without a fact only fossil's pipeline has.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct EdgeDrops {
-    /// The edge type's name in `fossil.graph.yml`, `<Src>_<label>_<Dst>`.
-    pub table: String,
-    /// Rows of its input that resolved no endpoint pair.
-    pub dropped: u64,
 }

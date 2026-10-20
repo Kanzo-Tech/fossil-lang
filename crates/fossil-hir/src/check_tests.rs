@@ -1555,7 +1555,7 @@ fn a_stage_condition_is_typed_and_not_only_resolved() {
 /// writing, and `Both.join(Third, on = Left.k == Right.k)` is the same program
 /// with two REAL bindings, both of them on the left.
 ///
-/// `fossil_df::plan::join_equalities` enforces the rule at run time. Every
+/// `fossil_exec::plan::join_equalities` enforces the rule at run time. Every
 /// case below fails at check time instead, which is where the span is.
 ///
 /// Seven cases, and the accepted ones are half the point: a rule that refused

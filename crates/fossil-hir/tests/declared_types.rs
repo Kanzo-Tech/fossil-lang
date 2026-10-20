@@ -8,7 +8,7 @@
 //! # What it does NOT prove
 //!
 //! - **That a run writes what the declaration says.** That is the conformance
-//!   program `docs/programs/declared`, executed by `fossil-df`'s
+//!   program `docs/programs/declared`, executed by `fossil-exec`'s
 //!   `tests/programs.rs` and read back with `DuckDB`.
 //! - **That the decoder of a real `ShEx` document names its shapes as the line
 //!   decoder here does.** Both write the shape's full IRI and the import reads

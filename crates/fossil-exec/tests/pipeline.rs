@@ -171,7 +171,7 @@ async fn a_filter_keeps_the_rows_its_predicate_admits() {
     ];
 
     let ctx = SessionContext::new();
-    let df = fossil_df::plan_relation(&ctx, &ops, 1, anchor())
+    let df = fossil_exec::plan_relation(&ctx, &ops, 1, anchor())
         .await
         .expect("the filter plans");
     let batch = one(df.collect().await.expect("the filter runs"));
@@ -201,7 +201,7 @@ async fn a_projection_restricts_the_row_to_the_columns_it_names() {
     ];
 
     let ctx = SessionContext::new();
-    let df = fossil_df::plan_relation(&ctx, &ops, 1, anchor())
+    let df = fossil_exec::plan_relation(&ctx, &ops, 1, anchor())
         .await
         .expect("the projection plans");
     let batch = one(df.collect().await.expect("the projection runs"));
@@ -232,7 +232,7 @@ async fn an_inner_join_composes_both_rows_whole() {
     ];
 
     let ctx = SessionContext::new();
-    let df = fossil_df::plan_relation(&ctx, &ops, 2, anchor())
+    let df = fossil_exec::plan_relation(&ctx, &ops, 2, anchor())
         .await
         .expect("the join plans")
         .sort_by(vec![datafusion::prelude::col(
@@ -276,7 +276,7 @@ async fn a_join_whose_two_keys_are_named_differently_plans() {
     ];
 
     let ctx = SessionContext::new();
-    let df = fossil_df::plan_relation(&ctx, &ops, 2, anchor())
+    let df = fossil_exec::plan_relation(&ctx, &ops, 2, anchor())
         .await
         .expect("two differently-named keys are an ordinary equi-join");
     // The PLAN's schema, because this join matches nothing by construction and
@@ -314,7 +314,7 @@ async fn a_compound_key_joins_on_both_columns() {
     ];
 
     let ctx = SessionContext::new();
-    let df = fossil_df::plan_relation(&ctx, &ops, 2, anchor())
+    let df = fossil_exec::plan_relation(&ctx, &ops, 2, anchor())
         .await
         .expect("a conjunction of equalities plans");
     assert_eq!(
@@ -374,7 +374,7 @@ async fn the_three_operators_compose_in_one_chain() {
     ];
 
     let ctx = SessionContext::new();
-    let df = fossil_df::plan_relation(&ctx, &ops, 4, anchor())
+    let df = fossil_exec::plan_relation(&ctx, &ops, 4, anchor())
         .await
         .expect("the chain plans");
     let batch = one(df.collect().await.expect("the chain runs"));
@@ -439,7 +439,7 @@ async fn a_joined_relation_feeds_the_vertex_it_emits() {
     ];
 
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_df::execute_vertex_ops(&ctx, &db, &ops, anchor())
+    let (vertex, node) = fossil_exec::execute_vertex_ops(&ctx, &db, &ops, anchor())
         .await
         .expect("the joined vertex materialises");
 
@@ -477,7 +477,7 @@ async fn an_outer_join_is_refused_by_name() {
             },
         ];
         let ctx = SessionContext::new();
-        let err = fossil_df::plan_relation(&ctx, &ops, 2, anchor())
+        let err = fossil_exec::plan_relation(&ctx, &ops, 2, anchor())
             .await
             .expect_err("only Inner is executable")
             .to_string();
@@ -562,7 +562,7 @@ async fn a_condition_that_is_not_an_equijoin_is_refused() {
             kind: JoinKind::Inner,
         });
         let ctx = SessionContext::new();
-        let err = fossil_df::plan_relation(&ctx, &ops, 2, anchor())
+        let err = fossil_exec::plan_relation(&ctx, &ops, 2, anchor())
             .await
             .expect_err("only a conjunction of column equalities is admitted")
             .to_string();
@@ -612,7 +612,7 @@ async fn a_self_join_keeps_both_sides_apart_by_their_alias() {
         },
     ];
     let ctx = SessionContext::new();
-    let df = fossil_df::plan_relation(&ctx, &ops, 3, anchor())
+    let df = fossil_exec::plan_relation(&ctx, &ops, 3, anchor())
         .await
         .expect("a self-join plans")
         .sort_by(vec![datafusion::prelude::col(
@@ -653,7 +653,7 @@ async fn an_unexecuted_operator_fails_as_itself() {
         },
     ];
     let ctx = SessionContext::new();
-    let err = fossil_df::plan_relation(&ctx, &ops, 1, anchor())
+    let err = fossil_exec::plan_relation(&ctx, &ops, 1, anchor())
         .await
         .expect_err("Rename is defined and unreached")
         .to_string();
@@ -733,7 +733,7 @@ async fn a_union_is_addressed_by_its_own_relation() {
         "`everyone.name` resolves against the union, not against `users`"
     );
 
-    let err = fossil_df::plan_relation(&ctx, &ops[..3], 2, anchor())
+    let err = fossil_exec::plan_relation(&ctx, &ops[..3], 2, anchor())
         .await
         .expect("the union plans")
         .select(vec![datafusion::prelude::col(
@@ -753,7 +753,7 @@ async fn a_union_is_addressed_by_its_own_relation() {
 /// The names a relation produces, sorted — the two verbs above are set
 /// operations and neither promises an order.
 async fn collect_names(ops: &[Op<'_>], ctx: &SessionContext, index: usize) -> Vec<String> {
-    let df = fossil_df::plan_relation(ctx, ops, index, anchor())
+    let df = fossil_exec::plan_relation(ctx, ops, index, anchor())
         .await
         .expect("the relation plans");
     let batches = df.collect().await.expect("the relation runs");
@@ -790,7 +790,7 @@ async fn a_group_by_folds_the_rows_of_each_group() {
         group_by_spend(&db),
     ];
     let ctx = SessionContext::new();
-    let batch = one(fossil_df::plan_relation(&ctx, &ops, 1, anchor())
+    let batch = one(fossil_exec::plan_relation(&ctx, &ops, 1, anchor())
         .await
         .expect("a group_by plans")
         .sort_by(vec![datafusion::prelude::col("orders.user_id")])
@@ -841,7 +841,7 @@ async fn a_group_bys_aggregate_answers_to_the_ops_own_relation() {
         },
     ];
     let ctx = SessionContext::new();
-    let batches = fossil_df::plan_relation(&ctx, &ops, 2, anchor())
+    let batches = fossil_exec::plan_relation(&ctx, &ops, 2, anchor())
         .await
         .expect("`Spend.spent` resolves against the op's own relation")
         .collect()
@@ -855,7 +855,7 @@ async fn a_group_bys_aggregate_answers_to_the_ops_own_relation() {
         "one row per group"
     );
 
-    let err = fossil_df::plan_relation(&ctx, &ops[..2], 1, anchor())
+    let err = fossil_exec::plan_relation(&ctx, &ops[..2], 1, anchor())
         .await
         .expect("the group_by plans")
         .select(vec![datafusion::prelude::col(

@@ -1,16 +1,16 @@
-# DataFusion backend for the property-graph MIR: lowers `lower_to_mir_pg` to a
-# DataFusion plan, executes it, and writes an Apache GraphAr graph through
-# `Storage` — `Executor` is the one host that writes one. Compiles to wasm32
-# (the browser executor) and natively (the tests) alike.
+# The engine: lowers `lower_to_mir_pg` to a DataFusion plan, executes it into
+# the graph `fossil-sinks` writes, through `Storage` — `Executor` is the run a
+# host drives. Compiles to wasm32 (the browser executor) and natively (the
+# tests) alike.
 [package]
-name = "fossil-df"
+name = "fossil-exec"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-description = "DataFusion backend for the property-graph MIR (lower_to_mir_pg)"
+description = "The engine: the property-graph MIR (lower_to_mir_pg) run on DataFusion"
 # Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
 publish = false
 
@@ -27,10 +27,6 @@ doctest = false
 tracing = { workspace = true }
 fossil-base = { path = "../fossil-base" }
 fossil-hir = { path = "../fossil-hir" }
-# The writer counts what it wrote with the profiler's plan, rendered on
-# DataFusion (`facts`). It links no engine and is in the wasm closure already,
-# through `fossil-wasm`, so the gate gains no crate (`/docs/design/facts`).
-fossil-profile = { path = "../fossil-profile" }
 fossil-mir = { path = "../fossil-mir" }
 # The one IO path of a run: sources read and the graph written through
 # `object_store` stores built from vended credentials. `object-store` only — the
@@ -41,52 +37,21 @@ fossil-storage = { path = "../fossil-storage", features = ["object-store"] }
 object_store = { workspace = true }
 futures = { workspace = true }
 bytes = { workspace = true }
-# The graph a run writes is Apache GraphAr's: the information files and the Parquet chunks
-# are `graphar-*`'s, and this crate lays out and counts what it hands them.
-graphar-info = { workspace = true }
-graphar-parquet = { workspace = true }
-# The canonical graph-schema contract — the metadata fossil-df produces and the
+# What the engine hands a sink, and the sink a run writes through: `graphar`
+# is the one `Executor` drives.
+fossil-sinks = { path = "../fossil-sinks", features = ["graphar"] }
+# The canonical graph-schema contract — the metadata fossil-exec produces and the
 # graph is laid out from (the universal substrate's single source).
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 # RDF input seam: Turtle parsing for `io.rdf` sources → Arrow rows, through
 # `rudof_rdf`'s in-memory graph. Pure Rust, WASM-clean — RDF is decoded at the
 # I/O border, same as in the browser.
 rudof_rdf = { workspace = true }
-# A subject is validated as an IRI before it is a vertex (`layout`); the mapping that says what the
-# tables mean as RDF is `fossil_mir::describe`'s.
+# The RDF terms of an `io.rdf` source, as `rudof_rdf` parses them (`rdf`).
 oxrdf = { workspace = true }
-# `default-features = false` drops datafusion's `sql` frontend (we build plans
-# via the DataFrame/LogicalPlan API, not `ctx.sql()`) and its own `compression`
-# feature — shrinking the wasm surface. We KEEP `parquet`: `io.parquet` sources
-# must be READ (locally and, in the browser, remotely by signed URL — design C2).
-# CSV/JSON reading is core (ungated). Re-add a feature here if a plan op needs it.
-#
-# ⚠️ This does NOT remove the `zstd` C dep: datafusion 54 HARDCODES
-# `arrow-ipc` with `features=["lz4","zstd"]` in datafusion-common /
-# datafusion-datasource-arrow / datafusion-physical-plan (not behind any
-# feature). So `zstd-sys` cannot be cut from the feature graph — the wasm32
-# build needs a wasm-capable clang to compile zstd-C (verified 2026-06-09):
-#   CC_wasm32_unknown_unknown=<llvm>/clang AR_wasm32_unknown_unknown=<llvm>/llvm-ar \
-#     cargo build -p fossil-df --target wasm32-unknown-unknown
-# (Apple's system clang lacks the wasm target; `brew install llvm` provides one.)
-# Cutting zstd entirely would require a `[patch.crates-io]` fork of those three
-# subcrates — deferred. The wasm CI job must install LLVM.
-#
-# `nested_expressions` is ON because a catalogue row asked for it, and that is
-# the only reason a feature is on here. `str.split` lowers to `string_split`,
-# which reconciles to DataFusion's `string_to_array` — a function that lives in
-# the nested-expressions package and is therefore absent from
-# `all_default_functions()`. The row was UNRENDERABLE on this engine for want of
-# a feature flag, which is a different thing from unrenderable for want of a
-# capability, and it was filed beside the ones that cannot be done at all.
-#
-# `crypto_expressions` is deliberately OFF. It is the sibling package, and no
-# function of the language needs its `sha256`. Turning it on would grow the
-# wasm surface for a function no template says.
-datafusion = { version = "54", default-features = false, features = [
-  "parquet",
-  "nested_expressions",
-] }
+# The engine. Pinned in the workspace table, whose comment says what it is
+# built with and why; `fossil-sinks` writes through the same build.
+datafusion = { workspace = true }
 
 # `src/report.rs` — what a run tells its caller, and what `serde-wasm-bindgen`
 # hands JS; `schemars` derives its TypeScript (`xtask/tests/wire.rs`).
@@ -96,7 +61,6 @@ schemars = { workspace = true }
 # `serde_json::Value`, so the parse and the decode speak the same type; both are
 # pure Rust, so neither costs the wasm build anything.
 serde_json = { workspace = true }
-thiserror = { workspace = true }
 # The stdlib UDFs no engine ships. Pure Rust, no C, wasm-clean — the logic is
 # the function's, not the database's, which is why it can live in the compiler
 # ring at all.
@@ -104,6 +68,11 @@ slug = { workspace = true }
 unicode-normalization = { workspace = true }
 
 [dev-dependencies]
+# The tests read a written graph back: its information files (`graphar-info`),
+# its chunk paths (`graphar-parquet`), and a source's profile (`fossil-profile`).
+graphar-info = { workspace = true }
+graphar-parquet = { workspace = true }
+fossil-profile = { path = "../fossil-profile" }
 # `tests/programs.rs` keeps each conformance program's artefacts as files.
 expect-test = { workspace = true }
 # `tests/write.rs` reads the graph back with a second engine: a graph only

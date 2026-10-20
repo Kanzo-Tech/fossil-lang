@@ -10,7 +10,7 @@
 //!   editor's view of a program: forward-propagated source types, every
 //!   diagnostic, and [`render_diagnostics`] drawing them as a terminal host
 //!   would.
-//! - **run** — [`fossil_df::Executor`], the one host that writes a graph. The
+//! - **run** — [`fossil_exec::Executor`], the one host that writes a graph. The
 //!   program's directory is loaded into an in-memory store under [`AUTHORITY`],
 //!   the program is compiled AT its URL there, so every relative source and
 //!   document resolves beside it as it would for any reader of that file, and the
@@ -35,7 +35,7 @@ use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
 use fossil_base::{Diagnostic, FossilDb, SourceFile, System, file_at};
-use fossil_df::{Executor, Output, Ran, RunReport};
+use fossil_exec::{Executor, Output, Ran, RunReport};
 use fossil_hir::documents::{documents_named, register_missing_documents, registry_key};
 use graphar_info::{EdgeInfo, GraphInfo, VertexInfo};
 use graphar_parquet::paths;

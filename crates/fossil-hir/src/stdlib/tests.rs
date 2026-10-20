@@ -306,7 +306,7 @@ fn the_deleted_names_are_gone() {
         "parse.csv_row",
         // The `anon.` namespace goes entirely: fossil has no anonymisation
         // (`/docs/design/discarded`). With no `anon.hash` nothing needs
-        // `sha256`, which is why `fossil-df` leaves `crypto_expressions` off.
+        // `sha256`, which is why `fossil-exec` leaves `crypto_expressions` off.
         "anon.hash",
         "anon.redact",
         // Rows that ran nothing or said what another says (`/docs/design/declared`).

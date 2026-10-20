@@ -5,7 +5,7 @@
 //! operator of the algebra).
 //! This module says what each becomes HERE, which is a materializer's business
 //! and not the language's — as the type a column is stored as is the
-//! writer's (`crate::layout`) and not the lattice's.
+//! writer's (`fossil_sinks::graphar`) and not the lattice's.
 //!
 //! # Two vocabularies, one catalog
 //!

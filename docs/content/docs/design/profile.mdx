@@ -50,12 +50,12 @@ The browser reaches it through
 `@fossil-lang/wasm` is the loop (`packages/wasm/src/profile.ts, runProfiler`), and `profile` beside
 it reads each source under its credential and hands the plan its name and its binding
 (`packages/wasm/src/describe.ts, profile`). A program's own sources are `program.describe()`: its
-inputs, profiled, handed to the checker, and answered as the value a run takes. `fossil-df`'s tests run the same plan on the native
+inputs, profiled, handed to the checker, and answered as the value a run takes. `fossil-exec`'s tests run the same plan on the native
 `duckdb` crate, so the code is shared and only the engine differs
 ([Three hosts](/docs/design/three-hosts)).
 
 **It is inside the wasm gate, on purpose.** The engine stays with the host, and nothing that
-depends on `fossil-profile` links one through it — its own tests and `fossil-df`'s take DuckDB on a
+depends on `fossil-profile` links one through it — its own tests and `fossil-exec`'s take DuckDB on a
 dev edge. So `fossil-profile` is a dependency of `fossil-wasm`, and the gate has watched it from
 its first commit (`crates/xtask/src/main.rs, wasm_check`). A `native` feature carrying the engine
 was the other shape, and cargo's feature unification is why it is not: one dependent enabling it

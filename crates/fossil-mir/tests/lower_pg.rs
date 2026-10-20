@@ -187,7 +187,7 @@ prop https://ex.org/hasProject - 0 *
 // `Project`; `Project`: a literal `title`. Written as the schema itself, not as
 // the ShEx document that would derive it: which schema language produced this is
 // exactly what MIR must not know (the ShEx path is covered end-to-end by
-// `fossil-df/tests/rdf_source.rs`).
+// `fossil-exec/tests/rdf_source.rs`).
 fn kb_schema() -> GraphSchema {
     let string_prop = |name: &str, iri: &str, cardinality| Property {
         name: name.to_string(),

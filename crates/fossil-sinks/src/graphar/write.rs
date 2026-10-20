@@ -1,4 +1,4 @@
-//! The graph, written: [`write`](crate::write::write) writes an Apache `GraphAr`
+//! The graph, written: [`write`](super::write) writes an Apache `GraphAr`
 //! graph — a vertex type's chunk, a relation's adjacency list and offsets, and
 //! the information files — through `graphar-parquet`.
 //!
@@ -19,7 +19,7 @@
 //!
 //! **One writer.** Two writers write two different graphs. This is the only
 //! function in the workspace that encodes a graph's Parquet, and the only host
-//! that calls it is [`crate::Executor`].
+//! that calls it is `fossil_exec::Executor`.
 
 use datafusion::arrow::error::ArrowError;
 use datafusion::error::DataFusionError;
@@ -35,10 +35,9 @@ use graphar_info::{AdjListType, GraphInfo};
 use graphar_parquet::{Options, SRC_INDEX_COL, VERTEX_INDEX_COL};
 use object_store::{ObjectStore, PutOptions, PutPayload};
 
-use crate::Graph;
-use crate::facts::{self, FOOTER_KEY};
-use crate::layout::{self, user_types};
-use crate::report::EdgeDrops;
+use super::facts::{self, FOOTER_KEY};
+use super::layout::{self, user_types};
+use crate::{EdgeDrops, Graph};
 
 /// What [`write`](fn@write) answers: the graph it wrote, and what the edge join
 /// discarded — the one fact the graph cannot hold about itself.
@@ -198,7 +197,7 @@ impl From<WriteError> for Failure {
 /// types.
 ///
 /// **The writer counts what it writes** before each vertex chunk
-/// ([`crate::facts`]): the counts are in the chunk's own footer, and a graph
+/// ([`super::facts`]): the counts are in the chunk's own footer, and a graph
 /// never exists without them (`/docs/design/facts`).
 ///
 /// # Errors

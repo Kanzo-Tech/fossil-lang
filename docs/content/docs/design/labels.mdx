@@ -14,7 +14,7 @@ annotation, a predicate and an RDF object** — `// rdfs:label "birth date"@en` 
 a language is an `rdf:langString`**, a lexical form and a BCP 47 tag. The grammar is
 `grammar.bnf, DeclAttrs`, `grammar.bnf, AnnotationAttr` and `grammar.bnf, LANG_STRING`; the
 conformance program is `docs/programs/labels`, run end to end by
-`crates/fossil-df/tests/labels_and_facts.rs`; and this page is why it is shaped as it is and what it
+`crates/fossil-exec/tests/labels_and_facts.rs`; and this page is why it is shaped as it is and what it
 costs.
 
 ## What an annotation is
@@ -414,6 +414,6 @@ Nobel*, and for Marie Curie the name whose tag matches, *Maria Skłodowska-Curie
 | `fossil-graph-schema` | `Primitive::LangString` and `rdf:langString` in its XSD table both ways; `annotations` on `Shape` and `PropertyConstraint`, and `languages` on `PropertyConstraint`; the wire types `@fossil-lang/types` generates from them |
 | `fossil-hir` | `shex.rs` carries a shape's and a triple constraint's annotations, `rdf:langString` and language value sets; `shacl.rs` reads `sh:name` as an `rdfs:label` annotation and `sh:description` as an `rdfs:comment` one, carries the non-SHACL predicates, `sh:datatype rdf:langString` and `sh:languageIn`; `declared.rs` lowers `@annotation`; the checker types `LangString`, checks a constant tag with `oxilangtag`, refuses a CURIE predicate and `"x".lang("en")`; `fossil-ide` shows a field's annotations on hover |
 | `catalogue.bnf` | one row, `str.lang`, lowered to a two-field struct the writer splits; `LangString` in the type table both profiling hosts read |
-| `fossil-df` | `layout` writes a `LangString` property as a `langString` struct (a list when it is a set), checks the per-row tag and refuses a repeated element; `describe` writes the annotations as triples and the unnesting query of the tagged property |
+| `fossil-exec` | `layout` writes a `LangString` property as a `langString` struct (a list when it is a set), checks the per-row tag and refuses a repeated element; `describe` writes the annotations as triples and the unnesting query of the tagged property |
 | `codemirror-fossil` | a highlight for the new token, through the legend the wasm ships |
 | kanzo-ui | Ask and `@kanzo-tech/graph` read the labels from `Mapping.model()` and the tags from the struct |

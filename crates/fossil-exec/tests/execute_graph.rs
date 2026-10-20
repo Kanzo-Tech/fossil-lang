@@ -1,6 +1,6 @@
 //! The `DataFusion` backend's edge phase, end to end: a program with two
 //! mappings (Person, Order) and an interpolated foreign key (`placedBy` →
-//! Person) → [`fossil_df::execute_graph`] → two vertex tables and one edge
+//! Person) → [`fossil_exec::execute_graph`] → two vertex tables and one edge
 //! table, its `dense_id`s resolved by an in-memory join.
 //!
 //! It holds the barrier (every vertex before any edge) and the edge join's
@@ -51,7 +51,7 @@ async fn execute_graph_resolves_edges_to_dense_ids() {
         support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
 
     let ctx = SessionContext::new();
-    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor())
+    let graph = fossil_exec::execute_graph(&ctx, &db, file, &descriptor())
         .await
         .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
@@ -97,7 +97,7 @@ async fn the_write_emits_one_information_file_per_type_and_relation() {
         support::db_with_shapes(PROGRAM, "graph.fossil", &[("graph.shex", GRAPH_SHEX)]);
 
     let ctx = SessionContext::new();
-    let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor())
+    let graph = fossil_exec::execute_graph(&ctx, &db, file, &descriptor())
         .await
         .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 

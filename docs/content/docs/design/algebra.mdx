@@ -117,9 +117,9 @@ share a name — the MIR lowering carries the binding, so a column reference say
 <Program src="shop/shop.fossil" region="join" title="shop.fossil" />
 
 Three shapes follow and each has an executed test: differently-named keys plan as an ordinary
-equi-join (`crates/fossil-df/tests/pipeline.rs, a_join_whose_two_keys_are_named_differently_plans`), a compound key is a conjunction of equalities
-joined by `and` (`crates/fossil-df/tests/pipeline.rs, a_compound_key_joins_on_both_columns`), and a self-join tells its two halves
-apart by the alias `X as Y` (`crates/fossil-df/tests/pipeline.rs, a_self_join_keeps_both_sides_apart_by_their_alias`).
+equi-join (`crates/fossil-exec/tests/pipeline.rs, a_join_whose_two_keys_are_named_differently_plans`), a compound key is a conjunction of equalities
+joined by `and` (`crates/fossil-exec/tests/pipeline.rs, a_compound_key_joins_on_both_columns`), and a self-join tells its two halves
+apart by the alias `X as Y` (`crates/fossil-exec/tests/pipeline.rs, a_self_join_keeps_both_sides_apart_by_their_alias`).
 
 #### And the checker is where it is exacted
 
@@ -132,7 +132,7 @@ and it is a different question with a different answer: `on = Purchase.id == Pur
 perfectly good `Bool` over columns that all exist, and it describes the product of the two relations
 with a filter on one of them.
 
-The rule was not invented at that layer. `fossil_df::plan::join_equalities` has enforced it since
+The rule was not invented at that layer. `fossil_exec::plan::join_equalities` has enforced it since
 the day joins executed, and it keeps its copy, because a MIR reaching the engine need not have come
 through this checker. What moved is *where an author meets it*: the refusal now carries a span and
 the author's own names, and [the sixth
@@ -198,7 +198,7 @@ while every conformance artefact is compared byte for byte. The parameter is gon
 Its effect is **not** visible in either conformance artefact, and it cannot be made so: `EmitVertex`
 dedups by subject unconditionally, so four sightings of two species mint two vertices with or
 without the verb. The rows are asserted where rows exist —
-`crates/fossil-df/tests/pipeline.rs, distinct_over_a_union_drops_the_shared_row` unions three names onto three and counts six, then five.
+`crates/fossil-exec/tests/pipeline.rs, distinct_over_a_union_drops_the_shared_row` unions three names onto three and counts six, then five.
 
 ## The plan is DataFusion's
 
@@ -236,7 +236,7 @@ after it](/docs/design/shapes).
   `seq.aggregate` was a seventh and is deleted: `group_by` took the aggregations into itself,
   because a grouping with nothing aggregated has the rows of `select(…).distinct()`.
 - **The three join flavours that are not `Inner`.** They stay defined and unreachable
-  (`crates/fossil-df/tests/pipeline.rs, an_outer_join_is_refused_by_name` pins the refusal). An outer join manufactures NULL, and
+  (`crates/fossil-exec/tests/pipeline.rs, an_outer_join_is_refused_by_name` pins the refusal). An outer join manufactures NULL, and
   [the shape](/docs/design/shapes) has no way to declare a nullable property yet, so the one that
   arrives will arrive with that story and not before.
 - **How a pipeline's type is reported in the editor.** A source binding today has a schema from a
@@ -244,7 +244,7 @@ after it](/docs/design/shapes).
   the derived one.
 - **Which side a bare column belongs to, when two bindings of one relation carry the same name.**
   Nothing in the surface spells a bare column, so this is not reachable by writing a program today;
-  `fossil_df::plan::column` builds an unqualified reference for one anyway, and DataFusion's rule
+  `fossil_exec::plan::column` builds an unqualified reference for one anyway, and DataFusion's rule
   for it — resolve against whichever relation has the name, and error naming both candidates if two
   do — is inherited rather than chosen. The day a verb produces a column with no binding to
   qualify it, that inheritance becomes a decision.

@@ -1,11 +1,11 @@
 //! The `DataFusion` backend's vertex phase, end to end: `hello.fossil` →
-//! [`fossil_df::execute_vertex`] runs the plan over a real CSV and checks the
+//! [`fossil_exec::execute_vertex`] runs the plan over a real CSV and checks the
 //! materialised vertex table (`dense_id` + subject + props): MIR-PG →
 //! `LogicalPlan` → `read_csv` → `Projection`/sort → `collect()` → a dense,
 //! deterministic `dense_id`.
 //!
 //! `cargo test`'s cwd is the crate root, so the source is
-//! `tests/fixtures/users.csv` (relative to `crates/fossil-df`).
+//! `tests/fixtures/users.csv` (relative to `crates/fossil-exec`).
 
 // `{users.id}` is a Fossil interpolation hole, not a Rust format arg.
 #![allow(clippy::literal_string_with_formatting_args)]
@@ -41,7 +41,7 @@ async fn execute_vertex_materialises_the_vertex_table_shape() {
         .expect("hello.fossil must contain one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_df::execute_vertex(
+    let (vertex, node) = fossil_exec::execute_vertex(
         &ctx,
         &db,
         mapping,
