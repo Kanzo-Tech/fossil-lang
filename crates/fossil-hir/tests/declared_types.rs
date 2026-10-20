@@ -142,7 +142,7 @@ fn a_declared_type_lowers_to_the_shape_vocabulary() {
             )
         })
         .collect();
-    let string = Term::Literal(Some(Primitive::String.to_xsd_iri().to_string()));
+    let string = Term::Literal(Some(Primitive::String.into()));
     assert_eq!(
         fields,
         [
