@@ -345,7 +345,7 @@ fn the_mapping_names_the_index_columns_graphar_does() {
 fn the_document_parses_and_writes_back_to_itself() {
     for ran in [hello(), labels()] {
         let mapping =
-            rml::rdf::parse_turtle(&mapping_text(&ran), None).expect("the mapping parses");
+            rml::rdf::parse_turtle(&ran.text("mapping.ttl"), None).expect("the mapping parses");
         let written = rml::rdf::write_turtle(&mapping).expect("the mapping writes");
         assert_eq!(
             rml::rdf::parse_turtle(&written, None).expect("it parses again"),

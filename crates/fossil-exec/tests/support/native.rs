@@ -364,7 +364,8 @@ impl Written {
     /// information files name.
     pub(crate) fn triples(&self) -> BTreeSet<Triple> {
         let root = self.materialise();
-        let mapping = rml::rdf::parse_turtle(&self.text("mapping.ttl"), None).expect("the mapping parses");
+        let mapping =
+            rml::rdf::parse_turtle(&self.text("mapping.ttl"), None).expect("the mapping parses");
         let conn = duckdb::Connection::open_in_memory().expect("duckdb");
         let graph = self.graph();
         let view = |name: &str, relative: String| {

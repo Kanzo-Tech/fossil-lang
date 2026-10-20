@@ -55,7 +55,10 @@ pub enum Error {
     Arrow(#[from] ArrowError),
     /// A subject that is not an absolute IRI: it has no RDF term.
     #[error("`{vertex_type}` has the subject {subject}, which is not an IRI")]
-    InvalidSubject { vertex_type: String, subject: String },
+    InvalidSubject {
+        vertex_type: String,
+        subject: String,
+    },
     /// An IRI the program's type names that is not one: the checker admits
     /// none, so it is fossil's fault.
     #[error("`{at}`: `{value}` is not an IRI")]
@@ -72,10 +75,7 @@ pub enum Error {
     MissingColumn(String),
     /// The destination could not be reached or written.
     #[error("`{path}`: {source}")]
-    Store {
-        path: String,
-        source: StorageError,
-    },
+    Store { path: String, source: StorageError },
     /// The store refused the file.
     #[error("`{path}`: {source}")]
     Put {
@@ -113,8 +113,12 @@ impl From<Error> for Failure {
             }
             Error::Put { path, source } => Self::new(Problem::WriteFailed { path: path.clone() })
                 .caused_by(Self::new(Problem::Unreachable { location: path }).caused_by(source)),
-            e @ Error::NotAnIri { .. } => bug("the program's type names an IRI that is not one").caused_by(e),
-            e @ Error::MissingColumn(_) => bug("a column the type names is not in its table").caused_by(e),
+            e @ Error::NotAnIri { .. } => {
+                bug("the program's type names an IRI that is not one").caused_by(e)
+            }
+            e @ Error::MissingColumn(_) => {
+                bug("a column the type names is not in its table").caused_by(e)
+            }
             Error::Arrow(e) => bug("an Arrow kernel refused a column").caused_by(e),
         }
     }
@@ -300,7 +304,10 @@ fn subjects(graph: &Graph) -> Result<HashMap<u32, NamedNode>, Error> {
 }
 
 /// The subject of each row of a vertex batch.
-fn rows_of(batch: &RecordBatch, subjects: &HashMap<u32, NamedNode>) -> Result<Vec<NamedNode>, Error> {
+fn rows_of(
+    batch: &RecordBatch,
+    subjects: &HashMap<u32, NamedNode>,
+) -> Result<Vec<NamedNode>, Error> {
     let ids = column(batch, PAYLOAD_ADDRESS, &DataType::UInt32)?;
     ids.as_primitive::<UInt32Type>()
         .iter()
@@ -407,14 +414,12 @@ fn language_tagged(
                 return Ok(None);
             }
             let tag = if tags.is_null(i) { "" } else { tags.value(i) };
-            let literal = Literal::new_language_tagged_literal(
-                forms.value(i),
-                tag.to_ascii_lowercase(),
-            )
-            .map_err(|_| Error::InvalidLanguageTag {
-                property: at.to_string(),
-                tag: tag.to_string(),
-            })?;
+            let literal =
+                Literal::new_language_tagged_literal(forms.value(i), tag.to_ascii_lowercase())
+                    .map_err(|_| Error::InvalidLanguageTag {
+                        property: at.to_string(),
+                        tag: tag.to_string(),
+                    })?;
             Ok(Some(Term::from(literal)))
         })
         .collect()

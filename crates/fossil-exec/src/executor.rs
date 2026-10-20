@@ -53,8 +53,8 @@ use object_store::memory::InMemory;
 use object_store::{ObjectStore, ObjectStoreExt};
 
 use crate::RunReport;
-use fossil_sinks::Sink;
 use crate::memory::{BUDGET, Budget, Refusal};
+use fossil_sinks::Sink;
 
 /// Where a run writes its graph — one value per `object_store` store it can
 /// go into.

@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 
 use fossil_exec::Sink;
 use native::Triple;
-use oxrdf::{Subject, Term};
+use oxrdf::{NamedOrBlankNode, Term};
 
 const XSD: &str = "http://www.w3.org/2001/XMLSchema#";
 
@@ -53,7 +53,11 @@ fn programs() -> Vec<(String, PathBuf, String)> {
                     .expect("under the root")
                     .display()
                     .to_string();
-                let file = path.file_name().expect("a file").to_string_lossy().into_owned();
+                let file = path
+                    .file_name()
+                    .expect("a file")
+                    .to_string_lossy()
+                    .into_owned();
                 out.push((name, dir.to_path_buf(), file));
             }
         }
@@ -75,10 +79,8 @@ fn parsed(ran: &native::Written) -> BTreeSet<Triple> {
         .map(|triple| {
             let triple = triple.unwrap_or_else(|e| panic!("graph.nt does not parse: {e}"));
             let (sk, s) = match triple.subject {
-                Subject::NamedNode(n) => ("I", n.into_string()),
-                Subject::BlankNode(b) => ("B", b.into_string()),
-                #[allow(unreachable_patterns)]
-                other => panic!("a subject fossil does not write: {other}"),
+                NamedOrBlankNode::NamedNode(n) => ("I", n.into_string()),
+                NamedOrBlankNode::BlankNode(b) => ("B", b.into_string()),
             };
             let p = triple.predicate.into_string();
             let [ok, o, dt, lang] = match triple.object {
@@ -91,10 +93,9 @@ fn parsed(ran: &native::Written) -> BTreeSet<Triple> {
                     l.language().unwrap_or(""),
                 ]
                 .map(str::to_string),
-                #[allow(unreachable_patterns)]
-                other => panic!("an object fossil does not write: {other}"),
+                other @ Term::Triple(_) => panic!("an object fossil does not write: {other}"),
             };
-            [sk.to_string(), s, p, ok.to_string(), o, dt, lang]
+            [sk.to_string(), s, p, ok, o, dt, lang]
         })
         .collect()
 }
@@ -146,7 +147,9 @@ fn every_program_means_the_same_triples_in_both_sinks() {
         let ntriples = match native::run_dir_as(&dir, &file, &[], Sink::NTriples) {
             Ok(ran) => ran,
             Err(e) => {
-                findings.push(format!("{name}: GraphAr wrote it and N-Triples refused: {e}"));
+                findings.push(format!(
+                    "{name}: GraphAr wrote it and N-Triples refused: {e}"
+                ));
                 continue;
             }
         };
@@ -157,7 +160,10 @@ fn every_program_means_the_same_triples_in_both_sinks() {
                 graphar.report.dropped, ntriples.report.dropped
             ));
         }
-        let (rml, nt) = (canonical_set(graphar.triples()), canonical_set(parsed(&ntriples)));
+        let (rml, nt) = (
+            canonical_set(graphar.triples()),
+            canonical_set(parsed(&ntriples)),
+        );
         for only in rml.difference(&nt) {
             findings.push(format!("{name}: only in GraphAr's mapping: {only:?}"));
         }
@@ -174,8 +180,8 @@ fn every_program_means_the_same_triples_in_both_sinks() {
 #[test]
 fn the_document_is_sorted_and_has_no_line_twice() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
-    let ran = native::run_dir_as(&dir, "hello.fossil", &[], Sink::NTriples)
-        .expect("hello.fossil runs");
+    let ran =
+        native::run_dir_as(&dir, "hello.fossil", &[], Sink::NTriples).expect("hello.fossil runs");
     let text = ran.text(fossil_sinks::ntriples::FILE);
     let lines: Vec<&str> = text.lines().collect();
     let mut sorted = lines.clone();
