@@ -46,8 +46,9 @@
 //! prop <predicate-iri> <value> <min> <max>
 //! ```
 //!
-//! `<value>` is `-` (the document narrows nothing), an XSD local name
-//! (`string`, `integer`, …), or `@<target-iri>` (an edge). `<max>` is a number
+//! `<value>` is `-` (the document narrows nothing), `iri` (an opaque IRI, `ShEx`'s
+//! `IRI`), an XSD local name (`string`, `integer`, …), or `@<target-iri>` (an
+//! edge). `<max>` is a number
 //! or `*`. A line beginning `!malformed ` makes the decoder reject the whole
 //! document with the rest of the line as its reason.
 
@@ -152,11 +153,14 @@ pub fn decode_lines(_uri: &str, text: &str) -> Result<OutputShapes, Rejection> {
                     .map_or(Some(1), |t| (t != "*").then(|| t.parse().unwrap_or(1)));
                 let (term, targets) = value.strip_prefix('@').map_or_else(
                     || {
-                        let datatype = format!("http://www.w3.org/2001/XMLSchema#{value}");
-                        (
-                            (value != "-").then_some(Term::Literal(Some(datatype))),
-                            Vec::new(),
-                        )
+                        let term = match value {
+                            "-" => None,
+                            "iri" => Some(Term::Iri),
+                            _ => Some(Term::Literal(Some(format!(
+                                "http://www.w3.org/2001/XMLSchema#{value}"
+                            )))),
+                        };
+                        (term, Vec::new())
                     },
                     |target| (None, vec![target.to_string()]),
                 );

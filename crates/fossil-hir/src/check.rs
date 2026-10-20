@@ -166,7 +166,7 @@ pub fn typecheck_mapping<'db>(
             entries: Vec::new(),
             sink,
             first_error: None,
-            expected_ref: None,
+            expected: None,
         },
         mapping,
         resolved_shape,
@@ -363,24 +363,19 @@ impl Checker<'_> {
         // `@subject` mints the identity of the node THIS mapping produces, so
         // what it is expected to be is a reference to this mapping's own shape.
         // Everywhere else the expectation comes off the resolved predicate.
-        self.expr.expected_ref = if matches!(prop.key, PropertyKey::Subject) {
+        self.expr.expected = if matches!(prop.key, PropertyKey::Subject) {
             // An identity is ALWAYS a reference — to the shape this mapping
             // targets, or, when the program named a document that bound
             // nothing, to the empty set. That is the same answer `synth_edge`
             // gives an unresolvable target: something already said why, and a
             // reference to no shape satisfies every slot rather than blaming
             // the identity a second time.
-            Some(self.mapping_shape_iri().into_iter().collect())
+            Some(Ty::reference(db, self.mapping_shape_iri()))
         } else {
-            expectation.as_ref().and_then(|(ty, _, _)| {
-                ty.and_then(|t| match t.kind(db) {
-                    TyKind::Ref(names) => Some(names.clone()),
-                    _ => None,
-                })
-            })
+            expectation.as_ref().and_then(|(ty, _, _)| *ty)
         };
         let actual = self.expr.synth(expr_id, &prop.value);
-        self.expr.expected_ref = None;
+        self.expr.expected = None;
         if let PropertyKey::Name(name) = &prop.key {
             self.check_constant_language(expr_id, name, &prop.value);
         }
@@ -1082,11 +1077,6 @@ pub(crate) fn subtypes<'db>(
     {
         return true;
     }
-    // S-IntFlt and S-TmplIri both answer `true`, and they are not one arm: each
-    // is a named subtyping rule with its own reason, and the reason is what the
-    // arm above it carries. Merged, the two rules would share one comment and
-    // neither would be findable by name.
-    #[allow(clippy::match_same_arms)]
     match (actual.kind(db), expected.kind(db)) {
         // S-IntFlt: Integer <: Float.
         (TyKind::Primitive(Primitive::Integer), TyKind::Primitive(Primitive::Float)) => true,
@@ -1161,13 +1151,14 @@ pub struct Expr<'db> {
     /// First type error encountered (if any). Every error also pushes a
     /// diagnostic, so any `Some(eg)` here implies >= 1 emitted `Diagnostic`.
     pub(crate) first_error: Option<ErrorGuaranteed>,
-    /// The shapes something above is expecting a reference to, if any.
+    /// The type the slot above this expression expects, if it declares one.
     ///
-    /// It exists because an interpolation's type is not a property of the
-    /// expression: `"…{u.id}"` is the identity of a node where a node is
-    /// wanted and a string anywhere else. That is the rule read literally, with
-    /// no IRI-template type and no subtyping rule standing in for it.
-    pub(crate) expected_ref: Option<Vec<SmolStr>>,
+    /// It exists because a string's type is not a property of the expression:
+    /// `"…{u.id}"` is the identity of a node where a node is wanted, an IRI
+    /// where an IRI is wanted, and a string anywhere else. That is the rule
+    /// read literally, with no IRI-template type and no subtyping rule standing
+    /// in for it.
+    pub(crate) expected: Option<Ty<'db>>,
 }
 
 impl<'db> Expr<'db> {
@@ -1192,8 +1183,20 @@ impl<'db> Expr<'db> {
             entries: Vec::new(),
             sink: Diagnostics::new(),
             first_error: None,
-            expected_ref: None,
+            expected: None,
         }
+    }
+
+    /// What a string written where an IRI is expected denotes: the node a
+    /// reference names, or an opaque IRI. `None` when the slot wants a value,
+    /// and the string is then a string.
+    fn denoted(&self) -> Option<Ty<'db>> {
+        self.expected.filter(|t| {
+            matches!(
+                t.kind(self.db),
+                TyKind::Ref(_) | TyKind::Primitive(Primitive::AnyUri)
+            )
+        })
     }
 
     const fn db(&self) -> &'db dyn fossil_base::Db {
@@ -1291,10 +1294,19 @@ impl<'db> Expr<'db> {
     fn synth_ty(&mut self, expr_id: ExprId, e: &HirExpr) -> Option<(Ty<'db>, ProvenanceKind)> {
         let db = self.db;
         let out = match e {
-            HirExpr::StringLit(_) => (
-                Ty::new(db, TyKind::Primitive(Primitive::String)),
-                ProvenanceKind::Literal,
-            ),
+            // T-Str: a constant IRI is a string, and an IRI's slot decides that
+            // it denotes rather than reads (`grammar.bnf`, «There is no
+            // ABS_IRI»). Not an edge's slot: an edge is drawn to a subject some
+            // mapping writes, and a constant names none.
+            HirExpr::StringLit(_) => {
+                let iri = self
+                    .denoted()
+                    .filter(|t| !matches!(t.kind(db), TyKind::Ref(_)));
+                (
+                    iri.unwrap_or_else(|| Ty::new(db, TyKind::Primitive(Primitive::String))),
+                    ProvenanceKind::Literal,
+                )
+            }
             // A constant `rdf:langString`. Its tag is constant, so the checker
             // holds it to BCP 47 here rather than leaving it to the run.
             HirExpr::LangStringLit { tag, .. } => {
@@ -1305,23 +1317,25 @@ impl<'db> Expr<'db> {
                 )
             }
             // T-Interp: the holes are typed like the expressions they are, and
-            // the interpolation's own type comes from where it sits — IRI under
-            // `iri =`, a string anywhere else.
+            // the interpolation's own type comes from where it sits — the
+            // identity of a node under `@subject` or in an edge's slot, an IRI
+            // in an IRI's slot, a string anywhere else.
             HirExpr::Interpolation(parts) => {
+                // A hole is not in the slot: `"…/{Row.code}"` is an IRI, and
+                // `Row.code` is still the text it reads.
+                let expected = self.expected.take();
                 for part in parts {
                     if let InterpolationPart::Hole(e) = part {
                         self.synth_ty(expr_id, e);
                     }
                 }
-                // An interpolation is a string unless something is expecting a
-                // reference, in which case it IS that reference: the holes are
-                // filled per row and the result is the identity of a node. That
-                // is bidirectional checking, with no IRI-template type and no
-                // subtyping rule standing in for it.
-                let ty = self.expected_ref.clone().map_or_else(
-                    || Ty::new(db, TyKind::Primitive(Primitive::String)),
-                    |shapes| Ty::reference(db, shapes),
-                );
+                self.expected = expected;
+                // The holes are filled per row and the result is the term the
+                // slot wants. That is bidirectional checking, with no
+                // IRI-template type and no subtyping rule standing in for it.
+                let ty = self
+                    .denoted()
+                    .unwrap_or_else(|| Ty::new(db, TyKind::Primitive(Primitive::String)));
                 (ty, ProvenanceKind::Literal)
             }
             // T-Column: the qualified spelling. Same resolution as T-Field,
