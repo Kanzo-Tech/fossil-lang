@@ -266,7 +266,7 @@ What is not, each with what happens instead:
 | not read | what happens |
 | --- | --- |
 | `OneOf` | a diagnostic suggesting the mapping be split |
-| shapes recursive through a direct cycle | rejected; the shape graph must be acyclic |
+| a labelled triple expression that includes itself (`&label`), directly or through another | rejected as [`shape/cyclic-reference`](/docs/errors/shape/cyclic-reference). A shape that REFERS to itself on a value — `snb:knows @snb:Person *` — is not this: it is an edge, and is read |
 | complex nested `EachOf` grouping | rejected at decomposition |
 | ShapeMap features | out of scope — a shape map selects nodes in a graph that already exists |
 

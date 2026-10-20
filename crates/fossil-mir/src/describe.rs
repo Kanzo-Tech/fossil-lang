@@ -305,7 +305,7 @@ fn object(
         // The shape's term, verbatim: `xsd:gYear` over an `int32` stays
         // `xsd:gYear`.
         Some(Term::Iri) => map.with_term_type(TermType::Iri),
-        Some(Term::Literal(Some(datatype))) => map.with_datatype(iri(datatype)?),
+        Some(Term::Literal(Some(datatype))) => map.with_datatype(iri(datatype.as_str())?),
         Some(Term::Literal(None)) | None => {
             // None declared: the literal is the column's natural one, except
             // where the writer stored a text for a type `GraphAr` lacks.
