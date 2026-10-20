@@ -12,14 +12,10 @@
 //! joined row holds a shared column name TWICE — once per side — and `select`
 //! is what narrows to the one you meant, naming a QUALIFIED column.
 //!
-//! # What this file does NOT prove
-//!
-//! **A join's condition is not TYPED.** `crate::infer::apply_source_op` runs
-//! `check_refs` over it — which asks only that every column it names exists
-//! under the binding that qualifies it — so
-//! `pedidos.persona_id == personas.persona_id` with an `Integer` on one side
-//! and a `String` on the other type-checks today. Asserting that here would pin
-//! the gap as the contract, so it is written down instead.
+//! A join's condition is typed like every other expression: `typecheck_stage`
+//! synthesises it against the joined scope, so an equality between an
+//! `Integer` key and a `String` one is `type/incomparable`, the same refusal
+//! `where` gives it — see `a_join_on_keys_of_types_that_do_not_compare_is_refused`.
 
 use fossil_base::test_support::{db_with_document, register_inferred};
 use fossil_base::{Diagnostic, FossilDb, SourceFile};
@@ -368,5 +364,23 @@ fn distinct_keeps_the_row_and_takes_no_arguments() {
         errs.iter()
             .any(|m| m.contains("`distinct` in `ventas` is given more arguments than it takes")),
         "the refusal says the verb takes nothing, got {errs:?}"
+    );
+}
+
+/// The keys of a join are compared by the rule every `==` is: `Integer` and
+/// `Float` compare, a number and a string do not. A join on `persona_id ==
+/// nombre` would run and pair nothing — or, with an engine that casts, pair the
+/// wrong rows — so it is refused where it is written.
+#[test]
+fn a_join_on_keys_of_types_that_do_not_compare_is_refused() {
+    let (db, file) = db_with(
+        "ventas := pedidos.join(personas, on = pedidos.persona_id == personas.nombre)",
+        two_sources(),
+    );
+    let errs = row_of(&db, file).expect_err("an Integer key against a String one must refuse");
+    assert!(
+        errs.iter()
+            .any(|m| m == "cannot compare Integer with String using `==`"),
+        "got {errs:?}"
     );
 }

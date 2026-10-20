@@ -351,6 +351,7 @@ impl Checker<'_> {
                         constraint.value_ty,
                         name.clone(),
                         shape.label_at(constraint.span, self.expr.file),
+                        constraint.occurs,
                     ))
                 })
             }
@@ -372,7 +373,7 @@ impl Checker<'_> {
             // the identity a second time.
             Some(self.mapping_shape_iri().into_iter().collect())
         } else {
-            expectation.as_ref().and_then(|(ty, _, _)| {
+            expectation.as_ref().and_then(|(ty, _, _, _)| {
                 ty.and_then(|t| match t.kind(db) {
                     TyKind::Ref(names) => Some(names.clone()),
                     _ => None,
@@ -385,11 +386,38 @@ impl Checker<'_> {
             self.check_constant_language(expr_id, name, &prop.value);
         }
 
-        if let (Some(actual), Some((expected, property, declared_at))) = (actual, expectation) {
+        // A `Seq` is several values, and a slot the shape does not narrow takes
+        // any ONE value: `nickname . ?` and `str.split(…)` would otherwise reach
+        // the writer as a list in a scalar column and be refused there as a
+        // type GraphAr cannot hold, which is true and says nothing about the
+        // line that wrote it. A narrowed slot needs no rule of its own:
+        // `subtypes` already refuses `Seq<String>` against `String`.
+        if let (Some(actual), Some((None, property, _, occurs))) = (actual, expectation.as_ref())
+            && occurs.is_single_valued()
+            && matches!(actual.kind(db), TyKind::Seq(_))
+        {
+            let span = self.expr.span_of(expr_id);
+            let d = Diagnostic::new(
+                Severity::Error,
+                Problem::PropertyMismatch {
+                    property: property.to_string(),
+                    expected: "one value".to_string(),
+                    actual: render_ty_kind(db, actual.kind(db)),
+                },
+                span,
+            );
+            let _ = self.expr.raise(d);
+            return;
+        }
+
+        if let (Some(actual), Some((expected, property, declared_at, _))) = (actual, expectation) {
             // `constraint.occurs` is deliberately NOT read here. The count a
             // shape declares is checked in `check_required_properties`, over the
             // predicates the body never wrote — the only direction that can be
             // observed, since no value type carries «zero or one» in itself.
+            // The upper bound is the executor's: what gives a subject a second
+            // value is a join repeating it, and that is in the rows
+            // (`write/too-many-values`).
             let type_name = self.target_type_name();
             let _ = compatible(
                 &mut self.expr,
@@ -853,10 +881,10 @@ pub fn compatible<'db>(
     // satisfied by anything.
     //
     // No value type carries a cardinality, so there is no `occurs` to check
-    // here. The cardinality a shape declares is enforced in exactly one place,
+    // here. The lower bound a shape declares is enforced in exactly one place,
     // and it is the direction that can be observed:
     // [`Checker::check_required_properties`], over the predicates the body
-    // never wrote.
+    // never wrote. The upper bound is the run's, `write/too-many-values`.
     if expected.is_none_or(|e| subtypes(db, actual, e)) {
         return Ok(());
     }
