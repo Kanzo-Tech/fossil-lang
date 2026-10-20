@@ -36,6 +36,17 @@ graphar = [
   "dep:tracing",
 ]
 
+# The triples of a graph, one N-Triples line each: the definition of what a
+# program means as RDF.
+ntriples = [
+  "dep:fossil-mir",
+  "dep:fossil-storage",
+  "dep:object_store",
+  "dep:oxrdf",
+  "dep:thiserror",
+  "dep:tracing",
+]
+
 [dependencies]
 # A graph is Arrow relations: `datafusion`'s re-export, the engine's own build.
 datafusion = { workspace = true }

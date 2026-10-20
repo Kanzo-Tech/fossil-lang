@@ -9,6 +9,8 @@
 //! - [`graphar`] (feature `graphar`): an Apache `GraphAr` graph, the chunks
 //!   through `graphar-parquet`, `mapping.ttl` after them and `fossil.graph.yml`
 //!   last.
+//! - [`ntriples`] (feature `ntriples`): the triples, one line each, which is
+//!   what a program means as RDF.
 
 // The writer is single-threaded by construction, as the engine is: the browser
 // has one thread, and `DataFusion`'s futures are not `Send`.
@@ -25,6 +27,20 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "graphar")]
 pub mod graphar;
+#[cfg(feature = "ntriples")]
+pub mod ntriples;
+
+/// Which format a run writes the graph in: one variant per sink compiled in,
+/// chosen by the host as it chooses the storage (decision M2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sink {
+    /// [`graphar`]: the graph's tables as Apache `GraphAr`'s.
+    #[cfg(feature = "graphar")]
+    GraphAr,
+    /// [`ntriples`]: the graph's triples.
+    #[cfg(feature = "ntriples")]
+    NTriples,
+}
 
 /// The columns of the tables the engine holds between the executor and the
 /// writer. They are not the graph's: the writer numbers the rows within their
@@ -52,6 +68,29 @@ pub struct Graph {
     pub schema: GraphSchema,
     pub vertices: Vec<VertexTable>,
     pub edges: Vec<EdgeTable>,
+}
+
+impl Graph {
+    /// What the join discarded, one entry per relation in the order of
+    /// [`GraphSchema::edges`], named as `fossil.graph.yml` names its edge type.
+    #[must_use]
+    pub fn dropped(&self) -> Vec<EdgeDrops> {
+        self.schema
+            .edges
+            .iter()
+            .map(|edge| EdgeDrops {
+                table: format!("{}_{}_{}", edge.source, edge.label, edge.destination),
+                dropped: self
+                    .edges
+                    .iter()
+                    .find(|e| {
+                        (&e.src_type, &e.label, &e.dst_type)
+                            == (&edge.source, &edge.label, &edge.destination)
+                    })
+                    .map_or(0, |e| e.dropped),
+            })
+            .collect()
+    }
 }
 
 /// A materialised edge's rows, `ORDER BY src_dense, dst_dense`: two `u32`

@@ -46,6 +46,14 @@ one back.
 
 Nothing is staged and read back: the writer encodes the batches the executor already held.
 
+**A run can write the triples instead.** `fossil_sinks::ntriples::write` writes the same graph as one
+N-Triples document, `graph.nt`, when the host chooses `Sink::NTriples` (`crates/fossil-sinks/src/lib.rs, Sink`);
+it is a cargo feature, and a host that writes only GraphAr links none of it. It is not a second copy
+beside the tables: a run writes one or the other. What a program means as RDF is defined there, in
+`crates/fossil-sinks/src/ntriples.rs, triples`, and `crates/fossil-exec/tests/ntriples.rs` holds every
+conformance program to it: the mapping, read over the tables the same program writes, gives the same
+set.
+
 **The graph document is written last, and that is not tidiness.** `fossil.graph.yml` is the commit: a
 reader opens nothing it does not name, so a run that fails halfway leaves chunks no reader will find.
 And a document written before the bytes can only *promise* them, while a count file is measured.

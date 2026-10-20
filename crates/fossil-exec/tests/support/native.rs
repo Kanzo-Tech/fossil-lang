@@ -29,13 +29,13 @@
 #[path = "profile.rs"]
 pub(crate) mod profile;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use fossil_base::test_support::NativeSystem;
 use fossil_base::{Diagnostic, FossilDb, SourceFile, System, file_at};
-use fossil_exec::{Executor, Output, Ran, RunReport};
+use fossil_exec::{Executor, Output, Ran, RunReport, Sink};
 use fossil_hir::documents::{documents_named, register_missing_documents, registry_key};
 use graphar_info::{EdgeInfo, GraphInfo, VertexInfo};
 use graphar_parquet::paths;
@@ -241,6 +241,11 @@ pub(crate) fn render_diagnostics(
 /// resolves it but the in-memory store routed at it.
 pub(crate) const AUTHORITY: &str = "https://programs.test/";
 
+/// One triple as `rml::sql` answers it: the subject's kind (`I`, `B`) and
+/// value, the predicate, the object's kind (`I`, `B`, `L`) and value, and a
+/// literal's datatype and language tag, empty for an IRI.
+pub(crate) type Triple = [String; 7];
+
 /// What a run answered and every file it wrote, by path under its root.
 #[derive(Debug)]
 pub(crate) struct Written {
@@ -342,6 +347,59 @@ impl Written {
     }
 
     /// The graph copied into a fresh directory, so `DuckDB` can read it.
+    /// The file at `path` the run wrote, as text.
+    pub(crate) fn text(&self, path: &str) -> String {
+        String::from_utf8(
+            self.files
+                .get(path)
+                .unwrap_or_else(|| panic!("the run wrote no `{path}`"))
+                .clone(),
+        )
+        .expect("the file is UTF-8")
+    }
+
+    /// The triples of the written `mapping.ttl` over the written Parquet: the
+    /// mapping parsed from its text, rendered to a view by `rml::sql` and read by
+    /// `DuckDB`, which resolves each table name the mapping uses to the chunk the
+    /// information files name.
+    pub(crate) fn triples(&self) -> BTreeSet<Triple> {
+        let root = self.materialise();
+        let mapping = rml::rdf::parse_turtle(&self.text("mapping.ttl"), None).expect("the mapping parses");
+        let conn = duckdb::Connection::open_in_memory().expect("duckdb");
+        let graph = self.graph();
+        let view = |name: &str, relative: String| {
+            conn.execute_batch(&format!(
+                "CREATE VIEW \"{name}\" AS SELECT * FROM read_parquet({})",
+                at(root.path(), &relative)
+            ))
+            .unwrap_or_else(|e| panic!("view {name}: {e}"));
+        };
+        for vertex in &graph.vertices {
+            view(
+                &vertex.r#type,
+                paths::vertex_chunk(vertex, &vertex.property_groups[0], 0),
+            );
+        }
+        for edge in &graph.edges {
+            view(&edge.triple(), self.adjacency(&edge.triple()));
+        }
+        let create = rml::sql::create_view(&mapping, None, "triples", |t| Ok(format!("\"{t}\"")))
+            .expect("the mapping renders");
+        conn.execute_batch(&create)
+            .unwrap_or_else(|e| panic!("{create}: {e}"));
+        let mut stmt = conn.prepare("SELECT * FROM triples").expect("prepare");
+        stmt.query_map([], |row| {
+            let mut cells: Vec<String> = Vec::new();
+            for i in 0..7 {
+                cells.push(row.get(i)?);
+            }
+            Ok(<[String; 7]>::try_from(cells).expect("seven columns"))
+        })
+        .expect("query")
+        .collect::<Result<_, _>>()
+        .expect("rows")
+    }
+
     pub(crate) fn materialise(&self) -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("tempdir");
         for (rel, bytes) in &self.files {
@@ -391,16 +449,27 @@ pub(crate) fn run_dir(
     program: &str,
     connections: &[(&str, &str)],
 ) -> Result<Written, String> {
+    run_dir_as(dir, program, connections, Sink::GraphAr)
+}
+
+/// [`run_dir`], writing with `sink`.
+pub(crate) fn run_dir_as(
+    dir: &Path,
+    program: &str,
+    connections: &[(&str, &str)],
+    sink: Sink,
+) -> Result<Written, String> {
     tokio::runtime::Builder::new_current_thread()
         .build()
         .expect("a current-thread runtime")
-        .block_on(run_dir_async(dir, program, connections))
+        .block_on(run_dir_async(dir, program, connections, sink))
 }
 
 async fn run_dir_async(
     dir: &Path,
     program: &str,
     connections: &[(&str, &str)],
+    sink: Sink,
 ) -> Result<Written, String> {
     let text = std::fs::read_to_string(dir.join(program))
         .unwrap_or_else(|e| panic!("read {program}: {e}"));
@@ -418,6 +487,7 @@ async fn run_dir_async(
         .with_store(AUTHORITY, Arc::clone(&served) as Arc<dyn ObjectStore>)
         .expect("route the program's directory");
     let mut exec = Executor::at(&text, &format!("{AUTHORITY}{program}"));
+    exec.set_sink(sink);
     exec.set_connections(
         connections
             .iter()

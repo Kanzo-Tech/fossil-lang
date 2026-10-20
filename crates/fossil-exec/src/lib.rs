@@ -62,6 +62,8 @@ pub use descriptor::output_descriptor;
 /// The executor a host drives. Named at the crate root because it is the
 /// crate's answer, not a detail of the module it is written in.
 pub use executor::{Executor, GraphFile, Output, Ran};
+/// The format a run writes, which the host chooses ([`Executor::set_sink`]).
+pub use fossil_sinks::Sink;
 /// The relation an op index produces — the seam a host (or a test that builds a
 /// [`fossil_mir::MirGraph`] by hand) uses to materialise an intermediate.
 pub use plan::plan_relation;

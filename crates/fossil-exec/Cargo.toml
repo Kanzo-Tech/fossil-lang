@@ -19,6 +19,11 @@ publish = false
 [lints]
 workspace = true
 
+# One per sink besides `GraphAr`'s, which every run can write: a host compiles in
+# the formats it offers, so a module that writes only `GraphAr` carries no other.
+[features]
+ntriples = ["fossil-sinks/ntriples"]
+
 [lib]
 doctest = false
 
@@ -82,6 +87,11 @@ duckdb = { workspace = true }
 # `tests/mapping.rs` renders the mapping to a view over the written graph (`rml::sql`) and reads the
 # triples back, which is Statement R made a test.
 rml = { workspace = true, features = ["sql"] }
+# `tests/ntriples.rs` runs every conformance program through both sinks: this
+# crate with its `ntriples` feature, and the parser that reads the document back.
+fossil-exec = { path = ".", features = ["ntriples"] }
+oxrdf = { workspace = true }
+oxttl = { workspace = true }
 # `tests/write.rs` wraps an `object_store` store to record the order of the
 # writes, and the trait is an `async_trait`.
 async-trait = { workspace = true }

@@ -25,7 +25,6 @@ use std::collections::BTreeSet;
 use std::path::Path;
 
 use expect_test::expect;
-use graphar_parquet::paths;
 
 #[path = "support/native.rs"]
 mod native;
@@ -43,16 +42,6 @@ fn hello() -> native::Written {
 fn labels() -> native::Written {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/programs/labels");
     native::run_dir(&dir, "labels.fossil", &[]).expect("labels.fossil runs")
-}
-
-fn mapping_text(ran: &native::Written) -> String {
-    String::from_utf8(
-        ran.files
-            .get("mapping.ttl")
-            .expect("the run wrote mapping.ttl")
-            .clone(),
-    )
-    .expect("Turtle is UTF-8")
 }
 
 // ───────────────────────────────────────────────────────────────────── golden
@@ -159,7 +148,7 @@ fn hello_is_one_triples_map_over_its_table() {
           subject ref(subject) as IRI a <https://example.org/Person>
           <https://example.org/name> -> ref(name) ^^<http://www.w3.org/2001/XMLSchema#string>
     "]]
-    .assert_eq(&render(&mapping_text(&hello())));
+    .assert_eq(&render(&hello().text("mapping.ttl")));
 }
 
 #[test]
@@ -190,12 +179,12 @@ fn labels_has_a_relation_a_tagged_set_a_tagged_value_and_its_annotations() {
         <https://schema.org/Person> <http://www.w3.org/2000/01/rdf-schema#label> "galardonado con el Nobel"@es
         <https://schema.org/birthDate> <http://www.w3.org/2000/01/rdf-schema#label> "birth date"@en
         <https://schema.org/birthDate> <http://www.w3.org/2000/01/rdf-schema#label> "fecha de nacimiento"@es
-    "#]].assert_eq(&render(&mapping_text(&labels())));
+    "#]].assert_eq(&render(&labels().text("mapping.ttl")));
 }
 
 // ───────────────────────────────────────────────────────────── Statement R
 
-type Triple = [String; 7];
+use native::Triple;
 
 /// A triple whose object is an IRI.
 fn iri(s: &str, p: &str, o: &str) -> Triple {
@@ -210,48 +199,6 @@ fn literal(s: &str, p: &str, o: &str, datatype: &str) -> Triple {
 /// A triple whose object is a language-tagged string.
 fn tagged(s: &str, p: &str, o: &str, tag: &str) -> Triple {
     ["I", s, p, "L", o, LANG_STRING, tag].map(str::to_string)
-}
-
-/// The triples of the written `mapping.ttl` over the written Parquet: the
-/// mapping parsed from its text, rendered to a view by `rml::sql` and read by
-/// `DuckDB`, which resolves each table name the mapping uses to the chunk the
-/// information files name.
-fn triples(ran: &native::Written) -> BTreeSet<Triple> {
-    let root = ran.materialise();
-    let mapping = rml::rdf::parse_turtle(&mapping_text(ran), None).expect("the mapping parses");
-    let conn = duckdb::Connection::open_in_memory().expect("duckdb");
-    let graph = ran.graph();
-    let view = |name: &str, relative: String| {
-        conn.execute_batch(&format!(
-            "CREATE VIEW \"{name}\" AS SELECT * FROM read_parquet({})",
-            native::at(root.path(), &relative)
-        ))
-        .unwrap_or_else(|e| panic!("view {name}: {e}"));
-    };
-    for vertex in &graph.vertices {
-        view(
-            &vertex.r#type,
-            paths::vertex_chunk(vertex, &vertex.property_groups[0], 0),
-        );
-    }
-    for edge in &graph.edges {
-        view(&edge.triple(), ran.adjacency(&edge.triple()));
-    }
-    let create = rml::sql::create_view(&mapping, None, "triples", |t| Ok(format!("\"{t}\"")))
-        .expect("the mapping renders");
-    conn.execute_batch(&create)
-        .unwrap_or_else(|e| panic!("{create}: {e}"));
-    let mut stmt = conn.prepare("SELECT * FROM triples").expect("prepare");
-    stmt.query_map([], |row| {
-        let mut cells: Vec<String> = Vec::new();
-        for i in 0..7 {
-            cells.push(row.get(i)?);
-        }
-        Ok(<[String; 7]>::try_from(cells).expect("seven columns"))
-    })
-    .expect("query")
-    .collect::<Result<_, _>>()
-    .expect("rows")
 }
 
 #[test]
@@ -270,7 +217,7 @@ fn the_triples_of_hello_are_the_triples_of_its_program() {
         expected.insert(iri(&s, RDF_TYPE, person));
         expected.insert(literal(&s, name, who, &format!("{XSD}string")));
     }
-    assert_eq!(triples(&hello()), expected);
+    assert_eq!(hello().triples(), expected);
 }
 
 #[test]
@@ -326,7 +273,7 @@ fn the_triples_of_labels_are_the_triples_of_its_program() {
         expected.insert(tagged(&win(id), motivation, why, "en"));
         expected.insert(iri(&who(laureate), awarded, &win(id)));
     }
-    assert_eq!(triples(&labels()), expected);
+    assert_eq!(labels().triples(), expected);
 }
 
 // ──────────────────────────────────────────────────────────── before a run
@@ -368,12 +315,12 @@ fn the_mapping_a_programs_types_describe_is_the_mapping_its_run_writes() {
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     assert_eq!(
         render(&described(&examples, "hello.fossil", &["hello.shex"])),
-        render(&mapping_text(&hello())),
+        render(&hello().text("mapping.ttl")),
     );
     let labels_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/programs/labels");
     assert_eq!(
         render(&described(&labels_dir, "labels.fossil", &[])),
-        render(&mapping_text(&labels())),
+        render(&labels().text("mapping.ttl")),
     );
 }
 

@@ -10,8 +10,8 @@
 //! workspace takes it ([`Executor::register_inferred_descriptor`],
 //! [`Executor::register_undescribed`]), so the run checks the program against
 //! the columns the editor checked it against. [`Executor::execute`] builds a `DataFusion` plan
-//! (`lower_to_mir_pg` → `execute_graph`), writes the `GraphAr` graph into its
-//! [`Output`] with [`fossil_sinks::graphar::write`], and answers what it [`Ran`].
+//! (`lower_to_mir_pg` → `execute_graph`), writes the graph into its [`Output`]
+//! with the [`Sink`] the host chose, and answers what it [`Ran`].
 //!
 //! ## Storage seam
 //! Every byte goes through a [`Storage`](fossil_storage::Storage): the sources `DataFusion` reads, the
@@ -53,6 +53,7 @@ use object_store::memory::InMemory;
 use object_store::{ObjectStore, ObjectStoreExt};
 
 use crate::RunReport;
+use fossil_sinks::Sink;
 use crate::memory::{BUDGET, Budget, Refusal};
 
 /// Where a run writes its graph — one value per `object_store` store it can
@@ -139,6 +140,7 @@ impl System for ExecutorSystem {
 pub struct Executor {
     db: FossilDb,
     file: SourceFile,
+    sink: Sink,
 }
 
 impl std::fmt::Debug for Executor {
@@ -167,7 +169,17 @@ impl Executor {
         let system: Arc<dyn System> = Arc::new(ExecutorSystem);
         let db = FossilDb::new(system);
         let file = SourceFile::new(&db, program.to_string(), path.to_string());
-        Self { db, file }
+        Self {
+            db,
+            file,
+            sink: Sink::GraphAr,
+        }
+    }
+
+    /// The format a run writes: [`Sink::GraphAr`] until the host chooses
+    /// another, as it chooses the storage.
+    pub const fn set_sink(&mut self, sink: Sink) {
+        self.sink = sink;
     }
 
     /// The connections (`{ name: baseUrl }`) every `@name/…` a document or
@@ -228,8 +240,8 @@ impl Executor {
     /// Run the program on `DataFusion`, reading through `storage`, and write
     /// the graph into `output`: route each source — through its connection's
     /// credential, or as a public URL — register the stores, execute the graph
-    /// with at most `limit` rows read from each source scan, and
-    /// [`fossil_sinks::graphar::write`] it.
+    /// with at most `limit` rows read from each source scan, and write it with
+    /// the [`Sink`] of [`Self::set_sink`].
     ///
     /// # Errors
     /// A [`Failure`] with its code: for [`Output::Storage`], what the host
@@ -240,7 +252,7 @@ impl Executor {
     /// `run/does-not-compile`, relating the program's diagnostics; a
     /// `storage/…` code for a source that will not route; `source/not-found`
     /// for one whose file is not in its store; `engine/failed`, with
-    /// `DataFusion`'s error as the cause; or what [`fossil_sinks::graphar::write`] refused.
+    /// `DataFusion`'s error as the cause; or what the sink refused.
     pub async fn execute(
         &self,
         storage: &mut Storage,
@@ -282,21 +294,31 @@ impl Executor {
             .await
             .map_err(|e| engine_failure(e, budget.refusal(), db, file))?;
 
-        // The writer counts what it writes on the same session, under the same
-        // pool: a profile that does not fit is refused as any operator is,
-        // before the chunk it is the footer of.
-        let written = fossil_sinks::graphar::write(&graph, &ctx, storage, &dest)
-            .await
-            .map_err(|e| match e {
-                fossil_sinks::graphar::WriteError::Engine(e) => {
-                    engine_failure(e, budget.refusal(), db, file)
-                }
-                other => other.into(),
-            })?;
+        let dropped = match self.sink {
+            // The writer counts what it writes on the same session, under the
+            // same pool: a profile that does not fit is refused as any operator
+            // is, before the chunk it is the footer of.
+            Sink::GraphAr => {
+                fossil_sinks::graphar::write(&graph, &ctx, storage, &dest)
+                    .await
+                    .map_err(|e| match e {
+                        fossil_sinks::graphar::WriteError::Engine(e) => {
+                            engine_failure(e, budget.refusal(), db, file)
+                        }
+                        other => other.into(),
+                    })?
+                    .dropped
+            }
+            #[cfg(feature = "ntriples")]
+            Sink::NTriples => {
+                fossil_sinks::ntriples::write(&graph, storage, &dest).await?;
+                graph.dropped()
+            }
+        };
         drop(ctx);
         let report = RunReport {
             location: dest,
-            dropped: written.dropped,
+            dropped,
         };
         Ok(match memory {
             None => Ran::Storage(report),
