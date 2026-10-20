@@ -227,7 +227,7 @@ fn vertex_maps(
         annotate(&predicate, &declared.annotations, notes)?;
         // A language-tagged value is a struct of the form and its tag, whatever
         // its cardinality; a set is a list of values.
-        let tagged = declared.datatype == Primitive::LangString;
+        let tagged = declared.datatype == Primitive::LANG_STRING;
         let several = declared.cardinality == Cardinality::Multi;
         let text = natural.get(&(label.to_string(), name.to_string())).copied();
         let object = if tagged {
@@ -310,8 +310,8 @@ fn object(
             // None declared: the literal is the column's natural one, except
             // where the writer stored a text for a type `GraphAr` lacks.
             let xsd = match declared.datatype {
-                Primitive::GYear => Some("gYear"),
-                Primitive::Time => Some("time"),
+                Primitive::YEAR => Some("gYear"),
+                Primitive::HOUR => Some("time"),
                 _ => text,
             };
             match xsd {
@@ -467,7 +467,7 @@ mod tests {
     fn property(name: &str, iri: Option<&str>) -> Property {
         Property {
             name: name.to_string(),
-            datatype: Primitive::String,
+            datatype: Primitive::STRING,
             iri: iri.map(str::to_string),
             term: None,
             cardinality: Cardinality::Single,

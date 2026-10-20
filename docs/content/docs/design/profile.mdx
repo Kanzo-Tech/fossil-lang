@@ -136,7 +136,7 @@ answers the `Vocabulary` `grammarFor` takes and each type's `@subject`
 (`crates/fossil-ide/src/constrain.rs, vocabulary_of`, `subject_of`; `@fossil-lang/wasm`'s
 `vocabularyOf` and `subjectOf`). keasy wrote both by hand: a type's IRI is `<base>/vocab/<name>`, a
 field's `<base>/vocab/<field>`, a thing's `<base>/id/<name in words>/`, and a field's type is the
-checker's own spelling of the primitive (`Option<Date>`, `Seq<Ref<Institution>>`). Nothing in the model
+checker's own spelling of the primitive (`Option<Time<Date>>`, `Seq<Ref<Institution>>`). Nothing in the model
 is the proposing model's: it cannot invent an IRI, and the spelling of a type is the one the checker
 prints (`Primitive`'s `Display`), so a copy in a host could not drift from it. The IRI scheme is a
 policy, and it is one: a host that wants another passes a vocabulary it built, which

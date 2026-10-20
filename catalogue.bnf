@@ -160,13 +160,13 @@ row shacl   = extensions "ttl" "shacl"            ; decodes decode_shacl        
    `DECIMAL` is a float because the lattice has no decimal; that is Design E's
    question and not this table's. *)
 
-duckdb integer   = "INTEGER" "BIGINT" "INT" "SMALLINT" "TINYINT" "HUGEINT" .
-duckdb float     = "DOUBLE" "FLOAT" "REAL" "DECIMAL*" .
-duckdb bool      = "BOOLEAN" "BOOL" .
-duckdb date      = "DATE" .
-duckdb date_time = "TIMESTAMP*" "DATETIME" .
-duckdb time      = "TIME*" .
-duckdb string    = "*" .
+duckdb integer        = "INTEGER" "BIGINT" "INT" "SMALLINT" "TINYINT" "HUGEINT" .
+duckdb float          = "DOUBLE" "FLOAT" "REAL" "DECIMAL*" .
+duckdb bool           = "BOOLEAN" "BOOL" .
+duckdb time_date      = "DATE" .
+duckdb time_date_time = "TIMESTAMP*" "DATETIME" .
+duckdb time_hour      = "TIME*" .
+duckdb string         = "*" .
 
 (* ------------------------------------------------------------- NOT IN HERE *)
 (* The WRITE half of the table is deliberately absent, not stubbed:
@@ -205,8 +205,8 @@ duckdb string    = "*" .
 
    `+` is one-or-more, `?` is zero-or-one, and bare is exactly one.
 
-   Fourteen type spellings: nine scalars — String Integer Float Bool Date
-   DateTime GYear LangString SeqString — and five whose meaning depends on the RECEIVER, which is
+   Fourteen type spellings: nine scalars — String Integer Float Bool TimeDate
+   TimeDateTime TimeYear StringLang SeqString — and five whose meaning depends on the RECEIVER, which is
    why they are not scalars: Rows (the relation a verb is a verb of), Predicate
    (a condition over its rows), Column and Binding (positions that NAME rather
    than evaluate), and Aggregate (whose argument names are the PROGRAM's).
@@ -308,7 +308,7 @@ fn str.upper       = (text: String) -> String                   ; expr "upper(%0
    position; the writer reads them by position. A constant string with a
    constant tag is the literal `"x"@en`, and the checker refuses the call
    naming it. *)
-fn str.lang        = (text: String, tag: String) -> LangString  ; expr "row(%0, %1)" .
+fn str.lang        = (text: String, tag: String) -> StringLang  ; expr "row(%0, %1)" .
 
 (* `str.slug` replaced the `fossil_slug` UDF, and THE TEMPLATE IT WAS SPECIFIED
    WITH MATCHED NEITHER RUST IMPLEMENTATION — measurement is the only reason we
@@ -367,15 +367,15 @@ fn str.strip_html = (text: String) -> String
 
 fn parse.integer  = (text: String) -> Integer                   ; expr "CAST(%0 AS BIGINT)" .
 fn parse.float    = (text: String) -> Float                     ; expr "CAST(%0 AS DOUBLE)" .
-fn parse.date     = (text: String, format: String) -> Date      ; expr "CAST(strptime(%0, %1) AS DATE)" .
-fn parse.datetime = (text: String, format: String) -> DateTime  ; expr "strptime(%0, %1)" .
+fn parse.date     = (text: String, format: String) -> TimeDate  ; expr "CAST(strptime(%0, %1) AS DATE)" .
+fn parse.datetime = (text: String, format: String) -> TimeDateTime  ; expr "strptime(%0, %1)" .
 
 (* `year` is XPath's `xs:gYear` constructor, and like it takes TEXT: XPath
    casts no integer to `xs:gYear`, so neither does this row, and a year is not
    an integer a shape can widen into. What it returns is stored as the year's
    integer, the column `/docs/format` says an `xsd:gYear` lands in; a timezone
    suffix (`1921Z`) is refused by the cast rather than dropped. *)
-fn parse.year     = (text: String) -> GYear                     ; expr "CAST(%0 AS INTEGER)" .
+fn parse.year     = (text: String) -> TimeYear                  ; expr "CAST(%0 AS INTEGER)" .
 
 (* ------------------------------------------------------------------- math/ *)
 (* SIX rows, and NO `ceil`/`floor`.

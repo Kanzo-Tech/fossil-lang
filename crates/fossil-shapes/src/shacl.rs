@@ -7,7 +7,7 @@
 //!
 //! - `sh:NodeShape` + `sh:targetClass T`   → a [`Shape`] whose `iri` is `T`.
 //! - `sh:property [ sh:path p ; sh:datatype D ]`         → a literal constraint.
-//! - `sh:property [ sh:path p ; sh:nodeKind sh:IRI ]`    → an `AnyUri` constraint.
+//! - `sh:property [ sh:path p ; sh:nodeKind sh:IRI ]`    → an `Uri` constraint.
 //! - `sh:property [ sh:path p ; sh:class C | sh:node S ]`→ a constraint with a target.
 //! - `sh:property [ sh:path p ; sh:or ( [sh:class A] [sh:class B] ) ]`
 //!   → one constraint with TWO targets (the reference RDF→property-graph union
@@ -461,7 +461,7 @@ mod tests {
 
     // One node shape exercising every canonical mapping: a typed literal
     // (→ a narrowed constraint, single-valued via sh:maxCount 1), an opaque IRI
-    // (sh:nodeKind sh:IRI → AnyUri), a plain edge (sh:class), and an OR edge
+    // (sh:nodeKind sh:IRI → Uri), a plain edge (sh:class), and an OR edge
     // (sh:or → two targets on one constraint, one EdgeType each).
     const SHAPES: &str = r"
 @prefix sh:  <http://www.w3.org/ns/shacl#> .
@@ -489,7 +489,7 @@ ex:PersonShape a sh:NodeShape ;
                 .find(|c| c.predicate == format!("https://ex.org/{p}"))
                 .unwrap_or_else(|| panic!("{p}"))
         };
-        assert_eq!(by("name").datatype(), Some(Primitive::String));
+        assert_eq!(by("name").datatype(), Some(Primitive::STRING));
         assert_eq!(
             by("name").occurs,
             Occurs {
@@ -499,7 +499,7 @@ ex:PersonShape a sh:NodeShape ;
         );
         assert_eq!(
             by("homepage").datatype(),
-            Some(Primitive::AnyUri),
+            Some(Primitive::Uri),
             "`sh:nodeKind sh:IRI` with no class is an opaque IRI column"
         );
         assert!(by("homepage").targets.is_empty(), "and not an edge");
@@ -674,7 +674,7 @@ ex:Thing a sh:NodeShape ; sh:property [ sh:path ex:label ] .
     /// `sh:name` and `sh:description` are read as `rdfs:label` and
     /// `rdfs:comment`, ahead of any the property shape writes under those
     /// predicates; every other non-SHACL triple is carried as itself; and a
-    /// `sh:datatype rdf:langString` with `sh:languageIn` is a `LangString`
+    /// `sh:datatype rdf:langString` with `sh:languageIn` is a `String<Lang>`
     /// whose tags are the list.
     #[test]
     fn sh_name_is_a_label_and_language_in_is_the_languages() {
@@ -712,7 +712,7 @@ ex:PersonShape a sh:NodeShape ;
                 Annotation::literal(RDFS_LABEL, "name", Some("en")),
             ]
         );
-        assert_eq!(name.datatype(), Some(Primitive::LangString));
+        assert_eq!(name.datatype(), Some(Primitive::LANG_STRING));
         assert_eq!(
             name.term,
             Some(fossil_graph_schema::Term::Literal(Some(

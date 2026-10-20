@@ -273,7 +273,7 @@ mod tests {
         )
         .expect("decodes");
         let person = doc.lookup("http://example.org/Person").expect("the shape");
-        assert_eq!(person.properties[0].datatype(), Some(Primitive::String));
+        assert_eq!(person.properties[0].datatype(), Some(Primitive::STRING));
         assert_eq!(person.properties[1].datatype(), None, "`-` narrows nothing");
         assert_eq!(person.properties[1].occurs, Occurs { min: 0, max: None });
         assert_eq!(person.properties[2].targets, ["http://example.org/City"]);

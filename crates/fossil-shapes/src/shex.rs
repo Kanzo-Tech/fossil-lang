@@ -919,7 +919,7 @@ shop:Order {
 
     /// A shape's and a triple constraint's annotations are carried, resolved
     /// through the document's prefixes; a language value set is a
-    /// `LangString` whose ranges are the set.
+    /// `String<Lang>` whose ranges are the set.
     #[test]
     fn annotations_and_a_language_set_are_carried() {
         use fossil_graph_schema::{Annotation, RDFS_LABEL};
@@ -941,7 +941,7 @@ ex:Person {
             [Annotation::literal(RDFS_LABEL, "person", None)]
         );
         let name = &person.properties[0];
-        assert_eq!(name.datatype(), Some(Primitive::LangString));
+        assert_eq!(name.datatype(), Some(Primitive::LANG_STRING));
         assert_eq!(name.languages, ["en", "es"]);
         assert_eq!(
             name.annotations,
@@ -1519,7 +1519,7 @@ ex:Person {
         assert_eq!(by_predicate("note").datatype(), None, "no valueExpr at all");
         assert_eq!(
             by_predicate("homepage").datatype(),
-            Some(Primitive::AnyUri),
+            Some(Primitive::Uri),
             "`nodeKind IRI` is an opaque IRI column — narrowed, but not an edge"
         );
         assert!(
@@ -1695,7 +1695,7 @@ ex:Person {
 
     /// The output model, constructed **by hand** rather than snapshotted
     /// against ourselves. Every distinction the lowering makes is here: an un-narrowed value is a `String` column, a `nodeKind IRI` is an
-    /// `AnyUri` column and not an edge, a disjunction emits one edge per
+    /// `Uri` column and not an edge, a disjunction emits one edge per
     /// destination sharing the predicate, and the single/multi collapse follows
     /// `Occurs::is_single_valued`.
     #[test]
@@ -1751,31 +1751,31 @@ ex:Person {
                         ),
                         prop(
                             "code",
-                            Primitive::String,
+                            Primitive::STRING,
                             "http://example.org/code",
                             Cardinality::Single
                         ),
                         prop(
                             "note",
-                            Primitive::String,
+                            Primitive::STRING,
                             "http://example.org/note",
                             Cardinality::Multi
                         ),
                         prop(
                             "homepage",
-                            Primitive::AnyUri,
+                            Primitive::Uri,
                             "http://example.org/homepage",
                             Cardinality::Multi
                         ),
                         prop(
                             "audited",
-                            Primitive::String,
+                            Primitive::STRING,
                             "http://example.org/audited",
                             Cardinality::Multi
                         ),
                         prop(
                             "reviewed",
-                            Primitive::String,
+                            Primitive::STRING,
                             "http://example.org/reviewed",
                             Cardinality::Multi
                         ),

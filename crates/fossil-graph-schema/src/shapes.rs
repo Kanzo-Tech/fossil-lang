@@ -232,14 +232,14 @@ impl PropertyConstraint {
     ///
     /// It is the [`term`](Self::term)'s [`Term::primitive`]: `Some(p)` for a
     /// literal narrowed to an XSD datatype in the lattice,
-    /// `Some(Primitive::AnyUri)` for an IRI, and `None` for everything else,
+    /// `Some(Primitive::Uri)` for an IRI, and `None` for everything else,
     /// including an XSD datatype **outside** the lattice.
     ///
-    /// `None` becomes [`Primitive::String`] in
+    /// `None` becomes [`Primitive::STRING`] in
     /// [`to_graph_schema`](OutputShapes::to_graph_schema) — the permissive
     /// walking-skeleton column. The `Option` exists so that a consumer that
     /// wants to *diagnose* an un-narrowed property can still tell the two apart,
-    /// which a bare `Primitive::String` cannot.
+    /// which a bare `Primitive::STRING` cannot.
     ///
     /// # The checker agrees
     ///
@@ -475,7 +475,7 @@ impl OutputShapes {
                     // An un-narrowed value is a string column: the permissive
                     // walking-skeleton default the `ShEx` lowering already
                     // applied to every `valueExpr` it could not read.
-                    let datatype = c.datatype().unwrap_or(Primitive::String);
+                    let datatype = c.datatype().unwrap_or(Primitive::STRING);
                     properties.push(Property {
                         name,
                         datatype,
@@ -484,7 +484,7 @@ impl OutputShapes {
                         // A language-tagged value is a property table whatever
                         // its count: that is where its tag has a column with a
                         // fixed name (`/docs/format`).
-                        cardinality: if datatype == Primitive::LangString {
+                        cardinality: if datatype == Primitive::LANG_STRING {
                             Cardinality::Multi
                         } else {
                             cardinality
@@ -524,7 +524,7 @@ mod tests {
         PropertyConstraint {
             name: local_name(predicate).into(),
             predicate: predicate.into(),
-            term: datatype.map(|p| Term::Literal(Some(p.into()))),
+            term: datatype.map(Term::of),
             targets: Vec::new(),
             occurs,
             span: None,
@@ -608,7 +608,7 @@ mod tests {
                 label,
                 predicates
                     .iter()
-                    .map(|p| prop(p, Some(Primitive::String), Occurs::ONE))
+                    .map(|p| prop(p, Some(Primitive::STRING), Occurs::ONE))
                     .collect(),
             )
         };
@@ -658,7 +658,7 @@ mod tests {
                     "https://example.org/Person",
                     vec![prop(
                         "https://example.org/first",
-                        Some(Primitive::String),
+                        Some(Primitive::STRING),
                         Occurs::ONE,
                     )],
                 ),
@@ -667,7 +667,7 @@ mod tests {
                     "https://example.org/Person",
                     vec![prop(
                         "https://example.org/second",
-                        Some(Primitive::String),
+                        Some(Primitive::STRING),
                         Occurs::ONE,
                     )],
                 ),
@@ -921,7 +921,7 @@ mod tests {
         assert_eq!(props[1].name, "note");
         assert_eq!(
             props[1].datatype,
-            Primitive::String,
+            Primitive::STRING,
             "an un-narrowed value is a string column"
         );
 
@@ -961,7 +961,7 @@ mod tests {
         assert!(g.node_by_iri("https://example.org/Person").is_some());
     }
 
-    /// An `AnyUri` datatype is an opaque IRI **column**, not an edge — the
+    /// An `Uri` datatype is an opaque IRI **column**, not an edge — the
     /// distinction `nodeKind IRI` vs `@<Shape>` makes, carried by `targets`
     /// being empty rather than by the datatype.
     #[test]
@@ -971,7 +971,7 @@ mod tests {
                 "https://example.org/Page",
                 vec![prop(
                     "https://example.org/seeAlso",
-                    Some(Primitive::AnyUri),
+                    Some(Primitive::Uri),
                     Occurs::ONE,
                 )],
             )],
@@ -979,7 +979,7 @@ mod tests {
         );
         let g = doc.to_graph_schema();
         assert!(g.edges.is_empty());
-        assert_eq!(g.nodes[0].properties[0].datatype, Primitive::AnyUri);
+        assert_eq!(g.nodes[0].properties[0].datatype, Primitive::Uri);
     }
 
     #[test]

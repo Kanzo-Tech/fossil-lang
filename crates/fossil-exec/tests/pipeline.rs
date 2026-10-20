@@ -44,7 +44,7 @@ fn db() -> FossilDb {
 /// not well-formed without one, and a test that lies about the row is a test
 /// that stops being evidence.
 fn row<'db>(db: &'db dyn fossil_base::Db, names: &[&str]) -> Ty<'db> {
-    let string_ty = Ty::new(db, TyKind::Primitive(Primitive::String));
+    let string_ty = Ty::new(db, TyKind::Primitive(Primitive::STRING));
     let fields: Vec<RecordField<'db>> = names
         .iter()
         .map(|n| RecordField {
@@ -390,7 +390,7 @@ async fn the_three_operators_compose_in_one_chain() {
 #[tokio::test]
 async fn a_joined_relation_feeds_the_vertex_it_emits() {
     let db = db();
-    let string_ty = Ty::new(&db, TyKind::Primitive(Primitive::String));
+    let string_ty = Ty::new(&db, TyKind::Primitive(Primitive::STRING));
     let ops = vec![
         source(&db, "users.csv", "users", &["id", "name"]),
         source(&db, "teams.csv", "teams", &["id", "team"]),

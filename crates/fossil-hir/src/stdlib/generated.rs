@@ -331,7 +331,7 @@ pub(super) fn rows() -> Vec<RegistryEntry> {
                     named: false,
                 },
             ],
-            SigTy::Scalar(ScalarTy::LangString),
+            SigTy::Scalar(ScalarTy::StringLang),
             LoweringKind::Expr(SmolStr::new("row(%0, %1)")),
         ),
         RegistryEntry::new(
@@ -398,7 +398,7 @@ pub(super) fn rows() -> Vec<RegistryEntry> {
                     named: false,
                 },
             ],
-            SigTy::Scalar(ScalarTy::Date),
+            SigTy::Scalar(ScalarTy::TimeDate),
             LoweringKind::Expr(SmolStr::new("CAST(strptime(%0, %1) AS DATE)")),
         ),
         RegistryEntry::new(
@@ -417,7 +417,7 @@ pub(super) fn rows() -> Vec<RegistryEntry> {
                     named: false,
                 },
             ],
-            SigTy::Scalar(ScalarTy::DateTime),
+            SigTy::Scalar(ScalarTy::TimeDateTime),
             LoweringKind::Expr(SmolStr::new("strptime(%0, %1)")),
         ),
         RegistryEntry::new(
@@ -428,7 +428,7 @@ pub(super) fn rows() -> Vec<RegistryEntry> {
                 arity: Arity::One,
                 named: false,
             }],
-            SigTy::Scalar(ScalarTy::GYear),
+            SigTy::Scalar(ScalarTy::TimeYear),
             LoweringKind::Expr(SmolStr::new("CAST(%0 AS INTEGER)")),
         ),
         RegistryEntry::new(

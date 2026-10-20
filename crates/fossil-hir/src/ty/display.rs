@@ -61,7 +61,7 @@ mod tests {
     #[test]
     fn renders_primitive() {
         let db = db();
-        let s = render_ty_kind(&db, &TyKind::Primitive(Primitive::String));
+        let s = render_ty_kind(&db, &TyKind::Primitive(Primitive::STRING));
         assert_eq!(s, "String");
     }
 

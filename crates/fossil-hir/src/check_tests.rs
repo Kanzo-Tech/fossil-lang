@@ -58,7 +58,7 @@ fn users_row(db: &dyn fossil_base::Db) -> Ty<'_> {
                 },
                 InferredColumn {
                     name: "name".into(),
-                    primitive: Primitive::String,
+                    primitive: Primitive::STRING,
                 },
                 InferredColumn {
                     name: "age".into(),
@@ -531,7 +531,7 @@ fn compatible_integer_widens_to_float() {
 #[test]
 fn compatible_string_to_integer_fails() {
     let (db, file) = db_with(HELLO);
-    let s = Ty::new(&db, TyKind::Primitive(Primitive::String));
+    let s = Ty::new(&db, TyKind::Primitive(Primitive::STRING));
     let i = Ty::new(&db, TyKind::Primitive(Primitive::Integer));
     let mut cx = build_checker(&db, first_mapping(&db, file), None, None);
     let value = HirExpr::ColumnRef {
@@ -570,7 +570,7 @@ Contact : Person from users
         let mut cx = build_checker(
             db,
             m,
-            Some(row_record(db, &[("name", Primitive::String)])),
+            Some(row_record(db, &[("name", Primitive::STRING)])),
             Some(ResolvedShape {
                 constraints: vec![crate::shapes::ShapeConstraint {
                     name: smol_str::SmolStr::from("name"),
@@ -644,7 +644,7 @@ Orders : Order from Purchase
         let mut cx = build_checker(
             db,
             m,
-            Some(row_record(db, &[("reference", Primitive::String)])),
+            Some(row_record(db, &[("reference", Primitive::STRING)])),
             Some(ResolvedShape {
                 constraints: vec![crate::shapes::ShapeConstraint {
                     name: smol_str::SmolStr::from("total"),
@@ -736,7 +736,7 @@ Orders : Order from Purchase
         let mut cx = build_checker(
             db,
             m,
-            Some(row_record(db, &[("reference", Primitive::String)])),
+            Some(row_record(db, &[("reference", Primitive::STRING)])),
             Some(ResolvedShape {
                 constraints: vec![crate::shapes::ShapeConstraint {
                     name: smol_str::SmolStr::from("total"),
@@ -841,7 +841,7 @@ Orders : Order from Purchase
             Some(row_record(
                 db,
                 &[
-                    ("reference", Primitive::String),
+                    ("reference", Primitive::STRING),
                     ("amount", Primitive::Float),
                 ],
             )),
@@ -906,7 +906,7 @@ fn a_wrong_type_with_no_repair_says_nothing() {
         let mut cx = build_checker(
             db,
             m,
-            Some(row_record(db, &[("name", Primitive::Date)])),
+            Some(row_record(db, &[("name", Primitive::DATE)])),
             Some(ResolvedShape {
                 constraints: vec![crate::shapes::ShapeConstraint {
                     name: smol_str::SmolStr::from("name"),
@@ -1506,7 +1506,7 @@ fn a_stage_condition_is_typed_and_not_only_resolved() {
             "r.csv",
             &[
                 ("celsius", Primitive::Float),
-                ("station", Primitive::String),
+                ("station", Primitive::STRING),
             ],
         );
         let src = format!("Row := io.csv(\"r.csv\")\nValid := Row.where({condition})\n");
@@ -1576,12 +1576,12 @@ fn a_join_condition_relates_the_two_sides_and_not_only_its_own() {
                 file,
                 &[
                     (key, Primitive::Integer),
-                    ("k", Primitive::String),
+                    ("k", Primitive::STRING),
                     // A SECOND string column per side, so a same-side equality
                     // is well-typed and reaches this rule rather than being
                     // refused one line earlier for comparing a String with an
                     // Integer.
-                    ("j", Primitive::String),
+                    ("j", Primitive::STRING),
                 ],
             );
         }
@@ -1744,7 +1744,7 @@ fn null_compares_with_anything_and_assigns_to_nothing() {
         register_inferred(
             &mut db,
             "r.csv",
-            &[("when", Primitive::Date), ("n", Primitive::Float)],
+            &[("when", Primitive::DATE), ("n", Primitive::Float)],
         );
         let src = format!("Row := io.csv(\"r.csv\")\nValid := Row.where({condition})\n");
         let file = SourceFile::new(&db, src, "null.fossil".to_string());

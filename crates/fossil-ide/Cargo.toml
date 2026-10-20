@@ -27,7 +27,7 @@ fossil-hir = { path = "../fossil-hir" }
 fossil-mir = { path = "../fossil-mir" }
 # The primitive lattice, for the ONE table that maps a column's `Primitive` to
 # the `ScalarTy` the catalogue hangs its members off — `users.name.` offers
-# `str.*` because `name` is a `Primitive::String`. It is already in the wasm
+# `str.*` because `name` is a `Primitive::STRING`. It is already in the wasm
 # closure through fossil-hir, which speaks it too.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 # goto-def + completion consume the stdlib classification catalog, which is

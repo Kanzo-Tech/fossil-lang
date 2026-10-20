@@ -24,8 +24,8 @@ const MODEL: Model = {
       identity: ['id'],
       fields: [
         { name: 'name', primitive: 'string' },
-        { name: 'born', primitive: 'date', optional: true },
-        { name: 'since', primitive: 'g_year' },
+        { name: 'born', primitive: 'time_date', optional: true },
+        { name: 'since', primitive: 'time_year' },
       ],
     },
     { name: 'Institution', source: 'institutions', identity: ['id'], fields: [{ name: 'title', primitive: 'string' }] },
@@ -55,8 +55,8 @@ describe('vocabularyOf', () => {
     expect(laureate.iri).toBe('https://acme.example/vocab/Laureate');
     expect(laureate.fields).toEqual([
       { name: 'name', iri: 'https://acme.example/vocab/name', type: 'String' },
-      { name: 'born', iri: 'https://acme.example/vocab/born', type: 'Option<Date>' },
-      { name: 'since', iri: 'https://acme.example/vocab/since', type: 'GYear' },
+      { name: 'born', iri: 'https://acme.example/vocab/born', type: 'Option<Time<Date>>' },
+      { name: 'since', iri: 'https://acme.example/vocab/since', type: 'Time<Year>' },
       { name: 'affiliation', iri: 'https://acme.example/vocab/affiliation', type: 'Seq<Ref<Institution>>' },
     ]);
     expect(sources.map((s) => s.name)).toEqual(['laureates', 'institutions', 'affiliations']);

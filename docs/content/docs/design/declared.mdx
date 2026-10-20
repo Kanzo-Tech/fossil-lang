@@ -16,7 +16,7 @@ second file.
 So a type can be declared in the program, and an imported one is named by its name. The grammar is
 [`grammar.bnf`](/docs/book/grammar), `TypeDecl`; this page is why it is shaped as it is. All of it is
 built except the conversions onto rudof's types, which is what the `direction` above declares. The
-stacked attributes, `@annotation` and `LangString` are
+stacked attributes, `@annotation` and `String<Lang>` are
 [Annotations and language-tagged strings](/docs/design/labels).
 
 ```
@@ -24,7 +24,7 @@ stacked attributes, `@annotation` and `LangString` are
 type Person
     @iri("https://schema.org/name")          name: String
     @iri("https://shop.example/vocab/name")  handle: String
-    @iri("https://schema.org/birthDate")     born: Option<Date>
+    @iri("https://schema.org/birthDate")     born: Option<Time<Date>>
     @iri("https://schema.org/homeLocation")  livesIn: Ref<City>
 ```
 
@@ -142,18 +142,18 @@ separate two fields:
 @iri("https://schema.org/Person")
 type Laureate
     @iri("https://schema.org/name")
-    name: Seq<LangString>
+    name: Seq<String<Lang>>
 
     @iri("https://schema.org/birthDate")
     @annotation("http://www.w3.org/2000/01/rdf-schema#label", "birth date"@en)
     @annotation("http://www.w3.org/2000/01/rdf-schema#label", "fecha de nacimiento"@es)
-    birthDate: Date
+    birthDate: Time<Date>
 ```
 
 The body is still indented and still one field per entry; only the attribute's line moved. The second
 attribute is `@annotation`, a ShEx annotation — a predicate and an RDF object — and the reason a field
 would carry several; [Annotations and language-tagged strings](/docs/design/labels) is the argument for
-it, for `"…"@en` and for `LangString`. The grammar is `grammar.bnf, DeclAttrs`.
+it, for `"…"@en` and for `String<Lang>`. The grammar is `grammar.bnf, DeclAttrs`.
 
 **What would reverse it:** a field whose attributes outgrow their lines often enough that the field's
 name is hard to find under them. Then the attributes move into the body of the field, and that is an
@@ -178,8 +178,8 @@ type Persona
     @severity(info)
     email: Seq<String, 1, 3>
 
-    @iri("https://ex.org/alta")  alta: Date
-    @iri("https://ex.org/baja")  baja: Option<Date>
+    @iri("https://ex.org/alta")  alta: Time<Date>
+    @iri("https://ex.org/baja")  baja: Option<Time<Date>>
 ```
 
 It is the shape of a validator in Pydantic or Zod — a condition on the field, with no schema language
@@ -190,7 +190,7 @@ equalities, `sh:lessThan` is `x < y` on the type. The grammar is `grammar.bnf, A
 **One rule says what an assertion reads.** On a field, the field's own name is one of its values, and
 the assertion holds of each: a `Seq<String>` is checked element by element. On a type, the names are
 its fields that hold one value, and the assertion holds of each node. A value that is absent is not
-checked, as in SHACL, which is what lets `alta <= baja` stand beside an `Option<Date>`. A name the
+checked, as in SHACL, which is what lets `alta <= baja` stand beside an `Option<Time<Date>>`. A name the
 rule does not give — a second field from a field's assertion, a field of many values from the type's —
 is [`shape/out-of-scope`](/docs/errors/shape/out-of-scope), and a condition that is not a `Bool` is
 [`type/expected-bool`](/docs/errors/type/expected-bool).

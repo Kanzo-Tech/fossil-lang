@@ -62,7 +62,7 @@ pub use shapes::{
     local_name,
 };
 pub use span::Span;
-pub use xsd::{OutsideLattice, Xsd};
+pub use xsd::{NotALiteral, OutsideLattice, Xsd};
 
 /// A whole graph's schema: its node types and edge types. The single contract
 /// shared by the producer, every materializer, and the consumer.
@@ -115,7 +115,7 @@ pub struct Property {
     /// The field's annotations.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub annotations: Vec<Annotation>,
-    /// For a [`Primitive::LangString`], the basic language ranges a value's
+    /// For a [`Primitive::LANG_STRING`], the basic language ranges a value's
     /// tag must match (RFC 4647 §3.3.1) — SHACL's `sh:languageIn`, a `ShEx`
     /// language value set. Empty is any tag.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -160,13 +160,20 @@ pub enum Term {
 }
 
 impl Term {
-    /// The lattice reading of the term: an IRI is [`Primitive::AnyUri`], a
+    /// The term a primitive is written as: a [`Primitive::Uri`] is an IRI, and
+    /// every other primitive a literal of its canonical datatype.
+    #[must_use]
+    pub fn of(primitive: Primitive) -> Self {
+        Xsd::try_from(primitive).map_or(Self::Iri, |xsd| Self::Literal(Some(xsd)))
+    }
+
+    /// The lattice reading of the term: an IRI is [`Primitive::Uri`], a
     /// literal is its datatype read into the lattice ([`Xsd`]), and a literal
     /// with no datatype, or one outside the lattice, narrows nothing.
     #[must_use]
     pub fn primitive(&self) -> Option<Primitive> {
         match self {
-            Self::Iri => Some(Primitive::AnyUri),
+            Self::Iri => Some(Primitive::Uri),
             Self::Literal(datatype) => datatype.as_ref().and_then(|d| Primitive::try_from(d).ok()),
         }
     }
@@ -180,25 +187,125 @@ impl Term {
 /// Materializers map it to their own vocabulary (`GraphAr` `string/int64/double/…`,
 /// `DataFusion` scalars, `DuckDB` column types) next to the materializer. XSD is
 /// one of those vocabularies, the RDF border's, and [`Xsd`] is where the lattice
-/// meets it: this enum names no datatype IRI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
+/// meets it: this enum names no datatype IRI, and no variant exists for RDF's
+/// sake. A text with a language is a [`String`](Self::String) with
+/// [`Lang::Tagged`]; every point in time is a [`Time`](Self::Time) of some
+/// [`Precision`]; an identifier is a [`Uri`](Self::Uri), whichever format spells
+/// it as an IRI.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(into = "WirePrimitive", from = "WirePrimitive")]
 pub enum Primitive {
-    String,
+    /// A text, with a language or without one. The two are disjoint, as
+    /// `xsd:string` and `rdf:langString` are (RDF 1.1 Concepts §3.3: a tag is
+    /// never empty), so `String` is no `String<Lang>` and a text gains its tag
+    /// only by a call that writes one (`str.lang`). A tagged property is
+    /// always a property table with a `lang` column, whatever its cardinality
+    /// ([`OutputShapes::to_graph_schema`]).
+    String(Lang),
     Integer,
     Float,
     Bool,
+    /// A point in time, at a precision. No precision is a subtype of
+    /// another: a year is not a date.
+    Time(Precision),
+    /// An identifier. A format that has nodes writes it as one: RDF as an IRI
+    /// node, never an `xsd:anyURI` literal, which is a [`Self::String`] whose
+    /// shape says so.
+    Uri,
+}
+
+/// Whether a [`Primitive::String`] carries a language tag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Lang {
+    /// `String`.
+    Untagged,
+    /// `String<Lang>`: a text and its BCP 47 language tag.
+    Tagged,
+}
+
+/// The precision of a [`Primitive::Time`]: what one value of it names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Precision {
+    /// A calendar year, `Time<Year>`.
+    Year,
+    /// A calendar day, `Time<Date>`.
     Date,
+    /// A day and a time of day, `Time<DateTime>`.
     DateTime,
-    Time,
-    GYear,
-    AnyUri,
-    /// `rdf:langString` — a string and its BCP 47 language tag, RDF 1.1
-    /// Concepts §3.3. Named for the datatype's local name, as [`Self::AnyUri`]
-    /// and [`Self::GYear`] are for theirs (`/docs/design/labels`). A property of
-    /// this type is always a property table with a `lang` column, whatever its
-    /// cardinality ([`OutputShapes::to_graph_schema`]).
-    LangString,
+    /// A time of day on no day in particular, `Time<Hour>`.
+    Hour,
+}
+
+impl Precision {
+    /// Every precision, coarsest first.
+    pub const ALL: [Self; 4] = [Self::Year, Self::Date, Self::DateTime, Self::Hour];
+}
+
+/// The wire's spelling of a [`Primitive`]: one flat name, so a reader keys a
+/// table on it (`@fossil-lang/types`' `Primitive`). It is the program's
+/// spelling in `snake_case`, the parameter after the family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+#[schemars(rename = "Primitive")]
+enum WirePrimitive {
+    String,
+    StringLang,
+    Integer,
+    Float,
+    Bool,
+    TimeYear,
+    TimeDate,
+    TimeDateTime,
+    TimeHour,
+    Uri,
+}
+
+/// The wire's schema is `WirePrimitive`'s, under this type's name and
+/// documentation.
+impl schemars::JsonSchema for Primitive {
+    fn schema_name() -> String {
+        "Primitive".into()
+    }
+
+    fn json_schema(generator: &mut schemars::r#gen::SchemaGenerator) -> schemars::schema::Schema {
+        WirePrimitive::json_schema(generator)
+    }
+}
+
+impl From<Primitive> for WirePrimitive {
+    fn from(p: Primitive) -> Self {
+        match p {
+            Primitive::String(Lang::Untagged) => Self::String,
+            Primitive::String(Lang::Tagged) => Self::StringLang,
+            Primitive::Integer => Self::Integer,
+            Primitive::Float => Self::Float,
+            Primitive::Bool => Self::Bool,
+            Primitive::Time(Precision::Year) => Self::TimeYear,
+            Primitive::Time(Precision::Date) => Self::TimeDate,
+            Primitive::Time(Precision::DateTime) => Self::TimeDateTime,
+            Primitive::Time(Precision::Hour) => Self::TimeHour,
+            Primitive::Uri => Self::Uri,
+        }
+    }
+}
+
+impl From<WirePrimitive> for Primitive {
+    fn from(w: WirePrimitive) -> Self {
+        match w {
+            WirePrimitive::String => Self::STRING,
+            WirePrimitive::StringLang => Self::LANG_STRING,
+            WirePrimitive::Integer => Self::Integer,
+            WirePrimitive::Float => Self::Float,
+            WirePrimitive::Bool => Self::Bool,
+            WirePrimitive::TimeYear => Self::Time(Precision::Year),
+            WirePrimitive::TimeDate => Self::Time(Precision::Date),
+            WirePrimitive::TimeDateTime => Self::Time(Precision::DateTime),
+            WirePrimitive::TimeHour => Self::Time(Precision::Hour),
+            WirePrimitive::Uri => Self::Uri,
+        }
+    }
 }
 
 /// Cardinality of a property or edge — the only distinction a materializer
@@ -265,41 +372,79 @@ impl ConstraintSeverity {
 }
 
 /// The name a program reads: in a hover, a diagnostic, a completion's
-/// signature. The variant's own name — `AnyUri`, not the `snake_case` the wire
-/// carries.
+/// signature — `Time<Year>`, `String<Lang>`, the spelling a declared field
+/// writes ([`Primitive::from_name`]).
 impl std::fmt::Display for Primitive {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Debug::fmt(self, f)
+        match self {
+            Self::String(Lang::Untagged) => f.write_str("String"),
+            Self::String(Lang::Tagged) => f.write_str("String<Lang>"),
+            Self::Time(p) => write!(f, "Time<{p:?}>"),
+            other => std::fmt::Debug::fmt(other, f),
+        }
     }
 }
 
 impl Primitive {
+    /// A text with no language.
+    pub const STRING: Self = Self::String(Lang::Untagged);
+    /// A text and its language tag.
+    pub const LANG_STRING: Self = Self::String(Lang::Tagged);
+    /// A calendar year.
+    pub const YEAR: Self = Self::Time(Precision::Year);
+    /// A calendar day.
+    pub const DATE: Self = Self::Time(Precision::Date);
+    /// A day and a time of day.
+    pub const DATE_TIME: Self = Self::Time(Precision::DateTime);
+    /// A time of day.
+    pub const HOUR: Self = Self::Time(Precision::Hour);
+
     /// The lattice, in declaration order — what a declared field's type is
     /// read against ([`Self::from_name`]).
     pub const ALL: [Self; 10] = [
-        Self::String,
+        Self::STRING,
+        Self::LANG_STRING,
         Self::Integer,
         Self::Float,
         Self::Bool,
-        Self::Date,
-        Self::DateTime,
-        Self::Time,
-        Self::GYear,
-        Self::AnyUri,
-        Self::LangString,
+        Self::Time(Precision::Year),
+        Self::Time(Precision::Date),
+        Self::Time(Precision::DateTime),
+        Self::Time(Precision::Hour),
+        Self::Uri,
     ];
 
-    /// The primitive a program writes as `name` — `String`, `GYear`, `AnyUri`:
-    /// the name [`Display`](std::fmt::Display) prints, so a type is read in the
-    /// words the checker prints it in.
+    /// The primitive a program writes as `name` — `String`, `Time<Year>`,
+    /// `Uri`: the name [`Display`](std::fmt::Display) prints, so a type is read
+    /// in the words the checker prints it in.
     #[must_use]
     pub fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|p| p.to_string() == name)
     }
+
+    /// The family a program names before any parameter: `String` for both
+    /// texts, `Time` for every precision.
+    #[must_use]
+    pub const fn family(self) -> &'static str {
+        match self {
+            Self::String(_) => "String",
+            Self::Integer => "Integer",
+            Self::Float => "Float",
+            Self::Bool => "Bool",
+            Self::Time(_) => "Time",
+            Self::Uri => "Uri",
+        }
+    }
+
+    /// Whether this is a text with a language tag.
+    #[must_use]
+    pub const fn is_tagged(self) -> bool {
+        matches!(self, Self::String(Lang::Tagged))
+    }
 }
 
 /// `rdf:langString`, the datatype of every language-tagged string (RDF 1.1
-/// Concepts §3.3) — what [`Primitive::LangString`] is written as.
+/// Concepts §3.3) — what [`Primitive::LANG_STRING`] is written as.
 pub const RDF_LANG_STRING: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString";
 
 /// `rdfs:label` — the one predicate a label has in a graph, whichever document
@@ -422,7 +567,7 @@ mod tests {
                     iri: Some("https://example.org/Person".into()),
                     properties: vec![Property {
                         name: "name".into(),
-                        datatype: Primitive::String,
+                        datatype: Primitive::STRING,
                         iri: Some("https://example.org/name".into()),
                         term: None,
                         cardinality: Cardinality::Single,
@@ -481,6 +626,7 @@ mod tests {
             None,
             "the name is case-sensitive"
         );
+        assert_eq!(Primitive::from_name("Time"), None, "a family is no type");
         assert_eq!(Primitive::from_name("Option"), None);
     }
 

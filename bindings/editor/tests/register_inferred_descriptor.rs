@@ -31,7 +31,7 @@ fn register_inferred_descriptor_parses_and_stores() {
     assert_eq!(got.columns[0].name.as_str(), "id");
     assert_eq!(got.columns[0].primitive, Primitive::Integer);
     assert_eq!(got.columns[1].name.as_str(), "name");
-    assert_eq!(got.columns[1].primitive, Primitive::String);
+    assert_eq!(got.columns[1].primitive, Primitive::STRING);
 }
 
 #[test]

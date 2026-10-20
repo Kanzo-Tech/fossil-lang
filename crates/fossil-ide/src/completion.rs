@@ -505,18 +505,18 @@ fn receiver_of_ty<'db>(db: &'db dyn fossil_base::Db, ty: Ty<'db>) -> Option<Rece
 /// no signature can name.
 const fn scalar_of(primitive: Primitive) -> Option<ScalarTy> {
     Some(match primitive {
-        Primitive::String => ScalarTy::String,
+        Primitive::STRING => ScalarTy::String,
         Primitive::Integer => ScalarTy::Integer,
         Primitive::Float => ScalarTy::Float,
         Primitive::Bool => ScalarTy::Bool,
-        Primitive::Date => ScalarTy::Date,
-        Primitive::DateTime => ScalarTy::DateTime,
-        Primitive::GYear => ScalarTy::GYear,
-        Primitive::LangString => ScalarTy::LangString,
+        Primitive::DATE => ScalarTy::TimeDate,
+        Primitive::DATE_TIME => ScalarTy::TimeDateTime,
+        Primitive::YEAR => ScalarTy::TimeYear,
+        Primitive::LANG_STRING => ScalarTy::StringLang,
         // `ScalarTy` names no `Time` or `anyURI`, and `SeqString` —
         // the one tag with no primitive — is a `TyKind::Seq`, not a
         // `TyKind::Primitive`, so it never reaches this table.
-        Primitive::Time | Primitive::AnyUri => return None,
+        Primitive::HOUR | Primitive::Uri => return None,
     })
 }
 
@@ -731,7 +731,7 @@ mod tests {
                 columns: vec![
                     InferredColumn {
                         name: "name".into(),
-                        primitive: Primitive::String,
+                        primitive: Primitive::STRING,
                     },
                     InferredColumn {
                         name: "age".into(),

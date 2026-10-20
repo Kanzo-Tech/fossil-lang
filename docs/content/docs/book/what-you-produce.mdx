@@ -58,7 +58,7 @@ their types, and every IRI, whole, in a string: the type's above it, each field'
 <Program src="declared/declared.fossil" region="declaration" title="declared.fossil" />
 
 A field's type is written as the checker prints it. A primitive — `String`, `Integer`, `Float`, `Bool`,
-`Date`, `DateTime`, `Time`, `GYear`, `AnyUri` — is exactly one value of it; `Option<T>` is zero or one;
+`String<Lang>`, `Time<Year>`, `Time<Date>`, `Time<DateTime>`, `Time<Hour>`, `Uri` — is exactly one value of it; `Option<T>` is zero or one;
 `Seq<T>` zero or more; and `Ref<City>` is a reference to a node of the type `City`, declared or
 imported, which is an edge. The count is said once, outermost, so `Option<Seq<T>>` is refused rather
 than read as one of the two things it could mean.

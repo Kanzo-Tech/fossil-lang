@@ -1362,7 +1362,7 @@ impl<'db> Expr<'db> {
         let db = self.db;
         let out = match e {
             HirExpr::StringLit(_) => (
-                Ty::new(db, TyKind::Primitive(Primitive::String)),
+                Ty::new(db, TyKind::Primitive(Primitive::STRING)),
                 ProvenanceKind::Literal,
             ),
             // A constant `rdf:langString`. Its tag is constant, so the checker
@@ -1370,7 +1370,7 @@ impl<'db> Expr<'db> {
             HirExpr::LangStringLit { tag, .. } => {
                 self.refuse_ill_formed_tag(expr_id, tag);
                 (
-                    Ty::new(db, TyKind::Primitive(Primitive::LangString)),
+                    Ty::new(db, TyKind::Primitive(Primitive::LANG_STRING)),
                     ProvenanceKind::Literal,
                 )
             }
@@ -1389,7 +1389,7 @@ impl<'db> Expr<'db> {
                 // is bidirectional checking, with no IRI-template type and no
                 // subtyping rule standing in for it.
                 let ty = self.expected_ref.clone().map_or_else(
-                    || Ty::new(db, TyKind::Primitive(Primitive::String)),
+                    || Ty::new(db, TyKind::Primitive(Primitive::STRING)),
                     |shapes| Ty::reference(db, shapes),
                 );
                 (ty, ProvenanceKind::Literal)
@@ -2140,7 +2140,7 @@ impl<'db> Expr<'db> {
                         },
                         self.span_of(expr_id),
                     );
-                    if matches!(kind, TyKind::Primitive(Primitive::String))
+                    if matches!(kind, TyKind::Primitive(Primitive::STRING))
                         && matches!(op, BinOp::Add)
                     {
                         d = d.with_help(

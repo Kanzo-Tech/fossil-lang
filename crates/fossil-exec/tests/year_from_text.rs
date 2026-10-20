@@ -85,6 +85,6 @@ fn an_integer_does_not_fill_a_gyear_slot() {
     let program = PROGRAM.replace("parse.year(Row.awardYear)", "parse.integer(Row.awardYear)");
     assert_eq!(
         messages(&program),
-        ["`year` expects GYear, and this is Integer"]
+        ["`year` expects Time<Year>, and this is Integer"]
     );
 }

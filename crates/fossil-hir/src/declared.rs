@@ -46,8 +46,8 @@
 
 use fossil_base::{Diagnostic, Diagnostics};
 use fossil_graph_schema::{
-    Annotation, ConstraintSeverity, Occurs, OutputShapes, Primitive, Problem, PropertyConstraint,
-    Severity, Shape, Span, Term,
+    Annotation, ConstraintSeverity, Occurs, OutputShapes, Precision, Primitive, Problem,
+    PropertyConstraint, Severity, Shape, Span, Term,
 };
 use fossil_syntax::ast::{
     AnnotationAttr, AssertAttr, Field, ImportMember, IriAttr, TypeDecl, TypeExpr,
@@ -454,7 +454,7 @@ fn value_type(
             .ok_or_else(|| invalid(te, "`Ref` needs the type it refers to: `Ref<City>`".into()))?;
         let target_name = target.name().unwrap_or_default();
         if target.argument().is_some()
-            || Primitive::from_name(&target_name).is_some()
+            || Primitive::ALL.iter().any(|p| p.family() == target_name)
             || [OPTION, SEQ, REF].contains(&target_name.as_str())
         {
             return Err(invalid(
@@ -472,14 +472,8 @@ fn value_type(
             |iri| Ok((None, vec![iri.to_string()])),
         );
     }
-    if let Some(p) = Primitive::from_name(&name) {
-        if te.argument().is_some() {
-            return Err(invalid(
-                te,
-                format!("`{p}` is a primitive and takes no argument"),
-            ));
-        }
-        return Ok((Some(Term::Literal(Some(p.into()))), Vec::new()));
+    if let Some(p) = primitive(te, &name)? {
+        return Ok((Some(Term::of(p)), Vec::new()));
     }
     if dm.lookup_type(db, &name).is_some() || dm.lookup_type_error(db, &name).is_some() {
         return Err(invalid(
@@ -500,6 +494,59 @@ fn value_type(
         },
         help,
     ))
+}
+
+/// The primitive `te` writes, if `name` begins one: a family and its
+/// parameter, `Time<Year>` and `String<Lang>`, or a primitive that takes none.
+fn primitive(te: &TypeExpr, name: &str) -> Result<Option<Primitive>, Refusal> {
+    let parameter = te.argument();
+    if parameter
+        .as_ref()
+        .is_some_and(|a| a.argument().is_some() || a.bounds().next().is_some())
+    {
+        return Err(invalid(
+            te,
+            format!("`{name}` takes a bare name as its parameter"),
+        ));
+    }
+    let parameter = parameter.map(|a| a.name().unwrap_or_default());
+    let p = match (name, parameter.as_deref()) {
+        ("Time", Some(precision)) => Primitive::from_name(&format!("Time<{precision}>"))
+            .ok_or_else(|| {
+                invalid(
+                    te,
+                    format!(
+                        "a time is at one of {}",
+                        Precision::ALL.map(|p| format!("`Time<{p:?}>`")).join(", ")
+                    ),
+                )
+            })?,
+        ("Time", None) => {
+            return Err(invalid(
+                te,
+                "`Time` needs its precision: `Time<Year>`, `Time<Date>`, `Time<DateTime>` or \
+                 `Time<Hour>`"
+                    .into(),
+            ));
+        }
+        ("String", Some("Lang")) => Primitive::LANG_STRING,
+        ("String", Some(other)) => {
+            return Err(invalid(
+                te,
+                format!("`String` takes `Lang` and nothing else, not `{other}`: `String<Lang>`"),
+            ));
+        }
+        (name, parameter) => match Primitive::from_name(name) {
+            Some(p) if parameter.is_some() => {
+                return Err(invalid(
+                    te,
+                    format!("`{p}` is a primitive and takes no argument"),
+                ));
+            }
+            p => return Ok(p),
+        },
+    };
+    Ok(Some(p))
 }
 
 /// Every name a field's type may start with: the lattice, then the three

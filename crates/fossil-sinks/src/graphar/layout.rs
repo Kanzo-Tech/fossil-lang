@@ -291,13 +291,13 @@ fn subjects(graph: &Graph) -> Result<Vec<StringArray>, WriteError> {
 fn empty_type(primitive: Primitive) -> DataType {
     match primitive {
         Primitive::Integer => DataType::Int64,
-        Primitive::GYear => DataType::Int32,
+        Primitive::YEAR => DataType::Int32,
         Primitive::Float => DataType::Float64,
         Primitive::Bool => DataType::Boolean,
-        Primitive::Date => DataType::Date32,
-        Primitive::DateTime => DataType::Timestamp(TimeUnit::Millisecond, None),
-        Primitive::LangString => lang_string(),
-        Primitive::String | Primitive::Time | Primitive::AnyUri => DataType::Utf8,
+        Primitive::DATE => DataType::Date32,
+        Primitive::DATE_TIME => DataType::Timestamp(TimeUnit::Millisecond, None),
+        Primitive::LANG_STRING => lang_string(),
+        Primitive::STRING | Primitive::HOUR | Primitive::Uri => DataType::Utf8,
     }
 }
 
@@ -463,7 +463,7 @@ fn tagged(
         value: String::new(),
     };
     let tagged = array.as_struct_opt().ok_or_else(unrepresentable)?;
-    if declared.map(|d| d.datatype) != Some(Primitive::LangString) || tagged.num_columns() != 2 {
+    if declared.map(|d| d.datatype) != Some(Primitive::LANG_STRING) || tagged.num_columns() != 2 {
         return Err(unrepresentable());
     }
     let form = exact(tagged.column(0), &DataType::Utf8)?;
@@ -541,7 +541,7 @@ fn set(
     let name = declared.name.as_str();
     let at = format!("{label}.{name}");
     let batches = values.map_or(&[][..], |v| v.batches.as_slice());
-    let is_tagged = declared.datatype == Primitive::LangString;
+    let is_tagged = declared.datatype == Primitive::LANG_STRING;
 
     let src = gather(
         batches,
@@ -1014,7 +1014,7 @@ mod tests {
         let g = graph(
             vec![node(
                 "T",
-                vec![property("at", Primitive::DateTime, Cardinality::Single)],
+                vec![property("at", Primitive::DATE_TIME, Cardinality::Single)],
             )],
             vec![vertices("T", 0, &[A], vec![("at", finer)])],
         );
@@ -1023,7 +1023,7 @@ mod tests {
         let g = graph(
             vec![node(
                 "T",
-                vec![property("at", Primitive::DateTime, Cardinality::Single)],
+                vec![property("at", Primitive::DATE_TIME, Cardinality::Single)],
             )],
             vec![vertices("T", 0, &[A], vec![("at", whole)])],
         );
@@ -1054,9 +1054,9 @@ mod tests {
             arrays.push(Arc::new(StringArray::from(tags.to_vec())));
         }
         let datatype = if tags.is_some() {
-            Primitive::LangString
+            Primitive::LANG_STRING
         } else {
-            Primitive::String
+            Primitive::STRING
         };
         let mut table = vertices("T", 0, &[A], vec![]);
         table.properties.push(PropertyValues {

@@ -75,13 +75,13 @@ const fn sql_type_of(ty: ScalarTy) -> &'static str {
         ScalarTy::Integer => "BIGINT",
         ScalarTy::Float => "DOUBLE",
         ScalarTy::Bool => "BOOLEAN",
-        ScalarTy::Date => "DATE",
-        ScalarTy::DateTime => "TIMESTAMP",
+        ScalarTy::TimeDate => "DATE",
+        ScalarTy::TimeDateTime => "TIMESTAMP",
         // A year is stored as its integer (`/docs/format`).
-        ScalarTy::GYear => "INTEGER",
+        ScalarTy::TimeYear => "INTEGER",
         ScalarTy::SeqString => "VARCHAR[]",
         // `str.lang`'s two fields by position: the form, then the tag.
-        ScalarTy::LangString => "STRUCT(VARCHAR, VARCHAR)",
+        ScalarTy::StringLang => "STRUCT(VARCHAR, VARCHAR)",
     }
 }
 
@@ -93,7 +93,7 @@ const fn sql_type_of(ty: ScalarTy) -> &'static str {
 /// per-row valid argument would make this a test of the arguments, and
 /// `DESCRIBE` never looks at one.
 fn dummy(ty: ScalarTy) -> String {
-    if ty == ScalarTy::LangString {
+    if ty == ScalarTy::StringLang {
         // An unnamed struct has no type to `CAST` to; `row` is its literal.
         return "row('abc', 'en')".to_string();
     }
@@ -102,11 +102,11 @@ fn dummy(ty: ScalarTy) -> String {
         ScalarTy::Integer => "2",
         ScalarTy::Float => "1.5",
         ScalarTy::Bool => "true",
-        ScalarTy::Date => "'2026-05-21'",
-        ScalarTy::DateTime => "'2026-05-21 00:00:00'",
-        ScalarTy::GYear => "2026",
+        ScalarTy::TimeDate => "'2026-05-21'",
+        ScalarTy::TimeDateTime => "'2026-05-21 00:00:00'",
+        ScalarTy::TimeYear => "2026",
         ScalarTy::SeqString => "['a', 'b']",
-        ScalarTy::LangString => unreachable!("returned above"),
+        ScalarTy::StringLang => unreachable!("returned above"),
     };
     format!("CAST({literal} AS {})", sql_type_of(ty))
 }
