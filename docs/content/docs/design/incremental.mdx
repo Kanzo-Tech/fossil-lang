@@ -176,7 +176,7 @@ linked into nothing: no symbol of either is in the editor's module.
 
 **The editor's module links the mapping.** `describe` moved to `fossil-mir` ([the graph as Apache
 GraphAr](/docs/design/graphar), D6) so that `program.mapping()` can answer before a run, which puts `rml`'s AST and its
-Turtle writer in the editor's module, beside `vocabularyOf` and `subjectOf`. Built with `--profile wasm-release` and
+Turtle writer in the editor's module, beside `write`. Built with `--profile wasm-release` and
 `wasm-bindgen --target web`, before `wasm-opt`, at the fork's `889cb741` on 2026-10-15, it is 4,360,297 bytes (1,244,285
 gzipped) against the 4,164,703 (1,185,693 gzipped) above, which was not measured again: 195,594 bytes more (+4.7%) and
 58,592 more gzipped (+4.9%). `wasm-opt` was not run. The module is still under the 2 MB compressed ceiling `build-wasm.sh` asserts.

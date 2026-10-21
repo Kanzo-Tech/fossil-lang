@@ -184,7 +184,7 @@ directions.
 | --- | --- |
 | `fossil-syntax`, `fossil-base`, `codemirror-fossil` | nothing changed |
 | `fossil-mir` | `describe`: the mapping of the types, public, so a host asks before a run (D6) |
-| `fossil-ide`, `fossil-wasm`, `@fossil-lang/wasm` | `program.mapping()` is that function over the program's types; `vocabularyOf` and `subjectOf` compute a model's names and `@subject`; a profile names its sources by binding ([profile](/docs/design/profile)) |
+| `fossil-ide`, `fossil-wasm`, `@fossil-lang/wasm` | `program.mapping()` is that function over the program's types; `write` makes a model's program; a profile names its sources by binding ([profile](/docs/design/profile)) |
 | `fossil-hir` | `shacl.rs` walks rudof's `ASTSchema` from `ShaclParser` into `OutputShapes`, and `oxttl`/`oxrdf` leave the crate. `shex.rs` keeps `shex_ast`. The `providers` registry is unchanged: the names are fossil's, the parse each calls is rudof's |
 | `fossil-df` | the writer through `graphar-parquet`; `layout`, crate-private; `facts.rs` writes the Parquet footers (D2); `rdf.rs` on `rudof_rdf`'s parser; ids numbered per type. `corpus::*` is gone |
 | `fossil-df-wasm`, `@fossil-lang/executor` | `run` unchanged; the executor holds the integration tests (`integration/`: run → `attachGraph` → assert) |
@@ -990,7 +990,7 @@ become a package — and it belongs to whoever that host is, not to fossil.
 | | `corpus/unreadable`, `corpus/not-a-location`, `corpus/duplicate-table`, `corpus/unsupported-format`, `corpus/not-json` | **deleted**: they were the earlier reader's; `attachGraph` throws its own |
 | | `write/invalid-subject`, `write/duplicate-value`, `write/ambiguous-iri`, `write/unrepresentable` | **new** |
 | `@fossil-lang/storage`, `@fossil-lang/codemirror-fossil` | every export | unchanged |
-| `@fossil-lang/wasm` | `program.mapping()`, `vocabularyOf`, `subjectOf`, `DUCKDB_TYPES` | **new** |
+| `@fossil-lang/wasm` | `program.mapping()`, `write`, `DUCKDB_TYPES` | **new** |
 | | `ProfileSource.name`; a profile's `SourceProfile`, `ColumnRef.source` and `ProfileFailure.source` | `name` is `location`, and a profile names its sources by `binding` ([profile](/docs/design/profile)) |
 | `fossil_df` | `Executor`, `Output`, `Ran`, `MEMORY`, `RunReport`, `EdgeDrops` | unchanged |
 | | `CorpusFile`; `SinkRef::Corpus` in `fossil_mir` | **renamed** `GraphFile` and `SinkRef::Graph`; `MEMORY` is `memory://graph/` |

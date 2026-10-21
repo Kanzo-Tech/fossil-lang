@@ -1,8 +1,8 @@
 ---
-title: Profile, and the mapping a model proposes
-description: "fossil's half of Kanzo Tasks: one sans-IO profiler inside the wasm gate, run by both hosts on their own DuckDB, which replaced introspect; and the mapping a model proposes, written in Fossil under a grammar whose names are the profile's and the types'."
+title: Profile, and the program a model implies
+description: "fossil's half of Kanzo Tasks: one sans-IO profiler inside the wasm gate, run by both hosts on their own DuckDB, which replaced introspect; and the program a host's model of the data implies, written by fossil and not by a model."
 direction:
-  summary: "A mapping a model proposes is Fossil written under a grammar whose every name comes from a profile or a declared type, so a name that does not exist cannot be decoded."
+  summary: "A host describes what it decided a graph holds as a Model, and fossil writes the program: no model writes Fossil, and no name in it is proposed."
 ---
 
 Kanzo's assistant and its Ask become one pattern, a *Task*: a small model in the browser fills a
@@ -10,7 +10,7 @@ small artefact under a JSON Schema, a deterministic oracle checks it, and a boun
 asks the person. The pattern, its API and the decisions about the model are kanzo-ui's, on [Tasks in
 the design of Kanzo UI](https://kanzo-tech.github.io/ui/docs/design/tasks); the assistant's screens
 are keasy's. This page is the part that lives here: what fossil computes so that the model has less to
-guess, and what the model hands fossil instead of a program.
+guess, and the program fossil writes from what the host decided, so that no model writes one.
 
 ## What the assistant guesses today
 
@@ -87,69 +87,49 @@ file bound twice is read twice.
 reading one file twice that is measured on a program that does it. Then the key is the name again and a
 binding is the host's to attach.
 
-## The mapping is Fossil, and the model cannot write a name that does not exist
+## The program is written by fossil, from a model of the data
 
-**The model writes Fossil, and Fossil is statically typed, so the checker is its oracle.** A wrong
-type, a second `@subject`, a property the shape requires and the mapping leaves out: the checker
-says each, at its span, with the type it expected, and a Task sends that back for a repair. No
-format in front of Fossil could do better, because none of them is typed — RML validates the graph
-after producing it, which is what [types](/docs/design/types) says fossil exists to move earlier.
+**A host describes what it decided a graph holds as data, in one type, and fossil writes the
+program** (owner decision, 21 October 2026). The decisions are the host's: which sources are read,
+which types there are and the source each is read from, which columns identify one, which column
+fills each field, and which relations hold between them, read on the type's own source or across a
+link file. That is a `Model` (`crates/fossil-ide/src/model.rs, Model`). Everything derived from
+it is knowledge of the language and is fossil's: each IRI, each `@subject`, the bindings, a column
+quoted when its header is not a name, the join of a link file, and the mappings in one canonical
+layout (`crates/fossil-ide/src/model.rs, write`; `@fossil-lang/wasm`'s `write`). The same model
+writes the same text.
 
-**What the checker cannot do is stop a name from being invented** — it reports `nmae` after the
-model wrote it. A decoder constrained by a grammar can, and the browser's has one: WebLLM's engine
-(`xgrammar`) takes an EBNF string beside the prompt. So the grammar for one request is the mapping
-productions of `grammar.bnf`, in one canonical layout, with every reference a closed list: the
-sources of the request, each one's columns as its profile reads them, the types — imported from a
-document or [declared in the program](/docs/design/declared) — each type's fields, and the
-catalogue's `parse.*` functions (`crates/fossil-ide/src/constrain.rs, grammar_for`). A name not on
-a list cannot be decoded, and the prelude — the types imported and declared, the sources bound — is
-the request's, never the model's (`crates/fossil-ide/src/constrain.rs, prelude`). `fossil-wasm`
-answers both as `grammarFor`, *the grammar of Fossil for these names*: it is not a mapping
-grammar, and it does not care whether the model writes mappings alone or the types too.
+The IRI scheme is the workspace's: a type's IRI is `<base>/vocab/<name>`, a field's
+`<base>/vocab/<field>`, a thing's `<base>/id/<name in words>/` and the columns of its identity as
+holes, and a field's type is the checker's own spelling of the primitive (`Option<Date>`,
+`Seq<Ref<Institutions>>`), so a copy in a host could not drift from it. A relation's `many` is
+`Seq<Ref<…>>` and wins over `optional`, as a sequence is already empty. A relation read across a link
+file is one more mapping of the type it starts from, joined on the type's first identity column, and
+it writes again what the type requires: its fields that are not optional and the relations it holds
+exactly one of.
 
-**The grammar is a sub-language of Fossil, held from both sides.** Every sentence sampled from it
-parses with the parser every program goes through, three hundred per vocabulary; the conformance
-programs inside its scope, `hello`, `relationship` and `declared` — joins, links, quoted columns and
-a declared type beside an imported one among them — are sentences of it; and a column, a property or a type that does not exist is not. It is not a
-second definition of the language: types, cardinality and identity are the checker's, which a
-context-free grammar cannot say.
+**What `write` is not is an oracle.** Its output is a program like any other, and the checker reads
+it: a field whose primitive is not its column's is said at its span, as it would be in a program a
+person wrote. And it is not the spec fossil discarded ([discarded](/docs/design/discarded), "A mapping
+spec of our own"): that was a format a model filled in place of Fossil, an untyped layer in front of a
+typed language. Here no model fills anything, the `Model` is what a host already decided, and the
+output is Fossil, which the person edits in the editor.
 
-*Held by* `crates/fossil-ide/tests/constrain.rs`, "every_sentence_it_generates_parses",
-"the_conformance_programs_in_its_scope_are_sentences_of_it",
-"a_name_that_does_not_exist_is_not_a_sentence", "the_prelude_declares_what_the_program_declares".
-
-**What it costs:** one layout, so a model cannot align its `=` signs or split a mapping across a
-binding (`Adults := User.where(…)`); the same rows are a `where` on the mapping. And the AI SDK's
-WebLLM provider passes a JSON Schema and not a grammar, so `@kanzo-tech/llm/local` hands the grammar
-to the engine itself.
-
-**What would reverse it:** a model that writes mappings measurably better filling a JSON spec than
-writing grammar-held Fossil with the checker as its oracle, over the evaluation set. Then a spec
-returns — RML's, not one of ours ([discarded](/docs/design/discarded)).
-
-## The names a model writes in are computed, not proposed
-
-**`vocabularyOf` and `subjectOf` are fossil's, over a `Model`** (owner decision, 15 October 2026). A
-host that has decided what a graph holds — types over one source each, identified by some of its
-columns, and the relations between them — passes that `Model` and the profiled sources, and fossil
-answers the `Vocabulary` `grammarFor` takes and each type's `@subject`
-(`crates/fossil-ide/src/constrain.rs, vocabulary_of`, `subject_of`; `@fossil-lang/wasm`'s
-`vocabularyOf` and `subjectOf`). keasy wrote both by hand: a type's IRI is `<base>/vocab/<name>`, a
-field's `<base>/vocab/<field>`, a thing's `<base>/id/<name in words>/`, and a field's type is the
-checker's own spelling of the primitive (`Option<Date>`, `Seq<Ref<Institution>>`). Nothing in the model
-is the proposing model's: it cannot invent an IRI, and the spelling of a type is the one the checker
-prints (`Primitive`'s `Display`), so a copy in a host could not drift from it. The IRI scheme is a
-policy, and it is one: a host that wants another passes a vocabulary it built, which
-`grammarFor` still takes. A relation's `many` is `Seq<Ref<…>>` and wins over `optional`, as a sequence
-is already empty.
-
-*Held by* `crates/fossil-ide/tests/constrain.rs`,
+*Held by* `crates/fossil-ide/tests/model.rs`,
+"a_model_is_written_as_its_types_its_sources_and_a_mapping_per_type_and_link",
 "a_subject_is_the_workspaces_prefix_the_types_words_and_the_identitys_holes",
-"a_vocabulary_declares_the_types_with_the_workspaces_iris_and_reads_only_what_they_use".
+"a_relation_is_a_ref_an_optional_ref_or_a_sequence", and `crates/fossil-df/tests/written.rs`,
+"the_program_a_model_implies_checks_clean_and_runs".
 
-**What would reverse it:** a second host with a different IRI scheme that wants the rest of the
-function, the fields and the relations, and not the IRIs. Then the scheme is an argument and the default
-is this one.
+**What it replaced:** `grammarFor`, the grammar of Fossil for a request's names, which held a
+constrained decoder to the mapping productions so a model could not invent a name; and `vocabularyOf`
+and `subjectOf`, the names and identities a host computed for that model. Once the mappings are
+derived from the model, a model writes nothing a grammar would hold ([discarded](/docs/design/discarded),
+"A grammar of Fossil per request").
+
+**What would reverse it:** a program a host needs that a `Model` cannot describe — a mapping filtered
+by a predicate, a value computed from two columns — that a model would write better than a person in
+the editor. Then the model writes that mapping, and a grammar for it comes back with it.
 
 ## The graph before a run
 
@@ -182,10 +162,10 @@ module. Then the matcher is generated beside the table, from the same lines, as 
 
 ## Order
 
-The profiler and the mapping grammar are phase 2 of Kanzo Tasks, after the evaluation set and Ask's
-resolver. Both are built: `fossil-profile` with its two hosts, introspect gone, and
-`fossil_ide::constrain`, the grammar of Fossil over a vocabulary whose types are imported or
-[declared in the program](/docs/design/declared). On keasy's side the executor runs in a worker of
+The profiler and the program a model implies are phase 2 of Kanzo Tasks, after the evaluation set
+and Ask's resolver. Both are built: `fossil-profile` with its two hosts, introspect gone, and
+`fossil_ide::model`, the program a `Model` implies with its types [declared in the
+program](/docs/design/declared). On keasy's side the executor runs in a worker of
 its own, and it has moved into the executor itself ([A run off the page](/docs/design/off-the-page)).
 
 ## The graph's profile is the same plan

@@ -30,11 +30,11 @@
 
 pub mod code_action;
 pub mod completion;
-pub mod constrain;
 pub mod defs;
 pub mod diagnostics;
 pub mod goto_def;
 pub mod hover;
+pub mod model;
 pub mod outline;
 pub mod position;
 pub mod related;

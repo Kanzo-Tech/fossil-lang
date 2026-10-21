@@ -23,17 +23,12 @@ artefacts. Every door boots the module itself:
 - `program.mapping()` — the RML-Core mapping the program's types describe, as Turtle, before any
   run: what `mapping.ttl` is, from the types the program declares and imports, with nothing read.
   rudof's `Mapping.parse` reads it, and `Mapping.model()` is the pre-run shape of the graph.
-- `vocabularyOf(model, sources, base)` and `subjectOf(type, base)` — the names a model's mappings
-  are written in, computed from what a host decided: a `Model` (types over one source each, their
-  identity and the relations between them) and the profiled `SourceVocabulary`s give the
-  `Vocabulary` `grammarFor` takes, every IRI under `base`, and each type's `@subject`.
+- `write(model, { base })` — the program a `Model` implies: what a host decided a graph holds (the
+  sources, the types over them with each field's column, and the relations between them), written
+  as Fossil in one canonical layout, every IRI under `base`. The same model writes the same text,
+  and the checker reads it like any other program.
 - `DUCKDB_TYPES` — what a DuckDB `DESCRIBE` column type means on the lattice, from `catalogue.bnf`,
   in precedence order.
-- `grammarFor(vocabulary)` — the grammar of Fossil for these names: the `prelude` the request
-  already says (the types imported and declared, the sources bound), and the `grammar` of the
-  mappings after it, as the EBNF a constrained decoder (WebLLM's xgrammar) takes. Every name in it
-  exists — the sources' columns, the types and their fields, the catalogue's `parse.*` — and what
-  it writes is Fossil, for the checker to judge.
 - `bindingName(file, { signal })` — the name a file is bound by in a program: `people` for
   `people.csv`, `_2024_sales` for `2024-sales.parquet`. The rule is the lexer's
   (`fossil_syntax::name::binding_name`), so what comes back always lexes as one identifier.

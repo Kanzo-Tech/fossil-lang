@@ -1,8 +1,7 @@
 //! `Profiler` — [`fossil_profile::Profiler`] for a JS host: the plan in wasm,
 //! each query run on the page's DuckDB-WASM by the host, and the answers fed
-//! back. `runProfiler` in `@fossil-lang/wasm` is the loop around it. And `grammarFor`:
-//! what a model may write once the sources are profiled — `fossil_ide::constrain`, whose
-//! `vocabularyOf` and `subjectOf` are the names and the identities a host computes for it.
+//! back. `runProfiler` in `@fossil-lang/wasm` is the loop around it. And `write`: the program a
+//! model of the profiled sources implies — `fossil_ide::model`.
 
 use fossil_graph_schema::js::invalid_argument;
 use fossil_profile::{Options, Rows, Source};
@@ -117,64 +116,16 @@ fn spent() -> JsValue {
     fossil_graph_schema::js::bug("the profiler was used after `finish`", JsValue::UNDEFINED).into()
 }
 
-/// The grammar of Fossil for the names in `vocabulary`: the `prelude` the request already says (the
-/// types imported and declared, the sources bound) and the `grammar` of the mappings after it, as
-/// the EBNF a constrained decoder takes — every name in it one that exists (`fossil_ide::constrain`).
+/// The program `model` implies, every IRI under `base` (`fossil_ide::model::write`).
 ///
 /// # Errors
 ///
-/// `api/invalid-argument` when `vocabulary` is not a `Vocabulary`.
-#[wasm_bindgen(js_name = grammarFor, unchecked_return_type = "{ prelude: string; grammar: string }")]
-pub fn grammar_for(
-    #[wasm_bindgen(unchecked_param_type = "Vocabulary")] vocabulary: JsValue,
-) -> Result<JsValue, JsValue> {
-    #[derive(serde::Serialize)]
-    struct Constrained {
-        prelude: String,
-        grammar: String,
-    }
-    let vocabulary: fossil_ide::constrain::Vocabulary =
-        argument("vocabulary", "a Vocabulary", vocabulary)?;
-    to_value(
-        "the grammar",
-        &Constrained {
-            prelude: fossil_ide::constrain::prelude(&vocabulary),
-            grammar: fossil_ide::constrain::grammar_for(&vocabulary).ebnf(),
-        },
-    )
-}
-
-/// The vocabulary of `model` over the profiled `sources`, every IRI under `base`
-/// (`fossil_ide::constrain::vocabulary_of`): what [`grammar_for`] takes.
-///
-/// # Errors
-///
-/// `api/invalid-argument` when `model`, `sources` or `base` is not its shape.
-#[wasm_bindgen(js_name = vocabularyOf, unchecked_return_type = "Vocabulary")]
-pub fn vocabulary_of(
+/// `api/invalid-argument` when `model` is not a `Model`.
+#[wasm_bindgen]
+pub fn write(
     #[wasm_bindgen(unchecked_param_type = "Model")] model: JsValue,
-    #[wasm_bindgen(unchecked_param_type = "SourceVocabulary[]")] sources: JsValue,
-    base: &str,
-) -> Result<JsValue, JsValue> {
-    let model: fossil_ide::constrain::Model = argument("model", "a Model", model)?;
-    let sources: Vec<fossil_ide::constrain::SourceVocabulary> =
-        argument("sources", "an array of SourceVocabulary", sources)?;
-    to_value(
-        "the vocabulary",
-        &fossil_ide::constrain::vocabulary_of(&model, &sources, base),
-    )
-}
-
-/// A type's `@subject` under `base` (`fossil_ide::constrain::subject_of`).
-///
-/// # Errors
-///
-/// `api/invalid-argument` when `ty` is not a `ModelType`.
-#[wasm_bindgen(js_name = subjectOf)]
-pub fn subject_of(
-    #[wasm_bindgen(unchecked_param_type = "ModelType")] ty: JsValue,
     base: &str,
 ) -> Result<String, JsValue> {
-    let ty: fossil_ide::constrain::ModelType = argument("type", "a ModelType", ty)?;
-    Ok(fossil_ide::constrain::subject_of(&ty, base))
+    let model: fossil_ide::model::Model = argument("model", "a Model", model)?;
+    Ok(fossil_ide::model::write(&model, base))
 }

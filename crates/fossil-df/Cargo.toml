@@ -132,6 +132,8 @@ smol_str = { workspace = true }
 fossil-graph-schema = { path = "../fossil-graph-schema" }
 # `tests/census` counts `PROPERTY` nodes in the CST.
 fossil-syntax = { path = "../fossil-syntax" }
+# `tests/written.rs` checks and runs the program `fossil_ide::model::write` makes of a model.
+fossil-ide = { path = "../fossil-ide" }
 # `tests/programs.rs` renders each diagnostic as `fossil check` rendered it —
 # graphical, unicode — into the committed `expected/diagnostic.txt`.
 miette = { workspace = true, features = ["fancy"] }
