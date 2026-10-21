@@ -275,10 +275,10 @@ pub enum Expr {
         ranges: Vec<(char, char)>,
         negated: bool,
     },
-    Seq(Vec<Expr>),
-    Alt(Vec<Expr>),
-    Star(Box<Expr>),
-    Opt(Box<Expr>),
+    Seq(Vec<Self>),
+    Alt(Vec<Self>),
+    Star(Box<Self>),
+    Opt(Box<Self>),
 }
 
 /// A grammar: named rules, the first of them the root.

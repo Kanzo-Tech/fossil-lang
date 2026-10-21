@@ -6,7 +6,7 @@
 # crate (`fossil-storage-wasm`) and the artefact stem (`fossil_storage_wasm`).
 #
 # Pinned tooling (CLAUDE.md):
-#   Rust toolchain: 1.90 (rust-toolchain.toml at repo root)
+#   Rust toolchain: 1.95 (rust-toolchain.toml at repo root)
 #   wasm-bindgen-cli: 0.2.120 (matches the workspace-pinned lib)
 #
 # Output: packages/storage/pkg/

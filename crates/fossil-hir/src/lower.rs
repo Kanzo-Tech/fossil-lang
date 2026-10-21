@@ -378,7 +378,7 @@ pub enum HirExpr {
     /// which `DuckDB` builtin or `DataFusion` UDF it becomes is the
     /// materializer's business, resolved from the catalog entry. Arguments are
     /// positional and recursive — `str.slug(str.trim(User.a))` nests.
-    Call { func: SmolStr, args: Vec<HirExpr> },
+    Call { func: SmolStr, args: Vec<Self> },
     /// `buyer = Person(User.email)` — an EDGE: «the `Person` whose identity is
     /// built from this email».
     ///
@@ -412,7 +412,7 @@ pub enum HirExpr {
     /// Arity is checked against the template's hole count
     /// ([`crate::identity::subject_templates`]) and a mismatch is a diagnostic
     /// naming both numbers — the check positional binding gives away free.
-    Edge { target: SmolStr, args: Vec<HirExpr> },
+    Edge { target: SmolStr, args: Vec<Self> },
     /// `18` — an integer literal.
     IntLit(i64),
     /// `0.5` — a float literal, carried as its bits. See [`FloatBits`].
@@ -428,8 +428,8 @@ pub enum HirExpr {
     /// the operator is the only thing that differs.
     BinOp {
         op: BinOp,
-        lhs: Box<HirExpr>,
-        rhs: Box<HirExpr>,
+        lhs: Box<Self>,
+        rhs: Box<Self>,
     },
     /// `-Row.drift`, `not Row.degraded` — L7 (grammar.bnf, `UnaryExpr`).
     ///
@@ -456,16 +456,16 @@ pub enum HirExpr {
     /// still one variant for both operators: two operators of one level, one
     /// node, and the alternative is a node for `-` and a desugaring for `not`,
     /// which is two answers to one question.
-    UnaryOp { op: UnOp, operand: Box<HirExpr> },
+    UnaryOp { op: UnOp, operand: Box<Self> },
     /// `.age >= 18 ? "adult" : "minor"` — the conditional.
     ///
     /// Both branches must have the same type and there is no implicit coercion
     /// (`/docs/design/typing`), which is what makes it a total function of the
     /// row rather than a source of nullable columns.
     Ternary {
-        cond: Box<HirExpr>,
-        then: Box<HirExpr>,
-        otherwise: Box<HirExpr>,
+        cond: Box<Self>,
+        then: Box<Self>,
+        otherwise: Box<Self>,
     },
 }
 
@@ -2529,7 +2529,7 @@ fn lower_postfix(
             Diagnostic::new(
                 Severity::Error,
                 Problem::UncalledFunction {
-                    function: source.to_string(),
+                    function: source.clone(),
                 },
                 span,
             )

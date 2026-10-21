@@ -689,7 +689,7 @@ impl Checker<'_> {
                         Diagnostic::new(
                             Severity::Error,
                             Problem::UnsupportedDisjunction {
-                                shape: shape_iri.to_string(),
+                                shape: shape_iri.clone(),
                                 branches: n as u64,
                             },
                             header_span,
@@ -710,8 +710,8 @@ impl Checker<'_> {
                     let eg = self.expr.sink.report(
                         header_span,
                         Problem::UnresolvedReference {
-                            reference: label.to_string(),
-                            shape: in_shape.to_string(),
+                            reference: label.clone(),
+                            shape: in_shape.clone(),
                         },
                     );
                     self.expr.record_error(eg);
@@ -732,7 +732,7 @@ impl Checker<'_> {
                         header_span,
                         Problem::Unparseable {
                             document: document.clone(),
-                            reason: Some(m.to_string()),
+                            reason: Some(m.clone()),
                         },
                     );
                     self.expr.record_error(eg);

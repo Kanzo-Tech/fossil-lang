@@ -6,14 +6,14 @@ contributor rituals that make a solo project survivable.
 
 ## Development setup
 
-Fossil targets Rust 1.90 (per `rust-toolchain.toml`). With `rustup`
+Fossil targets Rust 1.95 (per `rust-toolchain.toml`). With `rustup`
 installed, `cd`-ing into the repo automatically activates the right
 toolchain plus the `wasm32-unknown-unknown` target.
 
 Verify with:
 
 ```bash
-rustc --version          # rustc 1.90.0
+rustc --version          # rustc 1.95.0
 rustup target list --installed | grep wasm32
 ```
 
