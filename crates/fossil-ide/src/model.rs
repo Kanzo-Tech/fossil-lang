@@ -15,6 +15,7 @@
 use std::fmt::Write as _;
 
 use fossil_graph_schema::Primitive;
+use fossil_syntax::name::{escape, spell};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -127,37 +128,10 @@ fn spoken(name: &str) -> String {
     words.trim().to_lowercase()
 }
 
-/// `IDENT` in `grammar.bnf`, less the words that are tokens of their own.
-fn is_ident(name: &str) -> bool {
-    const KEYWORDS: [&str; 7] = ["from", "and", "or", "not", "true", "false", "null"];
-    let mut chars = name.chars();
-    chars.next().is_some_and(|c| c.is_alphabetic() || c == '_')
-        && chars.all(|c| c.is_alphanumeric() || c == '_')
-        && !KEYWORDS.contains(&name)
-}
-
-/// A string literal's content as the lexer reads it back: its escapes, and `{{` for a brace.
-fn escaped(s: &str) -> String {
-    let mut out = String::new();
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '{' => out.push_str("{{"),
-            c => out.push(c),
-        }
-    }
-    out
-}
-
-/// `Source.column`, or `Source."a.column"` for a column that is not a name.
+/// `Source.column`, the column spelled as the lexer has it: `Source."a.column"` when it is not
+/// a name (`fossil_syntax::name::spell`).
 fn column(source: &str, column: &str) -> String {
-    if is_ident(column) {
-        format!("{source}.{column}")
-    } else {
-        format!("{source}.\"{}\"", escaped(column))
-    }
+    format!("{source}.{}", spell(column))
 }
 
 /// A type's `@subject`: its things' IRI prefix under `base`, and the columns of its identity as
@@ -171,8 +145,8 @@ fn subject(ty: &ModelType, base: &str) -> String {
         .collect();
     format!(
         "{}id/{}/{}",
-        escaped(&root(base)),
-        escaped(&spoken(&ty.name).replace(' ', "-")),
+        escape(&root(base)),
+        escape(&spoken(&ty.name).replace(' ', "-")),
         holes.join("-")
     )
 }
@@ -214,7 +188,7 @@ pub fn write(model: &Model, base: &str) -> String {
         let _ = writeln!(
             out,
             "@iri(\"{}{}\")\ntype {}",
-            escaped(&vocab),
+            escape(&vocab),
             t.name,
             t.name
         );
@@ -228,7 +202,7 @@ pub fn write(model: &Model, base: &str) -> String {
             let _ = writeln!(
                 out,
                 "    @iri(\"{}{}\") {}: {ty}",
-                escaped(&vocab),
+                escape(&vocab),
                 f.name,
                 f.name
             );
@@ -237,7 +211,7 @@ pub fn write(model: &Model, base: &str) -> String {
             let _ = writeln!(
                 out,
                 "    @iri(\"{}{}\") {}: {}",
-                escaped(&vocab),
+                escape(&vocab),
                 e.name,
                 e.name,
                 relation(e)
@@ -250,14 +224,14 @@ pub fn write(model: &Model, base: &str) -> String {
         let delimiter = s
             .delimiter
             .as_deref()
-            .map(|d| format!(", delimiter = \"{}\"", escaped(d)))
+            .map(|d| format!(", delimiter = \"{}\"", escape(d)))
             .unwrap_or_default();
         let _ = writeln!(
             out,
             "{} := io.{}(\"{}\"{delimiter})",
             s.name,
             s.format,
-            escaped(&s.reference)
+            escape(&s.reference)
         );
     }
 

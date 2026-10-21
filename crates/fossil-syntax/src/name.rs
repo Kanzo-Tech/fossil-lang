@@ -73,9 +73,17 @@ pub fn spell(name: &str) -> Cow<'_, str> {
     if is_bare(name) {
         return Cow::Borrowed(name);
     }
-    let mut out = String::with_capacity(name.len() + 2);
-    out.push('"');
-    for c in name.chars() {
+    Cow::Owned(format!("\"{}\"", escape(name)))
+}
+
+/// `value` as the content of a STRING: `"`, `\` and `{` escaped as a string
+/// literal escapes them, and a line break, a tab and a carriage return as
+/// `\n`, `\t` and `\r` (grammar.bnf, `ESCAPE` and `{{`). Between quotes it is the
+/// literal whose value is `value`; [`string_value`] reads it back.
+#[must_use]
+pub fn escape(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
         match c {
             '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
@@ -86,8 +94,7 @@ pub fn spell(name: &str) -> Cow<'_, str> {
             c => out.push(c),
         }
     }
-    out.push('"');
-    Cow::Owned(out)
+    out
 }
 
 /// The value of a STRING token with no hole, its escapes resolved
