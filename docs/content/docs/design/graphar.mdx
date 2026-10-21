@@ -452,9 +452,10 @@ which narrows the claim or adds a condition (A7 for IRI-valued columns is the fi
 - **One chunk per table**, `chunk_size` = max(rows, 1), ZSTD level 3, row groups of 122,880 rows,
   delta encoding on the sorted keys. Writes go through the routed store, one put per chunk; the
   executor's earlier split of a large file into multipart parts is not kept.
-- **Widening and text.** `int8`, `int16`, `uint8`, `uint16` become `int32`; `uint32` becomes `int64`;
-  `decimal` is written as text with `xsd:decimal` in the mapping; `time` as text with `xsd:time`;
-  `binary` as hexadecimal with `xsd:hexBinary`.
+- **One type per primitive.** A property is written as its primitive's GraphAr type whatever the
+  source held ([the data types](/docs/format/conventions/datatypes)): an `Integer` is `int64`, a
+  `Float` `double`, converted only when the value survives the round trip; `time` is text with
+  `xsd:time`, and `binary` hexadecimal with `xsd:hexBinary`.
 - **The counts**: nulls, minimum and maximum are the Parquet footer's; `fossil:stats` carries the
   distinct count and the most common values. A set column is counted over its elements (a tagged one
   by lexical form) and its frequencies are a share of the elements; a single column's, of the chunk's
@@ -823,8 +824,9 @@ itself never parses RDF.
 a number and nothing more. A copy of the datatypes in Arrow field metadata was not taken: it is a
 second document that can disagree with the mapping.
 
-Other widths: `int8`, `int16`, `uint8`, `uint16` and `uint32` widen without loss; `uint64` above
-`i64::MAX` is refused; `binary` becomes `string`, with `xsd:hexBinary` in the mapping, and `time` is
+Each primitive is one of them whatever the source held: an `Integer` is `int64`, a `Float` `double`,
+and a value is converted only when it survives the round trip, so `uint64` above `i64::MAX` and a
+decimal with more digits than a `double` are refused; `binary` becomes `string`, with `xsd:hexBinary` in the mapping, and `time` is
 written as `string` with `xsd:time`, so a graph with no `langString` property stays within what the
 reference readers parse. The one type beyond them is `langString` ([above](#a-relation-and-a-multi-valued-property)). **A `timestamp`
 finer than a millisecond is refused, as `write/unrepresentable`**, because GraphAr's `timestamp` is
@@ -990,7 +992,7 @@ become a package — and it belongs to whoever that host is, not to fossil.
 | | `corpus/unreadable`, `corpus/not-a-location`, `corpus/duplicate-table`, `corpus/unsupported-format`, `corpus/not-json` | **deleted**: they were the earlier reader's; `attachGraph` throws its own |
 | | `write/invalid-subject`, `write/duplicate-value`, `write/ambiguous-iri`, `write/unrepresentable` | **new** |
 | `@fossil-lang/storage`, `@fossil-lang/codemirror-fossil` | every export | unchanged |
-| `@fossil-lang/wasm` | `program.mapping()`, `vocabularyOf`, `subjectOf`, `DUCKDB_TYPES` | **new** |
+| `@fossil-lang/wasm` | `program.mapping()`, `vocabularyOf`, `subjectOf` | **new** |
 | | `ProfileSource.name`; a profile's `SourceProfile`, `ColumnRef.source` and `ProfileFailure.source` | `name` is `location`, and a profile names its sources by `binding` ([profile](/docs/design/profile)) |
 | `fossil_exec` | `Executor`, `Output`, `Ran`, `MEMORY`, `RunReport`, `EdgeDrops` | unchanged |
 | | `CorpusFile`; `SinkRef::Corpus` in `fossil_mir` | **renamed** `GraphFile` and `SinkRef::Graph`; `MEMORY` is `memory://graph/` |

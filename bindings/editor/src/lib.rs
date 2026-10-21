@@ -905,3 +905,21 @@ fn to_diagnostic(
 pub fn binding_name(file: &str) -> String {
     fossil_syntax::name::binding_name(file)
 }
+
+/// The DuckDB type a column of `primitive` has in a graph fossil wrote, before
+/// anything has run: `fossil_graph_schema::Duckdb::from`, the writer's one type
+/// per primitive.
+///
+/// # Errors
+///
+/// Returns a JS error if `primitive` is not a `Primitive`'s wire name.
+#[wasm_bindgen(js_name = duckdbTypeOf)]
+pub fn duckdb_type_of(
+    #[wasm_bindgen(unchecked_param_type = "Primitive")] primitive: JsValue,
+) -> Result<String, JsValue> {
+    let primitive: fossil_graph_schema::Primitive = serde_wasm_bindgen::from_value(primitive)
+        .map_err(|e| invalid_argument("primitive", "a Primitive", Some(e.into())))?;
+    Ok(fossil_graph_schema::Duckdb::from(primitive)
+        .as_str()
+        .to_owned())
+}

@@ -49,6 +49,7 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod duckdb;
 #[cfg(feature = "js")]
 pub mod js;
 pub mod problem;
@@ -56,6 +57,7 @@ pub mod shapes;
 pub mod span;
 pub mod xsd;
 
+pub use duckdb::Duckdb;
 pub use problem::{CODES, Failure, Foreign, Problem, Related, Severity, TEMPLATES};
 pub use shapes::{
     Occurs, OutputShapes, PropertyConstraint, Rejection, SUBJECT_COLUMN, Shape, language_matches,

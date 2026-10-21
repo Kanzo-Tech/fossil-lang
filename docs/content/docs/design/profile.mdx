@@ -163,22 +163,28 @@ the mapping reads no source and needs no `describe` first.
 a type that exists only by what a source contains. Then that type is absent before the run and present
 after, and the host says so.
 
-## The DuckDB type table reaches TypeScript from the catalogue
+## A DuckDB type is read by its name, as an XSD datatype is
 
-**`cargo xtask catalogue` projects the `duckdb` table of `catalogue.bnf` to
-`packages/wasm/src/catalogue.generated.ts` as `DUCKDB_TYPES`**, in file order, which is precedence. A
-host that stands in for an engine — a test double answering a `DESCRIBE` — says a primitive in the
-words the table does, and states no row of it; keasy's fixture kept its own `Primitive` to DuckDB-type
-map beside the Rust table. Only the table is projected. What a `DESCRIBE` type *means* is matched by
-`fossil-profile`, in the wasm module, from the same file, and a matcher in TypeScript would be a second
-implementation of it.
+**What a `DESCRIBE` column type means is `fossil_graph_schema::Duckdb`, beside `Xsd`, and it reads
+the type by its name.** `TryFrom<&Duckdb> for Primitive` takes DuckDB's spelling as `DESCRIBE` prints
+it, case-blind and without its parameters (`DECIMAL(18,3)` is a `DECIMAL`), and matches it whole
+against DuckDB's `LogicalTypeId` names. A type the lattice has no primitive for (`INTERVAL`, `BLOB`,
+a `STRUCT`, an unsigned integer) is `OutsideLattice`, and the profiler is the caller that reads it as
+text. A reader's `text` clause in `catalogue.bnf` names primitives, not spellings: JSON's says
+`time_date time_date_time time_hour`, the meanings DuckDB guessed from text the run keeps as text.
 
-*Held by* `crates/xtask/tests/catalogue_generated.rs`,
-"the_duckdb_table_is_projected_to_typescript_in_file_order", and
-"the_checked_in_files_match_the_catalogue".
+This replaced a `duckdb` table in `catalogue.bnf` of patterns — `"TIMESTAMP*"`, `"TIME*"`, a final
+`"*"` — where the first line that matched won, so `"TIMESTAMP*"` had to come before `"TIME*"` or every
+instant read as an hour, and anything unforeseen became a `String` without saying so. It was also
+projected to TypeScript as `DUCKDB_TYPES` for a host that stood in for an engine, and nothing read it.
 
-**What would reverse it:** a TypeScript host that has to read a `DESCRIBE` itself and cannot ask the
-module. Then the matcher is generated beside the table, from the same lines, as the Rust one is.
+*Held by* `crates/fossil-graph-schema/src/duckdb.rs`, "an_instant_is_never_an_hour" and
+"a_type_outside_the_lattice_is_refused"; `crates/fossil-profile/tests/native.rs`,
+"every_duckdb_instant_is_an_instant", which reads the names from a `DESCRIBE` DuckDB itself answered.
+
+**What would reverse it:** a DuckDB that adds types faster than a release of fossil can name them, so
+that a prefix is the only spelling that keeps up. Then the prefix is a case of the one read, still in
+`Duckdb`, and not a table whose order decides.
 
 ## Order
 

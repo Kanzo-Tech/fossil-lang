@@ -5,7 +5,7 @@
 
 use std::fmt::Write as _;
 
-use fossil_graph_schema::Primitive;
+use fossil_graph_schema::{Duckdb, Primitive};
 use fossil_profile::{ColumnRef, Inclusion, Options, Profile, Rows, Source};
 
 /// The host's half: a query on a `duckdb::Connection`, its rows as text.
@@ -213,7 +213,7 @@ fn a_sample_reads_the_counts_from_the_first_rows_and_says_so() {
 
 /// Every spelling `DuckDB` has for an instant maps to an instant.
 ///
-/// **The table is derived from `DuckDB` and not from memory**: the arms are
+/// **`Duckdb`'s names are derived from `DuckDB` and not from memory**: they are
 /// asserted against the `DESCRIBE` of a value `DuckDB` itself typed, so a
 /// version that renames a type fails here rather than silently widening a
 /// column to `String`. That widening is what this test exists for —
@@ -233,7 +233,14 @@ fn every_duckdb_instant_is_an_instant() {
             Primitive::DATE_TIME,
         ),
         ("DATE '2012-01-01'", Primitive::DATE),
+        ("CAST('2012-01-01' AS TIMESTAMP_S)", Primitive::DATE_TIME),
+        ("CAST('2012-01-01' AS TIMESTAMP_MS)", Primitive::DATE_TIME),
+        ("CAST('2012-01-01' AS TIMESTAMP_NS)", Primitive::DATE_TIME),
         ("TIME '12:00:00'", Primitive::HOUR),
+        ("CAST('12:00:00+01' AS TIMETZ)", Primitive::HOUR),
+        ("CAST(1 AS TINYINT)", Primitive::Integer),
+        ("CAST(1 AS HUGEINT)", Primitive::Integer),
+        ("CAST(1.5 AS FLOAT)", Primitive::Float),
         ("CAST(1 AS BIGINT)", Primitive::Integer),
         ("CAST(1.5 AS DOUBLE)", Primitive::Float),
         ("CAST(1.5 AS DECIMAL(38,18))", Primitive::Float),
@@ -243,8 +250,8 @@ fn every_duckdb_instant_is_an_instant() {
         let described = rows(&conn, &format!("DESCRIBE SELECT {sql} AS v")).expect("describe runs");
         let declared = described[0][1].clone().expect("a type");
         assert_eq!(
-            fossil_profile::generated::duckdb_primitive(&declared),
-            expected,
+            Primitive::try_from(&Duckdb::new(declared.as_str())).ok(),
+            Some(expected),
             "DuckDB types `{sql}` as `{declared}`, which must not widen to String"
         );
     }

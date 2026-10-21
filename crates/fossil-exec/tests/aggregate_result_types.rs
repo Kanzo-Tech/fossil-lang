@@ -47,8 +47,8 @@ struct Cell {
 /// The input column types a fossil source can hand an aggregate.
 ///
 /// `Decimal128` is in the list because it is REACHABLE and unrepresentable:
-/// `catalogue.bnf`'s `duckdb` table maps any `DECIMAL…`
-/// to `Primitive::Float`, so the checker calls the column a `Float` while a
+/// `fossil_graph_schema::Duckdb` reads any `DECIMAL(p,s)`
+/// as `Primitive::Float`, so the checker calls the column a `Float` while a
 /// Parquet source hands `DataFusion` a `Decimal128`. The language has no decimal
 /// type (`fossil_graph_schema::Primitive` is nine variants and none is one).
 fn input_columns() -> Vec<(&'static str, DataType, ArrayRef)> {

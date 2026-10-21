@@ -102,9 +102,11 @@
    `.delimiter(b'|')` is not here: a Rust method taking a byte belongs to the
    one adapter that calls it. *)
 
-(* `text` names the column types a reader infers from TEXT that the run reads
-   as text, so a DESCRIBE answering one of them means `string`. JSON has six
-   types and no date: `read_json_auto` calls `"1845-03-27"` a DATE and
+(* `text` names the primitives a reader infers from TEXT that the run reads
+   as text, so a DESCRIBE answering a type of one of them means `string`. What
+   a DESCRIBE type means is not this file's: it is `Duckdb`'s, beside `Xsd` in
+   `fossil-graph-schema`, read by the type's name. JSON has six types and no
+   date: `read_json_auto` calls `"1845-03-27"` a DATE and
    `"2010-02-14T20:30:21"` a TIMESTAMP, and the run's reader — arrow-json, as
    Spark's (`inferTimestamp` off by default) and Polars' do — keeps a JSON
    string a string. Typed as DuckDB guessed, the checker passed a program the
@@ -116,7 +118,7 @@
 row csv     = extensions "csv"                    ; reads native read_csv_auto option delim
             ; signature (uri: String, delimiter = String?) -> Rows ; op Source .
 row json    = extensions "json"                   ; reads native read_json_auto
-                                                    text "DATE" "TIMESTAMP*" "TIME*"
+                                                    text time_date time_date_time time_hour
             ; signature (uri: String) -> Rows ; op Source .
 row parquet = extensions "parquet"                ; reads native read_parquet
             ; signature (uri: String) -> Rows ; op Source .
@@ -140,33 +142,6 @@ row rdf     = extensions "ttl" "nt" "n3" "rdf"    ; reads materialised
 
 row shex    = extensions "shex" "shexj" "shexc"   ; decodes decode_shex         .
 row shacl   = extensions "ttl" "shacl"            ; decodes decode_shacl        .
-
-(* ------------------------------------------------------------ duckdb types *)
-(* What a DuckDB `DESCRIBE` column type means on the lattice — the `Primitive`
-   by its wire name, then the spellings that map to it. Both hosts
-   DESCRIBE through a native reader above, so the vocabulary is the readers'
-   and is generated into the plan they share, `fossil-profile`'s
-   `duckdb_primitive`.
-
-   A spelling is matched case-blind and whole; `"X*"` matches every spelling
-   that starts with `X`, and `"*"` matches anything and must come last. The
-   FIRST line that matches wins, and the order below is load-bearing in one
-   place: `"TIMESTAMP*"` before `"TIME*"`, which would swallow every one of
-   DuckDB's seven spellings of an instant. `TIMESTAMP WITH TIME ZONE` is what
-   `read_csv_auto` infers for an ISO-8601 string carrying an offset — how
-   LDBC-SNB dates every row it ships — and read as `string` it makes
-   `xsd:dateTime` over that column a type error.
-
-   `DECIMAL` is a float because the lattice has no decimal; that is Design E's
-   question and not this table's. *)
-
-duckdb integer        = "INTEGER" "BIGINT" "INT" "SMALLINT" "TINYINT" "HUGEINT" .
-duckdb float          = "DOUBLE" "FLOAT" "REAL" "DECIMAL*" .
-duckdb bool           = "BOOLEAN" "BOOL" .
-duckdb time_date      = "DATE" .
-duckdb time_date_time = "TIMESTAMP*" "DATETIME" .
-duckdb time_hour      = "TIME*" .
-duckdb string         = "*" .
 
 (* ------------------------------------------------------------- NOT IN HERE *)
 (* The WRITE half of the table is deliberately absent, not stubbed:

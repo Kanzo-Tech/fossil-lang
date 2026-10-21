@@ -182,17 +182,17 @@ pub(crate) fn lex(text: &str) -> Vec<Tok> {
 /// How a row's bytes become rows a plan can scan.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Reads {
-    /// `reads native <fn> [option <keyword>] [text "<SPELLING>"+]` — a
+    /// `reads native <fn> [option <keyword>] [text <primitive>+]` — a
     /// `DuckDB` table function, named by the token, the named parameter its
-    /// reader option is spelled with, if it takes one, and the column types it
+    /// reader option is spelled with, if it takes one, and the primitives it
     /// infers from text that the run reads as text.
     Native {
         /// The table function.
         function: String,
         /// The `DuckDB` keyword of the row's one reader option.
         option: Option<String>,
-        /// The `DESCRIBE` types that mean `string` for this reader.
-        text: Vec<Spelling>,
+        /// The primitives, by wire name, that mean `string` for this reader.
+        text: Vec<String>,
     },
     /// `reads materialised` — something outside the reader produces the
     /// relation and the core only scans it.
@@ -410,27 +410,6 @@ impl Row {
     }
 }
 
-/// One spelling of a `duckdb` line: whole, `"X*"`, or `"*"`.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Spelling {
-    /// Matches this spelling and no other.
-    Exact(String),
-    /// `"X*"` — matches every spelling starting with `X`.
-    Prefix(String),
-    /// `"*"` — matches anything.
-    Any,
-}
-
-/// One `duckdb <primitive> = "…"+ .` line: the `Primitive` by its wire name and
-/// the `DuckDB` column types that mean it.
-#[derive(Debug)]
-pub struct DuckdbType {
-    /// The `Primitive`'s wire name — `date_time`, not `DateTime`.
-    pub primitive: String,
-    /// The spellings, in file order.
-    pub spellings: Vec<Spelling>,
-}
-
 /// Everything `catalogue.bnf` declares.
 #[derive(Debug, Default)]
 pub struct Catalogue {
@@ -438,8 +417,6 @@ pub struct Catalogue {
     pub rows: Vec<Row>,
     /// The stdlib rows, in file order.
     pub fns: Vec<FnRow>,
-    /// The `DuckDB` type table, in file order — which is precedence.
-    pub duckdb: Vec<DuckdbType>,
 }
 
 impl Catalogue {
@@ -632,9 +609,8 @@ impl Parser {
 ///
 /// # Panics
 ///
-/// On any statement that is not a well-formed `row`, `fn` or `duckdb`, on a
-/// `duckdb` table that does not end in its one `"*"`, and on a file that
-/// declares no rows at all.
+/// On any statement that is not a well-formed `row` or `fn`, and on a file
+/// that declares no rows at all.
 #[must_use]
 pub fn parse(text: &str) -> Catalogue {
     let mut p = Parser {
@@ -647,18 +623,9 @@ pub fn parse(text: &str) -> Catalogue {
         match kw.as_str() {
             "row" => cat.rows.push(parse_row(&mut p)),
             "fn" => cat.fns.push(parse_fn(&mut p)),
-            "duckdb" => cat.duckdb.push(parse_duckdb(&mut p)),
-            other => panic!(
-                "catalogue.bnf: `{other}` begins no statement; write `row`, `fn` or `duckdb`"
-            ),
+            other => panic!("catalogue.bnf: `{other}` begins no statement; write `row` or `fn`"),
         }
     }
-    let catch_all = |t: &DuckdbType| t.spellings.contains(&Spelling::Any);
-    assert!(
-        cat.duckdb.last().is_some_and(catch_all)
-            && cat.duckdb.iter().filter(|t| catch_all(t)).count() == 1,
-        "catalogue.bnf: the `duckdb` table must end with the one line holding `\"*\"`"
-    );
     assert!(
         !cat.rows.is_empty(),
         "catalogue.bnf declares no `io.` rows at all"
@@ -682,31 +649,6 @@ fn parse_fn(p: &mut Parser) -> FnRow {
         name,
         sig,
         lowering,
-    }
-}
-
-/// `duckdb <primitive> = "<SPELLING>"+ .`
-fn parse_duckdb(p: &mut Parser) -> DuckdbType {
-    let primitive = p.word();
-    p.expect_punct("=");
-    let mut spellings = Vec::new();
-    while matches!(p.peek(), Some(Tok::Str(_))) {
-        spellings.push(spelling(p.string()));
-    }
-    assert!(!spellings.is_empty(), "`duckdb {primitive}` names no type");
-    p.expect_punct(".");
-    DuckdbType {
-        primitive,
-        spellings,
-    }
-}
-
-/// `"X"`, `"X*"` or `"*"`, as a [`Spelling`].
-fn spelling(s: String) -> Spelling {
-    match s.strip_suffix('*') {
-        Some("") => Spelling::Any,
-        Some(prefix) => Spelling::Prefix(prefix.to_owned()),
-        None => Spelling::Exact(s),
     }
 }
 
@@ -737,8 +679,8 @@ fn parse_row(p: &mut Parser) -> Row {
                         let option = p.eat_word("option").then(|| p.word());
                         let mut text = Vec::new();
                         if p.eat_word("text") {
-                            while matches!(p.peek(), Some(Tok::Str(_))) {
-                                text.push(spelling(p.string()));
+                            while matches!(p.peek(), Some(Tok::Word(_))) {
+                                text.push(p.word());
                             }
                             assert!(!text.is_empty(), "row `{name}`: `text` names no type");
                         }
@@ -954,83 +896,43 @@ fn primitive_path(wire: &str) -> String {
     format!("Primitive::{name}")
 }
 
-/// `fossil-profile`: the `duckdb` table as `duckdb_primitive`.
+/// `fossil-profile`: what a column one native reader `DESCRIBE`s means.
 #[must_use]
 pub fn emit_profile(cat: &Catalogue) -> String {
     let mut out = header(
-        "//! What a `DuckDB` `DESCRIBE` column type means on the lattice — the\n\
-         //! `duckdb` table of `catalogue.bnf`.",
+        "//! What a `DuckDB` `DESCRIBE` column type means on the lattice, per\n\
+         //! reader — the `text` clauses of `catalogue.bnf`.",
     );
     out.push_str(
-        "use fossil_base::NativeReader;\nuse fossil_graph_schema::Primitive;\n\n\
-         /// The [`Primitive`] a `DuckDB` column type means: case-blind, the first\n\
-         /// `duckdb` line of `catalogue.bnf` that matches.\n\
-         pub fn duckdb_primitive(t: &str) -> Primitive {\n\
-         \x20   match t.trim().to_ascii_uppercase().as_str() {\n",
-    );
-    for t in &cat.duckdb {
-        let variant = primitive_path(&t.primitive);
-        let exact: Vec<String> = t
-            .spellings
-            .iter()
-            .filter_map(|s| match s {
-                Spelling::Exact(x) => Some(format!("{x:?}")),
-                _ => None,
-            })
-            .collect();
-        if !exact.is_empty() {
-            let _ = writeln!(out, "        {} => {variant},", exact.join(" | "));
-        }
-        for s in &t.spellings {
-            match s {
-                Spelling::Prefix(x) => {
-                    let _ = writeln!(out, "        t if t.starts_with({x:?}) => {variant},");
-                }
-                Spelling::Any => {
-                    let _ = writeln!(out, "        _ => {variant},");
-                }
-                Spelling::Exact(_) => {}
-            }
-        }
-    }
-    out.push_str("    }\n}\n\n");
-    out.push_str(
-        "/// The [`Primitive`] a column one native reader `DESCRIBE`s means: a type\n\
-         /// its row declares `text` is one the reader inferred from text that the run\n\
-         /// reads as text, and the rest is [`duckdb_primitive`].\n\
+        "use fossil_base::NativeReader;\nuse fossil_graph_schema::{Duckdb, Primitive};\n\n\
+         /// The [`Primitive`] a column one native reader `DESCRIBE`s means: what\n\
+         /// [`Duckdb`] reads the type as, unless its row declares that primitive\n\
+         /// `text`, one the reader inferred from text that the run reads as text.\n\
+         /// A type outside the lattice is read as text too.\n\
          pub fn read_primitive(reader: NativeReader, t: &str) -> Primitive {\n\
-         \x20   let upper = t.trim().to_ascii_uppercase();\n\
+         \x20   let read = Primitive::try_from(&Duckdb::new(t)).unwrap_or(Primitive::STRING);\n\
          \x20   let text = match reader {\n",
     );
     for row in &cat.rows {
         if let Some(Reads::Native { function, text, .. }) = &row.reads
             && !text.is_empty()
         {
-            let tests: Vec<String> = text.iter().map(|s| rust_test(s, "upper")).collect();
+            let paths: Vec<String> = text.iter().map(|p| primitive_path(p)).collect();
             let _ = writeln!(
                 out,
-                "        NativeReader::{} => {},",
+                "        NativeReader::{} => matches!(read, {}),",
                 variant_of(function),
-                tests.join(" || ")
+                paths.join(" | ")
             );
         }
     }
     out.push_str(
         "        _ => false,\n\
          \x20   };\n\
-         \x20   if text { Primitive::STRING } else { duckdb_primitive(t) }\n\
+         \x20   if text { Primitive::STRING } else { read }\n\
          }\n",
     );
     out
-}
-
-/// A Rust test of `var` against one spelling.
-fn rust_test(s: &Spelling, var: &str) -> String {
-    match s {
-        Spelling::Exact(x) => format!("{var} == {x:?}"),
-        Spelling::Prefix(x) => format!("{var}.starts_with({x:?})"),
-        Spelling::Any => "true".to_owned(),
-    }
 }
 
 /// The `fossil-hir` half: the stdlib catalogue as a table of `RegistryEntry`.
@@ -1116,11 +1018,9 @@ fn ts_header(body: &str) -> String {
 }
 
 /// `@fossil-lang/wasm`'s `profile`: the constructors a host can `DESCRIBE`, so it asks
-/// for no credential to read a source it has nothing to describe with, and the
-/// `duckdb` table, so a host that stands in for an engine (a test double that
-/// answers a `DESCRIBE`) says a type in the words the table does and states no row
-/// of it. What a `DESCRIBE` *means* is `fossil-profile`'s, in the wasm module,
-/// from the same table, and the matching is not written a second time here.
+/// for no credential to read a source it has nothing to describe with. What a
+/// `DESCRIBE` *means* is `fossil-profile`'s, in the wasm module, and is not
+/// written a second time here.
 ///
 /// A materialised row (`io.rdf`) is absent on purpose and not by omission —
 /// there is no table function to `DESCRIBE` it with, which is what
@@ -1131,10 +1031,8 @@ pub fn emit_ts_profile(cat: &Catalogue) -> String {
     let mut out = ts_header(
         "// The `io.` constructors that read through a native DuckDB table function. A\n\
          // materialised row (`io.rdf`) has no reader to DESCRIBE through and is\n\
-         // deliberately absent. And the `duckdb` table: what a `DESCRIBE` column type\n\
-         // means on the lattice.",
+         // deliberately absent.",
     );
-    out.push_str("import type { Primitive } from \"@fossil-lang/types\";\n\n");
     out.push_str("/** The constructors a host can DESCRIBE, in catalogue order. */\n");
     let names: Vec<String> = native.iter().map(|(n, _)| format!("{n:?}")).collect();
     let _ = writeln!(
@@ -1143,33 +1041,7 @@ pub fn emit_ts_profile(cat: &Catalogue) -> String {
         names.join(", ")
     );
     out.push_str("/** One `io.` constructor that reads through a native reader. */\n");
-    out.push_str("export type NativeRow = (typeof NATIVE_ROWS)[number];\n\n");
-    out.push_str(
-        "/**\n * One line of the `duckdb` table: a `Primitive`, and the `DESCRIBE` column types that mean it.\n \
-         * A spelling is matched case-blind and whole; `\"X*\"` matches every spelling that starts with\n \
-         * `X`, and `\"*\"` matches anything.\n */\n\
-         export interface DuckdbType {\n  primitive: Primitive;\n  spellings: readonly string[];\n}\n\n\
-         /** The `duckdb` table, in file order — which is precedence: the first line that matches wins. */\n\
-         export const DUCKDB_TYPES: readonly DuckdbType[] = [\n",
-    );
-    for t in &cat.duckdb {
-        let spellings: Vec<String> = t
-            .spellings
-            .iter()
-            .map(|s| match s {
-                Spelling::Exact(x) => format!("{x:?}"),
-                Spelling::Prefix(x) => format!("\"{x}*\""),
-                Spelling::Any => "\"*\"".to_string(),
-            })
-            .collect();
-        let _ = writeln!(
-            out,
-            "  {{ primitive: {:?}, spellings: [{}] }},",
-            t.primitive,
-            spellings.join(", ")
-        );
-    }
-    out.push_str("];\n");
+    out.push_str("export type NativeRow = (typeof NATIVE_ROWS)[number];\n");
     out
 }
 

@@ -91,6 +91,7 @@ pub fn lower_to_mir_pg<'db>(
         // these ops; the vertex keeps its columns as written.
         Ok(ops) => (
             emit_edges(
+                db,
                 &ops,
                 &fossil_hir::graph_type::graph_type(db, mapping.file(db)).unwrap_or_default(),
             ),
@@ -398,7 +399,11 @@ fn mapping_span<'db>(
 /// `ex:hasProject` **references another vertex type** (→ a typed edge, one per
 /// destination of a union) and that it is **multi-valued**. The empty `G` (a
 /// program with no types) returns the ops unchanged.
-fn emit_edges<'db>(ops: &[Op<'db>], schema: &GraphSchema) -> Vec<Op<'db>> {
+fn emit_edges<'db>(
+    db: &'db dyn fossil_base::Db,
+    ops: &[Op<'db>],
+    schema: &GraphSchema,
+) -> Vec<Op<'db>> {
     // The vertex's shape IRI keys its node type; without it (or a node the
     // model doesn't declare) there is nothing to refine.
     let shape_iri = ops.iter().find_map(|o| match o {
@@ -453,7 +458,12 @@ fn emit_edges<'db>(ops: &[Op<'db>], schema: &GraphSchema) -> Vec<Op<'db>> {
                             });
                         }
                     } else if let Some(prop_def) = node.property_by_iri(predicate) {
+                        // The type the shape declares, not the value's: the
+                        // checker held the value to it, and the graph is
+                        // written in the program's types whatever the source
+                        // held (`Integer <: Float` writes a `Float`).
                         kept.push(VProp {
+                            ty: Ty::new(db, TyKind::Primitive(prop_def.datatype)),
                             single_valued: matches!(prop_def.cardinality, GsCardinality::Single),
                             ..p.clone()
                         });

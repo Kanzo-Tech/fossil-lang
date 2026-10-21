@@ -127,7 +127,7 @@ value without a language map.
 - **The datatype** is the shape's, verbatim: `rml:datatype xsd:gYear` stays `xsd:gYear` whatever the
   column's type. A value the shape declares an IRI is `rml:termType rml:IRI` and has no datatype.
   Where a shape declares none, the writer states one only where the column's type would lose it:
-  `xsd:gYear` for a year, `xsd:time` for a time, and `xsd:decimal`, `xsd:time` or `xsd:hexBinary` for a
+  `xsd:gYear` for a year, and `xsd:time` or `xsd:hexBinary` for a
   column [the writer stored as text](/docs/format/conventions/datatypes). Everywhere else the object
   map states none, and the literal is the column's **natural** one: the natural mapping of SQL types
   to XSD of R2RML §10.2 — an integer type is `xsd:integer`, `float` and `double` are `xsd:double`,
