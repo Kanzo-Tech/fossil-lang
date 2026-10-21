@@ -1148,13 +1148,21 @@ mod tests {
         let q = plan.next_query().expect("the columns");
         plan.feed(q.id, &fields(&[("note", DataType::Utf8)]), &[]);
         let q = plan.next_query().expect("the counts");
-        let none = Fields::empty();
-        plan.feed(q.id, &none, &rows(&[&["4", "2", "4", "a", long.as_str()]]));
+        let no_fields = Fields::empty();
+        plan.feed(
+            q.id,
+            &no_fields,
+            &rows(&[&["4", "2", "4", "a", long.as_str()]]),
+        );
         let q = plan.next_query().expect("the commonest values");
         assert!(q.sql.contains("LIMIT 10"), "{}", q.sql);
-        plan.feed(q.id, &none, &rows(&[&[long.as_str(), "2"], &["a", "2"]]));
+        plan.feed(
+            q.id,
+            &no_fields,
+            &rows(&[&[long.as_str(), "2"], &["a", "2"]]),
+        );
         while let Some(q) = plan.next_query() {
-            plan.feed(q.id, &none, &[]);
+            plan.feed(q.id, &no_fields, &[]);
         }
         let note = &plan.finish().sources[0].columns[0];
         assert_eq!(note.min_value.as_deref(), Some("a"));
