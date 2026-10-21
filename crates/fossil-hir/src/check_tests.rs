@@ -116,7 +116,7 @@ fn build_checker<'db>(
             entries: Vec::new(),
             sink,
             first_error: None,
-            expected_ref: None,
+            expected: None,
         },
         mapping,
         resolved_shape,
@@ -1479,6 +1479,57 @@ fn a_reference_to_one_shape_satisfies_a_slot_that_accepts_two() {
 
     // The set is the type: the order a document wrote it in is not part of it.
     assert_eq!(two, Ty::reference(&db, [b, a]), "canonicalised");
+}
+
+/// A string written where the shape wants an IRI IS that IRI, as an
+/// interpolation under `@subject` is the identity: `kind =
+/// "https://example.org/kind/{U.code}"` mints one per row, which is RML's
+/// `rr:template` with `rr:termType rr:IRI`.
+///
+/// Both halves, because a rule that accepts everything would pass the first:
+/// the interpolation and the constant are accepted, and a number is still
+/// refused.
+#[test]
+fn a_string_in_an_iris_slot_denotes_the_iri() {
+    const KIND: &str = "\
+shape https://example.org/Thing
+prop https://example.org/kind iri 1 1
+";
+    fn diagnostics(rhs: &str) -> Vec<String> {
+        use fossil_base::test_support::db_with_document;
+        let src = format!(
+            "type {{ Thing }} := io.shex(\"kind.shex\")\n\
+             U := io.csv(\"u.csv\")\n\
+             T : Thing from U\n    \
+             @subject = \"https://example.org/t/{{U.code}}\"\n    \
+             kind     = {rhs}\n"
+        );
+        let (db, file) = db_with_document(&src, "kind.shex", KIND);
+        def_map(&db, file)
+            .mappings(&db)
+            .clone()
+            .into_iter()
+            .flat_map(|m| {
+                read_by_check(&db, m)
+                    .iter()
+                    .map(Diagnostic::message)
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    for iri in [
+        "\"https://example.org/kind/{U.code}\"",
+        "\"https://example.org/kind/constant\"",
+    ] {
+        let said = diagnostics(iri);
+        assert!(said.is_empty(), "`{iri}` must denote the IRI: {said:#?}");
+    }
+    let number = diagnostics("1");
+    assert!(
+        number.iter().any(|m| m.contains("kind")),
+        "a number is not an IRI: {number:#?}"
+    );
 }
 
 // ── The condition of a stage ───────────────────────────────────────────────
