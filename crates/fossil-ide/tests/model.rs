@@ -4,13 +4,18 @@
 //! The program a model implies, in its one layout. That it compiles and runs over real files is
 //! `fossil-df`'s `tests/written.rs`; here is what it says.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use expect_test::expect;
+use fossil_base::sources::{InferredColumn, InferredDescriptor};
 use fossil_base::test_support::NativeSystem;
 use fossil_base::{FossilDb, SourceFile, System};
 use fossil_graph_schema::Primitive;
-use fossil_ide::model::{Model, ModelEdge, ModelField, ModelSource, ModelType, write};
+use fossil_ide::model::{
+    Inferred, Model, ModelEdge, ModelField, ModelSource, ModelType, infer, write,
+};
+use fossil_profile::{ColumnRef, ColumnStats, Inclusion, Profile, SourceProfile};
 use fossil_syntax::parse;
 
 const BASE: &str = "https://acme.example";
@@ -27,12 +32,12 @@ fn syntax_errors(program: &str) -> Vec<String> {
         .collect()
 }
 
-fn source(name: &str, reference: &str, delimiter: Option<&str>) -> ModelSource {
+fn source(name: &str, reference: &str, option: Option<&str>) -> ModelSource {
     ModelSource {
         name: name.into(),
         format: "csv".into(),
         reference: reference.into(),
-        delimiter: delimiter.map(Into::into),
+        option: option.map(Into::into),
     }
 }
 
@@ -243,4 +248,188 @@ fn every_primitive_is_a_type_the_program_declares() {
     assert!(text.contains("fAnyUri: AnyUri"), "{text}");
     assert!(text.contains("fLangString: LangString"), "{text}");
     assert!(syntax_errors(&text).is_empty(), "{text}");
+}
+
+// ── infer ───────────────────────────────────────────────────────────────────
+
+/// A profiled CSV: its columns, the ones with `nulls`, and its candidate keys.
+fn profiled(binding: &str, columns: &[&str], nulls: &[&str], keys: &[&str]) -> SourceProfile {
+    SourceProfile {
+        binding: binding.into(),
+        format: Some("csv".into()),
+        option: None,
+        descriptor: InferredDescriptor {
+            key: format!("{binding}.csv").into(),
+            columns: columns
+                .iter()
+                .map(|c| InferredColumn {
+                    name: (*c).into(),
+                    primitive: Primitive::String,
+                })
+                .collect(),
+            etag: String::new(),
+        },
+        rows: Some(3),
+        sampled: false,
+        columns: columns
+            .iter()
+            .map(|c| ColumnStats {
+                name: (*c).into(),
+                null_count: u64::from(nulls.contains(c)),
+                distinct_count: 3,
+                min_value: None,
+                max_value: None,
+                top_values: Vec::new(),
+            })
+            .collect(),
+        candidate_keys: keys.iter().map(|k| (*k).into()).collect(),
+        sample: Vec::new(),
+    }
+}
+
+fn inclusion(from: (&str, &str), to: (&str, &str)) -> Inclusion {
+    Inclusion {
+        from: ColumnRef {
+            source: from.0.into(),
+            column: from.1.into(),
+        },
+        to: ColumnRef {
+            source: to.0.into(),
+            column: to.1.into(),
+        },
+    }
+}
+
+fn inferred(profile: &Profile, choices: &[(&str, &str)]) -> Inferred {
+    let choices: HashMap<String, String> = choices
+        .iter()
+        .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+        .collect();
+    infer(profile, &choices)
+}
+
+fn fields(t: &ModelType) -> Vec<&str> {
+    t.fields.iter().map(|f| f.name.as_str()).collect()
+}
+
+#[test]
+fn a_key_is_asked_only_where_no_inclusion_lands_on_one() {
+    let people = || profiled("people", &["email", "id", "name"], &[], &["email", "id"]);
+    let profile = Profile {
+        sources: vec![people()],
+        ..Profile::default()
+    };
+    let Inferred { model, ambiguities } = inferred(&profile, &[]);
+    assert_eq!(ambiguities.len(), 1);
+    assert_eq!(ambiguities[0].id, "key/people");
+    assert_eq!(ambiguities[0].options, ["email", "id"]);
+    assert_eq!(ambiguities[0].chosen, "email");
+    assert_eq!(model.types[0].identity, ["email"]);
+    assert_eq!(fields(&model.types[0]), ["id", "name"]);
+
+    let model = inferred(&profile, &[("key/people", "id")]).model;
+    assert_eq!(model.types[0].identity, ["id"]);
+    assert_eq!(fields(&model.types[0]), ["email", "name"]);
+    assert_eq!(
+        inferred(&profile, &[("key/people", "name")]).model.types[0].identity,
+        ["email"],
+        "a choice that is not an option is not taken"
+    );
+
+    let fixed = Profile {
+        sources: vec![
+            people(),
+            profiled("posts", &["slug", "author"], &[], &["slug"]),
+        ],
+        inclusions: vec![inclusion(("posts", "author"), ("people", "id"))],
+        ..Profile::default()
+    };
+    let Inferred { model, ambiguities } = inferred(&fixed, &[]);
+    assert!(ambiguities.is_empty(), "{ambiguities:?}");
+    assert_eq!(model.types[0].identity, ["id"]);
+}
+
+#[test]
+fn a_type_is_its_binding_in_pascal_case_and_a_relation_its_column_without_its_id() {
+    let profile = Profile {
+        sources: vec![
+            profiled(
+                "nobel_prizes",
+                &["id", "country_id"],
+                &["country_id"],
+                &["id"],
+            ),
+            profiled("countries", &["code"], &[], &["code"]),
+        ],
+        inclusions: vec![inclusion(
+            ("nobel_prizes", "country_id"),
+            ("countries", "code"),
+        )],
+        ..Profile::default()
+    };
+    let model = inferred(&profile, &[]).model;
+    assert_eq!(model.types[0].name, "NobelPrizes");
+    assert_eq!(model.edges[0].name, "country");
+    assert!(
+        model.edges[0].optional,
+        "a column with nulls is an optional relation"
+    );
+    assert!(fields(&model.types[0]).is_empty());
+
+    let taken = Profile {
+        sources: vec![
+            profiled(
+                "nobel_prizes",
+                &["id", "country", "country_id"],
+                &[],
+                &["id"],
+            ),
+            profiled("countries", &["code"], &[], &["code"]),
+        ],
+        ..profile
+    };
+    let model = inferred(&taken, &[]).model;
+    assert_eq!(fields(&model.types[0]), ["country"]);
+    assert_eq!(
+        model.edges[0].name, "country_id",
+        "a relation whose short name a field holds keeps its column's"
+    );
+}
+
+#[test]
+fn two_columns_whose_words_make_one_name_are_asked_and_never_suffixed() {
+    let profile = Profile {
+        sources: vec![profiled(
+            "orders",
+            &["id", "order date", "order_date"],
+            &[],
+            &["id"],
+        )],
+        ..Profile::default()
+    };
+    let Inferred { model, ambiguities } = inferred(&profile, &[]);
+    assert_eq!(ambiguities[0].id, "name/Orders/order_date");
+    assert_eq!(ambiguities[0].options, ["order date", "order_date"]);
+    let columns =
+        |m: &Model| -> Vec<String> { m.types[0].fields.iter().map(|f| f.column.clone()).collect() };
+    assert_eq!(columns(&model), ["order date"]);
+    let model = inferred(&profile, &[("name/Orders/order_date", "order_date")]).model;
+    assert_eq!(columns(&model), ["order_date"]);
+}
+
+#[test]
+fn a_source_nothing_identifies_is_left_out_and_not_bound() {
+    let profile = Profile {
+        sources: vec![
+            profiled("people", &["id"], &[], &["id"]),
+            profiled("log", &["at", "who"], &[], &[]),
+        ],
+        inclusions: vec![inclusion(("log", "who"), ("people", "id"))],
+        ..Profile::default()
+    };
+    let Inferred { model, ambiguities } = inferred(&profile, &[]);
+    assert!(ambiguities.is_empty());
+    let bound: Vec<&str> = model.sources.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(bound, ["people"]);
+    assert!(model.edges.is_empty());
 }

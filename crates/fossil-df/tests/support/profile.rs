@@ -8,7 +8,7 @@ use std::collections::HashSet;
 
 use fossil_base::Db;
 use fossil_hir::lineage::Input;
-use fossil_profile::{Options, Rows, Source};
+use fossil_profile::{Options, Profile, Rows, Source};
 
 /// One query's answer on `conn`, every cell as text: the profiler's queries
 /// cast what they select to `VARCHAR`, and a `DESCRIBE`'s columns are text.
@@ -25,6 +25,14 @@ fn rows(conn: &duckdb::Connection, sql: &str) -> duckdb::Result<Rows> {
         );
     }
     Ok(out)
+}
+
+/// `sources` profiled to `options` on an in-memory `DuckDB`.
+pub(crate) fn profile(sources: Vec<Source>, options: Options) -> Profile {
+    let conn = duckdb::Connection::open_in_memory().expect("an in-memory DuckDB");
+    fossil_profile::run(sources, options, |sql| {
+        rows(&conn, sql).map_err(|e| e.to_string())
+    })
 }
 
 /// Describe each source that reads through a native reader and exists on disk,
@@ -57,11 +65,7 @@ pub(crate) fn profile_and_register(db: &mut dyn Db, sources: &[Input]) {
     if wanted.is_empty() {
         return;
     }
-    let conn = duckdb::Connection::open_in_memory().expect("an in-memory DuckDB");
-    let profile = fossil_profile::run(wanted, Options::TYPES, |sql| {
-        rows(&conn, sql).map_err(|e| e.to_string())
-    });
-    for source in profile.sources {
+    for source in profile(wanted, Options::TYPES).sources {
         fossil_base::describe_columns(db, source.descriptor);
     }
 }

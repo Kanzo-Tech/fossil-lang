@@ -330,6 +330,14 @@ pub struct SourceProfile {
     /// reference, which a second binding of the same file shares.
     #[schemars(with = "String")]
     pub binding: SmolStr,
+    /// The catalogue row it was read with (`csv`), as its [`Source`] named it;
+    /// absent for a table the host held.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub format: Option<String>,
+    /// The value of the reader option its binding wrote (`|` for
+    /// `delimiter = "|"`), verbatim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub option: Option<String>,
     /// Its columns and their types: what the compiler's cache takes.
     pub descriptor: InferredDescriptor,
     /// The rows the counts read, and whether that was a sample.
@@ -438,6 +446,7 @@ struct State {
     key: SmolStr,
     etag: String,
     format: Option<String>,
+    option: Option<String>,
     relation: Relation,
     described: bool,
     columns: Vec<InferredColumn>,
@@ -511,6 +520,7 @@ impl Profiler {
                 key: source.key,
                 etag: source.etag,
                 format: Some(source.format),
+                option: source.option,
                 relation,
                 described: false,
                 columns: Vec::new(),
@@ -541,6 +551,7 @@ impl Profiler {
                 key: t.name.clone(),
                 etag: String::new(),
                 format: None,
+                option: None,
                 relation: Relation::Table(t.name),
                 described: true,
                 columns: t.columns,
@@ -844,6 +855,8 @@ impl Profiler {
             .filter(|(s, _)| s.described)
             .map(|(s, candidate_keys)| SourceProfile {
                 binding: s.binding,
+                format: s.format,
+                option: s.option,
                 sampled: sampled > 0 && s.rows.is_some_and(|r| r >= sampled),
                 rows: s.rows,
                 columns: s.stats,

@@ -1776,6 +1776,7 @@ dependencies = [
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-mir",
+ "fossil-profile",
  "fossil-syntax",
  "line-index",
  "lsp-types",

@@ -7,6 +7,40 @@
 export type Access = 'read' | 'write';
 
 /**
+ * A question the profile cannot settle, and the answer the model stands at.
+ *
+ * `infer` never waits on one: the model it answers takes `chosen`, the host's choice when it gave
+ * one that is among `options`, else the first. A host shows the person what it asks and passes the
+ * answer back by `id`.
+ */
+export interface Ambiguity {
+  about: Ambiguous;
+  chosen: string;
+  /**
+   * What a choice is keyed by: `key/<source>`, `count/<source>` or `name/<type>/<name>`.
+   */
+  id: string;
+  options: string[];
+}
+
+/**
+ * What an `Ambiguity` asks.
+ */
+export type Ambiguous = {
+  kind: 'key';
+  source: string;
+} | {
+  from: string;
+  kind: 'count';
+  source: string;
+  to: string;
+} | {
+  kind: 'name';
+  name: string;
+  type: string;
+};
+
+/**
  * A column of one source and a column of the same or another.
  */
 export interface ColumnRef {
@@ -246,6 +280,14 @@ export interface Inclusion {
 }
 
 /**
+ * What `infer` answers: the model, and the questions it took a default for.
+ */
+export interface Inferred {
+  ambiguities: Ambiguity[];
+  model: Model;
+}
+
+/**
  * One column from a host-introspected source.
  */
 export interface InferredColumn {
@@ -456,7 +498,6 @@ export interface ModelField {
  * `<name> := io.<format>("<reference>")`.
  */
 export interface ModelSource {
-  delimiter?: string;
   /**
    * The constructor that reads it: `csv`, `parquet`, `json`.
    */
@@ -465,6 +506,11 @@ export interface ModelSource {
    * The binding every reference to it is qualified by: one `IDENT`.
    */
   name: string;
+  /**
+   * The value of the reader option its format's catalogue row declares (`|`, written `delimiter =
+   * "|"` on `csv`), verbatim. A format that declares none writes none.
+   */
+  option?: string;
   reference: string;
 }
 
@@ -681,6 +727,15 @@ export interface SourceProfile {
    * Its columns and their types: what the compiler's cache takes.
    */
   descriptor: InferredDescriptor;
+  /**
+   * The catalogue row it was read with (`csv`), as its `Source` named it; absent for a table the
+   * host held.
+   */
+  format?: string;
+  /**
+   * The value of the reader option its binding wrote (`|` for `delimiter = "|"`), verbatim.
+   */
+  option?: string;
   /**
    * The rows the counts read, and whether that was a sample.
    */

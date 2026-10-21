@@ -1,8 +1,8 @@
 ---
-title: Profile, and the program a model implies
-description: "fossil's half of Kanzo Tasks: one sans-IO profiler inside the wasm gate, run by both hosts on their own DuckDB, which replaced introspect; and the program a host's model of the data implies, written by fossil and not by a model."
+title: Profile, the model it implies, and the program
+description: "fossil's half of Kanzo Tasks: one sans-IO profiler inside the wasm gate, run by both hosts on their own DuckDB, which replaced introspect; the model of the data a profile implies, inferred by fossil; and the program a model implies, written by fossil and not by a language model."
 direction:
-  summary: "A host describes what it decided a graph holds as a Model, and fossil writes the program: no model writes Fossil, and no name in it is proposed."
+  summary: "fossil infers what a profile implies a graph holds as a Model, a host settles only what the profile cannot, and fossil writes the program: no model writes Fossil, and no name in it is proposed."
 ---
 
 Kanzo's assistant and its Ask become one pattern, a *Task*: a small model in the browser fills a
@@ -131,6 +131,51 @@ derived from the model, a model writes nothing a grammar would hold ([discarded]
 by a predicate, a value computed from two columns — that a model would write better than a person in
 the editor. Then the model writes that mapping, and a grammar for it comes back with it.
 
+## The model is inferred by fossil, from the profile
+
+**What a profile implies about a graph is fossil's answer, and a host asks only what it cannot
+settle** (owner decision, 21 October 2026). `infer` reads a profile into a `Model` and the
+questions it took a default for (`crates/fossil-ide/src/model.rs, infer`; `@fossil-lang/wasm`'s
+`infer`). This is where the references put it: an F# type provider and `DuckDB`'s `read_csv_auto`
+infer inside the library and not in its callers ([prior art](/docs/design/prior-art#types-from-data)),
+and the rule is W3C's Direct Mapping — a table with a key is a class, its key the subject, a column
+holding another's key a reference — with the link-table rule D2RQ's mapping generator adds.
+
+- **A type** is a source with a candidate key, named by its binding in `PascalCase` —
+  `laureates` is `Laureates`, never singularised. It is identified by the key an inclusion lands on,
+  as a relation fixes it, and otherwise by the one the person chooses among its candidates.
+- **A relation** is an inclusion from a type's column to another's key, named by the column without a
+  trailing `id` (`country_id` is `country`), or by the column itself when a field already holds that
+  name; optional when the column has nulls.
+- **A link file** is a source with no key whose two inclusions land on types' keys. It is a relation
+  across it, `Seq<Ref<…>>`, or, chosen, a type of its own identified by the two ends it links.
+- **A field** is every other column, named by its own words as the lexer spells an identifier
+  (`crates/fossil-syntax/src/name.rs, identifier`). Two columns whose words make one name are a
+  question, and the one chosen keeps it: a suffix is the scheme [discarded](/docs/design/discarded)
+  rejects.
+- A source that is none of these is left out: nothing identifies one of its rows.
+
+**A question never blocks the model.** Each `Ambiguity` names what it asks — a key, a link file, a
+shared name — its options and the option the model stands at: the host's choice by the question's
+`id`, else the first. The host phrases the question to its person; fossil does not write prose for a
+UI it does not own.
+
+*Held by* `crates/fossil-ide/tests/model.rs`,
+"a_key_is_asked_only_where_no_inclusion_lands_on_one",
+"a_type_is_its_binding_in_pascal_case_and_a_relation_its_column_without_its_id",
+"two_columns_whose_words_make_one_name_are_asked_and_never_suffixed",
+"a_source_nothing_identifies_is_left_out_and_not_bound", and `crates/fossil-df/tests/written.rs`,
+"the_program_a_profile_implies_checks_clean_and_runs_a_link_file_as_a_relation",
+"the_program_a_profile_implies_checks_clean_and_runs_a_link_file_as_a_type".
+
+**What it replaced:** keasy's structure, names, decisions and acceptance of a draft, which computed the
+same model in TypeScript beside the profile it read, with a singulariser and numeric suffixes on a
+collision.
+
+**What would reverse it:** a host whose people answer the same question differently for the same
+profile, so the default a model stands at is wrong more often than right. Then the question stays and
+the default goes, and `infer` answers no model until it is answered.
+
 ## The graph before a run
 
 **`program.mapping()` is the mapping of the program's types, with no run.** The pre-run shape of a
@@ -164,8 +209,8 @@ module. Then the matcher is generated beside the table, from the same lines, as 
 
 The profiler and the program a model implies are phase 2 of Kanzo Tasks, after the evaluation set
 and Ask's resolver. Both are built: `fossil-profile` with its two hosts, introspect gone, and
-`fossil_ide::model`, the program a `Model` implies with its types [declared in the
-program](/docs/design/declared). On keasy's side the executor runs in a worker of
+`fossil_ide::model`: the `Model` a profile implies, and the program a `Model` implies with its
+types [declared in the program](/docs/design/declared). On keasy's side the executor runs in a worker of
 its own, and it has moved into the executor itself ([A run off the page](/docs/design/off-the-page)).
 
 ## The graph's profile is the same plan

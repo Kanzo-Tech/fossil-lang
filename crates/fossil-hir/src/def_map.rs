@@ -1098,7 +1098,7 @@ pub(crate) fn parse_source_call(node: &SyntaxNode) -> (Option<SmolStr>, Option<S
 /// read at all: a row that has no such parameter has no such argument, and the
 /// alternative — reading it and dropping it later — is a silently ignored
 /// argument, which is worse than an unread one.
-pub(crate) fn reader_option_of(constructor: &str) -> Option<&'static SmolStr> {
+pub fn reader_option_of(constructor: &str) -> Option<&'static SmolStr> {
     crate::stdlib::stdlib()
         .lookup(constructor)?
         .sig

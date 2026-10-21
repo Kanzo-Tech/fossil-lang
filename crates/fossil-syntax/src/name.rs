@@ -37,20 +37,32 @@ pub fn is_bare(name: &str) -> bool {
 /// The binding name a file becomes in a program — `people` for `people.csv`, as a
 /// source a program binds by it: `people := io.csv("people.csv")`.
 ///
-/// The extension of the last segment goes; every character an identifier
-/// cannot hold becomes `_`, `/` among them, so `crm/people.csv` is `crm_people`;
-/// and a name that still does not lex as one `IDENT` — one that starts with a
-/// digit, an empty one, a reserved word such as `from` — is prefixed with `_`.
-/// Which characters an identifier holds is ASKED of the lexer, a character at a
-/// time, never restated: the answer is whatever `grammar.bnf, IDENT` lexes, and
-/// the result always [`is_bare`].
+/// The extension of the last segment goes, and the rest is the [`identifier`]
+/// it spells: `/` is a character an identifier cannot hold, so `crm/people.csv`
+/// is `crm_people`.
 #[must_use]
 pub fn binding_name(file: &str) -> String {
     let segment_start = file.rfind('/').map_or(0, |i| i + 1);
     let stem = file[segment_start..]
         .rfind('.')
         .map_or(file, |dot| &file[..segment_start + dot]);
-    let held: String = stem
+    identifier(stem)
+}
+
+/// The `IDENT` a word of the data becomes where the grammar holds no STRING — a
+/// declared type's or field's name: every character an identifier cannot hold
+/// becomes `_`, and a name that still does not lex as one `IDENT` — one that
+/// starts with a digit, an empty one, a reserved word such as `from` — is
+/// prefixed with `_`. Which characters an identifier holds is ASKED of the
+/// lexer, a character at a time, never restated: the answer is whatever
+/// `grammar.bnf, IDENT` lexes, and the result always [`is_bare`].
+///
+/// Two words can become one identifier (`Person.id` and `Person_id`); a caller
+/// that names several from one source owns that collision, and no suffix here
+/// breaks it (`/docs/design/discarded`).
+#[must_use]
+pub fn identifier(word: &str) -> String {
+    let held: String = word
         .chars()
         .map(|c| {
             let mut probe = String::from("a");
@@ -215,6 +227,21 @@ mod tests {
             let got = binding_name(file);
             assert_eq!(got, name, "{file}");
             assert!(is_bare(&got), "`{got}` from `{file}` lexes as one IDENT");
+        }
+    }
+
+    #[test]
+    fn a_word_of_the_data_becomes_an_ident_keeping_its_dots_as_underscores() {
+        for (word, name) in [
+            ("born", "born"),
+            ("Person.id", "Person_id"),
+            ("Order Date", "Order_Date"),
+            ("from", "_from"),
+            ("1st", "_1st"),
+        ] {
+            let got = identifier(word);
+            assert_eq!(got, name, "{word}");
+            assert!(is_bare(&got), "`{got}` from `{word}` lexes as one IDENT");
         }
     }
 

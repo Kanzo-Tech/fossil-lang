@@ -6,6 +6,8 @@ export type { Diagnostic } from './diagnostic.js';
 export type { Profiled, UndescribedSource } from './profiled.js';
 export type {
   Access,
+  Ambiguity,
+  Ambiguous,
   CompletionItem,
   CompletionKind,
   DiagnosticRelatedInformation,
@@ -16,6 +18,7 @@ export type {
   FormatKind,
   Hover,
   Inclusion,
+  Inferred,
   InferredColumn,
   InferredDescriptor,
   Input,
