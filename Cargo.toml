@@ -88,6 +88,10 @@ strsim = "0.11"
 # version rather than adding a dependency. Pure Rust, so it costs the wasm32
 # gate nothing.
 bytes = "1"
+# The CSV tokenizer `arrow-csv` reads with, for what `DataFusion`'s inference
+# does not keep: a column's text (`fossil-df`, `LeadingZeros`). Not a new crate in the
+# tree either, and pure Rust.
+csv-core = "0.1"
 
 # === The native engine — NATIVE ONLY ===
 # No crate links it on a normal edge; `fossil-df` and `fossil-profile` keep it as a
