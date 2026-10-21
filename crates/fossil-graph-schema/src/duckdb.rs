@@ -1,18 +1,18 @@
-//! DuckDB, at the profiling border.
+//! `DuckDB`, at the profiling border.
 //!
-//! A source is profiled by asking DuckDB to `DESCRIBE` it, and the answer types
-//! each column in DuckDB's words. [`Duckdb`] wraps one of those words and
+//! A source is profiled by asking `DuckDB` to `DESCRIBE` it, and the answer types
+//! each column in `DuckDB`'s words. [`Duckdb`] wraps one of those words and
 //! `TryFrom<&Duckdb>` reads it into the lattice, as [`Xsd`](crate::Xsd) does
 //! for a datatype IRI: by the type's name, whole, and never by a prefix or by
 //! the order of a table. The read is a `TryFrom` because the lattice is smaller
-//! than DuckDB: an `INTERVAL`, a `BLOB` or a `STRUCT` has no primitive, and the
+//! than `DuckDB`: an `INTERVAL`, a `BLOB` or a `STRUCT` has no primitive, and the
 //! caller decides what a column of one is.
 
 use serde::{Deserialize, Serialize};
 
 use crate::{Lang, OutsideLattice, Precision, Primitive};
 
-/// A DuckDB column type, exactly as `DESCRIBE` prints it: `BIGINT`,
+/// A `DuckDB` column type, exactly as `DESCRIBE` prints it: `BIGINT`,
 /// `DECIMAL(18,3)`, `TIMESTAMP WITH TIME ZONE`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -38,7 +38,7 @@ impl std::fmt::Display for Duckdb {
     }
 }
 
-/// The type a column of each primitive has when DuckDB reads a graph fossil
+/// The type a column of each primitive has when `DuckDB` reads a graph fossil
 /// wrote: every primitive is stored as one `GraphAr` type whatever the source
 /// handed the run (`fossil_sinks::graphar`), so a host can say a graph's column
 /// types before the run. It is not the inverse of the read below: an hour and an
@@ -62,9 +62,9 @@ impl From<Primitive> for Duckdb {
     }
 }
 
-/// The only DuckDB → [`Primitive`] table in the tree. It reads the type by its
+/// The only `DuckDB` → [`Primitive`] table in the tree. It reads the type by its
 /// name, case-blind and without its parameters (`DECIMAL(18,3)` is a
-/// `DECIMAL`), and the names are DuckDB's `LogicalTypeId` spellings, the ones
+/// `DECIMAL`), and the names are `DuckDB`'s `LogicalTypeId` spellings, the ones
 /// `DESCRIBE` prints.
 ///
 /// The unsigned integers are outside, as they were when this was a table of
@@ -110,7 +110,7 @@ mod tests {
         assert_eq!(read("DATE"), Some(Primitive::DATE));
     }
 
-    /// Every one of DuckDB's instants is a `Time<DateTime>`, and the order they
+    /// Every one of `DuckDB`'s instants is a `Time<DateTime>`, and the order they
     /// are listed in decides nothing: `TIMESTAMP WITH TIME ZONE` is what
     /// `read_csv_auto` infers for an ISO-8601 string with an offset, how
     /// LDBC-SNB dates every row it ships.

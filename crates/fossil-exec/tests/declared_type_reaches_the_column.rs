@@ -6,7 +6,7 @@
 //! from another. A graph's schema is its program's and does not change with
 //! the files it was built from, so the writer stores each primitive as one
 //! `GraphAr` type (`fossil_sinks::graphar::layout`, `stored_type`), and
-//! `fossil_graph_schema::Duckdb::from` says what DuckDB reads it as before
+//! `fossil_graph_schema::Duckdb::from` says what `DuckDB` reads it as before
 //! anything has run. Every assertion here reads the file with plain SQL and
 //! never through the writer's own types.
 
@@ -85,7 +85,7 @@ fn written(ran: &native::Written, label: &str) -> HashMap<String, (String, Strin
                 graphar_info::Cardinality::Single => on_disk,
                 _ => on_disk
                     .strip_suffix("[]")
-                    .map_or(on_disk.clone(), str::to_owned),
+                    .map_or_else(|| on_disk.clone(), str::to_owned),
             };
             (p.name.clone(), (p.data_type.to_string(), on_disk))
         })
@@ -187,7 +187,7 @@ id,n,x,ok,y,d,t,s
 1,7,1.5,true,v1999,v1999-01-02,v1999-01-02 03:04:05,hi
 ";
 
-/// **What a host is told a column will be is what DuckDB reads.** Each
+/// **What a host is told a column will be is what `DuckDB` reads.** Each
 /// primitive's column, written by a run, is the type `Duckdb::from` names.
 #[test]
 fn every_primitive_is_written_as_duckdb_is_told() {

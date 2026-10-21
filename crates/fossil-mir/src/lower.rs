@@ -51,7 +51,7 @@
 //! forbidden read added HERE leaves the whole of that crate green.
 
 use fossil_graph_schema::Cardinality as GsCardinality;
-use fossil_graph_schema::{GraphSchema, Primitive, local_name};
+use fossil_graph_schema::{GraphSchema, Primitive, Term, local_name};
 use fossil_hir::body::{ExprId, HirBody, body, mapping_cst_node};
 use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::{DefMap, def_map};
@@ -461,9 +461,11 @@ fn emit_edges<'db>(
                         // The type the shape declares, not the value's: the
                         // checker held the value to it, and the graph is
                         // written in the program's types whatever the source
-                        // held (`Integer <: Float` writes a `Float`).
+                        // held (`Integer <: Float` writes a `Float`). A shape
+                        // that declares none (`.`) leaves the value's.
+                        let declared = prop_def.term.as_ref().and_then(Term::primitive);
                         kept.push(VProp {
-                            ty: Ty::new(db, TyKind::Primitive(prop_def.datatype)),
+                            ty: declared.map_or(p.ty, |d| Ty::new(db, TyKind::Primitive(d))),
                             single_valued: matches!(prop_def.cardinality, GsCardinality::Single),
                             ..p.clone()
                         });

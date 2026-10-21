@@ -26,7 +26,7 @@
 //! | [`WasmWorkspace::semantic_tokens`] | `Array<{ range, kind, modifiers }>` | `textDocument/semanticTokens/full` |
 //!
 //! Beside the workspace, [`profile::JsProfiler`] — `Profiler` to JS — is
-//! `fossil-profile`'s plan, whose queries a host runs on its own DuckDB-WASM.
+//! `fossil-profile`'s plan, whose queries a host runs on its own `DuckDB`-WASM.
 //!
 //! The last four are the [`ide`] module: the `fossil-ide` answers the native
 //! LSP serves, as ordinary method calls, because a tab that already
@@ -906,7 +906,7 @@ pub fn binding_name(file: &str) -> String {
     fossil_syntax::name::binding_name(file)
 }
 
-/// The DuckDB type a column of `primitive` has in a graph fossil wrote, before
+/// The `DuckDB` type a column of `primitive` has in a graph fossil wrote, before
 /// anything has run: `fossil_graph_schema::Duckdb::from`, the writer's one type
 /// per primitive.
 ///

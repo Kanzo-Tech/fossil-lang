@@ -122,7 +122,7 @@ fn a_new_native_reader_is_a_row_and_nothing_else() {
     );
 }
 
-/// A row's `text` names primitives, never a spelling of DuckDB's: what a
+/// A row's `text` names primitives, never a spelling of `DuckDB`'s: what a
 /// `DESCRIBE` type means is `Duckdb`'s, and the row only says which of those
 /// meanings its reader guessed from text.
 #[test]
