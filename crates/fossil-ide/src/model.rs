@@ -3,7 +3,7 @@
 //!
 //! A host that has decided what a graph holds — the sources it reads, the types over them, each
 //! identified by some of its columns, each field from one column, and the relations between them —
-//! passes that [`Model`], and [`write`] answers the program: the types declared under the
+//! passes that [`Model`], and [`write()`] answers the program: the types declared under the
 //! workspace's IRIs, the sources bound, one mapping per type and one more per relation read across a
 //! link file. Everything derived from a model — an IRI, a `@subject`, a quoted column, a join — is
 //! fossil's, because it is knowledge of the language; the decisions are the host's.
@@ -19,7 +19,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// What a host has decided a graph holds: the sources it reads, the types over them and the
-/// relations between them. [`write`] makes it a program.
+/// relations between them. `write` makes it a program.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 pub struct Model {
     /// The files the program binds, in the order it binds them.
