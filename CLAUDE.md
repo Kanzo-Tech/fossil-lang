@@ -152,7 +152,7 @@ crates/
                            function every wasm crate throws a failure through
   fossil-ide/              hover, completion, goto-def, outline — every one asking `def_map`,
                            the one name resolver, and the checker; no index of its own
-  fossil-wasm/             WASM host shim (the workspace under `openProgram` + the tokenizer)
+  fossil-wasm/             WASM host shim (the workspace under `open` + the tokenizer)
   fossil-df-wasm/          `fossil_df::Executor` exposed to JS — the only host that writes a
                            graph, in the browser and in Node. There is no native CLI: it
                            was deleted on 2026-09-30 (`/docs/design/discarded` says what

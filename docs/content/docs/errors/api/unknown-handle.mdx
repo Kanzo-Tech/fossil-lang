@@ -3,7 +3,7 @@ title: The handle names nothing
 description: "`api/unknown-handle` — a workspace call was given a file handle that was closed, or never issued by this workspace."
 ---
 
-The workspace under `openProgram` — the glue's `FossilWorkspace`, which `@fossil-lang/wasm` does not
+The workspace under `open` — the glue's `FossilWorkspace`, which `@fossil-lang/wasm` does not
 export — answers a `FileHandle` from `openFile`, and the calls about one file — `updateFile`,
 `closeFile`, `missingDocuments`, `inputs` and the position queries — take it back. A `FossilProgram`
 holds exactly one, so a host reaches this code only through the glue. A handle that was

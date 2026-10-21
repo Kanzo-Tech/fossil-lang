@@ -17,7 +17,7 @@ pub struct JsProfiler {
     plan: Option<fossil_profile::Profiler>,
 }
 
-fn argument<T: serde::de::DeserializeOwned>(
+pub(crate) fn argument<T: serde::de::DeserializeOwned>(
     name: &str,
     expected: &str,
     value: JsValue,

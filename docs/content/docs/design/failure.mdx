@@ -56,7 +56,7 @@ can take minutes; it has a **signal**, and the person has a Stop. The line is dr
 thing that can wait forever is the person's own patience, and they can end it.
 
 1. **Every async function that crosses a package boundary takes `{ signal }`** and passes it down to
-   every wait it makes. `open`, `mount`, `profile`, `run`, `openProgram`, `engine()` gain one;
+   every wait it makes. `open`, `mount`, `profile`, `run`, `@fossil-lang/wasm`'s `open`, `engine()` gain one;
    `Engine.query`'s options become required, so fossil always passes one. TypeScript still accepts an
    engine that declares fewer parameters, so honouring the signal is the engine's contract, not the
    compiler's.
@@ -192,7 +192,7 @@ cannot prove.
 Each step is one branch and one merge, green.
 
 1. **Accept the page.** Done on 2026-10-01.
-2. **fossil.** `signal` through `open`, `mount`, `profile`, `run`, `openProgram`; the deadline
+2. **fossil.** `signal` through `open`, `mount`, `profile`, `run`, `@fossil-lang/wasm`'s `open`; the deadline
    helper on every host wait and wasm fetch; `storage/host-silent`; object-store client options;
    rejections no longer memoized; the cleanup-replaces-cause sites fixed; the guards; a test per G3
    case. *Breaking:* `Engine.query`'s `signal` is required.

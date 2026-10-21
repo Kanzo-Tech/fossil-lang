@@ -100,6 +100,44 @@ pub fn inputs(db: &dyn Db, file: SourceFile) -> Vec<Input> {
         .collect()
 }
 
+/// A data source a host names before there is a program — the files a person
+/// was asked about: what a program would write in its binding, and nothing else.
+///
+/// `format` is the host's: nothing selects a row by extension
+/// (`fossil_base::providers`), as one extension can name two rows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct DataRef {
+    /// The reference as a program would write it: a name beside the program,
+    /// `@conn/path`, or a URL.
+    pub reference: String,
+    /// The catalogue row that reads it (`csv`).
+    pub format: String,
+    /// The value of its reader option (`|`), verbatim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub option: Option<String>,
+}
+
+/// The inputs `refs` are, as [`inputs`] would answer them for a program at the
+/// workspace's root that bound each under its
+/// [`binding_name`](fossil_syntax::name::binding_name): the same anchor, the
+/// same connections, and no program text written to get there.
+#[must_use]
+pub fn inputs_named(db: &dyn Db, refs: &[DataRef]) -> Vec<Input> {
+    let dir = fossil_base::location::program_dir("");
+    let anchor = fossil_base::location::SourceAnchor::new(&dir, fossil_base::connections(db));
+    refs.iter()
+        .map(|r| Input {
+            role: Role::Data,
+            key: r.reference.clone(),
+            location: anchor.location(&r.reference),
+            connection: anchor.connection(&r.reference),
+            binding: Some(fossil_syntax::name::binding_name(&r.reference)),
+            format: Some(r.format.clone()),
+            option: r.option.clone(),
+        })
+        .collect()
+}
+
 /// What a format can appear as in a program.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -162,7 +200,7 @@ pub fn formats(table: &[&'static fossil_base::Provider]) -> Vec<Format> {
 
 #[cfg(test)]
 mod tests {
-    use super::{FormatKind, Input, Role, formats, inputs};
+    use super::{DataRef, FormatKind, Input, Role, formats, inputs, inputs_named};
 
     #[test]
     fn an_input_keeps_what_the_program_wrote_and_resolves_where_it_is_read() {
@@ -201,6 +239,35 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn a_named_source_is_the_input_a_program_at_the_root_binding_it_would_read() {
+        let mut db = fossil_base::test_support::new_db();
+        fossil_base::set_connections(
+            &mut db,
+            [("lake".to_string(), "s3://bucket/".to_string())].into(),
+        );
+        let file = fossil_base::SourceFile::new(
+            &db,
+            "_lake_users := io.csv(\"@lake/users.csv\", delimiter = \"|\")\n\
+             orders := io.parquet(\"orders.parquet\")\n"
+                .to_string(),
+            String::new(),
+        );
+        let named = [
+            DataRef {
+                reference: "@lake/users.csv".into(),
+                format: "csv".into(),
+                option: Some("|".into()),
+            },
+            DataRef {
+                reference: "orders.parquet".into(),
+                format: "parquet".into(),
+                option: None,
+            },
+        ];
+        assert_eq!(inputs_named(&db, &named), inputs(&db, file));
     }
 
     #[test]

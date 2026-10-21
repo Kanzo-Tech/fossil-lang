@@ -1,7 +1,7 @@
 {
   "name": "@fossil-lang/codemirror-fossil",
   "version": "0.0.0-development",
-  "description": "The fossil language layer for CodeMirror 6: fossil(program) over @fossil-lang/wasm's openProgram — highlighting from the compiler's own lexer, diagnostics from its checker (→ @codemirror/lint), and hover, completion and go-to-definition from the same fossil-ide answers the checker's own workspace gives. Extensions only — it composes into any editor rather than being one.",
+  "description": "The fossil language layer for CodeMirror 6: fossil(program) over @fossil-lang/wasm's open — highlighting from the compiler's own lexer, diagnostics from its checker (→ @codemirror/lint), and hover, completion and go-to-definition from the same fossil-ide answers the checker's own workspace gives. Extensions only — it composes into any editor rather than being one.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

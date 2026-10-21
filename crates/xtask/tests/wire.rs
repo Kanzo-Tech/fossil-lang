@@ -47,6 +47,7 @@ fn the_wire() {
     generator.subschema_for::<fossil_wasm::SemanticToken>();
     generator.subschema_for::<fossil_hir::documents::MissingDocument>();
     generator.subschema_for::<fossil_hir::lineage::Input>();
+    generator.subschema_for::<fossil_hir::lineage::DataRef>();
     generator.subschema_for::<fossil_hir::lineage::Format>();
     generator.subschema_for::<fossil_base::sources::InferredDescriptor>();
     generator.subschema_for::<fossil_profile::Source>();

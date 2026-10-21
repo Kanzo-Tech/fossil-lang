@@ -2,13 +2,14 @@
  * @fossil-lang/wasm — the fossil compiler front end in the browser, over the `fossil-wasm`
  * wasm-bindgen artefacts.
  *
- * - {@link openProgram} — one program open for an editor: the incremental workspace, the documents
+ * - {@link open} — one program open for an editor: the incremental workspace, the documents
  *   it names read through the host, and the position queries `@fossil-lang/codemirror-fossil`'s
  *   `fossil(program)` draws from.
  * - {@link inputs} — what a program reads, with no editor: the `ts.preProcessFile` of fossil.
  * - {@link formats} and {@link formatFor} — the formats this build reads, and which reads a file.
- * - {@link profile} — what some sources are, on the host's engine, before there is a program;
- *   `program.describe` is the same over a program's own inputs. {@link runProfiler} is its loop.
+ * - {@link profile} — what the sources a host names are, on the host's engine, before there is a
+ *   program; `program.describe` is the same over a program's own inputs. {@link runProfiler} is its
+ *   loop.
  * - {@link infer} — the model a profile implies, and each question it took a default for.
  * - {@link write} — the program a model implies: what a host decided a graph holds, as Fossil;
  *   `program.mapping()` is the RML mapping its types describe, before any run.
@@ -16,7 +17,7 @@
  * - {@link bindingName} — the binding name a file becomes in a program, one `IDENT`.
  * - {@link initFossilWasm} — Node only: hand over the `.wasm` bytes. Every door boots itself.
  *
- *   const program = await openProgram('job.fossil', { host, text });
+ *   const program = await open('job.fossil', { host, text });
  *   const extensions = fossil(program, { onNavigate });
  *   const profiled = await program.describe({ engine, options: { depth: 'types' } });
  */
@@ -28,10 +29,10 @@
 // from the one the functions use (the crash the codemirror tokenizer hit on the main thread).
 export { initFossilWasm, type InitInput } from './load.js';
 export { formatFor, formats } from './format.js';
-export { inputs, openProgram } from './program.js';
-export type { FossilProgram, OpenProgramOptions } from './program.js';
+export { inputs, open, profile } from './program.js';
+export type { FossilProgram, OpenOptions } from './program.js';
 export { runProfiler, type ProfileRows } from './profile.js';
-export { profile, type ProfileIO } from './describe.js';
+export type { ProfileIO } from './describe.js';
 export { bindingName } from './name.js';
 export { infer } from './infer.js';
 export { write } from './write.js';

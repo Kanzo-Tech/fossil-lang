@@ -24,10 +24,10 @@ markup, at the lowest precedence CodeMirror has. The editor is the host's decisi
 
 ```ts
 import { fossil } from '@fossil-lang/codemirror-fossil';
-import { openProgram } from '@fossil-lang/wasm';
+import { open } from '@fossil-lang/wasm';
 
 // `host` is the host's `Host`: the connection map, and credentials to read what the program names.
-const program = await openProgram('hello.fossil', { host, text });
+const program = await open('hello.fossil', { host, text });
 
 const extensions = fossil(program, { onNavigate: (target) => console.log(target) });
 ```
@@ -44,7 +44,7 @@ and the linter then ask by `(line, character)` about exactly the text on screen.
 the failure on the first character by its code (`internal/bug` when fossil did not raise it) and
 hands `onDiagnostics` that one diagnostic — `uncheckedDiagnostic(uri, cause)` — through the same
 call as any batch. A host counting diagnostics for a panel or a badge wraps nothing; a failure
-before there is a linter, `openProgram` rejecting, is reported with the same
+before there is a linter, `open` rejecting, is reported with the same
 `uncheckedDiagnostic`.
 
 `@kanzo-tech/ui`'s `CodeEditor` takes exactly that as its `extensions` prop and

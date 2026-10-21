@@ -31,9 +31,9 @@
  *
  * ```ts
  * import { fossil } from '@fossil-lang/codemirror-fossil';
- * import { openProgram } from '@fossil-lang/wasm';
+ * import { open } from '@fossil-lang/wasm';
  *
- * const program = await openProgram('hello.fossil', { host, text });
+ * const program = await open('hello.fossil', { host, text });
  * const extensions = fossil(program, { onNavigate: (target) => report(target) });
  * ```
  *
@@ -55,7 +55,7 @@
  * as one diagnostic, {@link uncheckedDiagnostic}, through the same call as every successful batch.
  * A host that renders its own panel or a "Valid" badge from `onDiagnostics` therefore needs no
  * `try` around `diagnostics` to learn the check failed, and no copy of it to say so: a failure
- * before there is a linter at all — `openProgram` rejecting — is reported with the same
+ * before there is a linter at all — `open` rejecting — is reported with the same
  * `uncheckedDiagnostic(uri, cause)`.
  *
  * ## Why one workspace, and not one per rate

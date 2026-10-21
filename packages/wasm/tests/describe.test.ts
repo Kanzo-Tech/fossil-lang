@@ -2,7 +2,8 @@ import "./boot.js";
 
 import type { Access, Input, Scope, StorageCredential, Table } from "@fossil-lang/types";
 import { describe, expect, it, vi } from "vitest";
-import { profile, type ProfileIO } from "../src/index.js";
+import { profileInputs as profile, type ProfileIO } from "../src/describe.js";
+import { profile as profileNamed } from "../src/index.js";
 
 /** Rows as the columns an engine answers in. */
 function tableOf(rows: readonly Record<string, unknown>[]): Table {
@@ -79,6 +80,30 @@ describe("profile", () => {
   }
 
   const describes = (sql: string[]) => sql.filter((s) => s.startsWith("DESCRIBE"));
+
+  it("reads the sources a host names as a program at the root binding each would", async () => {
+    const { io, sql } = fakeIO(async () => [{ column_name: "id", column_type: "BIGINT" }]);
+    const { profile: profiled, descriptors } = await profileNamed(
+      [{ reference: "@w/users.csv", format: "csv", option: "|" }],
+      io,
+    );
+    expect(profiled.sources.map((s) => [s.binding, s.format, s.option])).toEqual([["_w_users", "csv", "|"]]);
+    expect(descriptors.map((d) => d.key)).toEqual(["@w/users.csv"]);
+    expect(describes(sql)[0]).toContain("s3://bucket/w/users.csv");
+  });
+
+  it("refuses two references that make one binding", async () => {
+    const { io } = fakeIO(async () => []);
+    await expect(
+      profileNamed(
+        [
+          { reference: "a.csv", format: "csv" },
+          { reference: "a.json", format: "json" },
+        ],
+        io,
+      ),
+    ).rejects.toMatchObject({ code: "api/invalid-argument" });
+  });
 
   it("mounts each connection once, describes the s3:// location and drops the secret after", async () => {
     const { io, credentials, sql } = fakeIO(async (text) =>

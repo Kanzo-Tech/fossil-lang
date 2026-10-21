@@ -9,8 +9,8 @@
  * sample. Every source in the answer is named by its binding, the name the program writes. The plan is Rust, the same one `fossil-df`'s tests run on native DuckDB, so only the
  * engine differs. The engine is the host's, which is why DuckDB-WASM is not a peer.
  *
- * `FossilProgram.describe` is this over the program's own inputs; {@link profile} is it over sources
- * a host names before there is a program — the files an assistant is shown.
+ * {@link profileInputs} is it over inputs: `FossilProgram.describe` passes the program's own, and
+ * `profile` in `./program.ts` the ones the sources a host names are, before there is a program.
  */
 
 import { mount, type Mount } from "@fossil-lang/storage";
@@ -85,7 +85,7 @@ function rowsOf(table: Awaited<ReturnType<Engine["query"]>>): ProfileRows {
  * @throws {FossilError} only what giving the credentials back raised; an abort rejects with the
  *   signal's reason.
  */
-export async function profile(inputs: readonly Input[], io: ProfileIO): Promise<Profiled> {
+export async function profileInputs(inputs: readonly Input[], io: ProfileIO): Promise<Profiled> {
   const { signal } = io;
   const native = inputs.filter(isNative);
   const undescribed: UndescribedSource[] = [];

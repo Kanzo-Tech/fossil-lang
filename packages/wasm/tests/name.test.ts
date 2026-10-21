@@ -6,13 +6,13 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
-import { bindingName, initFossilWasm, openProgram, type FossilProgram } from '../src/index.js';
+import { bindingName, initFossilWasm, open, type FossilProgram } from '../src/index.js';
 
 let tokenize: FossilProgram['tokenize'];
 
 beforeAll(async () => {
   await initFossilWasm(await readFile(fileURLToPath(new URL('../pkg/fossil_wasm_bg.wasm', import.meta.url))));
-  ({ tokenize } = await openProgram('t.fossil', { host: { connections: async () => ({}), credentials: async () => [] } }));
+  ({ tokenize } = await open('t.fossil', { host: { connections: async () => ({}), credentials: async () => [] } }));
 });
 
 describe('@fossil-lang/wasm — bindingName', () => {
