@@ -103,9 +103,9 @@
    one adapter that calls it. *)
 
 (* `text` names the primitives a reader infers from TEXT that the run reads
-   as text, so a DESCRIBE answering a type of one of them means `string`. What
-   a DESCRIBE type means is not this file's: it is `Duckdb`'s, beside `Xsd` in
-   `fossil-graph-schema`, read by the type's name. JSON has six types and no
+   as text, so a column the reader answers with a type of one of them means
+   `string`. What a column's type means is not this file's: the engine answers
+   it in Arrow, and `fossil_profile::primitive` reads the `DataType`. JSON has six types and no
    date: `read_json_auto` calls `"1845-03-27"` a DATE and
    `"2010-02-14T20:30:21"` a TIMESTAMP, and the run's reader — arrow-json, as
    Spark's (`inferTimestamp` off by default) and Polars' do — keeps a JSON

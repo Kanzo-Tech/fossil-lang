@@ -6,12 +6,24 @@
 
 use std::collections::HashSet;
 
+use duckdb::arrow::datatypes::Fields;
 use fossil_base::Db;
 use fossil_hir::lineage::Input;
 use fossil_profile::{Options, Rows, Source};
 
-/// One query's answer on `conn`, every cell as text: the profiler's queries
-/// cast what they select to `VARCHAR`, and a `DESCRIBE`'s columns are text.
+/// One query's answer on `conn`: the fields `DuckDB` hands it over in, and
+/// every cell as text — the profiler's queries cast what they select to
+/// `VARCHAR`.
+fn answer(conn: &duckdb::Connection, sql: &str) -> duckdb::Result<(Fields, Rows)> {
+    let fields = conn
+        .prepare(sql)?
+        .query_arrow([])?
+        .get_schema()
+        .fields()
+        .clone();
+    Ok((fields, rows(conn, sql)?))
+}
+
 fn rows(conn: &duckdb::Connection, sql: &str) -> duckdb::Result<Rows> {
     let mut stmt = conn.prepare(sql)?;
     let mut rows = stmt.query([])?;
@@ -59,7 +71,7 @@ pub(crate) fn profile_and_register(db: &mut dyn Db, sources: &[Input]) {
     }
     let conn = duckdb::Connection::open_in_memory().expect("an in-memory DuckDB");
     let profile = fossil_profile::run(wanted, Options::TYPES, |sql| {
-        rows(&conn, sql).map_err(|e| e.to_string())
+        answer(&conn, sql).map_err(|e| e.to_string())
     });
     for source in profile.sources {
         fossil_base::describe_columns(db, source.descriptor);

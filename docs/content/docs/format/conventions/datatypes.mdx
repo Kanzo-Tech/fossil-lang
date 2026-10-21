@@ -14,8 +14,8 @@ those, and the mapping carries the rest.
 
 **A property is written as the one GraphAr type of its primitive**, whatever type the source handed
 the run. A graph's schema is its program's, so it does not change with the files the graph was built
-from, and a host can say what each column will be before anything has run
-(`fossil_graph_schema::Duckdb::from`, `duckdbTypeOf` in `@fossil-lang/wasm`).
+from, and what each column will be is known before anything has run: the table below, read off the
+GraphAr type by any reader of the format.
 
 | the property is a | it is written as | DuckDB reads it as | and |
 | --- | --- | --- | --- |

@@ -9,8 +9,7 @@ Keep it under 200 lines, rules-not-context.
   written here and absent from `crates/fossil-syntax` is work outstanding, not an error in
   the file.
 - `catalogue.bnf` — WHICH NAMES EXIST, both halves: the `io.` constructors and every stdlib
-  function with its signature and lowering, plus the DuckDB type table both profiling
-  hosts read. Generated from, not compared against — `cargo xtask catalogue` writes every
+  function with its signature and lowering, and each reader's `text` clause. Generated from, not compared against — `cargo xtask catalogue` writes every
   projection and no Rust or TS states a row a second time. Adding a function is a line here.
   `CONTRIBUTING.md` has the list and the round-trip guard.
 - `docs/` — the whole of the documentation, and there is no second site.
@@ -149,8 +148,9 @@ crates/
                            DataFusion to count what it wrote; it links no engine, so it is in the
                            wasm closure. There is no native language server: it was deleted on
                            2026-10-12 (`/docs/design/discarded`). `Options::TYPES` is one
-                           `DESCRIBE` a source, what the editor asks for. `generated.rs` is
-                           `catalogue.bnf`'s reader and type table
+                           query of a source's columns, typed by the Arrow fields of its answer
+                           (`primitive`), what the editor asks for. `generated.rs` is
+                           `catalogue.bnf`'s `text` clauses
   fossil-graph-schema/     the canonical graph-schema — the shared substrate contract — and the
                            error catalogue: `Problem`, `Failure`, and (feature `js`) the one
                            function every wasm crate throws a failure through
@@ -222,8 +222,8 @@ docs/                      Next.js + fumadocs, and ALL of the prose: the book, t
                            `docs/CLAUDE.md` has the editorial rules
 
 grammar.bnf                the syntax, normative, and ahead of the parser on purpose
-catalogue.bnf              which names exist — the `io.` rows, the stdlib rows and the
-                           DuckDB type table. Every projection is generated; no Rust or TS
+catalogue.bnf              which names exist — the `io.` rows and the stdlib rows. Every
+                           projection is generated; no Rust or TS
                            states a row twice
 ```
 

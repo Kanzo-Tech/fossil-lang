@@ -4,13 +4,15 @@
 //! what a model may write once the sources are profiled — `fossil_ide::constrain`, whose
 //! `vocabularyOf` and `subjectOf` are the names and the identities a host computes for it.
 
+use arrow_schema::Fields;
 use fossil_graph_schema::js::invalid_argument;
 use fossil_profile::{Options, Rows, Source};
 use wasm_bindgen::prelude::*;
 
+use crate::arrow::JsField;
 use crate::to_value;
 
-/// The plan over some sources: hand out a query, take its rows, until there
+/// The plan over some sources: hand out a query, take its answer, until there
 /// are none; then the profile.
 #[wasm_bindgen(js_name = Profiler)]
 #[derive(Debug)]
@@ -65,23 +67,31 @@ impl JsProfiler {
         )
     }
 
-    /// The rows query `id` answered, every cell its text or `null`.
+    /// What query `id` answered: the fields of the answer, apache-arrow's, and
+    /// its rows, every cell its text or `null`.
     ///
     /// # Errors
     ///
-    /// `api/invalid-argument` when `rows` is not an array of arrays of text or
-    /// `null`; `internal/bug` after [`Self::finish`].
+    /// `api/invalid-argument` when `answer` is not that shape, or a field's
+    /// type is not an Arrow type; `internal/bug` after [`Self::finish`].
     pub fn feed(
         &mut self,
         id: u32,
-        #[wasm_bindgen(unchecked_param_type = "(string | null)[][]")] rows: JsValue,
+        #[wasm_bindgen(unchecked_param_type = "ProfileAnswer")] answer: JsValue,
     ) -> Result<(), JsValue> {
-        let rows: Rows = argument(
-            "rows",
-            "an array of rows, each an array of text or null",
-            rows,
-        )?;
-        self.plan_mut()?.feed(id, &rows);
+        #[derive(serde::Deserialize)]
+        struct Answer {
+            fields: Vec<JsField>,
+            rows: Rows,
+        }
+        const EXPECTED: &str = "the fields of an Arrow answer and its rows of text or null";
+        let Answer { fields, rows } = argument("answer", EXPECTED, answer)?;
+        let fields: Fields = fields
+            .into_iter()
+            .map(JsField::read)
+            .collect::<Result<_, _>>()
+            .map_err(|e| invalid_argument("answer", EXPECTED, Some(JsValue::from_str(&e))))?;
+        self.plan_mut()?.feed(id, &fields, &rows);
         Ok(())
     }
 

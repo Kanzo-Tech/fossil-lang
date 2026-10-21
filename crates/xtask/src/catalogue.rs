@@ -896,21 +896,21 @@ fn primitive_path(wire: &str) -> String {
     format!("Primitive::{name}")
 }
 
-/// `fossil-profile`: what a column one native reader `DESCRIBE`s means.
+/// `fossil-profile`: what a column one native reader answers means.
 #[must_use]
 pub fn emit_profile(cat: &Catalogue) -> String {
     let mut out = header(
-        "//! What a `DuckDB` `DESCRIBE` column type means on the lattice, per\n\
-         //! reader — the `text` clauses of `catalogue.bnf`.",
+        "//! What a column's Arrow type means on the lattice, per reader — the\n\
+         //! `text` clauses of `catalogue.bnf`.",
     );
     out.push_str(
-        "use fossil_base::NativeReader;\nuse fossil_graph_schema::{Duckdb, Primitive};\n\n\
-         /// The [`Primitive`] a column one native reader `DESCRIBE`s means: what\n\
-         /// [`Duckdb`] reads the type as, unless its row declares that primitive\n\
-         /// `text`, one the reader inferred from text that the run reads as text.\n\
-         /// A type outside the lattice is read as text too.\n\
-         pub fn read_primitive(reader: NativeReader, t: &str) -> Primitive {\n\
-         \x20   let read = Primitive::try_from(&Duckdb::new(t)).unwrap_or(Primitive::STRING);\n\
+        "use arrow_schema::DataType;\nuse fossil_base::NativeReader;\nuse fossil_graph_schema::Primitive;\n\n\
+         /// The [`Primitive`] a column one native reader answers means: what\n\
+         /// [`primitive`](crate::primitive) reads its type as, unless its row\n\
+         /// declares that primitive `text`, one the reader inferred from text that\n\
+         /// the run reads as text. A type outside the lattice is read as text too.\n\
+         pub fn read_primitive(reader: NativeReader, t: &DataType) -> Primitive {\n\
+         \x20   let read = crate::primitive(t).unwrap_or(Primitive::STRING);\n\
          \x20   let text = match reader {\n",
     );
     for row in &cat.rows {

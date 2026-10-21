@@ -90,10 +90,10 @@ Each is a PROJECTION of the same rows, not a copy of the file: `fossil-base` get
 the rows whose behaviour the compiler can link, `fossil_hir::providers` the ones
 needing a shape-language parser, `fossil-hir` the stdlib table the checker
 resolves every call against, `profile` the ones with a table function to
-`DESCRIBE` through (`io.rdf` has none), `executor` every row that reads data
+describe through (`io.rdf` has none), `executor` every row that reads data
 (`io.rdf` included — the host fetches its bytes like any other source), and
-`fossil-profile` a reader's `text` clause. What a DuckDB type means is not a row:
-it is `fossil_graph_schema::Duckdb`, beside `Xsd`. Which projection a row lands in
+`fossil-profile` a reader's `text` clause. What a column's type means is not a row:
+it is the Arrow type its engine answers, read by `fossil_profile::primitive`. Which projection a row lands in
 is derived from its clauses, never configured.
 
 The MDX one had a SECOND source until the move — `fossil-hir`'s

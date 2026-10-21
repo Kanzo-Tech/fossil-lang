@@ -5,7 +5,8 @@
 
 use std::fmt::Write as _;
 
-use fossil_graph_schema::{Duckdb, Primitive};
+use duckdb::arrow::datatypes::Fields;
+use fossil_graph_schema::Primitive;
 use fossil_profile::{ColumnRef, Inclusion, Options, Profile, Rows, Source};
 
 /// The host's half: a query on a `duckdb::Connection`, its rows as text.
@@ -24,10 +25,17 @@ fn rows(conn: &duckdb::Connection, sql: &str) -> duckdb::Result<Rows> {
     Ok(out)
 }
 
+/// The fields of a query's answer, the Arrow types `DuckDB` hands it over in.
+fn fields(conn: &duckdb::Connection, sql: &str) -> duckdb::Result<Fields> {
+    let mut stmt = conn.prepare(sql)?;
+    Ok(stmt.query_arrow([])?.get_schema().fields().clone())
+}
+
 fn profile(sources: impl IntoIterator<Item = Source>, options: Options) -> Profile {
     let conn = duckdb::Connection::open_in_memory().expect("in-memory duckdb");
     fossil_profile::run(sources, options, |sql| {
-        rows(&conn, sql).map_err(|e| e.to_string())
+        let answer = || Ok::<_, duckdb::Error>((fields(&conn, sql)?, rows(&conn, sql)?));
+        answer().map_err(|e| e.to_string())
     })
 }
 
@@ -211,12 +219,12 @@ fn a_sample_reads_the_counts_from_the_first_rows_and_says_so() {
     assert!(rows.sample.is_empty(), "shown: 0 keeps no rows");
 }
 
-/// Every spelling `DuckDB` has for an instant maps to an instant.
+/// Every type `DuckDB` has for an instant maps to an instant.
 ///
-/// **`Duckdb`'s names are derived from `DuckDB` and not from memory**: they are
-/// asserted against the `DESCRIBE` of a value `DuckDB` itself typed, so a
-/// version that renames a type fails here rather than silently widening a
-/// column to `String`. That widening is what this test exists for —
+/// **What `DuckDB` answers is asserted, not remembered**: each value is typed
+/// by `DuckDB` itself and handed over in Arrow, as every host receives it, so a
+/// version that answers a type differently fails here rather than silently
+/// widening a column to `String`. That widening is what this test exists for —
 /// `read_csv_auto` infers `TIMESTAMP WITH TIME ZONE` for any ISO-8601 string
 /// carrying an offset, and the checker compares this answer against the
 /// shape's declared `Primitive`. So a missing arm is not a slow path: it makes
@@ -247,12 +255,12 @@ fn every_duckdb_instant_is_an_instant() {
         ("true", Primitive::Bool),
         ("'x'", Primitive::STRING),
     ] {
-        let described = rows(&conn, &format!("DESCRIBE SELECT {sql} AS v")).expect("describe runs");
-        let declared = described[0][1].clone().expect("a type");
+        let answered = fields(&conn, &format!("SELECT {sql} AS v")).expect("the query runs");
+        let declared = answered[0].data_type();
         assert_eq!(
-            Primitive::try_from(&Duckdb::new(declared.as_str())).ok(),
+            fossil_profile::primitive(declared).ok(),
             Some(expected),
-            "DuckDB types `{sql}` as `{declared}`, which must not widen to String"
+            "DuckDB answers `{sql}` as `{declared}`, which must not widen to String"
         );
     }
 }

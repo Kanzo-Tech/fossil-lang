@@ -17,11 +17,14 @@ import { mount, type Mount } from "@fossil-lang/storage";
 import {
   FossilError,
   isFossilError,
+  type DataType,
   type Engine,
+  type Field,
   type Host,
   type Input,
   type Profile,
   type Profiled,
+  type ProfileAnswer,
   type ProfileOptions,
   type ProfileSource,
   type UndescribedSource,
@@ -29,7 +32,7 @@ import {
 import { attachCause } from "@fossil-lang/types/internal";
 
 import { NATIVE_ROWS, type NativeRow } from "./catalogue.generated.js";
-import { runProfiler, type ProfileRows } from "./profile.js";
+import { runProfiler } from "./profile.js";
 
 /** A data input a host can DESCRIBE — the rows `catalogue.bnf` gives a `reads native <fn>`, bound to
  *  a name. A materialised row (`io.rdf`) takes its schema from its shape instead. */
@@ -54,7 +57,7 @@ export interface ProfileIO {
    */
   etag?(source: Input): Promise<string> | string;
   /**
-   * How far the profile goes: `{ depth: "types" }` is one `DESCRIBE` a source, what an editor
+   * How far the profile goes: `{ depth: "types" }` is one query a source, what an editor
    * needs; absent, the whole profile, with `sample` rows read for the counts and `shown` kept.
    */
   options?: ProfileOptions;
@@ -62,15 +65,45 @@ export interface ProfileIO {
   signal?: AbortSignal;
 }
 
-/** An engine's answer as the plan reads it: every cell its text, or `null`. */
-function rowsOf(table: Awaited<ReturnType<Engine["query"]>>): ProfileRows {
+/** A field as a plain object: an apache-arrow type keeps its `typeId` and parameters on the class,
+ *  where the module's reader does not look. */
+function fieldOf({ name, nullable, type }: Field): Field {
+  return { name, nullable, type: typeOf(type) };
+}
+
+function typeOf(t: DataType): DataType {
+  const { typeId, bitWidth, isSigned, precision, scale, unit, timezone, byteWidth, listSize, keysSorted, mode } = t;
+  return {
+    typeId,
+    bitWidth,
+    isSigned,
+    precision,
+    scale,
+    unit,
+    timezone,
+    byteWidth,
+    listSize,
+    keysSorted,
+    mode,
+    typeIds: t.typeIds === undefined ? undefined : Array.from(t.typeIds),
+    children: t.children?.map(fieldOf),
+    dictionary: t.dictionary === undefined ? undefined : typeOf(t.dictionary),
+    indices: t.indices === undefined ? undefined : typeOf(t.indices),
+  };
+}
+
+/** An engine's answer as the plan reads it: its fields, and every cell its text or `null`. */
+function answerOf(table: Awaited<ReturnType<Engine["query"]>>): ProfileAnswer {
   const columns = table.schema.fields.map((f) => table.getChild(f.name));
-  return Array.from({ length: table.numRows }, (_, i) =>
-    columns.map((column) => {
-      const value: unknown = column?.get(i);
-      return value === null || value === undefined ? null : String(value);
-    }),
-  );
+  return {
+    fields: table.schema.fields.map(fieldOf),
+    rows: Array.from({ length: table.numRows }, (_, i) =>
+      columns.map((column) => {
+        const value: unknown = column?.get(i);
+        return value === null || value === undefined ? null : String(value);
+      }),
+    ),
+  };
 }
 
 /**
@@ -128,7 +161,7 @@ export async function profile(inputs: readonly Input[], io: ProfileIO): Promise<
     const sources = readable.filter((s): s is ProfileSource => s !== undefined);
     const profiled = await runProfiler(
       sources,
-      async (sql) => rowsOf(await io.engine.query(sql, { signal: signal ?? new AbortController().signal })),
+      async (sql) => answerOf(await io.engine.query(sql, { signal: signal ?? new AbortController().signal })),
       { options: io.options, signal },
     );
     const described = new Set(profiled.sources.map((s) => s.binding));

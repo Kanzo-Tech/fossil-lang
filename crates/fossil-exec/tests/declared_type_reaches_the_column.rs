@@ -5,10 +5,9 @@
 //! values of one property can arrive as `Int64` from one file and `Float64`
 //! from another. A graph's schema is its program's and does not change with
 //! the files it was built from, so the writer stores each primitive as one
-//! `GraphAr` type (`fossil_sinks::graphar::layout`, `stored_type`), and
-//! `fossil_graph_schema::Duckdb::from` says what `DuckDB` reads it as before
-//! anything has run. Every assertion here reads the file with plain SQL and
-//! never through the writer's own types.
+//! `GraphAr` type (`fossil_sinks::graphar::layout`, `stored_type`). Every
+//! assertion here reads the file with plain SQL on `DuckDB`, takes the Arrow
+//! type it answers each column in, and never looks at the writer's own types.
 
 // The fixtures use interpolation syntax (`"…{Order.customer}"`), which clippy
 // mistakes for format args in a plain string literal.
@@ -16,7 +15,9 @@
 
 use std::collections::HashMap;
 
-use fossil_graph_schema::{Duckdb, Primitive};
+use duckdb::arrow::datatypes::DataType;
+use fossil_graph_schema::{OutsideLattice, Primitive};
+use fossil_profile::primitive;
 
 #[path = "support/native.rs"]
 mod native;
@@ -44,9 +45,10 @@ order_id,customer,amount
 ";
 
 /// Run the fixture and give back `(declared, on_disk)` for `total`: the
-/// information file's `data_type`, and what `DuckDB` says the Parquet column is —
-/// read with plain SQL and never through the writer's own types.
-fn declared_and_on_disk(program: &str) -> (String, String) {
+/// information file's `data_type`, and the Arrow type `DuckDB` answers the
+/// Parquet column in — read with plain SQL and never through the writer's own
+/// types.
+fn declared_and_on_disk(program: &str) -> (String, DataType) {
     let dir = native::write_dir(&[
         ("shape.shex", SHAPE),
         ("data/orders.csv", ORDERS),
@@ -58,34 +60,34 @@ fn declared_and_on_disk(program: &str) -> (String, String) {
 }
 
 /// Every property of vertex type `label`: the information file's `data_type`,
-/// and what `DuckDB` says the Parquet column is.
-fn written(ran: &native::Written, label: &str) -> HashMap<String, (String, String)> {
+/// and the Arrow type `DuckDB` answers the Parquet column in.
+fn written(ran: &native::Written, label: &str) -> HashMap<String, (String, DataType)> {
     let root = ran.materialise();
     let conn = duckdb::Connection::open_in_memory().expect("duckdb");
     let path = root.path().join(ran.chunk(label));
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT * FROM read_parquet('{}') LIMIT 0",
+            path.display()
+        ))
+        .expect("the chunk is read");
+    let schema = stmt
+        .query_arrow([])
+        .expect("the chunk is read")
+        .get_schema();
     ran.vertex(label).property_groups[0]
         .properties
         .iter()
         .map(|p| {
-            let on_disk = conn
-                .query_row(
-                    &format!(
-                        "SELECT column_type FROM (DESCRIBE SELECT * FROM \
-                         read_parquet('{}')) WHERE column_name = '{}'",
-                        path.display(),
-                        p.name,
-                    ),
-                    [],
-                    |row| row.get::<_, String>(0),
-                )
+            let field = schema
+                .field_with_name(&p.name)
                 .expect("the column is in the file");
-            // A set is a list of its element (`T[]`), which is the property's
+            // A set is a list of its element, which is the property's
             // cardinality and not its type.
-            let on_disk = match p.cardinality {
-                graphar_info::Cardinality::Single => on_disk,
-                _ => on_disk
-                    .strip_suffix("[]")
-                    .map_or_else(|| on_disk.clone(), str::to_owned),
+            let on_disk = match (p.cardinality, field.data_type()) {
+                (graphar_info::Cardinality::Single, t) => t.clone(),
+                (_, DataType::List(element)) => element.data_type().clone(),
+                (_, t) => panic!("`{}` holds a set, and `{t}` is not a list", p.name),
             };
             (p.name.clone(), (p.data_type.to_string(), on_disk))
         })
@@ -114,7 +116,7 @@ Spending : Spend from PerCustomer
         declared, "double",
         "the information file declares the property's type"
     );
-    assert_eq!(on_disk, Duckdb::from(Primitive::Float).as_str());
+    assert_eq!(primitive(&on_disk), Ok(Primitive::Float), "{on_disk}");
 }
 
 /// The same with no `group_by` anywhere: `math.abs` is type-preserving, and
@@ -137,7 +139,7 @@ Spending : Spend from Order
         declared, "double",
         "the information file declares the property's type"
     );
-    assert_eq!(on_disk, Duckdb::from(Primitive::Float).as_str());
+    assert_eq!(primitive(&on_disk), Ok(Primitive::Float), "{on_disk}");
 }
 
 /// With no call at all: the source's `Int64` column is written as the
@@ -160,7 +162,7 @@ Spending : Spend from Order
         declared, "double",
         "the information file declares the property's type"
     );
-    assert_eq!(on_disk, Duckdb::from(Primitive::Float).as_str());
+    assert_eq!(primitive(&on_disk), Ok(Primitive::Float), "{on_disk}");
 }
 
 const EVERY: &str = "\
@@ -187,10 +189,13 @@ id,n,x,ok,y,d,t,s
 1,7,1.5,true,v1999,v1999-01-02,v1999-01-02 03:04:05,hi
 ";
 
-/// **What a host is told a column will be is what `DuckDB` reads.** Each
-/// primitive's column, written by a run, is the type `Duckdb::from` names.
+/// **A graph fossil wrote is profiled as its program declared it.** Each
+/// primitive's column, written by a run and read by `DuckDB`, is answered in an
+/// Arrow type the profiler reads back as that primitive — but for the three the
+/// lattice keeps apart only by meaning: a year is stored as an integer, and a
+/// tagged text as `GraphAr`'s `langString`, a struct no primitive holds.
 #[test]
-fn every_primitive_is_written_as_duckdb_is_told() {
+fn every_primitive_is_profiled_as_it_was_declared() {
     let dir = native::write_dir(&[
         ("shape.shex", EVERY),
         ("data/things.csv", THINGS),
@@ -216,21 +221,21 @@ Things : Thing from Row
     ]);
     let ran = native::run_dir(dir.path(), "things.fossil", &[]).expect("the program runs");
     let written = written(&ran, "Thing");
-    for (name, primitive) in [
-        ("n", Primitive::Integer),
-        ("x", Primitive::Float),
-        ("ok", Primitive::Bool),
-        ("y", Primitive::YEAR),
-        ("d", Primitive::DATE),
-        ("t", Primitive::DATE_TIME),
-        ("s", Primitive::STRING),
-        ("l", Primitive::LANG_STRING),
+    for (name, declared, read) in [
+        ("n", Primitive::Integer, Ok(Primitive::Integer)),
+        ("x", Primitive::Float, Ok(Primitive::Float)),
+        ("ok", Primitive::Bool, Ok(Primitive::Bool)),
+        ("y", Primitive::YEAR, Ok(Primitive::Integer)),
+        ("d", Primitive::DATE, Ok(Primitive::DATE)),
+        ("t", Primitive::DATE_TIME, Ok(Primitive::DATE_TIME)),
+        ("s", Primitive::STRING, Ok(Primitive::STRING)),
+        ("l", Primitive::LANG_STRING, Err(OutsideLattice)),
     ] {
         let (_, on_disk) = &written[name];
         assert_eq!(
-            on_disk,
-            Duckdb::from(primitive).as_str(),
-            "`{name}`, a {primitive}"
+            primitive(on_disk),
+            read,
+            "`{name}`, a {declared}, is `{on_disk}`"
         );
     }
 }
