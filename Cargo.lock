@@ -1696,6 +1696,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "csv-core",
  "datafusion",
  "duckdb",
  "expect-test",
