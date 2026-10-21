@@ -16,9 +16,10 @@ beforeAll(async () => {
 });
 
 describe('@fossil-lang/wasm — bindingName', () => {
-  it('is the file without its extension, held to what an identifier holds', async () => {
+  it('is the file\'s own name, without its folder or extension, held to what an identifier holds', async () => {
     expect(await bindingName('people.csv')).toBe('people');
-    expect(await bindingName('crm/people.v2.csv')).toBe('crm_people_v2');
+    expect(await bindingName('crm/people.v2.csv')).toBe('people_v2');
+    expect(await bindingName('@lake/users.csv')).toBe('users');
     expect(await bindingName('2024-sales.parquet')).toBe('_2024_sales');
     expect(await bindingName('from.csv')).toBe('_from');
   });

@@ -83,8 +83,11 @@ reads — is `location`, so a source has one name. The descriptor inside a `Sour
 keyed by the reference the program wrote, because that is what the compiler's cache is keyed by and
 what survives a connection being repointed: two bindings of one file share a descriptor and are two
 sources of the profile, each profiled under its own name. A profile of files before there is a program
-has no bindings, so the host gives each the name `bindingName(file)` makes of it, and a collision is
-the host's to disambiguate; a program cannot bind a name twice. The plan reads a binding once, so one
+has no bindings, so each is bound under `bindingName(file)`: the file's own name, as `DuckDB` names
+a table it reads from a path and an F# type provider names a file's type — `@lake/users.csv` is
+`users`, never `_lake_users`, because the folder and the connection say where a file is and not what
+it is. Two files that make one name are refused (`api/invalid-argument`), as a program cannot bind a
+name twice and a suffix is a name nobody wrote. The plan reads a binding once, so one
 file bound twice is read twice.
 
 *Held by* `crates/fossil-profile/tests/native.rs`,

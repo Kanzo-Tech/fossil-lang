@@ -250,7 +250,7 @@ mod tests {
         );
         let file = fossil_base::SourceFile::new(
             &db,
-            "_lake_users := io.csv(\"@lake/users.csv\", delimiter = \"|\")\n\
+            "users := io.csv(\"@lake/users.csv\", delimiter = \"|\")\n\
              orders := io.parquet(\"orders.parquet\")\n"
                 .to_string(),
             String::new(),

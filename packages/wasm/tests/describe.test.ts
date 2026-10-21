@@ -87,7 +87,7 @@ describe("profile", () => {
       [{ reference: "@w/users.csv", format: "csv", option: "|" }],
       io,
     );
-    expect(profiled.sources.map((s) => [s.binding, s.format, s.option])).toEqual([["_w_users", "csv", "|"]]);
+    expect(profiled.sources.map((s) => [s.binding, s.format, s.option])).toEqual([["users", "csv", "|"]]);
     expect(descriptors.map((d) => d.key)).toEqual(["@w/users.csv"]);
     expect(describes(sql)[0]).toContain("s3://bucket/w/users.csv");
   });
