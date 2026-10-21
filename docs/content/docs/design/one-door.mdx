@@ -22,7 +22,7 @@ refuses a graph whose indices have a gap before any view is made, and attaches t
 engine as the catalog it is given: one view per vertex type and per edge type, and the information
 files as five relations — `graphar_vertex_types`, `graphar_edge_types`, `graphar_properties`,
 `graphar_extra_info` and `graphar_chunks`. The `GraphAttachment` it answers detaches the catalog.
-What every relation carries is [the graph's own facts](/docs/design/facts); a graph a run answered in
+What each relation carries is in [the graph as Apache GraphAr](/docs/design/graphar); a graph a run answered in
 memory is attached the same way once its files are registered with the engine
 ([A run off the page](/docs/design/off-the-page)); the credential is `@fossil-lang/storage`'s `mount`,
 which the host calls. The contract is [the graph](/docs/design/graph) and Apache GraphAr's; the

@@ -147,11 +147,12 @@ then destination ([identity](/docs/format/conventions/identity),
 | [Identity](/docs/format/conventions/identity) | a vertex's index is its row, `0 … count − 1` in its type; the global id is the reader's arithmetic over the types; the identity is the subject IRI | one dense id space without storing one, and an index that does not move when a type is read |
 | [Adjacency](/docs/format/conventions/adjacency) | a relation is one `ordered_by_source` list of per-type indices, with its offset table | the CSR a graph algorithm wants, read as it lies |
 | [Data types](/docs/format/conventions/datatypes) | GraphAr's types, `time` as a string, millisecond timestamps, `set` and `langString` | a graph every GraphAr reader opens, except where a tagged value is declared |
-| [Statistics](/docs/format/conventions/statistics) | Parquet's footer statistics, and `fossil:stats` for what Parquet has no field for | an engine reads counts and bounds off the footer without a scan |
-| Payload | plain Parquet, row groups of 122,880 rows, every page ZSTD | an engine prunes row groups off the footer, and any Parquet reader opens the file |
+| [Statistics](/docs/format/conventions/statistics) | Parquet's footer statistics — nulls, bounds and the distinct count — one row group per chunk | an engine reads counts and bounds off the footer without a scan |
+| Payload | plain Parquet, one row group per chunk, every page ZSTD | the footer's statistics are the chunk's, and any Parquet reader opens the file |
 
-The row-group size is DuckDB's own default, fixed by the writer rather than left to the Parquet
-library, whose default puts a million-row table in one row group and leaves nothing to prune.
+A chunk is one row group so that Parquet's statistics, which are per row group, are the chunk's: a
+reader combines chunks, never row groups within one. The cost is pruning inside a chunk, which an
+engine does by row group; a reader prunes by chunk instead.
 
 ## Whose rule it is
 
@@ -169,7 +170,6 @@ them still reads the tables.
 | The commit: the graph document written last | fossil's |
 | The names `fossil.graph.yml` and `mapping.ttl` | fossil's |
 | `langString`, the struct's shape | fossil's, under the specification's user-defined types, which GraphAr's C++ and Java readers do not parse |
-| `fossil:stats`: its key, its JSON Schema, its version | fossil's, in Parquet's `key_value_metadata` |
 | Datatypes beyond GraphAr's, such as `xsd:gYear` over an `int32` | the mapping's, and only there |
 | The seven-column `triples` relation | rudof's: its column names come from SPARQL 1.1 Results JSON, and no standard defines a triples table |
 | A logical source in the mapping that names a GraphAr graph | none: the mapping's sources are SQL names the host resolves |
@@ -182,13 +182,11 @@ the mapping beside it. A directory holding GraphAr's documents under another nam
 graph and not a fossil graph, and one holding `fossil.graph.yml` without `mapping.ttl` is a write
 that did not finish. A reader opens `fossil.graph.yml` and refuses a location that has none.
 
-The versions inside it are other people's and one of ours:
+The versions inside it are other people's:
 
 - `version: gar/v1` in every information file, which is GraphAr's, and the only one GraphAr defines.
   A graph with a tagged multi-valued property writes `gar/v1 (langString)` in the documents that use
   it, which is how GraphAr declares a user-defined type.
-- `version: 1` inside the value of `fossil:stats`, which a reader of that key checks and refuses
-  another ([Statistics](/docs/format/conventions/statistics)).
 - the draft of RML-Core that `mapping.ttl` is written against, which is the vocabulary's namespace
   IRI, `http://w3id.org/rml/`, and no version.
 

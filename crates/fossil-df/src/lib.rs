@@ -17,7 +17,7 @@
 //! `wasm-bindgen` shell over it, and it is the only write host.
 //!
 //! The crate compiles to `wasm32-unknown-unknown` (the whole executor runs in
-//! the browser). `zstd-sys` is an unavoidable C dep (datafusion 54 hardcodes
+//! the browser). `zstd-sys` is an unavoidable C dep (datafusion hardcodes
 //! `arrow-ipc/zstd`), so the wasm build needs a wasm-capable clang — see the
 //! `datafusion` entry in `Cargo.toml`.
 
@@ -41,7 +41,6 @@ pub mod descriptor;
 /// The run a host drives: one compiled program, its documents, its sources,
 /// and the graph it writes.
 pub mod executor;
-mod facts;
 mod layout;
 /// What a run's operators may reserve, and the compaction that keeps
 /// `DataFusion`'s count of it true.
@@ -1283,7 +1282,7 @@ async fn csv_schema(
             .into_stream()
             .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))
             .boxed();
-        let chunks = format.read_to_delimited_chunks_from_stream(bytes).await;
+        let chunks = format.read_to_delimited_chunks_from_stream(bytes);
         let mut zeros = LeadingZeros::new(options);
         let (schema, read) = format
             .infer_schema_from_stream(

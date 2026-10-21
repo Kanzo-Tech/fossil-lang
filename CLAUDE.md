@@ -85,7 +85,7 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| Rust toolchain | 1.90 | per `rust-toolchain.toml`; bumped from 1.85 to unblock wasm-bindgen-cli 0.2.120 install |
+| Rust toolchain | 1.95 | per `rust-toolchain.toml`; DataFusion `main`, pinned below, declares `rust-version = "1.95.0"`. CI names it in tandem |
 | salsa | 0.28.5, defaults minus `accumulator` | incremental query framework; diagnostics travel in query outputs (`/docs/design/incremental`); ≥0.28.5 for RUSTSEC-2026-0308. 0.28 returns by reference by default, so every tracked item that predates it names `returns(clone)` or `returns(copy)`, the 0.26 default |
 | rowan | 0.16 | lossless CST |
 | logos | 0.16 | lexer |
@@ -93,10 +93,10 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
 | duckdb | 1.10502 (`features = ["bundled"]`) | native execution |
 | wasm-bindgen | =0.2.120 | exact pin; CLI must match |
 | wasm-opt (binaryen) | 116 via `cargo install wasm-opt@0.116.1` | NOT apt (ubuntu ships binaryen 108, whose wasm-opt corrupts wasm-bindgen's externref table → `Table.grow(): failed to grow table` instantiating a wasm-bindgen module on Node 20, binaryen #4711; 116 fixes it). `packages/executor/scripts/build-wasm.sh` passes the six wasm32 default features (bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint, reference-types, multivalue — Rust 1.87/LLVM 20). NOT `-all` → no gc/typed-funcref, which break instantiation |
-| arrow + parquet | 58 | the graph writer, `fossil_df::write` (through `datafusion`'s re-export) and `graphar-parquet` |
-| graphar-info, graphar-parquet | 0.1.0-alpha.1, crates.io | the Apache GraphAr YAML model and chunk writers (Kanzo-Tech/graphar); no `tokio`, builds for wasm32; `serde_yaml_ng`, never `serde_yml` |
+| arrow + parquet | 60 | the graph writer, `fossil_df::write` (through `datafusion`'s re-export) and `graphar-parquet`; 60 is the first whose Arrow writer counts `distinct_count` in a row group's `Statistics`, the graph's counts (`/docs/format/conventions/statistics`). `object_store` 0.14 comes with it |
+| graphar-info, graphar-parquet | Kanzo-Tech/graphar by `git` + `rev` | the Apache GraphAr YAML model and chunk writers; no `tokio`, builds for wasm32; `serde_yaml_ng`, never `serde_yml`. By git because the published 0.1.0-alpha.1 is on arrow 58 / `object_store` 0.13; the rev is on 60 / 0.14 and writes a chunk as one row group with `distinct_count`. A graphar release on those majors reverses it (`/docs/design/graphar#the-pins-datafusion-main-and-graphar-by-git`) |
 | shex_ast, shacl, rudof_rdf, rudof_iri, prefixmap, rml | Kanzo-Tech/rudof by `git` + `rev` (master after its per-syntax features, R-d; the owner tags it later) | ShEx and SHACL shape documents, the Turtle parser, and `rml`, the RML-Core mapping `describe` builds and writes as `mapping.ttl` (its `sql` feature renders it in tests); one git source for all six, `default-features = false`, and `rudof_rdf` with `features = ["turtle"]`, the one syntax fossil reads — the defaults drag in `reqwest`/`tokio` and what wasm32 cannot build |
-| datafusion | 54, `default-features = false` | pinned in `crates/fossil-df/Cargo.toml`, not the workspace table — see the `zstd`/`arrow-ipc` note there |
+| datafusion | apache/datafusion `main` by `git` + `rev`, `default-features = false` | pinned in `crates/fossil-df/Cargo.toml`, not the workspace table — see the `zstd`/`arrow-ipc` note there. By git because the newest release (55.2.0) is on arrow 59 and `main` is on 60; a DataFusion release on arrow 60 reverses it (same page) |
 
 When bumping: update workspace `Cargo.toml` `[workspace.dependencies]`, run `cargo deny check`,
 verify WASM gate, and write the reason down on the page it affects if it is a major version with
@@ -135,15 +135,14 @@ crates/
                            the RML-Core mapping of them, `graphar-parquet` writes the chunks,
                            `mapping.ttl` after them and `fossil.graph.yml` last), and `Executor` — the
                            whole run a host drives, under the 2 GiB pool in `memory.rs` that
-                           refuses as `run/over-budget`. `facts` counts what the footers hold
-                           (`fossil:stats`)
+                           refuses as `run/over-budget`. The counts are the Parquet footers'
+                           own `Statistics`; fossil writes no key of its own
   fossil-profile/          what a source is — columns and types, counts, candidate keys, the
                            inclusions between sources, a sample — planned as queries and read
                            from their answers, running NOTHING (sans-IO, `run(sources, options,
                            exec)`). Each query is an `Ask`: the browser runs its SQL on DuckDB-WASM,
-                           `fossil-df`'s tests on native `duckdb`, and the writer renders it on
-                           DataFusion to count what it wrote; it links no engine, so it is in the
-                           wasm closure. There is no native language server: it was deleted on
+                           `fossil-df`'s tests on native `duckdb`; it links no engine, so it is
+                           in the wasm closure. There is no native language server: it was deleted on
                            2026-10-12 (`/docs/design/discarded`). `Options::TYPES` is one
                            `DESCRIBE` a source, what the editor asks for. `generated.rs` is
                            `catalogue.bnf`'s reader and type table

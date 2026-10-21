@@ -17,8 +17,9 @@
 //! 5. an adjacency list is `_graphArSrcIndex`, `_graphArDstIndex`, sorted by
 //!    both, every endpoint an index of the type its information file names, and
 //!    its offset table has the source type's count plus one rows;
-//! 6. row groups of 122,880 rows, and the sorted key delta-encoded;
-//! 7. a vertex chunk carries `fossil:stats` and an adjacency chunk does not;
+//! 6. the sorted key delta-encoded;
+//! 7. a chunk is one row group, and its footer's `Statistics` count the
+//!    distinct values beside the nulls — Parquet's own, and no key of fossil's;
 //! 8. a value travels with its row and an edge connects the identities it was
 //!    written from — asked through `subject`, since an index is an address;
 //! 9. `fossil.graph.yml` is the last object written, and a write that fails
@@ -53,9 +54,6 @@ use object_store::{
 };
 
 mod support;
-
-/// Rows per row group, which the writer fixes at `DuckDB`'s own default.
-const ROW_GROUP_ROWS: usize = 122_880;
 
 const DEST: &str = "s3://jobs/run-1/";
 const SHEX: &str = include_str!("fixtures/executor.shex");
@@ -228,14 +226,9 @@ async fn run(
     let graph = fossil_df::execute_graph(&ctx, &db, file, &descriptor)
         .await
         .expect("the graph");
-    let result = fossil_df::write(
-        &graph,
-        &datafusion::prelude::SessionContext::new(),
-        &storage,
-        DEST,
-    )
-    .await
-    .map_err(fossil_graph_schema::Failure::from);
+    let result = fossil_df::write(&graph, &storage, DEST)
+        .await
+        .map_err(fossil_graph_schema::Failure::from);
     (result, out)
 }
 
@@ -527,52 +520,52 @@ async fn the_graph_keeps_the_promises_it_makes_to_a_stranger() {
         );
     }
 
-    // 7. The facts are in a vertex chunk's own footer, and an adjacency chunk
-    //    has none: `fossil:stats`, version 1, keyed by property name.
+    // 7. The counts are the footer's own `Statistics`: a chunk is one row
+    //    group, so a row group's counts are the chunk's, and `distinct_count`
+    //    is beside the nulls. No chunk carries a key of fossil's.
     for v in &g.vertices {
         let p = at(&paths::vertex_chunk(v, &v.property_groups[0], 0));
-        let footer = text(
-            &conn,
-            &format!(
-                "SELECT decode(value) FROM parquet_kv_metadata({p}) WHERE key::VARCHAR = 'fossil:stats'"
-            ),
-        );
-        let stats: serde_json::Value = serde_json::from_str(&footer).expect("fossil:stats is JSON");
-        assert_eq!(stats["version"], 1);
-        let columns = stats["columns"].as_object().expect("columns");
-        let declared: Vec<&str> = v.property_groups[0]
-            .properties
-            .iter()
-            .map(|p| p.name.as_str())
-            .collect();
-        let mut keys: Vec<&str> = columns.keys().map(String::as_str).collect();
-        keys.sort_unstable();
-        let mut sorted = declared.clone();
-        sorted.sort_unstable();
-        assert_eq!(keys, sorted, "keyed by property name, and not by the index");
-        let at_text: Vec<usize> = declared
-            .iter()
-            .map(|n| footer.find(&format!("\"{n}\":{{")).expect("a key"))
-            .collect();
-        assert!(
-            at_text.windows(2).all(|w| w[0] < w[1]),
-            "in the group's order: {footer}"
-        );
         assert_eq!(
-            columns["subject"]["distinct_count"],
-            count(paths::vertex_count(v))
+            scalar(
+                &conn,
+                &format!("SELECT count(DISTINCT row_group_id) FROM parquet_metadata({p})")
+            ),
+            1,
+            "{} is one row group",
+            v.r#type
         );
-    }
-    for e in &g.edges {
-        let p = at(&paths::adj_list_chunk(e, &e.adj_lists[0], 0, 0));
         assert_eq!(
             scalar(
                 &conn,
                 &format!(
-                    "SELECT count(*) FROM parquet_kv_metadata({p}) WHERE key::VARCHAR = 'fossil:stats'"
+                    "SELECT stats_distinct_count FROM parquet_metadata({p}) WHERE path_in_schema = 'subject'"
                 )
             ),
-            0
+            count(paths::vertex_count(v)),
+            "{}'s subjects are distinct, and the footer says how many",
+            v.r#type
+        );
+    }
+    for p in g
+        .vertices
+        .iter()
+        .map(|v| paths::vertex_chunk(v, &v.property_groups[0], 0))
+        .chain(
+            g.edges
+                .iter()
+                .map(|e| paths::adj_list_chunk(e, &e.adj_lists[0], 0, 0)),
+        )
+    {
+        assert_eq!(
+            scalar(
+                &conn,
+                &format!(
+                    "SELECT count(*) FROM parquet_kv_metadata({}) WHERE key::VARCHAR LIKE 'fossil:%'",
+                    at(&p)
+                )
+            ),
+            0,
+            "{p} carries no key of fossil's"
         );
     }
 
@@ -668,11 +661,13 @@ async fn the_graph_keeps_the_promises_it_makes_to_a_stranger() {
     let _ = std::fs::remove_dir_all(&root);
 }
 
-/// A table past one row group is cut at [`ROW_GROUP_ROWS`], which is what lets
-/// a reader prune a `dense_id` range by the footer's statistics.
+/// A table past parquet-rs's default row group (1,048,576 rows is its cap, and
+/// 122,880 was fossil's own before) is still one row group: `graphar-parquet`
+/// writes a chunk as one, so the footer's `Statistics` are the chunk's, and a
+/// reader prunes by chunk.
 #[tokio::test]
-async fn a_table_past_one_row_group_is_cut_at_122_880_rows() {
-    let rows = ROW_GROUP_ROWS as u32 + 7_000;
+async fn a_chunk_past_122_880_rows_is_still_one_row_group() {
+    let rows = 122_880 + 7_000;
     let (result, out) = run(PEOPLE_ONLY, sources(rows, 0), usize::MAX).await;
     result.expect("the write");
     let root = materialise(&out, "row_groups").await;
@@ -689,14 +684,16 @@ async fn a_table_past_one_row_group_is_cut_at_122_880_rows() {
             &conn,
             &format!("SELECT count(DISTINCT row_group_id) FROM parquet_metadata({p})")
         ),
-        2
+        1
     );
     assert_eq!(
         scalar(
             &conn,
-            &format!("SELECT max(row_group_num_rows) FROM parquet_metadata({p})")
+            &format!(
+                "SELECT stats_distinct_count FROM parquet_metadata({p}) WHERE path_in_schema = '_graphArVertexIndex'"
+            )
         ),
-        ROW_GROUP_ROWS as i64
+        i64::from(rows)
     );
     let _ = std::fs::remove_dir_all(&root);
 }

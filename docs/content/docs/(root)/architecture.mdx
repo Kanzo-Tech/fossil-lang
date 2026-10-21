@@ -42,7 +42,7 @@ one back.
 | every vertex, then every edge, with a hard barrier between them | `crates/fossil-df/src/lib.rs, execute_graph` | the payload columns and the edges, as Arrow in memory; `dense_id` numbered globally as each type lands (`crates/fossil-df/src/lib.rs, prepend_dense_id`) |
 | the layout: every table as GraphAr's, held to admissibility | `crates/fossil-df/src/layout.rs, layout` | the information files and the batches, per-type indices, `write/*` refusals before a byte is written |
 | the mapping | `crates/fossil-mir/src/describe.rs, describe` | the RML-Core document of the tables, A2 held, from the types alone |
-| one chunk per table, row groups of 122,880, every page ZSTD, footers carrying the counts | `crates/fossil-df/src/write.rs, write` | the chunks, the counts, `mapping.ttl`, the information files, and `fossil.graph.yml` last |
+| one chunk per table, one row group per chunk, every page ZSTD, footers carrying the counts | `crates/fossil-df/src/write.rs, write` | the chunks, the counts, `mapping.ttl`, the information files, and `fossil.graph.yml` last |
 
 Nothing is staged and read back: the writer encodes the batches the executor already held.
 
@@ -63,7 +63,7 @@ await using graph = await graphar.attachGraph(engine, 'job', (paths) => paths.ma
 
 It attaches the graph to the host's `Engine` as the catalog it is given: a view per type, and the
 information files as five relations. Every read after that is the host's SQL. Pruning is the
-engine's: every table is written in the order of its key, and DuckDB skips the row groups whose footer
+engine's: every table is written in the order of its key, and DuckDB skips the chunks whose footer
 statistics exclude a predicate. [One door](/docs/design/one-door) argues the surface; the credential
 is `@fossil-lang/storage`'s `mount`, called by the host.
 
@@ -97,12 +97,12 @@ graph LR
   X["<b>no home</b> · 1 crate<br/>xtask"]
 
   E -->|11| L
-  M -->|6| L
+  M -->|5| L
   M -->|2| C
   C -->|2| L
 ```
 
-**21 cross-group edges**, and no pair runs both ways. Every number above
+**20 cross-group edges**, and no pair runs both ways. Every number above
 is derived from `crates/*/Cargo.toml`, `[dependencies]` only: a test may depend on whatever it
 likes, so dev edges are out of scope here for the same reason they are in `content.test.ts`, which
 reads the manifests and fails the build on any figure in this diagram that stops holding.
@@ -110,9 +110,9 @@ reads the manifests and fails the build on any figure in this diagram that stops
 No edge runs from the editor to the engine, and the editor links no database: the browser runs
 `fossil-profile`'s plan on DuckDB-WASM, because without the columns a `DESCRIBE` finds the editor is
 silent on every diagnostic whose evidence is a source's schema. The plan itself is a language crate
-that links no engine ([Profile](/docs/design/profile)) — and the engine's sixth edge into the
-language is that same plan: the writer counts what it wrote with it, rendered on DataFusion
-([the graph's own facts](/docs/design/facts)).
+that links no engine ([Profile](/docs/design/profile)). The writer does not run it: what it wrote is
+counted by the Parquet writer itself, in each chunk's footer
+([Statistics](/docs/format/conventions/statistics)).
 
 The arrow between engine and graph runs one way:
 

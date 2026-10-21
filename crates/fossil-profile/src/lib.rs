@@ -19,12 +19,10 @@
 //! Each query is an [`Ask`] — the counts of a relation, the commonest values of
 //! a column, an inclusion between two, a sample — and SQL is one rendering of
 //! it, [`Ask::sql`], `DuckDB`'s, which the two hosts that profile SOURCES run.
-//! The graph writer counts the TABLES it wrote with the same plan
-//! ([`Profiler::over_tables`]) on `DataFusion`, which has no SQL in this build,
-//! and renders the same `Ask` as a `DataFusion` plan. A table plan stops at the
-//! counts: a graph carries no inclusions (`/docs/design/facts`). Which queries to run, how
-//! to prune them and what a count means stay here; only the rendering is per
-//! engine (`/docs/design/facts`).
+//! Which queries to run, how to prune them and what a count means stay here;
+//! only the rendering is per engine. A written graph is not profiled here: its
+//! counts are the Parquet footer's own `Statistics`
+//! (`/docs/format/conventions/statistics`).
 //!
 //! Every query answers in text, so the engines answer in one form: rows of text
 //! cells, `None` for SQL `NULL`.
@@ -58,7 +56,7 @@ pub type Rows = Vec<Vec<Option<String>>>;
 
 /// The longest value a profile keeps, in bytes. A longer one is left out,
 /// never cut: a prefix is a value the column does not hold, and a reader shows
-/// these to a person and filters by them (`/docs/design/facts`). 64 bytes hold
+/// these to a person and filters by them (`/docs/design/profile`). 64 bytes hold
 /// a date, a number, a code or a short name, and not a description.
 pub const MAX_VALUE_BYTES: usize = 64;
 
@@ -88,15 +86,6 @@ pub struct Source {
     /// The host's validator for the bytes it read: carried into the descriptor.
     #[serde(default)]
     pub etag: String,
-}
-
-/// A table the host already holds, with no reader: the columns and their
-/// types are known, so it is not described. What the graph writer counts.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Table {
-    /// The name the host's engine holds it under.
-    pub name: SmolStr,
-    pub columns: Vec<InferredColumn>,
 }
 
 /// How far a profile goes.
@@ -132,13 +121,6 @@ impl Options {
         shown: 0,
         depth: Depth::Types,
     };
-
-    /// Every row, and no sample kept: what the graph writer counts with.
-    pub const WHOLE: Self = Self {
-        sample: 0,
-        shown: 0,
-        depth: Depth::Whole,
-    };
 }
 
 impl Default for Options {
@@ -160,23 +142,16 @@ pub struct Query {
     pub sql: String,
 }
 
-/// What a query reads: a source through its reader, or a table the host holds.
+/// What a query reads: a source through its reader,
+/// `read_csv_auto('people.csv', delim='|')` — [`relation`]'s rendering.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Relation {
-    /// `read_csv_auto('people.csv', delim='|')` — [`relation`]'s rendering.
-    Read(String),
-    /// A table the host's engine holds under this name.
-    Table(SmolStr),
-}
+pub struct Relation(pub String);
 
 impl Relation {
     /// The relation in `DuckDB` SQL.
     #[must_use]
     pub fn sql(&self) -> String {
-        match self {
-            Self::Read(read) => read.clone(),
-            Self::Table(name) => ident(name),
-        }
+        self.0.clone()
     }
 }
 
@@ -481,9 +456,6 @@ pub struct Profiler {
     queue: VecDeque<(u32, Ask)>,
     pending: HashMap<u32, Pending>,
     next_id: u32,
-    /// Whether the inclusions between the relations are tested: between
-    /// sources, and never between the tables of a graph.
-    between: bool,
     inclusions: Vec<Inclusion>,
     failed: Vec<Failure>,
 }
@@ -504,8 +476,7 @@ impl Profiler {
             if states.iter().any(|s| s.binding == source.binding) {
                 continue;
             }
-            let relation =
-                Relation::Read(relation(reader, &source.location, source.option.as_deref()));
+            let relation = Relation(relation(reader, &source.location, source.option.as_deref()));
             states.push(State {
                 binding: source.binding,
                 key: source.key,
@@ -527,34 +498,6 @@ impl Profiler {
         plan
     }
 
-    /// A plan over tables the host already holds, whose columns are known: no
-    /// `DESCRIBE`, and no inclusion — the counts, the commonest values and the
-    /// keys they make. What the graph writer counts what it wrote with: a
-    /// graph carries no inclusions, which were measured and dropped
-    /// (`/docs/design/facts`).
-    #[must_use]
-    pub fn over_tables(tables: impl IntoIterator<Item = Table>, options: Options) -> Self {
-        let states = tables
-            .into_iter()
-            .map(|t| State {
-                binding: t.name.clone(),
-                key: t.name.clone(),
-                etag: String::new(),
-                format: None,
-                relation: Relation::Table(t.name),
-                described: true,
-                columns: t.columns,
-                rows: None,
-                stats: Vec::new(),
-                sample: Vec::new(),
-            })
-            .collect();
-        Self {
-            between: false,
-            ..Self::with(states, options)
-        }
-    }
-
     fn with(states: Vec<State>, options: Options) -> Self {
         Self {
             options,
@@ -563,7 +506,6 @@ impl Profiler {
             queue: VecDeque::new(),
             pending: HashMap::new(),
             next_id: 0,
-            between: true,
             inclusions: Vec::new(),
             failed: Vec::new(),
         }
@@ -644,9 +586,7 @@ impl Profiler {
                 Phase::Top
             }
             Phase::Top => {
-                if self.between {
-                    self.plan_inclusions();
-                }
+                self.plan_inclusions();
                 Phase::Inclusions
             }
             Phase::Inclusions => {
@@ -1136,54 +1076,6 @@ mod tests {
         assert_eq!(note.min_value.as_deref(), Some("a"));
         assert_eq!(note.max_value, None);
         assert!(note.top_values.is_empty());
-    }
-
-    /// Tables the host holds are not described, and no inclusion is tested
-    /// between them: the plan is the counts, and the keys they make.
-    #[test]
-    fn tables_are_counted_without_a_describe_or_an_inclusion() {
-        let column = |name: &str, primitive| InferredColumn {
-            name: name.into(),
-            primitive,
-        };
-        let mut plan = Profiler::over_tables(
-            [
-                Table {
-                    name: "Person".into(),
-                    columns: vec![
-                        column("dense_id", Primitive::Integer),
-                        column("subject", Primitive::AnyUri),
-                    ],
-                },
-                Table {
-                    name: "Prize".into(),
-                    columns: vec![
-                        column("dense_id", Primitive::Integer),
-                        column("subject", Primitive::AnyUri),
-                        column("winner", Primitive::AnyUri),
-                    ],
-                },
-            ],
-            Options::WHOLE,
-        );
-        while let Some((id, ask)) = plan.next_ask() {
-            assert!(
-                matches!(ask, Ask::Counts { .. } | Ask::TopValues { .. }),
-                "only counts and commonest values: {ask:?}"
-            );
-            if let Ask::Counts { columns, .. } = &ask {
-                let mut row = vec!["2".to_string()];
-                for _ in columns {
-                    row.extend(["2", "2", "a", "b"].map(String::from));
-                }
-                plan.feed(id, &[row.into_iter().map(Some).collect()]);
-            } else {
-                plan.feed(id, &[]);
-            }
-        }
-        let profile = plan.finish();
-        assert!(profile.inclusions.is_empty());
-        assert_eq!(profile.sources[0].candidate_keys, ["dense_id", "subject"]);
     }
 
     #[test]

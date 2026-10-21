@@ -106,8 +106,8 @@ conventions fossil adds to GraphAr's start to mean a contract.
 ## One format, changed in place
 
 The format has no version string of its own. A fossil graph is identified by `fossil.graph.yml` —
-graph `name: fossil`, `version: gar/v1` — with `mapping.ttl` beside it, and the only version fossil
-owns is the `version: 1` inside `fossil:stats`. **The format changes in place: a writer and the
+graph `name: fossil`, `version: gar/v1` — with `mapping.ttl` beside it, and fossil owns no version
+at all. **The format changes in place: a writer and the
 reader that reads what it writes ship in one release**, and no reader branches on which writer wrote a
 graph.
 
@@ -260,8 +260,8 @@ rewrite every comparison a consumer makes for no fact it lacks.
 **What would reverse it.** A consumer whose engine fixes other names for the same facts and cannot
 alias a column — then that consumer's names are the argument. Brevity does not.
 
-What the relations carry beyond these — the counts the writer takes of what it wrote — is
-[the graph's own facts](/docs/design/facts).
+What a reader reads beyond these — the counts of each column — is Parquet's own footer
+`Statistics` ([Statistics](/docs/format/conventions/statistics)).
 
 ## What a graph can carry, and where the format lives
 
