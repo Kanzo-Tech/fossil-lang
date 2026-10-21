@@ -1206,16 +1206,34 @@ async fn csv_schema(
             .map_err(|e| DataFusionError::ObjectStore(Box::new(e)))
             .boxed();
         let chunks = format.read_to_delimited_chunks_from_stream(bytes).await;
+        let mut zeros = LeadingZeros::new(options);
         let (schema, read) = format
-            .infer_schema_from_stream(&state, remaining, chunks)
+            .infer_schema_from_stream(
+                &state,
+                remaining,
+                chunks.inspect(|chunk| {
+                    if let Ok(chunk) = chunk {
+                        zeros.feed(chunk);
+                    }
+                }),
+            )
             .await?;
+        zeros.feed(&[]);
         let names = unique_column_names(schema.fields().iter().map(|f| f.name().as_str()));
         schemas.push(Schema::new(
             schema
                 .fields()
                 .iter()
+                .enumerate()
                 .zip(names)
-                .map(|(f, name)| f.as_ref().clone().with_name(name))
+                .map(|((at, f), name)| {
+                    let f = f.as_ref().clone().with_name(name);
+                    if zeros.text(at) && f.data_type().is_numeric() {
+                        f.with_data_type(DataType::Utf8)
+                    } else {
+                        f
+                    }
+                })
                 .collect::<Vec<_>>(),
         ));
         remaining = remaining.saturating_sub(read);
@@ -1224,6 +1242,97 @@ async fn csv_schema(
         }
     }
     Ok(Schema::try_merge(schemas)?)
+}
+
+/// The columns of a CSV whose text keeps a leading zero, `00000000000000000001`
+/// or `-007`, which are read as text and not as numbers.
+///
+/// `DataFusion` infers such a column as an integer, and the zeros are gone
+/// before anything reads it: GTFS-Madrid-Bench's `agency/00000000000000000001`
+/// became `agency/1`, an identifier the source never wrote. `DuckDB`'s sniffer
+/// keeps the column `VARCHAR`, and the browser's profile is `DuckDB`'s, so the
+/// read follows it and the checker and the read agree on what the column is.
+/// `0`, `0.5` and `-0.5` are numbers still: the rule is a zero followed by a
+/// digit.
+///
+/// It reads the bytes inference reads, as they stream past, through the
+/// tokenizer `arrow-csv` is built on, so a quoted delimiter or newline is what
+/// it is to the reader.
+struct LeadingZeros {
+    reader: csv_core::Reader,
+    /// The field being read, across chunks.
+    field: Vec<u8>,
+    filled: usize,
+    column: usize,
+    header: bool,
+    text: Vec<bool>,
+}
+
+impl LeadingZeros {
+    fn new(options: &CsvReadOptions<'_>) -> Self {
+        let reader = csv_core::ReaderBuilder::new()
+            .delimiter(options.delimiter)
+            .quote(options.quote)
+            .escape(options.escape)
+            .comment(options.comment)
+            .terminator(
+                options
+                    .terminator
+                    .map_or(csv_core::Terminator::CRLF, csv_core::Terminator::Any),
+            )
+            .build();
+        Self {
+            reader,
+            field: vec![0; 64],
+            filled: 0,
+            column: 0,
+            header: options.has_header,
+            text: Vec::new(),
+        }
+    }
+
+    /// The next bytes of the file; `&[]` once there are none, for the last
+    /// field.
+    fn feed(&mut self, mut input: &[u8]) {
+        use csv_core::ReadFieldResult::{End, Field, InputEmpty, OutputFull};
+        loop {
+            let (result, read, wrote) = self
+                .reader
+                .read_field(input, &mut self.field[self.filled..]);
+            input = &input[read..];
+            self.filled += wrote;
+            match result {
+                InputEmpty | End => return,
+                OutputFull => self.field.resize(self.field.len() * 2, 0),
+                Field { record_end } => {
+                    if !self.header && leading_zero(&self.field[..self.filled]) {
+                        if self.text.len() <= self.column {
+                            self.text.resize(self.column + 1, false);
+                        }
+                        self.text[self.column] = true;
+                    }
+                    self.filled = 0;
+                    self.column += 1;
+                    if record_end {
+                        self.column = 0;
+                        self.header = false;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Whether column `at` held a leading zero in any row.
+    fn text(&self, at: usize) -> bool {
+        self.text.get(at).copied().unwrap_or(false)
+    }
+}
+
+fn leading_zero(field: &[u8]) -> bool {
+    let digits = field
+        .strip_prefix(b"-")
+        .or_else(|| field.strip_prefix(b"+"));
+    matches!(digits.unwrap_or(field), [b'0', d, ..] if d.is_ascii_digit())
 }
 
 /// The files `uri` names in its store, and `source/not-found` when it names
@@ -2078,6 +2187,63 @@ mod tests {
             &failure.problem,
             fossil_graph_schema::Problem::UnsupportedExpression { expression } if expression == "seq.where"
         ));
+    }
+
+    /// GTFS-Madrid-Bench's `agency_id` is `00000000000000000001`, and read as an
+    /// integer it was `1` in every IRI built from it. `DuckDB` reads it as
+    /// `VARCHAR`, and so does this; `0`, `0.5`, `-0.5` and `10` stay numbers.
+    #[tokio::test]
+    async fn a_column_with_a_leading_zero_is_text() {
+        use std::sync::Arc;
+
+        use object_store::{ObjectStoreExt as _, PutPayload, memory::InMemory, path::Path};
+
+        let csv = "id,zero,half,signed,ten,quoted\n\
+                   00000000000000000001,0,0.5,-0.5,10,\"a,b\"\n\
+                   2,0,1.5,-007,20,\"c\nd\"\n";
+        let store = Arc::new(InMemory::new());
+        store
+            .put(&Path::from("t.csv"), PutPayload::from(csv))
+            .await
+            .unwrap();
+        let ctx = datafusion::prelude::SessionContext::new();
+        let memory =
+            datafusion::execution::object_store::ObjectStoreUrl::parse("memory://").unwrap();
+        ctx.register_object_store(memory.as_ref(), store);
+        let schema = super::csv_schema(&ctx, "memory:///t.csv", &super::csv_options(None))
+            .await
+            .unwrap();
+        let types: Vec<_> = schema
+            .fields()
+            .iter()
+            .map(|f| (f.name().as_str(), f.data_type().to_string()))
+            .collect();
+        assert_eq!(
+            types,
+            [
+                ("id", "Utf8".to_string()),
+                ("zero", "Int64".to_string()),
+                ("half", "Float64".to_string()),
+                ("signed", "Utf8".to_string()),
+                ("ten", "Int64".to_string()),
+                ("quoted", "Utf8".to_string()),
+            ]
+        );
+    }
+
+    /// A field split across two chunks, or quoting the delimiter, is one field.
+    #[test]
+    fn leading_zeros_are_read_through_chunks_and_quotes() {
+        let options = super::csv_options(None);
+        let mut zeros = super::LeadingZeros::new(&options);
+        for chunk in ["a,b,c\n\"1,0\",0", "7,9\n", "1,2,3\n"] {
+            zeros.feed(chunk.as_bytes());
+        }
+        zeros.feed(&[]);
+        assert_eq!(
+            (zeros.text(0), zeros.text(1), zeros.text(2)),
+            (false, true, false)
+        );
     }
 
     #[test]

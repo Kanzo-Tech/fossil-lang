@@ -42,6 +42,8 @@ fossil-storage = { path = "../fossil-storage", features = ["object-store"] }
 object_store = { workspace = true }
 futures = { workspace = true }
 bytes = { workspace = true }
+# A CSV column read as text when its text says it is not a number (`LeadingZeros`).
+csv-core = { workspace = true }
 # What the engine hands a sink, and the sink a run writes through: `graphar`
 # is the one `Executor` drives.
 fossil-sinks = { path = "../fossil-sinks", features = ["graphar"] }
