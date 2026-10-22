@@ -168,9 +168,9 @@ the plan reads off `catalogue.bnf` — the reader, its option keyword and the Du
 share — `until` and `within`, the document loop's `DocumentWorkspace`, the storage grant's
 `GrantPlan`, `attachCause` — is on `@fossil-lang/types/internal`, an exports subpath with no semver
 promise, rather than on the barrel beside `Host`. A name on the barrel is a second way to do what a
-host already does through `openProgram`, `run`, `mount` or `profile`, and the raw wasm glue is
+host already does through `open`, `run`, `mount` or `profile`, and the raw wasm glue is
 the clearest case: `FossilWorkspace` on `@fossil-lang/wasm`'s barrel let a host check a program
-without reading its shape document, which `openProgram` never does. What would reverse it: a host
+without reading its shape document, which `open` never does. What would reverse it: a host
 that needs one of those names to do something no public call does — and then the call is what is
 missing, not the export.
 

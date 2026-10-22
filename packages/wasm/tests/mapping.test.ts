@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
-import { initFossilWasm, openProgram } from '../src/index.js';
+import { initFossilWasm, open } from '../src/index.js';
 import { recordingHost } from './host.js';
 
 beforeAll(async () => {
@@ -27,7 +27,7 @@ type Prize
 describe('FossilProgram.mapping', () => {
   it('describes the declared types as RML before anything is read', async () => {
     const { host, fetched } = recordingHost('{}');
-    const program = await openProgram('declared.fossil', { host, text: PROGRAM });
+    const program = await open('declared.fossil', { host, text: PROGRAM });
     try {
       const turtle = await program.mapping();
       expect(fetched).toEqual([]);
@@ -42,7 +42,7 @@ describe('FossilProgram.mapping', () => {
 
   it('answers the mapping of the text of the last update', async () => {
     const { host } = recordingHost('{}');
-    const program = await openProgram('declared.fossil', { host, text: PROGRAM });
+    const program = await open('declared.fossil', { host, text: PROGRAM });
     try {
       program.update(PROGRAM.replace('category: String', 'kind: String').replace('vocab/category', 'vocab/kind'));
       const turtle = await program.mapping();
@@ -55,7 +55,7 @@ describe('FossilProgram.mapping', () => {
 
   it('describes a program with no type as an empty mapping, and refuses an IRI two columns share', async () => {
     const { host } = recordingHost('{}');
-    const program = await openProgram('declared.fossil', { host, text: '' });
+    const program = await open('declared.fossil', { host, text: '' });
     try {
       expect(await program.mapping()).not.toContain('Person');
       program.update(PROGRAM.replace('vocab/awarded', 'name').replace('https://schema.org/name', 'https://nobel.example/name'));

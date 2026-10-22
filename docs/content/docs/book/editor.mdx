@@ -9,9 +9,9 @@ The editor is a browser one. The compiler is built to WebAssembly (`@fossil-lang
 
 ```ts
 import { fossil } from '@fossil-lang/codemirror-fossil';
-import { openProgram } from '@fossil-lang/wasm';
+import { open } from '@fossil-lang/wasm';
 
-const program = await openProgram('hello.fossil', { host, text });
+const program = await open('hello.fossil', { host, text });
 const extensions = fossil(program, { onNavigate: (target) => console.log(target) });
 ```
 

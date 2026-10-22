@@ -3,7 +3,7 @@
 The fossil compiler front end in the browser, over the `fossil-wasm` Rust crate's wasm-bindgen
 artefacts. Every door boots the module itself:
 
-- `openProgram(uri, { host, text, signal })` — one program open for an editor. See below.
+- `open(uri, { host, text, signal })` — one program open for an editor. See below.
 - `inputs(text, { host, signal })` — what a program reads, with no editor: TypeScript's
   `ts.preProcessFile`. Each `Input` is `{ role, key, location, connection?, binding?, format?,
   option? }` — a data source or a shape document, the key as written and the location through
@@ -16,10 +16,12 @@ artefacts. Every door boots the module itself:
   each query run by `query` on the host's engine, a phase's queries at once: the profile the language
   server reads natively, in the page. `profile` and `program.describe` are what a host calls; this
   is their loop.
-- `profile(inputs, { host, engine, options, etag, signal })` — what some sources are, on the host's
-  DuckDB, under the credentials the host vends: before there is a program, the files an assistant is
-  shown. `program.describe` is the same over a program's own inputs. Every source in the answer is
-  named by its `binding`; the descriptor inside is keyed by the reference the program wrote.
+- `profile(sources, { host, engine, options, etag, signal })` — what the sources a host names are
+  (`{ reference, format, option? }`), on the host's DuckDB, under the credentials the host vends:
+  before there is a program, the files an assistant is shown. Each is read as a program at the root
+  would read it, bound under its `bindingName`; no program text is written. `program.describe` is the
+  same over a program's own inputs. Every source in the answer is named by its `binding`; the
+  descriptor inside is keyed by the reference.
 - `program.mapping()` — the RML-Core mapping the program's types describe, as Turtle, before any
   run: what `mapping.ttl` is, from the types the program declares and imports, with nothing read.
   rudof's `Mapping.parse` reads it, and `Mapping.model()` is the pre-run shape of the graph.
@@ -36,13 +38,13 @@ artefacts. Every door boots the module itself:
   (`fossil_syntax::name::binding_name`), so what comes back always lexes as one identifier.
 - `initFossilWasm(bytes)` — Node only: hand over the `.wasm`. A bundled host never calls it.
 
-## One program in one editor: `openProgram`
+## One program in one editor: `open`
 
 ```typescript
-import { openProgram } from '@fossil-lang/wasm';
+import { open } from '@fossil-lang/wasm';
 import { fossil } from '@fossil-lang/codemirror-fossil';
 
-const program = await openProgram('job.fossil', { host, text });   // host: Host
+const program = await open('job.fossil', { host, text });   // host: Host
 const extensions = fossil(program, { onNavigate });
 
 const profiled = await program.describe({ engine, options: { depth: 'types' } });   // engine: DuckDB

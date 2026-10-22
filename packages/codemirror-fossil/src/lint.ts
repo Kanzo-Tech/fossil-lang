@@ -130,7 +130,7 @@ function failureOf(cause: unknown): FossilError {
  * {@link fossilLinter} draws a failed check with exactly this diagnostic and hands it to
  * `onDiagnostics`, so a host's panel and the squiggle say the same thing and a program nobody could
  * check never reads as clean. A host whose failure happens before there is a linter —
- * `openProgram` rejecting — reports it with the same call rather than a copy of it.
+ * `open` rejecting — reports it with the same call rather than a copy of it.
  */
 export function uncheckedDiagnostic(uri: string, cause: unknown): Diagnostic {
   return diagnosticOf(uri, failureOf(cause).problem);

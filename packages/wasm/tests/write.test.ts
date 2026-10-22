@@ -7,7 +7,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import type { Model } from '@fossil-lang/types';
-import { initFossilWasm, openProgram, write } from '../src/index.js';
+import { initFossilWasm, open, write } from '../src/index.js';
 import { recordingHost } from './host.js';
 
 beforeAll(async () => {
@@ -51,7 +51,7 @@ describe('write', () => {
   it('is a program the checker parses', async () => {
     const text = await write(MODEL, { base: 'https://acme.example' });
     const { host } = recordingHost('{}');
-    const program = await openProgram('written.fossil', { host, text });
+    const program = await open('written.fossil', { host, text });
     try {
       const syntax = (await program.diagnostics()).filter((d) => d.code.startsWith('syntax/'));
       expect(syntax).toEqual([]);

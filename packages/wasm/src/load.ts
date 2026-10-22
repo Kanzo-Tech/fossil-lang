@@ -10,7 +10,7 @@ export type { InitInput };
 
 /**
  * Boot the fossil-wasm module — **for a host with no bundler, and nothing else**. Every door
- * (`openProgram`, `inputs`, `formats`) boots it itself; this is how Node, whose `fetch` rejects
+ * (`open`, `inputs`, `formats`) boots it itself; this is how Node, whose `fetch` rejects
  * `file://`, hands over the bytes (`BufferSource`) or a `Response` first.
  *
  * A bundled host never calls it: the glue resolves `new URL('fossil_wasm_bg.wasm',

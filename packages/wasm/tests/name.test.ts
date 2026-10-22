@@ -6,19 +6,20 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
-import { bindingName, initFossilWasm, openProgram, type FossilProgram } from '../src/index.js';
+import { bindingName, initFossilWasm, open, type FossilProgram } from '../src/index.js';
 
 let tokenize: FossilProgram['tokenize'];
 
 beforeAll(async () => {
   await initFossilWasm(await readFile(fileURLToPath(new URL('../pkg/fossil_wasm_bg.wasm', import.meta.url))));
-  ({ tokenize } = await openProgram('t.fossil', { host: { connections: async () => ({}), credentials: async () => [] } }));
+  ({ tokenize } = await open('t.fossil', { host: { connections: async () => ({}), credentials: async () => [] } }));
 });
 
 describe('@fossil-lang/wasm — bindingName', () => {
-  it('is the file without its extension, held to what an identifier holds', async () => {
+  it('is the file\'s own name, without its folder or extension, held to what an identifier holds', async () => {
     expect(await bindingName('people.csv')).toBe('people');
-    expect(await bindingName('crm/people.v2.csv')).toBe('crm_people_v2');
+    expect(await bindingName('crm/people.v2.csv')).toBe('people_v2');
+    expect(await bindingName('@lake/users.csv')).toBe('users');
     expect(await bindingName('2024-sales.parquet')).toBe('_2024_sales');
     expect(await bindingName('from.csv')).toBe('_from');
   });

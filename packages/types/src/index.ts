@@ -10,6 +10,7 @@ export type {
   Ambiguous,
   CompletionItem,
   CompletionKind,
+  DataRef,
   DiagnosticRelatedInformation,
   EdgeDrops,
   ColumnRef,

@@ -193,7 +193,7 @@ fn busy(method: &str) -> Failure {
 
 // The types the signatures above name, from the one place they are declared.
 #[wasm_bindgen(typescript_custom_section)]
-const WIRE_TYPES: &str = "import type { Diagnostic, CompletionItem, Format, Hover, Input, \
+const WIRE_TYPES: &str = "import type { DataRef, Diagnostic, CompletionItem, Format, Hover, Input, \
     Inferred, Location, Model, Profile, ProfileAnswer, ProfileOptions, ProfileQuery, ProfileSource, \
     SemanticToken, Token } \
     from '@fossil-lang/types';\n\
@@ -403,6 +403,25 @@ impl WasmWorkspace {
         let ws = self.inner.try_borrow().map_err(|_| busy("inputs"))?;
         let rows = ws.inputs_native(*handle).ok_or_else(unknown_handle)?;
         to_value("the inputs", &rows)
+    }
+
+    /// The inputs the sources a host names are, with no program — see
+    /// [`fossil_hir::lineage::inputs_named`]: expanded through the connections
+    /// set on this workspace.
+    ///
+    /// # Errors
+    ///
+    /// `api/invalid-argument` when `refs` is not an array of `DataRef`; a JS
+    /// error if the workspace is busy.
+    #[wasm_bindgen(js_name = inputsNamed, unchecked_return_type = "Input[]")]
+    pub fn inputs_named(
+        &self,
+        #[wasm_bindgen(unchecked_param_type = "readonly DataRef[]")] refs: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        let refs: Vec<fossil_hir::lineage::DataRef> =
+            profile::argument("refs", "an array of DataRef", refs)?;
+        let ws = self.inner.try_borrow().map_err(|_| busy("inputsNamed"))?;
+        to_value("the inputs", &ws.inputs_named_native(&refs))
     }
 
     /// The RML-Core mapping the program's types describe — what `mapping.ttl` is, as Turtle, before
@@ -703,6 +722,15 @@ impl FossilWorkspace {
     pub fn inputs_native(&self, handle: FileHandle) -> Option<Vec<fossil_hir::lineage::Input>> {
         let file = self.files.get(handle)?;
         Some(fossil_hir::lineage::inputs(&self.db, file))
+    }
+
+    /// Pure-Rust mirror of [`WasmWorkspace::inputs_named`].
+    #[must_use]
+    pub fn inputs_named_native(
+        &self,
+        refs: &[fossil_hir::lineage::DataRef],
+    ) -> Vec<fossil_hir::lineage::Input> {
+        fossil_hir::lineage::inputs_named(&self.db, refs)
     }
 
     /// Pure-Rust mirror of [`WasmWorkspace::mapping`]; `None` for an unknown handle.

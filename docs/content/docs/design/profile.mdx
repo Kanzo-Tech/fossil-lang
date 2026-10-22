@@ -47,10 +47,18 @@ let profile = plan.finish();                // types, keys, inclusions, samples
 
 The browser reaches it through
 `fossil-wasm`'s `Profiler` and runs each query on the page's DuckDB-WASM: `runProfiler` in
-`@fossil-lang/wasm` is the loop (`packages/wasm/src/profile.ts, runProfiler`), and `profile` beside
-it reads each source under its credential and hands the plan its name and its binding
-(`packages/wasm/src/describe.ts, profile`). A program's own sources are `program.describe()`: its
-inputs, profiled, handed to the checker, and answered as the value a run takes. `fossil-exec`'s tests run the same plan on the native
+`@fossil-lang/wasm` is the loop (`packages/wasm/src/profile.ts, runProfiler`), and `profileInputs`
+beside it reads each input under its credential and hands the plan its name and its binding
+(`packages/wasm/src/describe.ts, profileInputs`). A program's own sources are `program.describe()`:
+its inputs, profiled, handed to the checker, and answered as the value a run takes. The sources a
+host names before there is a program are `profile(sources)`, each a reference and the format the
+host chose: the inputs a program at the workspace's root binding each under its `bindingName` would
+read (`crates/fossil-hir/src/lineage.rs, inputs_named`), with no program text written to reach them.
+A host that wrote `x := io.csv("…")` lines only to have them scanned back was asking the parser for
+what the anchor and the connections answer directly.
+
+*Held by* `crates/fossil-hir/src/lineage.rs`,
+"a_named_source_is_the_input_a_program_at_the_root_binding_it_would_read". `fossil-exec`'s tests run the same plan on the native
 `duckdb` crate, so the code is shared and only the engine differs
 ([Three hosts](/docs/design/three-hosts)).
 
@@ -75,8 +83,11 @@ reads — is `location`, so a source has one name. The descriptor inside a `Sour
 keyed by the reference the program wrote, because that is what the compiler's cache is keyed by and
 what survives a connection being repointed: two bindings of one file share a descriptor and are two
 sources of the profile, each profiled under its own name. A profile of files before there is a program
-has no bindings, so the host gives each the name `bindingName(file)` makes of it, and a collision is
-the host's to disambiguate; a program cannot bind a name twice. The plan reads a binding once, so one
+has no bindings, so each is bound under `bindingName(file)`: the file's own name, as `DuckDB` names
+a table it reads from a path and an F# type provider names a file's type — `@lake/users.csv` is
+`users`, never `_lake_users`, because the folder and the connection say where a file is and not what
+it is. Two files that make one name are refused (`api/invalid-argument`), as a program cannot bind a
+name twice and a suffix is a name nobody wrote. The plan reads a binding once, so one
 file bound twice is read twice.
 
 *Held by* `crates/fossil-profile/tests/native.rs`,

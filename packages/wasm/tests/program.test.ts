@@ -1,12 +1,12 @@
 /**
- * `openProgram` is the protocol both editor hosts used to write by hand: the text arrives through
+ * `open` is the protocol both editor hosts used to write by hand: the text arrives through
  * `update`, the documents it names are resolved before a check, and every question takes only a
  * position. These pin each half across the real wasm boundary.
  */
 import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
-import { initFossilWasm, openProgram, type FossilProgram } from '../src/index.js';
+import { initFossilWasm, open, type FossilProgram } from '../src/index.js';
 import { ARROW, describingEngine, recordingHost } from './host.js';
 
 beforeAll(async () => {
@@ -49,12 +49,12 @@ const USERS = describingEngine({
 });
 const TYPES = { depth: 'types' } as const;
 
-describe('openProgram', () => {
+describe('open', () => {
   let program: FossilProgram | undefined;
 
   it('reads the documents the text names at open, through the host, once', async () => {
     const { host, asked, fetched } = recordingHost(SHAPE);
-    program = await openProgram('prog.fossil', { host, text: PROGRAM });
+    program = await open('prog.fossil', { host, text: PROGRAM });
     try {
       expect(asked).toEqual([{ connection: 'vocab' }]);
       expect(fetched).toHaveLength(1);
@@ -77,7 +77,7 @@ describe('openProgram', () => {
 
   it('answers a position query about the text of the last update, with no check between', async () => {
     const { host } = recordingHost(SHAPE);
-    program = await openProgram('prog.fossil', { host });
+    program = await open('prog.fossil', { host });
     try {
       const line = PROGRAM.split('\n').findIndex((l) => l.includes('name = users.name'));
       const character = PROGRAM.split('\n')[line]!.indexOf('users.name') + 'users.'.length + 1;
@@ -99,7 +99,7 @@ describe('openProgram', () => {
 
   it('names shapes, declarations and connections across the boundary', async () => {
     const { host } = recordingHost(SHAPE);
-    program = await openProgram('prog.fossil', { host });
+    program = await open('prog.fossil', { host });
     try {
       program.update(PROGRAM);
       const rows = program.semanticTokens();
@@ -122,7 +122,7 @@ describe('openProgram', () => {
 
   it('reports its inputs through the connection map', async () => {
     const { host } = recordingHost(SHAPE);
-    program = await openProgram('prog.fossil', { host, text: PROGRAM });
+    program = await open('prog.fossil', { host, text: PROGRAM });
     try {
       expect(await program.inputs()).toEqual([
         {
@@ -142,7 +142,7 @@ describe('openProgram', () => {
 
   it('describes what it reads through its own host, and answers the profile a run takes', async () => {
     const { host, asked } = recordingHost(SHAPE);
-    program = await openProgram('prog.fossil', { host, text: PROGRAM });
+    program = await open('prog.fossil', { host, text: PROGRAM });
     try {
       const profiled = await program.describe({ engine: USERS, options: TYPES });
       expect(asked).toContainEqual({ connection: 'lake' });
@@ -164,10 +164,10 @@ describe('openProgram', () => {
   });
 });
 
-describe('openProgram, when a source cannot be described', () => {
+describe('open, when a source cannot be described', () => {
   it('answers one warning at the call that reads it, under the code the profile answered', async () => {
     const { host } = recordingHost(SHAPE);
-    const program = await openProgram('prog.fossil', { host, text: PROGRAM });
+    const program = await open('prog.fossil', { host, text: PROGRAM });
     try {
       const unreadable = describingEngine({}, new Error('CORS / unreachable'));
       const { undescribed } = await program.describe({ engine: unreadable, options: TYPES });
@@ -188,12 +188,12 @@ describe('openProgram, when a source cannot be described', () => {
   });
 });
 
-describe('openProgram, when a document cannot be read', () => {
+describe('open, when a document cannot be read', () => {
   const MISSING = PROGRAM.replace('@vocab/person.shex', '@vocab/gone.shex');
 
   it('answers a row under the code of the document’s read, beside the checker’s rows', async () => {
     const { host } = recordingHost(SHAPE);
-    const program = await openProgram('prog.fossil', { host, text: MISSING });
+    const program = await open('prog.fossil', { host, text: MISSING });
     try {
       const rows = await program.diagnostics();
       expect(rows[0]).toMatchObject({
@@ -208,7 +208,7 @@ describe('openProgram, when a document cannot be read', () => {
 
   it('answers storage/host-silent once the host has been quiet for 30 s, instead of never painting', async () => {
     const { host } = recordingHost(SHAPE);
-    const program = await openProgram('prog.fossil', { host, text: MISSING });
+    const program = await open('prog.fossil', { host, text: MISSING });
     vi.useFakeTimers();
     try {
       host.connections = () => new Promise(() => {});

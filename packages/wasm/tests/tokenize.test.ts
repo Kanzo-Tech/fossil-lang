@@ -9,7 +9,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
-import { initFossilWasm, openProgram, type FossilProgram } from '../src/index.js';
+import { initFossilWasm, open, type FossilProgram } from '../src/index.js';
 import type { Token } from '@fossil-lang/types';
 
 let tokenize: FossilProgram['tokenize'];
@@ -20,7 +20,7 @@ beforeAll(async () => {
   );
   const bytes = await readFile(wasmPath);
   await initFossilWasm(bytes);
-  ({ tokenize } = await openProgram('t.fossil', { host: { connections: async () => ({}), credentials: async () => [] } }));
+  ({ tokenize } = await open('t.fossil', { host: { connections: async () => ({}), credentials: async () => [] } }));
 });
 
 describe('@fossil-lang/wasm — tokenize', () => {

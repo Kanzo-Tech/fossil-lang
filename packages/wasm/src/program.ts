@@ -22,24 +22,26 @@
  */
 import { FossilWorkspace, tokenize } from '../pkg/fossil_wasm.js';
 import { resolveDocuments } from '@fossil-lang/storage';
-import type {
-  CompletionItem,
-  Diagnostic,
-  Host,
-  Hover,
-  Input,
-  Location,
-  Profiled,
-  SemanticToken,
-  Token,
+import {
+  FossilError,
+  type CompletionItem,
+  type DataRef,
+  type Diagnostic,
+  type Host,
+  type Hover,
+  type Input,
+  type Location,
+  type Profiled,
+  type SemanticToken,
+  type Token,
 } from '@fossil-lang/types';
-import { profile, type ProfileIO } from './describe.js';
+import { profileInputs, type ProfileIO } from './describe.js';
 import { diagnosticOf, until, type DocumentWorkspace, type UnreadDocument } from '@fossil-lang/types/internal';
 
 import { initFossilWasm } from './load.js';
 
-/** What {@link openProgram} takes beside the key. */
-export interface OpenProgramOptions {
+/** What {@link open} takes beside the key. */
+export interface OpenOptions {
   /** The connection map, and the credentials a document the program names is read with. */
   host: Host;
   /** The buffer's text at open. Defaults to empty. */
@@ -124,7 +126,7 @@ function documents(workspace: FossilWorkspace, handle: ReturnType<FossilWorkspac
  * A boot that succeeded is kept, so a second program in the same tab costs a workspace and nothing
  * else.
  */
-export async function openProgram(uri: string, options: OpenProgramOptions): Promise<FossilProgram> {
+export async function open(uri: string, options: OpenOptions): Promise<FossilProgram> {
   const { host, text = '', signal } = options;
   await until(initFossilWasm(), signal);
 
@@ -174,7 +176,7 @@ export async function openProgram(uri: string, options: OpenProgramOptions): Pro
     },
     async describe(io) {
       await settle(io.signal);
-      const profiled = await profile(workspace.inputs(handle), { ...io, host });
+      const profiled = await profileInputs(workspace.inputs(handle), { ...io, host });
       for (const descriptor of profiled.descriptors) workspace.registerInferredDescriptor(JSON.stringify(descriptor));
       for (const { source, problem } of profiled.undescribed) {
         workspace.registerUndescribed(source.key, JSON.stringify(problem));
@@ -214,4 +216,43 @@ export async function inputs(
   } finally {
     workspace.free();
   }
+}
+
+/**
+ * What the sources a host names are, before there is a program — the files an assistant is shown:
+ * each read as a program at the workspace's root would read it, bound under its `bindingName` and
+ * expanded through `host.connections()`, then profiled as {@link FossilProgram.describe} profiles a
+ * program's inputs. No program text is written to get there. Boots the module itself.
+ *
+ * @throws {FossilError} `api/invalid-argument` when two references make one binding (`a.csv` and
+ *   `a.json`): a profile names its sources by binding, and a suffix to tell them apart is a name
+ *   nobody wrote.
+ */
+export async function profile(sources: readonly DataRef[], io: ProfileIO): Promise<Profiled> {
+  const { host, signal } = io;
+  await until(initFossilWasm(), signal);
+  const workspace = new FossilWorkspace();
+  let named: Input[];
+  try {
+    await resolveDocuments(
+      {
+        setConnections: (connections) => workspace.setConnections(connections),
+        missingDocuments: () => [],
+        registerDocument: () => {},
+      },
+      host,
+      { signal },
+    );
+    named = workspace.inputsNamed(sources);
+  } finally {
+    workspace.free();
+  }
+  const bindings = named.map((i) => i.binding);
+  if (new Set(bindings).size !== bindings.length) {
+    throw FossilError.of('api/invalid-argument', {
+      argument: 'sources',
+      expected: 'references whose binding names differ',
+    });
+  }
+  return profileInputs(named, io);
 }

@@ -167,7 +167,7 @@ bindings/                  the wasm-bindgen cdylibs, one per npm package (swc's 
                            oxc's `napi/`). Each keeps its crate name, which is the stem of the
                            artefact its package loads; a library with a `js` feature stays in
                            `crates/`
-  editor/                  `fossil-wasm`: the workspace under `openProgram` + the tokenizer,
+  editor/                  `fossil-wasm`: the workspace under `open` + the tokenizer,
                            for `@fossil-lang/wasm`
   executor/                `fossil-df-wasm`: `fossil_exec::Executor` exposed to JS, for
                            `@fossil-lang/executor` — the only host that writes a graph, in the

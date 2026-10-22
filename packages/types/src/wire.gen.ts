@@ -116,6 +116,28 @@ export interface CompletionItem {
 export type CompletionKind = 'function' | 'field';
 
 /**
+ * A data source a host names before there is a program — the files a person was asked about: what
+ * a program would write in its binding, and nothing else.
+ *
+ * `format` is the host's: nothing selects a row by extension (`fossil_base::providers`), as one
+ * extension can name two rows.
+ */
+export interface DataRef {
+  /**
+   * The catalogue row that reads it (`csv`).
+   */
+  format: string;
+  /**
+   * The value of its reader option (`|`), verbatim.
+   */
+  option?: string;
+  /**
+   * The reference as a program would write it: a name beside the program, `@conn/path`, or a URL.
+   */
+  reference: string;
+}
+
+/**
  * One diagnostic row in the `WasmWorkspace::diagnostics` return array: the workspace's own shape,
  * not the LSP wire's (`lsp_types::Diagnostic`).
  *

@@ -37,15 +37,17 @@ pub fn is_bare(name: &str) -> bool {
 /// The binding name a file becomes in a program — `people` for `people.csv`, as a
 /// source a program binds by it: `people := io.csv("people.csv")`.
 ///
-/// The extension of the last segment goes, and the rest is the [`identifier`]
-/// it spells: `/` is a character an identifier cannot hold, so `crm/people.csv`
-/// is `crm_people`.
+/// The name is the file's own, as `DuckDB` names a table it reads from a path and
+/// as an F# type provider names the type of a file: the last segment without its
+/// extension (and a URL's query), so `@crm/people.csv` and `exports/people.csv` are both `people`, and
+/// the rest is the [`identifier`] that spells. The folder and the connection are
+/// where the file is, not what it is. Two files that make one name are the
+/// caller's to refuse; no suffix here tells them apart (`/docs/design/discarded`).
 #[must_use]
 pub fn binding_name(file: &str) -> String {
-    let segment_start = file.rfind('/').map_or(0, |i| i + 1);
-    let stem = file[segment_start..]
-        .rfind('.')
-        .map_or(file, |dot| &file[..segment_start + dot]);
+    let path = file.split(['?', '#']).next().unwrap_or(file);
+    let segment = path.rsplit(['/', '\\']).next().unwrap_or(path);
+    let stem = segment.rfind('.').map_or(segment, |dot| &segment[..dot]);
     identifier(stem)
 }
 
@@ -215,8 +217,10 @@ mod tests {
             ("people.csv", "people"),
             ("Order Date.csv", "Order_Date"),
             ("2024-sales.parquet", "_2024_sales"),
-            ("crm/people.v2.csv", "crm_people_v2"),
-            ("a.b/c", "a_b_c"),
+            ("crm/people.v2.csv", "people_v2"),
+            ("@lake/users.csv", "users"),
+            ("https://example.org/d/orders.parquet?sig=x", "orders"),
+            ("a.b/c", "c"),
             ("café.json", "caf_"),
             ("from.csv", "_from"),
             ("true.csv", "_true"),
