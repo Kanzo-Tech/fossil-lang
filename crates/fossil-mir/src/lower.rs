@@ -155,7 +155,7 @@ fn lower_mapping<'db>(
     let predicates = checked.predicates(db).clone();
     // v0.1: every prop is typed String. The descriptor-driven type refinement is
     // the next increment; the backend derives the xsd spelling from `Ty`.
-    let string_ty = Ty::new(db, TyKind::Primitive(Primitive::String));
+    let string_ty = Ty::new(db, TyKind::Primitive(Primitive::STRING));
 
     let mut ops: Vec<Op<'db>> = Vec::with_capacity(3);
 
@@ -300,7 +300,7 @@ fn lower_mapping<'db>(
             HirExpr::LangStringLit { .. } => props.push(VProp {
                 name: pred_local,
                 value: lower_property_value(db, sink, &prop.value, &m.source_binding, None),
-                ty: Ty::new(db, TyKind::Primitive(Primitive::LangString)),
+                ty: Ty::new(db, TyKind::Primitive(Primitive::LANG_STRING)),
                 rdf_uri: iri.clone(),
                 term: term.clone(),
                 single_valued: true,
@@ -989,7 +989,7 @@ fn operator_ty<'db>(
         },
         HirExpr::ColumnRef { column, .. } | HirExpr::FieldRef(column) => field_ty(column.as_str()),
         HirExpr::FloatLit(_) => prim(Primitive::Float),
-        HirExpr::LangStringLit { .. } => prim(Primitive::LangString),
+        HirExpr::LangStringLit { .. } => prim(Primitive::LANG_STRING),
         HirExpr::IntLit(_) => prim(Primitive::Integer),
         HirExpr::BoolLit(_) => prim(Primitive::Bool),
         // A row whose return is not a scalar is a VERB of the algebra, and no
@@ -1000,13 +1000,13 @@ fn operator_ty<'db>(
         HirExpr::Call { func, .. } => fossil_hir::stdlib::stdlib()
             .lookup(func.as_str())
             .and_then(|entry| entry.sig.ret.scalar())
-            .map_or_else(|| prim(Primitive::String), |s| s.to_ty(db)),
+            .map_or_else(|| prim(Primitive::STRING), |s| s.to_ty(db)),
         // A conditional's branches agree by construction, so either answers.
         HirExpr::Ternary { then, .. } => operator_ty(db, then, field_ty),
         HirExpr::NullLit
         | HirExpr::StringLit(_)
         | HirExpr::Interpolation(_)
-        | HirExpr::Edge { .. } => prim(Primitive::String),
+        | HirExpr::Edge { .. } => prim(Primitive::STRING),
     }
 }
 
@@ -1164,7 +1164,7 @@ fn lower_property_value<'db>(
         HirExpr::LangStringLit { value, tag } => Expr::Call {
             func: SmolStr::new_static("str.lang"),
             args: vec![Expr::LitString(value.clone()), Expr::LitString(tag.clone())],
-            ty: Ty::new(db, TyKind::Primitive(Primitive::LangString)),
+            ty: Ty::new(db, TyKind::Primitive(Primitive::LANG_STRING)),
         },
         HirExpr::Interpolation(parts) => {
             lower_interpolation(db, sink, parts, source_binding, assert_line)
@@ -1202,7 +1202,7 @@ fn lower_property_value<'db>(
             // The branch type is the conditional's; the checker proved they
             // agree. Without a source row neither branch types, and String is
             // what every other untyped property gets.
-            ty: Ty::new(db, TyKind::Primitive(Primitive::String)),
+            ty: Ty::new(db, TyKind::Primitive(Primitive::STRING)),
         },
         // A comparison against `null` is `IS NULL`, and it is decided HERE
         // rather than in a backend because it is a fact about the algebra: in
@@ -1320,7 +1320,7 @@ fn call_result_ty<'db>(db: &'db dyn fossil_base::Db, func: &SmolStr) -> Ty<'db> 
         .lookup(func.as_str())
         .and_then(|e| e.sig.ret.scalar())
         .map_or_else(
-            || Ty::new(db, TyKind::Primitive(Primitive::String)),
+            || Ty::new(db, TyKind::Primitive(Primitive::STRING)),
             |s| s.to_ty(db),
         )
 }

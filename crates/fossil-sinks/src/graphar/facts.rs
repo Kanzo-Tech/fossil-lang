@@ -214,9 +214,9 @@ const fn primitive(data_type: &DataType) -> Primitive {
         | DataType::UInt64 => Primitive::Integer,
         DataType::Float16 | DataType::Float32 | DataType::Float64 => Primitive::Float,
         DataType::Boolean => Primitive::Bool,
-        DataType::Date32 | DataType::Date64 => Primitive::Date,
-        DataType::Timestamp(..) => Primitive::DateTime,
-        _ => Primitive::String,
+        DataType::Date32 | DataType::Date64 => Primitive::DATE,
+        DataType::Timestamp(..) => Primitive::DATE_TIME,
+        _ => Primitive::STRING,
     }
 }
 

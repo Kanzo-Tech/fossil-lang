@@ -649,7 +649,7 @@ fn row_per_value(df: DataFrame, column: &str) -> datafusion::error::Result<DataF
 fn node_property(db: &dyn fossil_base::Db, prop: &VProp<'_>) -> NodeProp {
     NodeProp {
         name: prop.name.to_string(),
-        datatype: inner_primitive(db, prop.ty).unwrap_or(Primitive::String),
+        datatype: inner_primitive(db, prop.ty).unwrap_or(Primitive::STRING),
         iri: prop.rdf_uri.as_ref().map(ToString::to_string),
         term: prop.term.clone(),
         cardinality: if prop.single_valued {
@@ -2164,7 +2164,7 @@ mod tests {
             args: vec![],
             ty: Ty::new(
                 &db,
-                TyKind::Primitive(fossil_graph_schema::Primitive::String),
+                TyKind::Primitive(fossil_graph_schema::Primitive::STRING),
             ),
         };
         let err = super::render(&call).expect_err("a plan operator is not a value");

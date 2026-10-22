@@ -549,7 +549,7 @@ mod tests {
     /// reads it — the backend takes its columns from the file — but a `Source`
     /// is not well-formed without one.
     fn row<'db>(db: &'db dyn fossil_base::Db, names: &[&str]) -> Ty<'db> {
-        let string_ty = Ty::new(db, TyKind::Primitive(Primitive::String));
+        let string_ty = Ty::new(db, TyKind::Primitive(Primitive::STRING));
         let fields: Vec<RecordField<'db>> = names
             .iter()
             .map(|n| RecordField {

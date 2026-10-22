@@ -269,12 +269,12 @@ fn laureate(identity: &[&str]) -> ModelType {
         fields: vec![
             ModelField {
                 name: "name".into(),
-                primitive: Primitive::String,
+                primitive: Primitive::STRING,
                 optional: false,
             },
             ModelField {
                 name: "born".into(),
-                primitive: Primitive::Date,
+                primitive: Primitive::DATE,
                 optional: true,
             },
         ],
@@ -345,7 +345,11 @@ fn a_vocabulary_declares_the_types_with_the_workspaces_iris_and_reads_only_what_
         declared.fields,
         [
             field("name", "https://acme.example/vocab/name", "String"),
-            field("born", "https://acme.example/vocab/born", "Option<Date>"),
+            field(
+                "born",
+                "https://acme.example/vocab/born",
+                "Option<Time<Date>>"
+            ),
             field(
                 "affiliation",
                 "https://acme.example/vocab/affiliation",
@@ -387,8 +391,9 @@ fn a_relation_is_a_ref_an_optional_ref_or_a_sequence() {
 fn every_primitive_is_a_type_the_prelude_declares() {
     let fields: Vec<ModelField> = Primitive::ALL
         .into_iter()
-        .map(|primitive| ModelField {
-            name: format!("f{primitive}"),
+        .enumerate()
+        .map(|(i, primitive)| ModelField {
+            name: format!("f{i}"),
             primitive,
             optional: false,
         })
@@ -401,8 +406,11 @@ fn every_primitive_is_a_type_the_prelude_declares() {
         edges: Vec::new(),
     };
     let text = prelude(&vocabulary_of(&model, &[], BASE));
-    assert!(text.contains("fGYear: GYear"), "{text}");
-    assert!(text.contains("fAnyUri: AnyUri"), "{text}");
-    assert!(text.contains("fLangString: LangString"), "{text}");
+    for primitive in Primitive::ALL {
+        assert!(
+            text.contains(&format!(": {primitive}\n")),
+            "{primitive}: {text}"
+        );
+    }
     assert!(syntax_errors(&text).is_empty(), "{text}");
 }

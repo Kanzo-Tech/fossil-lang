@@ -30,11 +30,11 @@ fn dummy(ty: ScalarTy) -> String {
         ScalarTy::Integer => "2".to_string(),
         ScalarTy::Float => "1.5".to_string(),
         ScalarTy::Bool => "true".to_string(),
-        ScalarTy::Date => "DATE '2026-05-21'".to_string(),
-        ScalarTy::DateTime => "TIMESTAMP '2026-05-21 00:00:00'".to_string(),
-        ScalarTy::GYear => "CAST(2026 AS INTEGER)".to_string(),
+        ScalarTy::TimeDate => "DATE '2026-05-21'".to_string(),
+        ScalarTy::TimeDateTime => "TIMESTAMP '2026-05-21 00:00:00'".to_string(),
+        ScalarTy::TimeYear => "CAST(2026 AS INTEGER)".to_string(),
         ScalarTy::SeqString => "['a', 'b']".to_string(),
-        ScalarTy::LangString => "row('abc', 'en')".to_string(),
+        ScalarTy::StringLang => "row('abc', 'en')".to_string(),
     }
 }
 

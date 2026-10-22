@@ -543,22 +543,22 @@ impl SigSpec {
 /// the v0.1 stdlib signatures need. Resolved to a `Ty<'db>` by [`Self::to_ty`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScalarTy {
-    /// `xsd:string`.
+    /// `String`.
     String,
-    /// `xsd:integer`.
+    /// `Integer`.
     Integer,
-    /// `xsd:float` / `xsd:double`.
+    /// `Float`.
     Float,
-    /// `xsd:boolean`.
+    /// `Bool`.
     Bool,
-    /// `xsd:date`.
-    Date,
-    /// `xsd:dateTime`.
-    DateTime,
-    /// `xsd:gYear`.
-    GYear,
-    /// `rdf:langString` — a string and its language tag.
-    LangString,
+    /// `Time<Date>`.
+    TimeDate,
+    /// `Time<DateTime>`.
+    TimeDateTime,
+    /// `Time<Year>`.
+    TimeYear,
+    /// `String<Lang>` — a text and its language tag.
+    StringLang,
     /// `Seq<String>` — the one repeated shape v0.1 needs (`str.split`).
     SeqString,
 }
@@ -567,14 +567,14 @@ impl ScalarTy {
     /// The primitive this tag is, or — for [`Self::SeqString`] — holds.
     const fn primitive(self) -> Primitive {
         match self {
-            Self::String | Self::SeqString => Primitive::String,
+            Self::String | Self::SeqString => Primitive::STRING,
             Self::Integer => Primitive::Integer,
             Self::Float => Primitive::Float,
             Self::Bool => Primitive::Bool,
-            Self::Date => Primitive::Date,
-            Self::DateTime => Primitive::DateTime,
-            Self::GYear => Primitive::GYear,
-            Self::LangString => Primitive::LangString,
+            Self::TimeDate => Primitive::DATE,
+            Self::TimeDateTime => Primitive::DATE_TIME,
+            Self::TimeYear => Primitive::YEAR,
+            Self::StringLang => Primitive::LANG_STRING,
         }
     }
 

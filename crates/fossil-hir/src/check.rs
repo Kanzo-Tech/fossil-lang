@@ -1264,7 +1264,7 @@ impl<'db> Expr<'db> {
         self.expected.filter(|t| {
             matches!(
                 t.kind(self.db),
-                TyKind::Ref(_) | TyKind::Primitive(Primitive::AnyUri)
+                TyKind::Ref(_) | TyKind::Primitive(Primitive::Uri)
             )
         })
     }
@@ -1373,7 +1373,7 @@ impl<'db> Expr<'db> {
                     .denoted()
                     .filter(|t| !matches!(t.kind(db), TyKind::Ref(_)));
                 (
-                    iri.unwrap_or_else(|| Ty::new(db, TyKind::Primitive(Primitive::String))),
+                    iri.unwrap_or_else(|| Ty::new(db, TyKind::Primitive(Primitive::STRING))),
                     ProvenanceKind::Literal,
                 )
             }
@@ -1382,7 +1382,7 @@ impl<'db> Expr<'db> {
             HirExpr::LangStringLit { tag, .. } => {
                 self.refuse_ill_formed_tag(expr_id, tag);
                 (
-                    Ty::new(db, TyKind::Primitive(Primitive::LangString)),
+                    Ty::new(db, TyKind::Primitive(Primitive::LANG_STRING)),
                     ProvenanceKind::Literal,
                 )
             }
@@ -1405,7 +1405,7 @@ impl<'db> Expr<'db> {
                 // IRI-template type and no subtyping rule standing in for it.
                 let ty = self
                     .denoted()
-                    .unwrap_or_else(|| Ty::new(db, TyKind::Primitive(Primitive::String)));
+                    .unwrap_or_else(|| Ty::new(db, TyKind::Primitive(Primitive::STRING)));
                 (ty, ProvenanceKind::Literal)
             }
             // T-Column: the qualified spelling. Same resolution as T-Field,
@@ -2154,7 +2154,7 @@ impl<'db> Expr<'db> {
                         },
                         self.span_of(expr_id),
                     );
-                    if matches!(kind, TyKind::Primitive(Primitive::String))
+                    if matches!(kind, TyKind::Primitive(Primitive::STRING))
                         && matches!(op, BinOp::Add)
                     {
                         d = d.with_help(

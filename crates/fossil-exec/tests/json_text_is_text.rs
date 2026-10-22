@@ -53,7 +53,7 @@ fn messages(program: &str) -> Vec<String> {
 fn a_date_shaped_json_string_does_not_fill_a_date_slot() {
     assert_eq!(
         messages(&program("Row.born")),
-        ["`birthday` expects Date, and this is String"]
+        ["`birthday` expects Time<Date>, and this is String"]
     );
 }
 

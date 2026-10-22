@@ -34,7 +34,7 @@ shape http://example.org/Persona
 prop http://example.org/name - 1 1
 ";
 
-const COLUMNS: &[(&str, Primitive)] = &[("id", Primitive::Integer), ("name", Primitive::String)];
+const COLUMNS: &[(&str, Primitive)] = &[("id", Primitive::Integer), ("name", Primitive::STRING)];
 
 /// A program whose only interesting line is the binding under test.
 fn program(binding: &str) -> String {

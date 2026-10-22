@@ -211,10 +211,10 @@ pub enum SigTy {
     Integer,
     Float,
     Bool,
-    Date,
-    DateTime,
-    GYear,
-    LangString,
+    TimeDate,
+    TimeDateTime,
+    TimeYear,
+    StringLang,
     SeqString,
     Rows,
     Predicate,
@@ -232,10 +232,10 @@ impl SigTy {
             "Integer" => Self::Integer,
             "Float" => Self::Float,
             "Bool" => Self::Bool,
-            "Date" => Self::Date,
-            "DateTime" => Self::DateTime,
-            "GYear" => Self::GYear,
-            "LangString" => Self::LangString,
+            "TimeDate" => Self::TimeDate,
+            "TimeDateTime" => Self::TimeDateTime,
+            "TimeYear" => Self::TimeYear,
+            "StringLang" => Self::StringLang,
             "SeqString" => Self::SeqString,
             "Rows" => Self::Rows,
             "Predicate" => Self::Predicate,
@@ -257,10 +257,10 @@ impl SigTy {
             Self::Integer => "SigTy::Scalar(ScalarTy::Integer)",
             Self::Float => "SigTy::Scalar(ScalarTy::Float)",
             Self::Bool => "SigTy::Scalar(ScalarTy::Bool)",
-            Self::Date => "SigTy::Scalar(ScalarTy::Date)",
-            Self::DateTime => "SigTy::Scalar(ScalarTy::DateTime)",
-            Self::GYear => "SigTy::Scalar(ScalarTy::GYear)",
-            Self::LangString => "SigTy::Scalar(ScalarTy::LangString)",
+            Self::TimeDate => "SigTy::Scalar(ScalarTy::TimeDate)",
+            Self::TimeDateTime => "SigTy::Scalar(ScalarTy::TimeDateTime)",
+            Self::TimeYear => "SigTy::Scalar(ScalarTy::TimeYear)",
+            Self::StringLang => "SigTy::Scalar(ScalarTy::StringLang)",
             Self::SeqString => "SigTy::Scalar(ScalarTy::SeqString)",
             Self::Rows => "SigTy::Rows",
             Self::Predicate => "SigTy::Predicate",
@@ -270,8 +270,8 @@ impl SigTy {
         }
     }
 
-    /// How the reference page spells this position. The two that differ from
-    /// the file's own word are the two the type page already had names for.
+    /// How the reference page spells this position: a program's spelling,
+    /// which a one-word file cannot write wherever a type takes a parameter.
     #[must_use]
     pub const fn page_name(self) -> &'static str {
         match self {
@@ -279,10 +279,10 @@ impl SigTy {
             Self::Integer => "Integer",
             Self::Float => "Float",
             Self::Bool => "Bool",
-            Self::Date => "Date",
-            Self::DateTime => "DateTime",
-            Self::GYear => "GYear",
-            Self::LangString => "LangString",
+            Self::TimeDate => "Time<Date>",
+            Self::TimeDateTime => "Time<DateTime>",
+            Self::TimeYear => "Time<Year>",
+            Self::StringLang => "String<Lang>",
             Self::SeqString => "Seq<String>",
             Self::Rows => "Relation",
             Self::Predicate => "Predicate",
@@ -939,6 +939,21 @@ pub fn emit_base(rows: &[Row]) -> String {
     out
 }
 
+/// The Rust that names the primitive the wire calls `wire`: a variant, or the
+/// constant for one parameter of a family.
+fn primitive_path(wire: &str) -> String {
+    let name = match wire {
+        "string" => "STRING",
+        "string_lang" => "LANG_STRING",
+        "time_year" => "YEAR",
+        "time_date" => "DATE",
+        "time_date_time" => "DATE_TIME",
+        "time_hour" => "HOUR",
+        other => return format!("Primitive::{}", upper_camel(other)),
+    };
+    format!("Primitive::{name}")
+}
+
 /// `fossil-profile`: the `duckdb` table as `duckdb_primitive`.
 #[must_use]
 pub fn emit_profile(cat: &Catalogue) -> String {
@@ -954,7 +969,7 @@ pub fn emit_profile(cat: &Catalogue) -> String {
          \x20   match t.trim().to_ascii_uppercase().as_str() {\n",
     );
     for t in &cat.duckdb {
-        let variant = format!("Primitive::{}", upper_camel(&t.primitive));
+        let variant = primitive_path(&t.primitive);
         let exact: Vec<String> = t
             .spellings
             .iter()
@@ -1003,7 +1018,7 @@ pub fn emit_profile(cat: &Catalogue) -> String {
     out.push_str(
         "        _ => false,\n\
          \x20   };\n\
-         \x20   if text { Primitive::String } else { duckdb_primitive(t) }\n\
+         \x20   if text { Primitive::STRING } else { duckdb_primitive(t) }\n\
          }\n",
     );
     out

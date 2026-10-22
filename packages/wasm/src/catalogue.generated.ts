@@ -30,8 +30,8 @@ export const DUCKDB_TYPES: readonly DuckdbType[] = [
   { primitive: "integer", spellings: ["INTEGER", "BIGINT", "INT", "SMALLINT", "TINYINT", "HUGEINT"] },
   { primitive: "float", spellings: ["DOUBLE", "FLOAT", "REAL", "DECIMAL*"] },
   { primitive: "bool", spellings: ["BOOLEAN", "BOOL"] },
-  { primitive: "date", spellings: ["DATE"] },
-  { primitive: "date_time", spellings: ["TIMESTAMP*", "DATETIME"] },
-  { primitive: "time", spellings: ["TIME*"] },
+  { primitive: "time_date", spellings: ["DATE"] },
+  { primitive: "time_date_time", spellings: ["TIMESTAMP*", "DATETIME"] },
+  { primitive: "time_hour", spellings: ["TIME*"] },
   { primitive: "string", spellings: ["*"] },
 ];

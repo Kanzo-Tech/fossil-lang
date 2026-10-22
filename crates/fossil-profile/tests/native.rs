@@ -91,9 +91,9 @@ fn a_profile_says_what_the_files_are() {
     assert_eq!(
         columns,
         [
-            ("id", Primitive::String),
+            ("id", Primitive::STRING),
             ("laureate", Primitive::Integer),
-            ("category", Primitive::String),
+            ("category", Primitive::STRING),
             ("share", Primitive::Float)
         ]
     );
@@ -226,19 +226,19 @@ fn a_sample_reads_the_counts_from_the_first_rows_and_says_so() {
 fn every_duckdb_instant_is_an_instant() {
     let conn = duckdb::Connection::open_in_memory().expect("in-memory duckdb");
     for (sql, expected) in [
-        ("TIMESTAMP '2012-01-01 00:00:00'", Primitive::DateTime),
-        ("TIMESTAMPTZ '2012-01-01 00:00:00+01'", Primitive::DateTime),
+        ("TIMESTAMP '2012-01-01 00:00:00'", Primitive::DATE_TIME),
+        ("TIMESTAMPTZ '2012-01-01 00:00:00+01'", Primitive::DATE_TIME),
         (
             "CAST('2012-01-01T00:00:00.000+00:00' AS TIMESTAMP WITH TIME ZONE)",
-            Primitive::DateTime,
+            Primitive::DATE_TIME,
         ),
-        ("DATE '2012-01-01'", Primitive::Date),
-        ("TIME '12:00:00'", Primitive::Time),
+        ("DATE '2012-01-01'", Primitive::DATE),
+        ("TIME '12:00:00'", Primitive::HOUR),
         ("CAST(1 AS BIGINT)", Primitive::Integer),
         ("CAST(1.5 AS DOUBLE)", Primitive::Float),
         ("CAST(1.5 AS DECIMAL(38,18))", Primitive::Float),
         ("true", Primitive::Bool),
-        ("'x'", Primitive::String),
+        ("'x'", Primitive::STRING),
     ] {
         let described = rows(&conn, &format!("DESCRIBE SELECT {sql} AS v")).expect("describe runs");
         let declared = described[0][1].clone().expect("a type");

@@ -1208,7 +1208,7 @@ mod disambiguation {
                    @annotation(\"http://www.w3.org/2000/01/rdf-schema#label\", \"Nobel laureate\"@en)\n\
                    type Laureate\n    \
                    @iri(\"https://schema.org/name\")\n    \
-                   name: Seq<LangString>\n\
+                   name: Seq<String<Lang>>\n\
                    \n    \
                    @iri(\"https://schema.org/birthDate\")\n    \
                    @annotation(\"http://www.w3.org/2000/01/rdf-schema#label\", \"birth date\"@en)\n    \

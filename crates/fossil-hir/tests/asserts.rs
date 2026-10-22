@@ -17,7 +17,7 @@ use fossil_hir::typecheck_mapping;
 const COLUMNS: &[(&str, Primitive)] = &[
     ("id", Primitive::Integer),
     ("age", Primitive::Integer),
-    ("mail", Primitive::String),
+    ("mail", Primitive::STRING),
 ];
 
 /// The constraints design's declaration: an assertion on the type, one on a
@@ -37,8 +37,8 @@ type Persona
     @severity(info)
     email: Seq<String, 1, 3>
 
-    @iri(\"https://ex.org/alta\")       alta: Date
-    @iri(\"https://ex.org/baja\")       baja: Option<Date>
+    @iri(\"https://ex.org/alta\")       alta: Time<Date>
+    @iri(\"https://ex.org/baja\")       baja: Option<Time<Date>>
 
 rows := io.csv(\"u.csv\")
 ";

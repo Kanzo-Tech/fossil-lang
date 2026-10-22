@@ -16,11 +16,11 @@ pub fn duckdb_primitive(t: &str) -> Primitive {
         "DOUBLE" | "FLOAT" | "REAL" => Primitive::Float,
         t if t.starts_with("DECIMAL") => Primitive::Float,
         "BOOLEAN" | "BOOL" => Primitive::Bool,
-        "DATE" => Primitive::Date,
-        "DATETIME" => Primitive::DateTime,
-        t if t.starts_with("TIMESTAMP") => Primitive::DateTime,
-        t if t.starts_with("TIME") => Primitive::Time,
-        _ => Primitive::String,
+        "DATE" => Primitive::DATE,
+        "DATETIME" => Primitive::DATE_TIME,
+        t if t.starts_with("TIMESTAMP") => Primitive::DATE_TIME,
+        t if t.starts_with("TIME") => Primitive::HOUR,
+        _ => Primitive::STRING,
     }
 }
 
@@ -36,7 +36,7 @@ pub fn read_primitive(reader: NativeReader, t: &str) -> Primitive {
         _ => false,
     };
     if text {
-        Primitive::String
+        Primitive::STRING
     } else {
         duckdb_primitive(t)
     }

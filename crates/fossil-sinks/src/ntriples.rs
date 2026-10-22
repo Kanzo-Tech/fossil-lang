@@ -12,7 +12,7 @@
 //! that the natural one of the value as the engine holds it (R2RML §10.2): an
 //! integer is `xsd:integer`, a float `xsd:double`, a date `xsd:date`, a
 //! timestamp `xsd:dateTime`, a decimal `xsd:decimal` and bytes `xsd:hexBinary`.
-//! `GYear` and `Time` keep theirs whatever column holds them. Its lexical form is
+//! `Time<Year>` and `Time` keep theirs whatever column holds them. Its lexical form is
 //! the value's text, Arrow's rendering of it, with bytes in upper-case
 //! hexadecimal, the canonical `xsd:hexBinary` form.
 //!
@@ -374,7 +374,7 @@ fn objects(
         let tags = cast(tagged.column(1), &DataType::Utf8)?;
         return language_tagged(&at, &forms, &tags, |i| !tagged.is_null(i));
     }
-    if property.datatype == Primitive::LangString
+    if property.datatype == Primitive::LANG_STRING
         && let Some(tags) = tags
     {
         let forms = cast(column, &DataType::Utf8)?;
@@ -434,8 +434,8 @@ fn datatype(property: &Property, column: &DataType) -> Option<NamedNode> {
             Some(NamedNode::new_unchecked(datatype.as_str()))
         }
         Some(Declared::Literal(None)) | None => Some(match property.datatype {
-            Primitive::GYear => xsd::G_YEAR.into_owned(),
-            Primitive::Time => xsd::TIME.into_owned(),
+            Primitive::YEAR => xsd::G_YEAR.into_owned(),
+            Primitive::HOUR => xsd::TIME.into_owned(),
             _ => natural(column).into_owned(),
         }),
     }

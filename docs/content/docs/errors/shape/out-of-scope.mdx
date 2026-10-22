@@ -12,9 +12,9 @@ assertion names a second field:
 type Stay
     @iri("https://ex.org/arrival")
     @assert(arrival <= departure)
-    arrival: Date
+    arrival: Time<Date>
 
-    @iri("https://ex.org/departure")  departure: Option<Date>
+    @iri("https://ex.org/departure")  departure: Option<Time<Date>>
 ```
 
 ```text
@@ -48,5 +48,5 @@ The rule is SHACL's: `sh:lessThan` is a property shape's, relating two paths of 
 ## How to repair it
 
 - **Two fields compared**: move the assertion above the `type`. A field that is absent is not
-  checked, so `Option<Date>` on one side is fine.
+  checked, so `Option<Time<Date>>` on one side is fine.
 - **Each value of a `Seq` checked**: move the assertion onto the field.

@@ -233,7 +233,7 @@ mod tests {
                 },
                 InferredColumn {
                     name: "name".into(),
-                    primitive: Primitive::String,
+                    primitive: Primitive::STRING,
                 },
             ],
             etag: "abc123".into(),

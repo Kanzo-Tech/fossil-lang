@@ -744,7 +744,7 @@ impl Profiler {
                         let name = row.first()?.as_deref()?;
                         let kind = row.get(1)?.as_deref()?;
                         let primitive = reader
-                            .map_or(Primitive::String, |r| generated::read_primitive(r, kind));
+                            .map_or(Primitive::STRING, |r| generated::read_primitive(r, kind));
                         (!name.is_empty()).then(|| InferredColumn {
                             name: name.into(),
                             primitive,
@@ -1067,7 +1067,7 @@ mod tests {
                 .iter()
                 .map(|c| c.primitive)
                 .collect::<Vec<_>>(),
-            [Primitive::String, Primitive::Integer, Primitive::Float]
+            [Primitive::STRING, Primitive::Integer, Primitive::Float]
         );
         assert_eq!(
             awards.candidate_keys,
@@ -1152,15 +1152,15 @@ mod tests {
                     name: "Person".into(),
                     columns: vec![
                         column("dense_id", Primitive::Integer),
-                        column("subject", Primitive::AnyUri),
+                        column("subject", Primitive::Uri),
                     ],
                 },
                 Table {
                     name: "Prize".into(),
                     columns: vec![
                         column("dense_id", Primitive::Integer),
-                        column("subject", Primitive::AnyUri),
-                        column("winner", Primitive::AnyUri),
+                        column("subject", Primitive::Uri),
+                        column("winner", Primitive::Uri),
                     ],
                 },
             ],

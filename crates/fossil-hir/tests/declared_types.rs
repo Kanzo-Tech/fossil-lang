@@ -33,8 +33,8 @@ shape https://other.example/Tag
 
 const COLUMNS: &[(&str, Primitive)] = &[
     ("id", Primitive::Integer),
-    ("name", Primitive::String),
-    ("nick", Primitive::String),
+    ("name", Primitive::STRING),
+    ("nick", Primitive::STRING),
     ("city", Primitive::Integer),
 ];
 
@@ -142,7 +142,7 @@ fn a_declared_type_lowers_to_the_shape_vocabulary() {
             )
         })
         .collect();
-    let string = Term::Literal(Some(Primitive::String.into()));
+    let string = Term::of(Primitive::STRING);
     assert_eq!(
         fields,
         [
