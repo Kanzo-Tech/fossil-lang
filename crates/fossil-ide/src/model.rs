@@ -31,7 +31,6 @@ pub struct Model {
     /// The files the program binds, in the order it binds them.
     pub sources: Vec<ModelSource>,
     pub types: Vec<ModelType>,
-    #[serde(default)]
     pub edges: Vec<ModelEdge>,
 }
 
