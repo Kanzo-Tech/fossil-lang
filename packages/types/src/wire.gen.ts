@@ -391,7 +391,7 @@ export interface MissingDocument {
  * relations between them. `write` makes it a program.
  */
 export interface Model {
-  edges?: ModelEdge[];
+  edges: ModelEdge[];
   /**
    * The files the program binds, in the order it binds them.
    */
