@@ -27,7 +27,7 @@ const MODEL: Model = {
       identity: ['id'],
       fields: [
         { name: 'name', column: 'name', primitive: 'string' },
-        { name: 'born', column: 'born', primitive: 'date', optional: true },
+        { name: 'born', column: 'born', primitive: 'time_date', optional: true },
       ],
     },
     { name: 'Institutions', source: 'institutions', identity: ['id'], fields: [{ name: 'title', column: 'title', primitive: 'string' }] },
