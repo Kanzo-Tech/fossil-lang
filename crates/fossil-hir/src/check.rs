@@ -1989,7 +1989,7 @@ impl<'db> Expr<'db> {
     /// `Operator::Divide` on two `Int64`s gives an `Int64` and TRUNCATES — so a
     /// result type read off the operands would mean `7 / 2` is `3` here and
     /// `3.5` there. Typing it `Float` picks the answer that loses nothing, and
-    /// `fossil_df::render` casts the left operand so the engine agrees with the
+    /// `fossil_exec::render` casts the left operand so the engine agrees with the
     /// type instead of the type flattering the engine.
     fn synth_binop(
         &mut self,

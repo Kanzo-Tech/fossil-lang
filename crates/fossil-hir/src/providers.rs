@@ -257,7 +257,7 @@ ex:Contact {
         // answer is a bool. The SENTENCE it turns into is
         // `fossil_hir::refusals::decline_extension`, tested there and asserted
         // end-to-end over this very table in
-        // `fossil-df/tests/provider_registry.rs`.
+        // `fossil-exec/tests/provider_registry.rs`.
         assert!(!SHEX.accepts("catalogue.ttl"));
     }
 

@@ -18,7 +18,7 @@
 //! two subjects; one per multi-valued or language-tagged property, over a query
 //! that unnests the list once so each row is one element. The tables are SQL
 //! names, which the host resolves, and their names and columns are the layout's
-//! (`fossil-df`'s `layout`): a vertex type's table is its label, a relation's is
+//! (`fossil-exec`'s `layout`): a vertex type's table is its label, a relation's is
 //! `<Src>_<label>_<Dst>`, and the columns are the properties' names beside the
 //! `subject` and the three index columns.
 //!
@@ -56,7 +56,7 @@ use rudof_iri::IriS;
 pub const PAYLOAD_IDENTITY: &str = "subject";
 
 /// `GraphAr`'s name for the column of a vertex's index within its type
-/// (`graphar_parquet::VERTEX_INDEX_COL`, which `fossil-df` holds this to).
+/// (`graphar_parquet::VERTEX_INDEX_COL`, which `fossil-exec` holds this to).
 pub const VERTEX_INDEX_COL: &str = "_graphArVertexIndex";
 /// `GraphAr`'s name for the column of a relation's source index
 /// (`graphar_parquet::SRC_INDEX_COL`).

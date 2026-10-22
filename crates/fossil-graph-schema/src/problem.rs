@@ -869,6 +869,13 @@ catalogue! {
     #[error("a `{vertex_type}` vertex has the subject {subject}, which is not an absolute IRI")]
     WriteInvalidSubject { vertex_type: String, subject: String },
 
+    /// A value of a property the program types as an IRI that is not an
+    /// absolute IRI: the object of its triple would be a term no RDF parser
+    /// reads.
+    "write/invalid-iri", "A value typed as an IRI is not one",
+    #[error("`{property}` holds `{value}`, which is not an absolute IRI")]
+    WriteInvalidIri { property: String, value: String },
+
     /// One IRI that names two things the mapping needs it to name one of
     /// (admissibility A2): two vertex types with one class, two columns of one
     /// type with one predicate, or a relation whose predicate is a column

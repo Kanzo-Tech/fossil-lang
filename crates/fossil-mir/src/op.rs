@@ -182,7 +182,7 @@ pub enum Op<'db> {
     Sink { input: usize, sink: SinkRef },
 
     /// `Empty(schema)` — the empty relation, carrying the column schema it
-    /// would have produced. Nothing constructs it and `fossil_df::plan` does
+    /// would have produced. Nothing constructs it and `fossil_exec::plan` does
     /// not execute it; it is the identity of [`Op::Union`] and the target a
     /// statically-false filter rewrites to. A variant of its own rather than a
     /// `Source` with an empty marker, so `schema_of` stays total and no
@@ -233,7 +233,7 @@ pub struct ProjectedColumn {
 ///   paragraph below describes.
 ///
 /// The invariant this field states is checkable against the backend by
-/// induction over `fossil_df::plan::build`: a `Source` is qualified by its
+/// induction over `fossil_exec::plan::build`: a `Source` is qualified by its
 /// binding, `Filter`/`Distinct` preserve, `Project` keeps the qualifier each
 /// column was written with, `Union` collapses to the one name it carries,
 /// `GroupBy` keeps its keys' and adds its own for the aggregates, and `Join`
@@ -327,7 +327,7 @@ pub struct VProp<'db> {
 // `fossil_hir::stdlib::AggFn`. A copy on this side of the lowering would be a
 // second table to keep in step with four rows of `math/`.
 
-/// Source formats. `fossil_df::read_source` is where each one picks its reader.
+/// Source formats. `fossil_exec::read_source` is where each one picks its reader.
 ///
 /// [`Provider`](Self::Provider) covers the formats no built-in reader handles:
 /// the core stays format-agnostic — the plan scans a relation an external

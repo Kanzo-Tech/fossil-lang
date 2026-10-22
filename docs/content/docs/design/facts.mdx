@@ -132,12 +132,12 @@ already holds — the writer collects every batch to number the ids, so nothing 
 storage. A run that cannot profile what it wrote writes no graph document and so no graph: the
 profile is part of the commit, and a graph never exists without its facts.
 
-**The plan runs on DataFusion, which has no SQL here.** `fossil-df` builds DataFusion with
+**The plan runs on DataFusion, which has no SQL here.** `fossil-exec` builds DataFusion with
 `default-features = false`, dropping its `sql` frontend from the wasm build, and the profiler's
 queries are SQL strings DuckDB runs. So the plan's queries are **data** — an `Ask`, one per kind
 (the counts of a table, the commonest values of a column) — and SQL is DuckDB's rendering of an
-`Ask`, kept in `fossil-profile` for the two hosts that profile sources, while `fossil-df` renders the
-same `Ask` as a DataFusion plan (`crates/fossil-df/src/facts.rs`). Which queries to run and what a
+`Ask`, kept in `fossil-profile` for the two hosts that profile sources, while `fossil-exec` renders the
+same `Ask` as a DataFusion plan (`crates/fossil-sinks/src/graphar/facts.rs`). Which queries to run and what a
 count means stay in one crate; only the rendering is per engine. The wasm gate does not move:
 `fossil-profile` links no engine and is in the wasm closure already.
 
@@ -156,7 +156,7 @@ the manifest as `inclusions`, read as `fossil_inclusions`. They are gone from th
 
 **They were the cost.** Measured natively, release build, the run into memory, median of three
 interleaved with the same program on the writer without facts, on a shared four-core host (load 10
-to 13). *Write* is `fossil_df::write` whole; *facts* the part of it that counted; the SNB, CORDIS and
+to 13). *Write* is `fossil_sinks::graphar::write` whole; *facts* the part of it that counted; the SNB, CORDIS and
 Nobel graphs are the keasy dev examples:
 
 | graph | tables · rows written | run before | run with inclusions | write before → with inclusions | facts | of it, inclusions | manifest |
@@ -229,7 +229,7 @@ the candidate keys the one exact count kept.
 | Where | What changes |
 | --- | --- |
 | `fossil-profile` | `Ask` as the plan's queries, with `sql()` as DuckDB's rendering; `min_value`, `max_value` and `top_values` in the counts; `nulls` and `distinct` renamed to `null_count` and `distinct_count`; a source that is a table the host already holds, with no reader, counted and never tested for an inclusion |
-| `fossil-df` | `fossil-profile` a dependency; `Ask` rendered on DataFusion; the counts run before each vertex chunk, under the pool; `fossil:stats` written in the chunk's footer |
+| `fossil-exec` | `fossil-profile` a dependency; `Ask` rendered on DataFusion; the counts run before each vertex chunk, under the pool; `fossil:stats` written in the chunk's footer |
 | `@fossil-lang/types` | the renamed profile wire types, generated |
 | `@fossil-lang/wasm` | `runProfiler` reads `query.sql` as before; the editor's profile carries the new counts |
 | kanzo-ui | Ask's field statistics read the footers instead of `SUMMARIZE`; `@kanzo-tech/graph` reads GraphAr's relations |

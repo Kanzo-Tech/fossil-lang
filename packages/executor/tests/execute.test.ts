@@ -3,8 +3,8 @@
  * build (`--target web`) through the package's typed surface. Proves the full
  * vertex+edge path runs in WASM and emits a GraphAr graph with its mapping.
  *
- * The Rust core is covered by `crates/fossil-df/tests/execute_core.rs` and the
- * graph it writes by `crates/fossil-df/tests/write.rs`;
+ * The Rust core is covered by `crates/fossil-exec/tests/execute_core.rs` and the
+ * graph it writes by `crates/fossil-exec/tests/write.rs`;
  * this suite covers the wasm-bindgen + JS-marshalling boundary cargo can't reach.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
@@ -45,7 +45,7 @@ function countOf(files: { path: string; bytes: Uint8Array }[], path: string): bi
 
 async function fixture(name: string): Promise<Uint8Array> {
   const p = fileURLToPath(
-    new URL(`../../../crates/fossil-df/tests/fixtures/${name}`, import.meta.url),
+    new URL(`../../../crates/fossil-exec/tests/fixtures/${name}`, import.meta.url),
   );
   return new Uint8Array(await readFile(p));
 }
@@ -55,7 +55,7 @@ let SHEX: string;
 
 beforeAll(async () => {
   SHEX = await readFile(
-    fileURLToPath(new URL('../../../crates/fossil-df/tests/fixtures/graph.shex', import.meta.url)),
+    fileURLToPath(new URL('../../../crates/fossil-exec/tests/fixtures/graph.shex', import.meta.url)),
     'utf8',
   );
   const wasmPath = fileURLToPath(

@@ -304,7 +304,7 @@ fn a_union_answers_to_the_pipeline_and_to_neither_side() {
 /// The sides of a `union` are paired COLUMN BY COLUMN, and the refusal says
 /// which pair disagreed.
 ///
-/// `fossil-df` unions by position and hands back a schema with the left side's
+/// `fossil-exec` unions by position and hands back a schema with the left side's
 /// names, so a mismatch it accepted would be a corpus whose `nombre` column
 /// holds half integers. The rule is the backend's, said where a user hears it.
 #[test]

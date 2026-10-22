@@ -453,7 +453,7 @@ A rung's cell count can be stated in front of the bytes. **Its quotient edge cou
 many edges survive as a quotient at a rung is measured, not planned — and a document written first
 either omits it or guesses.
 
-So the manifest is emitted **last**, over a payload that exists: `fossil_df::materialise` returns a
+So the manifest is emitted **last**, over a payload that exists: `fossil_exec::materialise` returns a
 value and writes nothing, the layout pass writes the graph, and
 `ac1801d4:crates/fossil-df/src/lib.rs, declare_pyramids` carries what the pass measured into the document.
 That retires *the manifest is the plan and the pass is what fills it* for this block only, and the

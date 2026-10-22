@@ -91,7 +91,7 @@ pub enum RowReader {
     Native(NativeReader),
     /// Something outside the reader materialises the relation (RDF, …) and the
     /// core only scans the result. Lowers to `fossil_mir::SourceFormat::Provider`
-    /// and is executed by `fossil-df`. There is no `SourceProvider` trait and no
+    /// and is executed by `fossil-exec`. There is no `SourceProvider` trait and no
     /// provider crate: the row is the whole extension point.
     Materialised,
 }

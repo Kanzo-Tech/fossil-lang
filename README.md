@@ -50,7 +50,7 @@ does not implement yet is work outstanding, not an error in the file.
 
 ## What runs
 
-The executor — `fossil_df::Executor`, published as `@fossil-lang/executor` — is
+The executor — `fossil_exec::Executor`, published as `@fossil-lang/executor` — is
 the one host that runs a program and writes its graph, in the browser and in
 Node. There is no native CLI; `/docs/design/discarded` says why and what would
 bring one back.
@@ -65,10 +65,10 @@ DuckDB:
 duckdb -c "SELECT * FROM read_parquet('<location>vertex/Person/subject_name/chunk0')"
 ```
 
-`crates/fossil-df/tests/walking_skeleton.rs` asserts that content — not merely
+`crates/fossil-exec/tests/walking_skeleton.rs` asserts that content — not merely
 that files appeared — and is the test that goes red if it stops holding. The
 language itself is proved by the conformance programs under `docs/programs/`,
-which `crates/fossil-df/tests/programs.rs` compiles and runs and the
+which `crates/fossil-exec/tests/programs.rs` compiles and runs and the
 documentation transcludes.
 
 ## Foundations
@@ -96,7 +96,7 @@ There is **one** reference, in three pieces:
   Every push to `main` publishes it to <https://kanzo-tech.github.io/fossil-lang/>.
 - [`docs/programs/`](docs/programs/) — the conformance programs. Every program the
   documentation shows is one of these, read off disk at build time and never retyped into prose.
-  No count here: `crates/fossil-df/tests/programs.rs` walks the directory, and the number this
+  No count here: `crates/fossil-exec/tests/programs.rs` walks the directory, and the number this
   line used to carry was five behind it.
 
 Plus [`CONTRIBUTING.md`](CONTRIBUTING.md) for the dev cycle and commit policy, and

@@ -421,4 +421,4 @@ fn math.round = (value: Float) -> Integer   ; expr "CAST(round(%0) AS BIGINT)" .
    key schedule and DuckDB has `sha256` and no HMAC.
 
    `anon.hash` was also the last consumer of `sha256`, which is why
-   `crates/fossil-df/Cargo.toml` leaves `crypto_expressions` off. *)
+   the workspace `Cargo.toml` leaves `crypto_expressions` off. *)

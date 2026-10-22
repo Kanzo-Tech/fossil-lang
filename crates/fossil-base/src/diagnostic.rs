@@ -90,7 +90,7 @@ pub enum SpanFrame {
 /// **A renderer owes one snippet per text.** miette resolves a range against
 /// ONE `SourceCode`, so a report that underlines two files is two `Rendered`s
 /// under one message; the conformance harness's renderer
-/// (`fossil-df/tests/support/native.rs`) groups by this field before rendering. A renderer
+/// (`fossil-exec/tests/support/native.rs`) groups by this field before rendering. A renderer
 /// that ignored it would resolve a `.shex` offset against the program's text
 /// and underline whatever happens to sit at that byte — silently, and inside
 /// the right file.

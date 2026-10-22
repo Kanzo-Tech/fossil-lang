@@ -113,7 +113,7 @@ subject it is. Seven are modules of those crates now:
 | `fossil_base::sources` | the columns a host found for a source are the value of an input, so the type is the input's; the trait beside it, its schema and its stub had no caller |
 | `fossil_hir::lineage` | what a program reads is a question about its def map, asked by every host |
 | `fossil_hir::shex`, `fossil_hir::shacl` | a shape document becomes a type, and the types are here — the decoders and the `providers` rows that install them; what the executor was handed beside them, an enum whose one live method returned a `GraphSchema`, is a `GraphSchema` |
-| `fossil_df::layout` | the graph's layout is the writer's: nothing else lays out a GraphAr graph, and the module exports nothing |
+| `fossil_sinks::graphar::layout` | the graph's layout is the writer's: nothing else lays out a GraphAr graph, and the module exports nothing |
 | `fossil_mir::describe` | the graph's mapping is a function of the types, so the editor's module links it and a host asks before a run ([the graph as Apache GraphAr](/docs/design/graphar)) |
 
 One is still a crate of its own:
@@ -189,11 +189,11 @@ cannot trim (a parser the fork's features cannot drop, say), or its additions no
 release; the decode is then fossil's again, over a Turtle reader.
 
 **What would reverse it:** a module whose consumers are not the crate it sits in — a second reader
-of the graph layout in Rust, say, which would want `fossil_df::layout` without DataFusion.
+of the graph layout in Rust, say, which would want `fossil_sinks::graphar::layout` without DataFusion.
 
 ## Held by
 
-`crates/fossil-wasm/tests/register_inferred_descriptor.rs` describes a source after a check and asserts
-the check re-runs against the new columns; `crates/fossil-df/tests/documents.rs` runs a program whose
+`bindings/editor/tests/register_inferred_descriptor.rs` describes a source after a check and asserts
+the check re-runs against the new columns; `crates/fossil-exec/tests/documents.rs` runs a program whose
 output document the checker decoded; `crates/fossil-base/src/connections.rs` sets the connections
 after a query read them and asserts it re-runs, and that setting the same map again does not.

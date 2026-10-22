@@ -51,7 +51,7 @@ jobs:
         run: pnpm --filter "./packages/*" build
 
       # The acceptance corpus is `docs/programs/`, run by
-      # `crates/fossil-df/tests/programs.rs`, a Rust test that never enters a
+      # `crates/fossil-exec/tests/programs.rs`, a Rust test that never enters a
       # pnpm filter.
       - name: Test all packages
         run: pnpm --filter "./packages/*" test

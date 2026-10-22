@@ -1134,7 +1134,7 @@ fn substitute_edges<'db>(
 /// `Node.label` and `Other.label` two columns after a self-join instead of one.
 ///
 /// Not `source: SmolStr::default()` with the backend supplying the relation
-/// from the source URI: `fossil-df` resolves a `ColRef` against a `DFSchema`,
+/// from the source URI: `fossil-exec` resolves a `ColRef` against a `DFSchema`,
 /// so the binding is a name to RESOLVE, not text to paste into SQL, and
 /// dropping it loses the only thing that says which side of a join a column
 /// came from — a join whose two keys are spelled differently could not be
@@ -1515,7 +1515,7 @@ People : Person from Adults
     /// The author writes the equality — `on = Orders.persona_id ==
     /// People.persona_id`, both sides qualified — so there is nothing to
     /// synthesise and the condition lowers like any other expression, KEEPING
-    /// the qualification: without it `fossil_df::plan` could not plan a join
+    /// the qualification: without it `fossil_exec::plan` could not plan a join
     /// whose two keys are spelled differently.
     #[test]
     fn a_join_lowers_to_an_inner_equi_join_on_one_name() {

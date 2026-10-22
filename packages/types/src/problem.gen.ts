@@ -102,6 +102,7 @@ export type Code =
   | 'write/duplicate-value'
   | 'write/too-many-values'
   | 'write/invalid-subject'
+  | 'write/invalid-iri'
   | 'write/ambiguous-iri'
   | 'write/unrepresentable'
   | 'run/too-large'
@@ -214,6 +215,7 @@ export const CODES: readonly Code[] = [
   'write/duplicate-value',
   'write/too-many-values',
   'write/invalid-subject',
+  'write/invalid-iri',
   'write/ambiguous-iri',
   'write/unrepresentable',
   'run/too-large',
@@ -921,6 +923,14 @@ export interface ProblemData {
     vertex_type: string;
   };
   /**
+   * A value of a property the program types as an IRI that is not an absolute IRI: the object of
+   * its triple would be a term no RDF parser reads.
+   */
+  'write/invalid-iri': {
+    property: string;
+    value: string;
+  };
+  /**
    * One IRI that names two things the mapping needs it to name one of (admissibility A2): two
    * vertex types with one class, two columns of one type with one predicate, or a relation whose
    * predicate is a column predicate of its source type. The RDF image would make the two one.
@@ -1133,6 +1143,7 @@ export const TITLES: { readonly [C in Code]: string } = {
   'write/duplicate-value': 'A value appears twice where it must be unique',
   'write/too-many-values': 'A single-valued property has more than one value',
   'write/invalid-subject': 'A vertex has no absolute IRI as its subject',
+  'write/invalid-iri': 'A value typed as an IRI is not one',
   'write/ambiguous-iri': 'One IRI names two things',
   'write/unrepresentable': 'A value GraphAr cannot hold',
   'run/too-large': 'The graph has too many vertices',
@@ -1224,6 +1235,7 @@ export type DetailedCode =
   | 'write/duplicate-value'
   | 'write/too-many-values'
   | 'write/invalid-subject'
+  | 'write/invalid-iri'
   | 'write/ambiguous-iri'
   | 'write/unrepresentable'
   | 'run/too-large'
@@ -1314,6 +1326,7 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'write/duplicate-value': (d) => `\`${d.at}\` holds \`${d.value}\` twice`,
   'write/too-many-values': (d) => `\`${d.at}\` is single-valued, and \`${d.subject}\` has both \`${d.first}\` and \`${d.second}\``,
   'write/invalid-subject': (d) => `a \`${d.vertex_type}\` vertex has the subject ${d.subject}, which is not an absolute IRI`,
+  'write/invalid-iri': (d) => `\`${d.property}\` holds \`${d.value}\`, which is not an absolute IRI`,
   'write/ambiguous-iri': (d) => `\`${d.iri}\` names both \`${d.first}\` and \`${d.second}\``,
   'write/unrepresentable': (d) => `\`${d.property}\` holds \`${d.value}\`, of type ${d.datatype}, which GraphAr cannot hold`,
   'run/too-large': (d) => `the graph has ${d.vertices} vertices; a \`dense_id\` is a u32`,
