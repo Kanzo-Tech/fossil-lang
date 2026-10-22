@@ -22,12 +22,9 @@
 //! that calls it is `fossil_exec::Executor`.
 
 use datafusion::arrow::error::ArrowError;
-use datafusion::error::DataFusionError;
 use datafusion::parquet::basic::{Compression, Encoding, ZstdLevel};
-use datafusion::parquet::file::metadata::KeyValue;
 use datafusion::parquet::file::properties::WriterProperties;
 use datafusion::parquet::schema::types::ColumnPath;
-use datafusion::prelude::SessionContext;
 use fossil_graph_schema::{Failure, Problem};
 use fossil_mir::describe::{self, DescribeError};
 use fossil_storage::{Storage, StorageError};
@@ -35,7 +32,6 @@ use graphar_info::{AdjListType, GraphInfo};
 use graphar_parquet::{Options, SRC_INDEX_COL, VERTEX_INDEX_COL};
 use object_store::{ObjectStore, PutOptions, PutPayload};
 
-use super::facts::{self, FOOTER_KEY};
 use super::layout::{self, user_types};
 use crate::{EdgeDrops, Graph};
 
@@ -110,10 +106,6 @@ pub enum WriteError {
         tag: String,
         languages: Vec<String>,
     },
-    /// Counting what was written: the engine's refusal, `run/over-budget`
-    /// among them, which the executor reads off its pool.
-    #[error("counting the graph: {0}")]
-    Engine(#[from] DataFusionError),
     /// Resolving where the graph goes; the store's refusal, kept whole.
     #[error("write `{path}`: {source}")]
     Store {
@@ -175,7 +167,6 @@ impl From<WriteError> for Failure {
                 tag,
                 languages,
             }),
-            WriteError::Engine(e) => Self::new(Problem::EngineFailed {}).caused_by(e),
             e @ WriteError::UnknownType { .. } => {
                 bug("a relation names a vertex type with no table").caused_by(e)
             }
@@ -187,8 +178,7 @@ impl From<WriteError> for Failure {
     }
 }
 
-/// Write `graph` under `dest`, a prefix ending in `/` that `storage` covers,
-/// counting what it writes on `ctx`, the run's session, under its pool.
+/// Write `graph` under `dest`, a prefix ending in `/` that `storage` covers.
 ///
 /// Vertex types and relations are written in the order the compiled schema
 /// lists them, which is the order `fossil.graph.yml` lists them in. A vertex
@@ -196,9 +186,10 @@ impl From<WriteError> for Failure {
 /// the type. A relation's are sorted by `(src, dst)`, as indices within the end
 /// types.
 ///
-/// **The writer counts what it writes** before each vertex chunk
-/// ([`super::facts`]): the counts are in the chunk's own footer, and a graph
-/// never exists without them (`/docs/design/facts`).
+/// **The counts are Parquet's own.** `graphar-parquet` writes each chunk as one
+/// row group whose column `Statistics` carry the nulls, the bounds and
+/// `distinct_count`; a reader combines the chunks' into a table's
+/// (`/docs/format/conventions/statistics`). fossil adds no key of its own.
 ///
 /// # Errors
 ///
@@ -208,12 +199,7 @@ impl From<WriteError> for Failure {
 /// twice, an IRI that names two things in the mapping (A2) — is refused before
 /// any chunk is.
 #[tracing::instrument(skip_all, fields(dest = %dest))]
-pub async fn write(
-    graph: &Graph,
-    ctx: &SessionContext,
-    storage: &Storage,
-    dest: &str,
-) -> Result<Written, WriteError> {
+pub async fn write(graph: &Graph, storage: &Storage, dest: &str) -> Result<Written, WriteError> {
     let laid = layout::layout(graph)?;
     laid.info.validate()?;
     // The mapping is built, and A2 held, before a chunk is written: a graph
@@ -229,9 +215,8 @@ pub async fn write(
     };
 
     for vertex in &laid.vertices {
-        let stats = facts::footer(ctx, vertex).await?;
         let options = Options {
-            props: properties(&[VERTEX_INDEX_COL], Some(stats)),
+            props: properties(&[VERTEX_INDEX_COL]),
             user_types: user_types(),
         };
         graphar_parquet::write_vertices(
@@ -248,7 +233,7 @@ pub async fn write(
     // The sorted key and the offsets are runs of ascending integers, which is
     // what `DELTA_BINARY_PACKED` is for. The destination is not sorted.
     let options = Options {
-        props: properties(&[SRC_INDEX_COL, graphar_parquet::OFFSET_COL], None),
+        props: properties(&[SRC_INDEX_COL, graphar_parquet::OFFSET_COL]),
         user_types: user_types(),
     };
     let mut dropped = Vec::with_capacity(laid.edges.len());
@@ -295,14 +280,6 @@ pub async fn write(
 /// the two (`/docs/design/graphar`, D5).
 const MAPPING: &str = "mapping.ttl";
 
-/// Rows per Parquet row group, in every chunk of a graph.
-///
-/// `DuckDB`'s own default, set explicitly because parquet-rs defaults to
-/// 1,048,576 — which at a million vertices is one row group and no pruning by
-/// the statistics an index range reads. A reader prunes on the footer's
-/// statistics; nothing reads this number back.
-const ROW_GROUP_ROWS: usize = 122_880;
-
 /// The ZSTD level every page is written at. Compression is Parquet-internal —
 /// a reader learns the codec from the footer — so this is a size/time trade, not
 /// a format decision. Level 3 is zstd's own default. Measured 2026-09-30 on
@@ -311,27 +288,20 @@ const ROW_GROUP_ROWS: usize = 122_880;
 /// change in the run's time.
 const ZSTD_LEVEL: i32 = 3;
 
-/// The writer's properties: [`ROW_GROUP_ROWS`] rows per row group, every page ZSTD
-/// at [`ZSTD_LEVEL`], the sorted columns `delta` delta-encoded — dictionary
-/// encoding a column of unique values only falls back to plain after trying —
-/// and, for a vertex chunk, its facts under [`FOOTER_KEY`] in the file's
-/// `key_value_metadata`. A column a file does not have is not set.
-fn properties(delta: &[&str], stats: Option<String>) -> WriterProperties {
-    let mut builder = WriterProperties::builder()
-        .set_max_row_group_row_count(Some(ROW_GROUP_ROWS))
-        .set_max_row_group_bytes(None)
-        .set_compression(Compression::ZSTD(
-            ZstdLevel::try_new(ZSTD_LEVEL).expect("a level zstd accepts"),
-        ));
+/// The writer's properties: every page ZSTD at [`ZSTD_LEVEL`], and the sorted
+/// columns `delta` delta-encoded — dictionary encoding a column of unique values
+/// only falls back to plain after trying. A column a file does not have is not
+/// set. The row groups are `graphar-parquet`'s: one per chunk, so a row group's
+/// `Statistics` are the chunk's.
+fn properties(delta: &[&str]) -> WriterProperties {
+    let mut builder = WriterProperties::builder().set_compression(Compression::ZSTD(
+        ZstdLevel::try_new(ZSTD_LEVEL).expect("a level zstd accepts"),
+    ));
     for column in delta {
         let path = ColumnPath::from(*column);
         builder = builder
             .set_column_dictionary_enabled(path.clone(), false)
             .set_column_encoding(path, Encoding::DELTA_BINARY_PACKED);
-    }
-    if let Some(stats) = stats {
-        builder = builder
-            .set_key_value_metadata(Some(vec![KeyValue::new(FOOTER_KEY.to_string(), stats)]));
     }
     builder.build()
 }

@@ -170,7 +170,7 @@ describe('run over files', () => {
   });
 
   // Two mappings of one type are a `UNION ALL`, and a union of two scans has two
-  // partitions. DataFusion 54 coalesces them by spawning a Tokio task per
+  // partitions. DataFusion coalesces them by spawning a Tokio task per
   // partition, and there is no runtime here: the run panicked, trapped inside a
   // microtask and never settled. The Rust mirror is `execute_core.rs`
   // `a_union_of_two_mappings_runs_with_no_tokio_runtime`.

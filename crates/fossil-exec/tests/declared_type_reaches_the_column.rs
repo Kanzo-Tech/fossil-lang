@@ -15,7 +15,7 @@
 
 use std::collections::HashMap;
 
-use duckdb::arrow::datatypes::DataType;
+use datafusion::arrow::datatypes::DataType;
 use fossil_graph_schema::{OutsideLattice, Primitive};
 use fossil_profile::primitive;
 
@@ -85,10 +85,14 @@ fn written(ran: &native::Written, label: &str) -> HashMap<String, (String, DataT
             // A set is a list of its element, which is the property's
             // cardinality and not its type.
             let on_disk = match (p.cardinality, field.data_type()) {
-                (graphar_info::Cardinality::Single, t) => t.clone(),
-                (_, DataType::List(element)) => element.data_type().clone(),
+                (graphar_info::Cardinality::Single, t) => t,
+                (_, duckdb::arrow::datatypes::DataType::List(element)) => element.data_type(),
                 (_, t) => panic!("`{}` holds a set, and `{t}` is not a list", p.name),
             };
+            // `duckdb` answers in its own arrow (58), the profiler reads
+            // DataFusion's (60): the type crosses as the text both print and
+            // parse, which names every parameter.
+            let on_disk = on_disk.to_string().parse().expect("an Arrow type");
             (p.name.clone(), (p.data_type.to_string(), on_disk))
         })
         .collect()

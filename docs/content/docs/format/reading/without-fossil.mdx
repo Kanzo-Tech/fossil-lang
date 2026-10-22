@@ -18,7 +18,7 @@ sequenceDiagram
   R->>O: GET each <Type>.vertex.yml and <Src>_<label>_<Dst>.edge.yml
   O-->>R: every table: its prefix, its property groups, its chunk sizes
   R->>O: GET the count files, then the footers of the chunks
-  O-->>R: how many rows, and the row groups whose statistics meet the predicate
+  O-->>R: how many rows, and the chunks whose statistics meet the predicate
   Note over R: <b>no request names a file by listing</b><br/>every path is GraphAr's prefix arithmetic
 ```
 
@@ -130,7 +130,7 @@ A view per table, and every question after that is SQL:
 -- one vertex by its identity
 SELECT * FROM "job"."Person" WHERE subject = 'https://example.org/user/7';
 
--- the edges out of a range of sources: sorted by source, so the footer prunes
+-- the edges out of a range of sources: sorted by source, so the footers prune by chunk
 SELECT _graphArSrcIndex, _graphArDstIndex FROM "job"."Person_knows_Person"
  WHERE _graphArSrcIndex BETWEEN 40960 AND 45055;
 
@@ -142,7 +142,7 @@ SELECT o.subject AS order_iri, p.subject AS person_iri
 ```
 
 A predicate on the column a table is ordered by is the one the footers answer well; a predicate on
-anything else — a destination, or `subject` — reads every row group. Which edges point *into* a
+anything else — a destination, or `subject` — reads every chunk. Which edges point *into* a
 vertex is that second kind: there is one copy of each relation, ordered by its source
 ([adjacency](/docs/format/conventions/adjacency)).
 

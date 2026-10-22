@@ -4,9 +4,6 @@
 //!
 //! [`Graph`]: crate::Graph
 
-/// What a graph's columns hold beyond the footer's own statistics, counted as
-/// they are written (`fossil:stats`).
-mod facts;
 /// Every table laid out as `GraphAr`'s, held to what an RDF reader can recover.
 mod layout;
 /// The graph, written: `GraphAr`'s chunks, `fossil.graph.yml` last.

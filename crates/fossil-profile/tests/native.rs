@@ -5,7 +5,7 @@
 
 use std::fmt::Write as _;
 
-use duckdb::arrow::datatypes::Fields;
+use arrow_schema::{Field, Fields};
 use fossil_graph_schema::Primitive;
 use fossil_profile::{ColumnRef, Inclusion, Options, Profile, Rows, Source};
 
@@ -26,9 +26,19 @@ fn rows(conn: &duckdb::Connection, sql: &str) -> duckdb::Result<Rows> {
 }
 
 /// The fields of a query's answer, the Arrow types `DuckDB` hands it over in.
+/// `duckdb` answers in its own arrow (58) and the profiler reads 60, so each
+/// type crosses as the text both print and parse.
 fn fields(conn: &duckdb::Connection, sql: &str) -> duckdb::Result<Fields> {
     let mut stmt = conn.prepare(sql)?;
-    Ok(stmt.query_arrow([])?.get_schema().fields().clone())
+    let schema = stmt.query_arrow([])?.get_schema();
+    Ok(schema
+        .fields()
+        .iter()
+        .map(|f| {
+            let t = f.data_type().to_string().parse().expect("an Arrow type");
+            Field::new(f.name(), t, f.is_nullable())
+        })
+        .collect())
 }
 
 fn profile(sources: impl IntoIterator<Item = Source>, options: Options) -> Profile {

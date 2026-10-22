@@ -25,13 +25,11 @@ graphar = [
   "dep:fossil-base",
   "dep:fossil-hir",
   "dep:fossil-mir",
-  "dep:fossil-profile",
   "dep:fossil-storage",
   "dep:graphar-info",
   "dep:graphar-parquet",
   "dep:object_store",
   "dep:oxrdf",
-  "dep:serde_json",
   "dep:thiserror",
   "dep:tracing",
 ]
@@ -58,10 +56,6 @@ serde = { workspace = true }
 schemars = { workspace = true }
 
 # --- graphar ---
-# The writer counts what it wrote with the profiler's plan, rendered on
-# DataFusion (`facts`). It links no engine and is in the wasm closure already,
-# through `fossil-wasm`, so the gate gains no crate (`/docs/design/facts`).
-fossil-profile = { path = "../fossil-profile", optional = true }
 fossil-base = { path = "../fossil-base", optional = true }
 # A language tag is held to BCP 47 by the checker's own test (`terms`).
 fossil-hir = { path = "../fossil-hir", optional = true }
@@ -76,7 +70,5 @@ graphar-info = { workspace = true, optional = true }
 graphar-parquet = { workspace = true, optional = true }
 # A subject is validated as an IRI before it is a vertex (`layout`).
 oxrdf = { workspace = true, optional = true }
-# The `fossil:stats` footer is JSON.
-serde_json = { workspace = true, optional = true }
 thiserror = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }

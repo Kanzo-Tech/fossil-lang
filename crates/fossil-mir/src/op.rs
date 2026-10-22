@@ -386,7 +386,7 @@ pub enum Expr<'db> {
     /// String concatenation: `lhs || rhs`. Recursive via `Box` so the variant
     /// has a finite size; `salsa::SalsaValue` lifts through `Box<T>` when
     /// `T: SalsaValue`.
-    Concat(Box<Expr<'db>>, Box<Expr<'db>>),
+    Concat(Box<Self>, Box<Self>),
     /// `x IS NULL` / `x IS NOT NULL` — what `x == null` and `x != null` lower
     /// to, and the reason there is no null VALUE in this algebra.
     ///
@@ -396,21 +396,21 @@ pub enum Expr<'db> {
     /// `null` never survives as a value, which is the same statement the
     /// checker makes by refusing `name = null`.
     IsNull {
-        operand: Box<Expr<'db>>,
+        operand: Box<Self>,
         /// `true` for `!=` — the `NOT` of `IS NOT NULL`.
         negated: bool,
     },
     /// Function application: `func(args...)`, result typed `ty`.
     Call {
         func: SmolStr,
-        args: Vec<Expr<'db>>,
+        args: Vec<Self>,
         ty: Ty<'db>,
     },
     /// Binary operator: `lhs <op> rhs`, result typed `ty`.
     BinOp {
         op: BinOp,
-        lhs: Box<Expr<'db>>,
-        rhs: Box<Expr<'db>>,
+        lhs: Box<Self>,
+        rhs: Box<Self>,
         ty: Ty<'db>,
     },
     /// Unary operator: `-operand` or `not operand`, result typed `ty`.
@@ -421,16 +421,16 @@ pub enum Expr<'db> {
     /// the bits a `xsd:float` column carries.
     UnaryOp {
         op: UnOp,
-        operand: Box<Expr<'db>>,
+        operand: Box<Self>,
         ty: Ty<'db>,
     },
     /// `cond ? then : otherwise`, result typed `ty`. Renders as a two-armed
     /// `CASE` on every SQL engine; both branches have the same type by
     /// construction (the checker refuses anything else), so the CASE is total.
     Ternary {
-        cond: Box<Expr<'db>>,
-        then: Box<Expr<'db>>,
-        otherwise: Box<Expr<'db>>,
+        cond: Box<Self>,
+        then: Box<Self>,
+        otherwise: Box<Self>,
         ty: Ty<'db>,
     },
     /// Named runtime assertion. `span_line` carries the source line for the
@@ -439,6 +439,6 @@ pub enum Expr<'db> {
     Assert {
         name: SmolStr,
         span_line: u32,
-        inner: Box<Expr<'db>>,
+        inner: Box<Self>,
     },
 }

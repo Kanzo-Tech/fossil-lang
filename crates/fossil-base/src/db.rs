@@ -143,7 +143,7 @@ mod tests {
     /// test builds the full count atop the same constructor.
     #[salsa::tracked(returns(clone))]
     fn _read_text(db: &dyn Db, file: SourceFile) -> String {
-        file.text(db).to_string()
+        file.text(db).clone()
     }
 
     #[test]
