@@ -89,11 +89,8 @@ fn every_row_lands_in_exactly_one_generated_file() {
 /// spell.
 #[test]
 fn a_new_native_reader_is_a_row_and_nothing_else() {
-    // The one `duckdb` line is the file's frame, which `parse` requires: the
-    // type table has to end in its catch-all.
     let invented = catalogue::parse(
-        "row avro = extensions \"avro\" ; reads native read_avro_scan option sep .\n\
-         duckdb string = \"*\" .\n",
+        "row avro = extensions \"avro\" ; reads native read_avro_scan option sep .\n",
     )
     .rows;
     assert_eq!(invented.len(), 1);
@@ -125,28 +122,24 @@ fn a_new_native_reader_is_a_row_and_nothing_else() {
     );
 }
 
-/// The `duckdb` table reaches TypeScript whole and in file order, which is
-/// precedence: a host that stands in for an engine states no row of it.
+/// A row's `text` names primitives, never an engine's spelling of a type: what
+/// a column's Arrow type means is `fossil_profile::primitive`'s, and the row
+/// only says which of those meanings its reader guessed from text.
 #[test]
-fn the_duckdb_table_is_projected_to_typescript_in_file_order() {
+fn a_rows_text_names_primitives() {
     let cat = catalogue::parse(
-        "row avro = extensions \"avro\" ; reads native read_avro_scan option sep .\n\
-         duckdb integer = \"INT\" \"BIGINT\" .\n\
-         duckdb date_time = \"TIMESTAMP*\" .\n\
-         duckdb string = \"*\" .\n",
+        "row avro = extensions \"avro\" ; reads native read_avro_scan text time_date integer .\n",
     );
-    let ts = catalogue::emit_ts_profile(&cat);
-    let lines: Vec<&str> = ts
-        .lines()
-        .filter(|l| l.starts_with("  { primitive:"))
-        .collect();
-    assert_eq!(
-        lines,
-        [
-            "  { primitive: \"integer\", spellings: [\"INT\", \"BIGINT\"] },",
-            "  { primitive: \"date_time\", spellings: [\"TIMESTAMP*\"] },",
-            "  { primitive: \"string\", spellings: [\"*\"] },",
-        ]
+    let Some(Reads::Native { text, .. }) = &cat.rows[0].reads else {
+        panic!("a native row");
+    };
+    assert_eq!(text, &["time_date", "integer"]);
+    let emitted = catalogue::emit_profile(&cat);
+    assert!(
+        emitted.contains(
+            "NativeReader::AvroScan => matches!(read, Primitive::DATE | Primitive::Integer),"
+        ),
+        "{emitted}"
     );
 }
 

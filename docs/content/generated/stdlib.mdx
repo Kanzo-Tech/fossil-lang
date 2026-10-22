@@ -37,11 +37,11 @@ Source: `catalogue.bnf`, all of it. Change it and re-run the command. */}
 
 | | signature | lowers to |
 | --- | --- | --- |
-| `parse.date` | `(text: String, format: String) -> Date` | `CAST(strptime(%0, %1) AS DATE)` |
-| `parse.datetime` | `(text: String, format: String) -> DateTime` | `strptime(%0, %1)` |
+| `parse.date` | `(text: String, format: String) -> Time<Date>` | `CAST(strptime(%0, %1) AS DATE)` |
+| `parse.datetime` | `(text: String, format: String) -> Time<DateTime>` | `strptime(%0, %1)` |
 | `parse.float` | `(text: String) -> Float` | `CAST(%0 AS DOUBLE)` |
 | `parse.integer` | `(text: String) -> Integer` | `CAST(%0 AS BIGINT)` |
-| `parse.year` | `(text: String) -> GYear` | `CAST(%0 AS INTEGER)` |
+| `parse.year` | `(text: String) -> Time<Year>` | `CAST(%0 AS INTEGER)` |
 
 </section>
 
@@ -64,9 +64,10 @@ Source: `catalogue.bnf`, all of it. Change it and re-run the command. */}
 | --- | --- | --- |
 | `contains` | `(text: String, needle: String) -> Bool` | `contains(%0, %1)` |
 | `ends_with` | `(text: String, suffix: String) -> Bool` | `ends_with(%0, %1)` |
-| `lang` | `(text: String, tag: String) -> LangString` | `row(%0, %1)` |
+| `lang` | `(text: String, tag: String) -> String<Lang>` | `row(%0, %1)` |
 | `length` | `(text: String) -> Integer` | `length(%0)` |
 | `lower` | `(text: String) -> String` | `lower(%0)` |
+| `matches` | `(text: String, pattern: String) -> Bool` | `regexp_matches(%0, %1)` |
 | `replace` | `(text: String, needle: String, replacement: String) -> String` | `replace(%0, %1, %2)` |
 | `slice` | `(text: String, start: Integer) -> String` | `substring(%0, %1)` |
 | `slug` | `(text: String) -> String` | `trim(regexp_replace(lower(trim(%0)), '[^\p{L}\p{N}.-]', '-', 'g'), '-')` |

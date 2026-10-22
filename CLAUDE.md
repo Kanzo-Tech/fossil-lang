@@ -9,8 +9,7 @@ Keep it under 200 lines, rules-not-context.
   written here and absent from `crates/fossil-syntax` is work outstanding, not an error in
   the file.
 - `catalogue.bnf` — WHICH NAMES EXIST, both halves: the `io.` constructors and every stdlib
-  function with its signature and lowering, plus the DuckDB type table both profiling
-  hosts read. Generated from, not compared against — `cargo xtask catalogue` writes every
+  function with its signature and lowering, and each reader's `text` clause. Generated from, not compared against — `cargo xtask catalogue` writes every
   projection and no Rust or TS states a row a second time. Adding a function is a line here.
   `CONTRIBUTING.md` has the list and the round-trip guard.
 - `docs/` — the whole of the documentation, and there is no second site.
@@ -19,7 +18,7 @@ Keep it under 200 lines, rules-not-context.
   `/docs/design` is where an argument lives, with `design/discarded` for every rejected
   alternative and what would bring it back, and `design/prior-art` for every source named.
 - `docs/programs/` — the conformance programs. Documentation transcludes them; nothing
-  retypes a program into prose. No number here: `crates/fossil-df/tests/programs.rs` walks
+  retypes a program into prose. No number here: `crates/fossil-exec/tests/programs.rs` walks
   the directory, and the count in this line was already wrong.
 - `crates/` — the crate list. There is no number to quote; `cargo xtask wasm-check` prints
   the wasm32 subset it derived from the dependency graph.
@@ -75,10 +74,10 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
   timeline means breaks are inevitable, and without the ritual the third one leaves the codebase
   opaque to its own author.
 - **Walking-skeleton invariant:** `examples/hello.fossil`, run through the executor
-  (`fossil_df::Executor`, the one write host), must keep producing a readable Apache GraphAr
+  (`fossil_exec::Executor`, the one write host), must keep producing a readable Apache GraphAr
   graph — 5 `Person` vertices, asserted by content read back with DuckDB through the
   information files, not existence.
-  `crates/fossil-df/tests/walking_skeleton.rs` is the test that goes red. A refactor that
+  `crates/fossil-exec/tests/walking_skeleton.rs` is the test that goes red. A refactor that
   breaks it for >3 days is reverted and broken into smaller steps.
 
 ## Stack Pins
@@ -93,10 +92,10 @@ needs a wasm-capable `clang`; Apple's is not one. `CONTRIBUTING.md` has the invo
 | duckdb | 1.10502 (`features = ["bundled"]`) | native execution |
 | wasm-bindgen | =0.2.120 | exact pin; CLI must match |
 | wasm-opt (binaryen) | 116 via `cargo install wasm-opt@0.116.1` | NOT apt (ubuntu ships binaryen 108, whose wasm-opt corrupts wasm-bindgen's externref table → `Table.grow(): failed to grow table` instantiating a wasm-bindgen module on Node 20, binaryen #4711; 116 fixes it). `packages/executor/scripts/build-wasm.sh` passes the six wasm32 default features (bulk-memory, sign-ext, mutable-globals, nontrapping-fptoint, reference-types, multivalue — Rust 1.87/LLVM 20). NOT `-all` → no gc/typed-funcref, which break instantiation |
-| arrow + parquet | 58 | the graph writer, `fossil_df::write` (through `datafusion`'s re-export) and `graphar-parquet` |
+| arrow + parquet | 58 | the graph writer, `fossil_sinks::graphar::write` (through `datafusion`'s re-export) and `graphar-parquet` |
 | graphar-info, graphar-parquet | 0.1.0-alpha.1, crates.io | the Apache GraphAr YAML model and chunk writers (Kanzo-Tech/graphar); no `tokio`, builds for wasm32; `serde_yaml_ng`, never `serde_yml` |
 | shex_ast, shacl, rudof_rdf, rudof_iri, prefixmap, rml | Kanzo-Tech/rudof by `git` + `rev` (master after its per-syntax features, R-d; the owner tags it later) | ShEx and SHACL shape documents, the Turtle parser, and `rml`, the RML-Core mapping `describe` builds and writes as `mapping.ttl` (its `sql` feature renders it in tests); one git source for all six, `default-features = false`, and `rudof_rdf` with `features = ["turtle"]`, the one syntax fossil reads — the defaults drag in `reqwest`/`tokio` and what wasm32 cannot build |
-| datafusion | 54, `default-features = false` | pinned in `crates/fossil-df/Cargo.toml`, not the workspace table — see the `zstd`/`arrow-ipc` note there |
+| datafusion | 54, `default-features = false` | the workspace table, for `fossil-exec` and `fossil-sinks` — see the `zstd`/`arrow-ipc` note there |
 
 When bumping: update workspace `Cargo.toml` `[workspace.dependencies]`, run `cargo deny check`,
 verify WASM gate, and write the reason down on the page it affects if it is a major version with
@@ -104,7 +103,7 @@ API changes.
 
 ## Project Layout
 
-`ls crates/` and `git ls-files packages` are the lists. This is what each one is for.
+`ls crates/ bindings/` and `git ls-files packages` are the lists. This is what each one is for.
 
 ```
 crates/
@@ -119,44 +118,44 @@ crates/
                            connections. `stdlib.rs` owns the TYPES a row is written in; the ROWS
                            are `catalogue.bnf` and `stdlib/generated.rs` is what
                            `cargo xtask catalogue` makes of them. Adding a function is a
-                           line in the `.bnf` and touches no Rust. And the shape-document
-                           decoders: `shex` over `shex_ast`, `shacl` over rudof's `ShaclParser`, and
+                           line in the `.bnf` and touches no Rust. And
                            `providers::PROVIDERS`, the registry a compiling host installs
+  fossil-shapes/           the shape-document decoders: `shex` over `shex_ast`, `shacl` over
+                           rudof's `ShaclParser`. A document becomes the vocabulary a declared
+                           type lowers to; nothing above this crate names either language
   fossil-mir/              typed operator algebra; `src/op.rs` is the operator enum
   fossil-storage/          a vended `StorageCredential` (Iceberg REST's) → a scoped DuckDB secret,
                            an Azure SAS lend, or (feature `object-store`) an `object_store` store
                            routed by longest prefix and renewed at expires−5min — the one IO path
                            of DataFusion and of every byte fossil reads or writes. `js`: a JS
                            `Host` as its `Host`. The one renderer of a `CREATE SECRET`
-  fossil-storage-wasm/     that, exposed to JS for `@fossil-lang/storage`
-  fossil-df/               DataFusion backend for the property-graph MIR, the one graph
-                           writer (`write`: `layout` lays the tables out as Apache GraphAr's
-                           and holds them to what an RDF reader can recover, `describe` builds
-                           the RML-Core mapping of them, `graphar-parquet` writes the chunks,
-                           `mapping.ttl` after them and `fossil.graph.yml` last), and `Executor` — the
-                           whole run a host drives, under the 2 GiB pool in `memory.rs` that
-                           refuses as `run/over-budget`. `facts` counts what the footers hold
-                           (`fossil:stats`)
+  fossil-exec/             the engine: the property-graph MIR run on DataFusion into the
+                           `Graph` a sink writes, and `Executor` — the whole run a host drives,
+                           under the 2 GiB pool in `memory.rs` that refuses as
+                           `run/over-budget`. It knows no output format but the sink it calls
+  fossil-sinks/            what a sink is handed (`Graph`, `EdgeDrops`) and one module per
+                           output format, each behind the feature of its name. `graphar`:
+                           `layout` lays the tables out as Apache GraphAr's and holds them to
+                           what an RDF reader can recover, `describe` builds the RML-Core
+                           mapping of them, `graphar-parquet` writes the chunks, `mapping.ttl`
+                           after them and `fossil.graph.yml` last; `facts` counts what the
+                           footers hold (`fossil:stats`)
   fossil-profile/          what a source is — columns and types, counts, candidate keys, the
                            inclusions between sources, a sample — planned as queries and read
                            from their answers, running NOTHING (sans-IO, `run(sources, options,
                            exec)`). Each query is an `Ask`: the browser runs its SQL on DuckDB-WASM,
-                           `fossil-df`'s tests on native `duckdb`, and the writer renders it on
+                           `fossil-exec`'s tests on native `duckdb`, and the writer renders it on
                            DataFusion to count what it wrote; it links no engine, so it is in the
                            wasm closure. There is no native language server: it was deleted on
                            2026-10-12 (`/docs/design/discarded`). `Options::TYPES` is one
-                           `DESCRIBE` a source, what the editor asks for. `generated.rs` is
-                           `catalogue.bnf`'s reader and type table
+                           query of a source's columns, typed by the Arrow fields of its answer
+                           (`primitive`), what the editor asks for. `generated.rs` is
+                           `catalogue.bnf`'s `text` clauses
   fossil-graph-schema/     the canonical graph-schema — the shared substrate contract — and the
                            error catalogue: `Problem`, `Failure`, and (feature `js`) the one
                            function every wasm crate throws a failure through
   fossil-ide/              hover, completion, goto-def, outline — every one asking `def_map`,
                            the one name resolver, and the checker; no index of its own
-  fossil-wasm/             WASM host shim (the workspace under `openProgram` + the tokenizer)
-  fossil-df-wasm/          `fossil_df::Executor` exposed to JS — the only host that writes a
-                           graph, in the browser and in Node. There is no native CLI: it
-                           was deleted on 2026-09-30 (`/docs/design/discarded` says what
-                           brings it back)
   xtask/                   repo automation. Two commands: `wasm-check` derives the wasm32
                            subset from the cdylib closure, and `catalogue [--check]`
                            regenerates every projection of `catalogue.bnf`.
@@ -164,6 +163,19 @@ crates/
                            wire type in `@fossil-lang/types` — is
                            the expect test `tests/wire.rs` (`UPDATE_EXPECT=1`), because the
                            binary must not link the crates `catalogue` generates into
+
+bindings/                  the wasm-bindgen cdylibs, one per npm package (swc's `bindings/`,
+                           oxc's `napi/`). Each keeps its crate name, which is the stem of the
+                           artefact its package loads; a library with a `js` feature stays in
+                           `crates/`
+  editor/                  `fossil-wasm`: the workspace under `openProgram` + the tokenizer,
+                           for `@fossil-lang/wasm`
+  executor/                `fossil-df-wasm`: `fossil_exec::Executor` exposed to JS, for
+                           `@fossil-lang/executor` — the only host that writes a graph, in the
+                           browser and in Node. There is no native CLI: it was deleted on
+                           2026-09-30 (`/docs/design/discarded` says what brings it back)
+  storage/                 `fossil-storage-wasm`: `fossil-storage` exposed to JS, for
+                           `@fossil-lang/storage`
 
 packages/                  npm-published @fossil-lang/* family (pnpm workspace)
   wasm/                    wraps fossil-wasm build outputs (.js + .wasm + .d.ts); `runProfiler`
@@ -210,8 +222,8 @@ docs/                      Next.js + fumadocs, and ALL of the prose: the book, t
                            `docs/CLAUDE.md` has the editorial rules
 
 grammar.bnf                the syntax, normative, and ahead of the parser on purpose
-catalogue.bnf              which names exist — the `io.` rows, the stdlib rows and the
-                           DuckDB type table. Every projection is generated; no Rust or TS
+catalogue.bnf              which names exist — the `io.` rows and the stdlib rows. Every
+                           projection is generated; no Rust or TS
                            states a row twice
 ```
 
@@ -234,12 +246,12 @@ over somebody else's editor, and the somebody else is `@kanzo-tech/ui`.
   `dep = { workspace = true }`. Run `cargo deny check` to confirm no advisory or license issue.
   Run WASM gate to confirm no transitive WASM-incompat leak. If the dep is foundational, say why
   on the page whose claim depends on it.
-- **Add a new crate:** `members = ["crates/*"]` picks it up; copy the shape of an existing
-  peer (compiler-core or wasm-shim). Do not
+- **Add a new crate:** `members = ["crates/*", "bindings/*"]` picks it up; copy the shape of an
+  existing peer — a wasm-bindgen cdylib goes under `bindings/`, everything else under `crates/`. Do not
   record the new crate count anywhere — nothing should have one to update.
 - **Run the WASM smoke test:** build the nodejs bindgen target, then
-  `node crates/fossil-wasm/test-wasm-workspace.js` — the build precondition is in that file's
-  header. `crates/fossil-wasm/tests/workspace.rs` is its native mirror and runs on every PR.
+  `node bindings/editor/test-wasm-workspace.js` — the build precondition is in that file's
+  header. `bindings/editor/tests/workspace.rs` is its native mirror and runs on every PR.
 - **There are no apps.** fossil is the backend; the views are `@kanzo-tech/graph` and the rest of kanzo-ui. A second viewer here is the thing `apps/playground` was, and it was deleted for it.
 
 ## Anti-patterns
@@ -248,4 +260,4 @@ over somebody else's editor, and the somebody else is `@kanzo-tech/ui`.
   defaults drag in crates that do not build for wasm32.
 - Putting compiler logic in `fossil-base` — it is the trait + db substrate, no business logic.
 - Skipping the WASM gate locally. CI catches it eventually but the feedback loop is slower.
-- Editing a generated file (`packages/wasm/pkg/*`, `crates/fossil-wasm/pkg/*`, or `target/*`). They are regenerated.
+- Editing a generated file (`packages/wasm/pkg/*`, `bindings/editor/pkg/*`, or `target/*`). They are regenerated.

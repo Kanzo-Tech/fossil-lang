@@ -29,7 +29,7 @@ fn diagnostics(occurs: &str) -> Vec<String> {
     register_inferred(
         &mut db,
         "p.csv",
-        &[("id", Primitive::Integer), ("nombre", Primitive::String)],
+        &[("id", Primitive::Integer), ("nombre", Primitive::STRING)],
     );
     let mapping = *def_map(&db, file)
         .mappings(&db)

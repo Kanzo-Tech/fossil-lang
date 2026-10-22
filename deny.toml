@@ -21,7 +21,7 @@ ignore = [
     # the only kind worth writing — the rest of this list is entries that cannot yet say it.
 
     # --- Unreachable code paths in a transitive RDF stack ---
-    { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.37.5: quadratic time checking a start tag for duplicate attribute names — a DoS on hostile XML. Reached only as oxrdfxml, which `rudof_rdf` links to read RDF/XML. Nothing in `crates/` asks for it: `grep -rn 'RDFFormat' crates/*/src` finds Turtle and only Turtle (`fossil_hir::shacl`, `fossil_df::rdf`). Not a lockfile fix — the patch is quick-xml >=0.41 and oxrdfxml 0.2.3 requires ^0.37, so it lands when oxrdfxml bumps. FAILS AGAIN / DELETE ME: the day any crate here reads RDF/XML, or oxrdfxml ships the bump." },
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.37.5: quadratic time checking a start tag for duplicate attribute names — a DoS on hostile XML. Reached only as oxrdfxml, which `rudof_rdf` links to read RDF/XML. Nothing in `crates/` asks for it: `grep -rn 'RDFFormat' crates/*/src` finds Turtle and only Turtle (`fossil_hir::shacl`, `fossil_exec::rdf`). Not a lockfile fix — the patch is quick-xml >=0.41 and oxrdfxml 0.2.3 requires ^0.37, so it lands when oxrdfxml bumps. FAILS AGAIN / DELETE ME: the day any crate here reads RDF/XML, or oxrdfxml ships the bump." },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.37.5: unbounded namespace-declaration allocation in `NsReader`, memory-exhaustion DoS. Same crate, same unreachable path, same expiry as RUSTSEC-2026-0194 above — the two are one dependency bump apart." },
 
     # --- A build script's code path that the `bundled` feature compiles out ---
@@ -126,17 +126,18 @@ deny = [
     # `--allow unused-wrapper`, which is not scoped to an entry.
     { name = "duckdb", wrappers = [
         # Direct parents by a DEV edge only, and nothing links it on a normal
-        # one: `fossil-df`'s tests read back the graph it wrote and describe a
+        # one: `fossil-exec`'s tests read back the graph it wrote and describe a
         # program's sources before checking it (`tests/support/profile.rs`), and
         # `fossil-profile`'s tests run the profiler's plan on it.
-        "fossil-df",
+        "fossil-exec",
         "fossil-profile",
     ], reason = "The language may not link a database: it must start in milliseconds and compile to wasm32. Since the native language server was deleted on 2026-10-12 no crate links `duckdb` at all; the browser runs `fossil-profile`'s plan on DuckDB-WASM, and the native engine is a test's." },
     { name = "datafusion", wrappers = [
         # Links it, directly.
-        "fossil-df",
+        "fossil-exec",
+        "fossil-sinks",
         "fossil-df-wasm",
-    ], reason = "The engine layer only: the executor. `fossil-df-wasm` is a wrapper because it exists, not because it is allowed: it is the one write host, and it runs the executor in the browser and in Node. The native CLI reached it through `fossil-df` and was deleted on 2026-09-30. `crates/xtask/tests/engine_reach.rs` holds the list against the graph." },
+    ], reason = "The engine layer only: the executor and the sinks it writes through, whose `Graph` is Arrow relations and whose GraphAr writer counts what it wrote on DataFusion. `fossil-df-wasm` is a wrapper because it exists, not because it is allowed: it is the one write host, and it runs the executor in the browser and in Node. The native CLI reached it through `fossil-exec` and was deleted on 2026-09-30. `crates/xtask/tests/engine_reach.rs` holds the list against the graph." },
 ]
 
 [sources]

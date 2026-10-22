@@ -220,6 +220,25 @@ pub(super) fn rows() -> Vec<RegistryEntry> {
             LoweringKind::Expr(SmolStr::new("ends_with(%0, %1)")),
         ),
         RegistryEntry::new(
+            "str.matches",
+            vec![
+                ParamSpec {
+                    name: SmolStr::new("text"),
+                    ty: SigTy::Scalar(ScalarTy::String),
+                    arity: Arity::One,
+                    named: false,
+                },
+                ParamSpec {
+                    name: SmolStr::new("pattern"),
+                    ty: SigTy::Scalar(ScalarTy::String),
+                    arity: Arity::One,
+                    named: false,
+                },
+            ],
+            SigTy::Scalar(ScalarTy::Bool),
+            LoweringKind::Expr(SmolStr::new("regexp_matches(%0, %1)")),
+        ),
+        RegistryEntry::new(
             "str.replace",
             vec![
                 ParamSpec {
@@ -312,7 +331,7 @@ pub(super) fn rows() -> Vec<RegistryEntry> {
                     named: false,
                 },
             ],
-            SigTy::Scalar(ScalarTy::LangString),
+            SigTy::Scalar(ScalarTy::StringLang),
             LoweringKind::Expr(SmolStr::new("row(%0, %1)")),
         ),
         RegistryEntry::new(
@@ -379,7 +398,7 @@ pub(super) fn rows() -> Vec<RegistryEntry> {
                     named: false,
                 },
             ],
-            SigTy::Scalar(ScalarTy::Date),
+            SigTy::Scalar(ScalarTy::TimeDate),
             LoweringKind::Expr(SmolStr::new("CAST(strptime(%0, %1) AS DATE)")),
         ),
         RegistryEntry::new(
@@ -398,7 +417,7 @@ pub(super) fn rows() -> Vec<RegistryEntry> {
                     named: false,
                 },
             ],
-            SigTy::Scalar(ScalarTy::DateTime),
+            SigTy::Scalar(ScalarTy::TimeDateTime),
             LoweringKind::Expr(SmolStr::new("strptime(%0, %1)")),
         ),
         RegistryEntry::new(
@@ -409,7 +428,7 @@ pub(super) fn rows() -> Vec<RegistryEntry> {
                 arity: Arity::One,
                 named: false,
             }],
-            SigTy::Scalar(ScalarTy::GYear),
+            SigTy::Scalar(ScalarTy::TimeYear),
             LoweringKind::Expr(SmolStr::new("CAST(%0 AS INTEGER)")),
         ),
         RegistryEntry::new(

@@ -59,6 +59,8 @@ ast_node!(TypeDecl, TYPE_DECL);
 ast_node!(Field, FIELD);
 ast_node!(IriAttr, IRI_ATTR);
 ast_node!(AnnotationAttr, ANNOTATION_ATTR);
+ast_node!(AssertAttr, ASSERT_ATTR);
+ast_node!(SeverityAttr, SEVERITY_ATTR);
 ast_node!(TypeExpr, TYPE_EXPR);
 
 /// The `IDENT` tokens directly under `node`, trivia and nested nodes skipped.
@@ -110,6 +112,11 @@ impl TypeDecl {
         self.0.children().filter_map(AnnotationAttr::cast)
     }
 
+    /// The `@assert(…)`s above the declaration, in written order.
+    pub fn asserts(&self) -> impl Iterator<Item = AssertAttr> {
+        self.0.children().filter_map(AssertAttr::cast)
+    }
+
     /// The declared name — `Person` in `type Person`: the `IDENT` after the
     /// contextual `type`.
     #[must_use]
@@ -138,6 +145,18 @@ impl Field {
     /// The `@annotation(…)`s of the field, in written order.
     pub fn annotations(&self) -> impl Iterator<Item = AnnotationAttr> {
         self.0.children().filter_map(AnnotationAttr::cast)
+    }
+
+    /// The `@assert(…)`s of the field, in written order.
+    pub fn asserts(&self) -> impl Iterator<Item = AssertAttr> {
+        self.0.children().filter_map(AssertAttr::cast)
+    }
+
+    /// The field's `@severity(…)`, when it was written. A second is the
+    /// parser's to refuse.
+    #[must_use]
+    pub fn severity(&self) -> Option<SeverityAttr> {
+        self.0.children().find_map(SeverityAttr::cast)
     }
 
     /// The field's name — what a mapping body writes as a property key.
@@ -232,6 +251,28 @@ impl AnnotationAttr {
     }
 }
 
+impl AssertAttr {
+    /// The condition — the `EXPR` node between the parentheses.
+    #[must_use]
+    pub fn condition(&self) -> Option<SyntaxNode> {
+        self.0.children().find(|n| n.kind() == SyntaxKind::EXPR)
+    }
+
+    /// The level after `severity =`, when it was written.
+    #[must_use]
+    pub fn severity(&self) -> Option<crate::SyntaxToken> {
+        idents(&self.0).nth(1)
+    }
+}
+
+impl SeverityAttr {
+    /// The level between the parentheses.
+    #[must_use]
+    pub fn level(&self) -> Option<crate::SyntaxToken> {
+        idents(&self.0).next()
+    }
+}
+
 impl TypeExpr {
     /// The constructor or the type — `Option` in `Option<Date>`, `Date` in
     /// `Date`.
@@ -246,5 +287,14 @@ impl TypeExpr {
     #[must_use]
     pub fn argument(&self) -> Option<Self> {
         self.0.children().find_map(Self::cast)
+    }
+
+    /// The bounds after the argument — `[1, 3]` in `Seq<String, 1, 3>` — as
+    /// the `INTEGER` tokens written.
+    pub fn bounds(&self) -> impl Iterator<Item = crate::SyntaxToken> {
+        self.0
+            .children_with_tokens()
+            .filter_map(rowan::NodeOrToken::into_token)
+            .filter(|t| t.kind() == SyntaxKind::INTEGER)
     }
 }

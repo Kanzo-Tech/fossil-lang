@@ -13,7 +13,7 @@
  * 5. `mapping.ttl` is beside the graph document.
  *
  * That the mapping means the same RDF as the data is held on the Rust side, over native DuckDB:
- * `crates/fossil-df/tests/mapping.rs`.
+ * `crates/fossil-exec/tests/mapping.rs`.
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';

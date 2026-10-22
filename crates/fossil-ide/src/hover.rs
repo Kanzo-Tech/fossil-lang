@@ -387,7 +387,7 @@ User : Person from users
     #[test]
     fn render_markdown_for_fieldref_with_forward_propagation() {
         let db = bare_db();
-        let str_ty = Ty::new(&db, TyKind::Primitive(Primitive::String));
+        let str_ty = Ty::new(&db, TyKind::Primitive(Primitive::STRING));
         let entry = ExprTypeEntry {
             expr_id: ExprId(1),
             ty: str_ty,
@@ -423,7 +423,7 @@ User : Person from users
     #[test]
     fn render_markdown_appends_a_target_block() {
         let db = bare_db();
-        let str_ty = Ty::new(&db, TyKind::Primitive(Primitive::String));
+        let str_ty = Ty::new(&db, TyKind::Primitive(Primitive::STRING));
         let entry = ExprTypeEntry {
             expr_id: ExprId(1),
             ty: str_ty,
@@ -491,7 +491,7 @@ User : Person from users
             }],
         );
         let variants: Vec<TyKind<'_>> = vec![
-            TyKind::Primitive(Primitive::String),
+            TyKind::Primitive(Primitive::STRING),
             TyKind::Seq(int_ty),
             TyKind::Record(rec),
             TyKind::Ref(vec![smol_str::SmolStr::new_static(

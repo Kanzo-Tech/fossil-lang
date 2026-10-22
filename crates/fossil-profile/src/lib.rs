@@ -26,8 +26,11 @@
 //! to prune them and what a count means stay here; only the rendering is per
 //! engine (`/docs/design/facts`).
 //!
-//! Every query answers in text, so the engines answer in one form: rows of text
-//! cells, `None` for SQL `NULL`.
+//! Every engine answers in Arrow, so a query's answer is its fields and its
+//! rows: the fields type a source's columns ([`primitive`] reads each
+//! [`DataType`](arrow_schema::DataType) into the lattice), and every other
+//! query casts what it asks for to text, so its rows are text cells, `None` for
+//! SQL `NULL`.
 //!
 //! [`run`] is the loop for a host that runs one query at a time: it brings the
 //! one thing a host owns, a function from SQL to rows, and this crate links no
@@ -44,6 +47,7 @@
 
 use std::collections::{HashMap, VecDeque};
 
+use arrow_schema::Fields;
 use fossil_base::sources::{InferredColumn, InferredDescriptor};
 use fossil_base::{NativeReader, RowReader};
 use fossil_graph_schema::Primitive;
@@ -51,7 +55,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 
+mod arrow;
 pub mod generated;
+
+pub use arrow::primitive;
 
 /// A query's answer: its rows, each cell the text of a value or `None` for `NULL`.
 pub type Rows = Vec<Vec<Option<String>>>;
@@ -104,7 +111,8 @@ pub struct Table {
 #[schemars(rename = "ProfileDepth")]
 #[serde(rename_all = "lowercase")]
 pub enum Depth {
-    /// The columns and their types, and nothing else: one `DESCRIBE` a source.
+    /// The columns and their types, and nothing else: one query a source, whose
+    /// answer is its fields and no row.
     /// What a host that compiles on every keystroke can afford — the editor.
     Types,
     /// Types, counts, keys, inclusions and a sample.
@@ -183,8 +191,8 @@ impl Relation {
 /// One query of the plan, as data. Each answers in text cells.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ask {
-    /// The relation's columns and their engine types: a row `[name, type]`
-    /// per column.
+    /// The relation's columns and their types: the fields of an answer with no
+    /// row.
     Describe { relation: Relation },
     /// One row: the rows read, then per column its distinct non-null values,
     /// its non-null values, its least and its greatest value.
@@ -228,7 +236,7 @@ impl Ask {
             n => format!("(SELECT * FROM {} LIMIT {n})", relation.sql()),
         };
         match self {
-            Self::Describe { relation } => format!("DESCRIBE SELECT * FROM {}", relation.sql()),
+            Self::Describe { relation } => format!("SELECT * FROM {} LIMIT 0", relation.sql()),
             Self::Counts {
                 relation,
                 sample,
@@ -527,8 +535,8 @@ impl Profiler {
         plan
     }
 
-    /// A plan over tables the host already holds, whose columns are known: no
-    /// `DESCRIBE`, and no inclusion — the counts, the commonest values and the
+    /// A plan over tables the host already holds, whose columns are known:
+    /// nothing to describe, and no inclusion — the counts, the commonest values and the
     /// keys they make. What the graph writer counts what it wrote with: a
     /// graph carries no inclusions, which were measured and dropped
     /// (`/docs/design/facts`).
@@ -724,8 +732,8 @@ impl Profiler {
             .collect()
     }
 
-    /// The rows query `id` answered.
-    pub fn feed(&mut self, id: u32, rows: &[Vec<Option<String>>]) {
+    /// What query `id` answered: the fields of its answer and its rows.
+    pub fn feed(&mut self, id: u32, fields: &Fields, rows: &[Vec<Option<String>>]) {
         let Some(what) = self.pending.remove(&id) else {
             return;
         };
@@ -738,17 +746,14 @@ impl Profiler {
                 let state = &mut self.states[i];
                 let reader = state.format.as_deref().and_then(native_reader);
                 state.described = true;
-                state.columns = rows
+                state.columns = fields
                     .iter()
-                    .filter_map(|row| {
-                        let name = row.first()?.as_deref()?;
-                        let kind = row.get(1)?.as_deref()?;
-                        let primitive = reader
-                            .map_or(Primitive::String, |r| generated::read_primitive(r, kind));
-                        (!name.is_empty()).then(|| InferredColumn {
-                            name: name.into(),
-                            primitive,
-                        })
+                    .filter(|field| !field.name().is_empty())
+                    .map(|field| InferredColumn {
+                        name: field.name().into(),
+                        primitive: reader.map_or(Primitive::STRING, |r| {
+                            generated::read_primitive(r, field.data_type())
+                        }),
                     })
                     .collect();
             }
@@ -865,17 +870,17 @@ impl Profiler {
 }
 
 /// The whole plan over `sources`, each query run by `exec` — the host's engine,
-/// one query at a time. A query `exec` refuses is a [`Failure`] in the profile,
-/// and the plan goes on.
+/// one query at a time, answering the fields and the rows. A query `exec`
+/// refuses is a [`Failure`] in the profile, and the plan goes on.
 pub fn run(
     sources: impl IntoIterator<Item = Source>,
     options: Options,
-    mut exec: impl FnMut(&str) -> Result<Rows, String>,
+    mut exec: impl FnMut(&str) -> Result<(Fields, Rows), String>,
 ) -> Profile {
     let mut plan = Profiler::new(sources, options);
     while let Some(query) = plan.next_query() {
         match exec(&query.sql) {
-            Ok(rows) => plan.feed(query.id, &rows),
+            Ok((fields, rows)) => plan.feed(query.id, &fields, &rows),
             Err(reason) => plan.fail(query.id, reason),
         }
     }
@@ -884,6 +889,8 @@ pub fn run(
 
 #[cfg(test)]
 mod tests {
+    use arrow_schema::{DataType, Field};
+
     use super::*;
 
     /// A CSV file bound by its stem: `awards.csv` is `awards`.
@@ -896,6 +903,19 @@ mod tests {
             option: None,
             etag: String::new(),
         }
+    }
+
+    /// An answer's fields: the columns a source is described by.
+    fn fields(columns: &[(&str, DataType)]) -> Fields {
+        columns
+            .iter()
+            .map(|(name, t)| Field::new(*name, t.clone(), true))
+            .collect()
+    }
+
+    /// What a query with no row answers: the columns of one `id BIGINT`.
+    fn id() -> Fields {
+        fields(&[("id", DataType::Int64)])
     }
 
     fn rows(cells: &[&[&str]]) -> Rows {
@@ -914,10 +934,10 @@ mod tests {
             }],
             Options::default(),
         );
-        let q = plan.next_query().expect("a DESCRIBE");
+        let q = plan.next_query().expect("the columns");
         assert_eq!(
             q.sql,
-            "DESCRIBE SELECT * FROM read_csv_auto('o''brien.csv', delim='|')"
+            "SELECT * FROM read_csv_auto('o''brien.csv', delim='|') LIMIT 0"
         );
     }
 
@@ -937,7 +957,7 @@ mod tests {
         assert!(plan.next_query().is_some());
         assert!(
             plan.next_query().is_none(),
-            "one DESCRIBE: the repeat and the graph are left out"
+            "one source: the repeat and the graph are left out"
         );
     }
 
@@ -954,7 +974,7 @@ mod tests {
             Options::TYPES,
         );
         while let Some(query) = plan.next_query() {
-            plan.feed(query.id, &rows(&[&["id", "BIGINT"]]));
+            plan.feed(query.id, &id(), &[]);
         }
         let profile = plan.finish();
         let named: Vec<(&str, &str)> = profile
@@ -968,11 +988,11 @@ mod tests {
     #[test]
     fn a_phase_waits_for_every_answer_before_the_next_begins() {
         let mut plan = Profiler::new([csv("a.csv"), csv("b.csv")], Options::default());
-        let a = plan.next_query().expect("a's DESCRIBE");
-        let b = plan.next_query().expect("b's DESCRIBE");
-        plan.feed(a.id, &rows(&[&["id", "BIGINT"]]));
+        let a = plan.next_query().expect("a's columns");
+        let b = plan.next_query().expect("b's columns");
+        plan.feed(a.id, &id(), &[]);
         assert!(plan.next_query().is_none(), "b is still out");
-        plan.feed(b.id, &rows(&[&["id", "BIGINT"]]));
+        plan.feed(b.id, &id(), &[]);
         assert!(
             plan.next_query()
                 .expect("a count")
@@ -992,26 +1012,29 @@ mod tests {
                 ..Options::default()
             },
         );
-        let mut answers: HashMap<&str, Rows> = HashMap::from([
+        let mut described: HashMap<&str, Fields> = HashMap::from([
             (
-                "DESCRIBE SELECT * FROM read_csv_auto('awards.csv')",
-                rows(&[
-                    &["id", "VARCHAR"],
-                    &["laureate", "BIGINT"],
-                    &["share", "DOUBLE"],
+                "SELECT * FROM read_csv_auto('awards.csv') LIMIT 0",
+                fields(&[
+                    ("id", DataType::Utf8),
+                    ("laureate", DataType::Int64),
+                    ("share", DataType::Float64),
                 ]),
             ),
             (
-                "DESCRIBE SELECT * FROM read_csv_auto('laureates.csv')",
-                rows(&[&["id", "BIGINT"], &["name", "VARCHAR"]]),
+                "SELECT * FROM read_csv_auto('laureates.csv') LIMIT 0",
+                fields(&[("id", DataType::Int64), ("name", DataType::Utf8)]),
             ),
         ]);
         let mut asked = Vec::new();
         while let Some(q) = plan.next_query() {
             asked.push(q.sql.clone());
-            let answer = if let Some(rows) = answers.remove(q.sql.as_str()) {
-                rows
-            } else if q.sql.contains("count(DISTINCT \"id\")") && q.sql.contains("awards.csv") {
+            if let Some(columns) = described.remove(q.sql.as_str()) {
+                plan.feed(q.id, &columns, &[]);
+                continue;
+            }
+            let answer = if q.sql.contains("count(DISTINCT \"id\")") && q.sql.contains("awards.csv")
+            {
                 // 4 awards: ids unique, 3 laureates among them, one share repeated.
                 rows(&[&[
                     "4",
@@ -1055,7 +1078,7 @@ mod tests {
             } else {
                 rows(&[&["x", "1"]])
             };
-            plan.feed(q.id, &answer);
+            plan.feed(q.id, &Fields::empty(), &answer);
         }
         assert!(plan.is_done());
         let profile = plan.finish();
@@ -1067,7 +1090,7 @@ mod tests {
                 .iter()
                 .map(|c| c.primitive)
                 .collect::<Vec<_>>(),
-            [Primitive::String, Primitive::Integer, Primitive::Float]
+            [Primitive::STRING, Primitive::Integer, Primitive::Float]
         );
         assert_eq!(
             awards.candidate_keys,
@@ -1122,15 +1145,24 @@ mod tests {
     fn a_value_longer_than_64_bytes_is_left_out_and_never_cut() {
         let long = "x".repeat(MAX_VALUE_BYTES + 1);
         let mut plan = Profiler::new([csv("a.csv")], Options::default());
-        let q = plan.next_query().expect("a DESCRIBE");
-        plan.feed(q.id, &rows(&[&["note", "VARCHAR"]]));
+        let q = plan.next_query().expect("the columns");
+        plan.feed(q.id, &fields(&[("note", DataType::Utf8)]), &[]);
         let q = plan.next_query().expect("the counts");
-        plan.feed(q.id, &rows(&[&["4", "2", "4", "a", long.as_str()]]));
+        let no_fields = Fields::empty();
+        plan.feed(
+            q.id,
+            &no_fields,
+            &rows(&[&["4", "2", "4", "a", long.as_str()]]),
+        );
         let q = plan.next_query().expect("the commonest values");
         assert!(q.sql.contains("LIMIT 10"), "{}", q.sql);
-        plan.feed(q.id, &rows(&[&[long.as_str(), "2"], &["a", "2"]]));
+        plan.feed(
+            q.id,
+            &no_fields,
+            &rows(&[&[long.as_str(), "2"], &["a", "2"]]),
+        );
         while let Some(q) = plan.next_query() {
-            plan.feed(q.id, &[]);
+            plan.feed(q.id, &no_fields, &[]);
         }
         let note = &plan.finish().sources[0].columns[0];
         assert_eq!(note.min_value.as_deref(), Some("a"));
@@ -1141,7 +1173,7 @@ mod tests {
     /// Tables the host holds are not described, and no inclusion is tested
     /// between them: the plan is the counts, and the keys they make.
     #[test]
-    fn tables_are_counted_without_a_describe_or_an_inclusion() {
+    fn tables_are_counted_without_being_described_or_an_inclusion() {
         let column = |name: &str, primitive| InferredColumn {
             name: name.into(),
             primitive,
@@ -1152,15 +1184,15 @@ mod tests {
                     name: "Person".into(),
                     columns: vec![
                         column("dense_id", Primitive::Integer),
-                        column("subject", Primitive::AnyUri),
+                        column("subject", Primitive::Uri),
                     ],
                 },
                 Table {
                     name: "Prize".into(),
                     columns: vec![
                         column("dense_id", Primitive::Integer),
-                        column("subject", Primitive::AnyUri),
-                        column("winner", Primitive::AnyUri),
+                        column("subject", Primitive::Uri),
+                        column("winner", Primitive::Uri),
                     ],
                 },
             ],
@@ -1176,9 +1208,9 @@ mod tests {
                 for _ in columns {
                     row.extend(["2", "2", "a", "b"].map(String::from));
                 }
-                plan.feed(id, &[row.into_iter().map(Some).collect()]);
+                plan.feed(id, &Fields::empty(), &[row.into_iter().map(Some).collect()]);
             } else {
-                plan.feed(id, &[]);
+                plan.feed(id, &Fields::empty(), &[]);
             }
         }
         let profile = plan.finish();
@@ -1187,10 +1219,10 @@ mod tests {
     }
 
     #[test]
-    fn a_types_profile_is_one_describe_a_source_and_nothing_after() {
+    fn a_types_profile_is_one_query_a_source_and_nothing_after() {
         let mut plan = Profiler::new([csv("a.csv")], Options::TYPES);
-        let q = plan.next_query().expect("the DESCRIBE");
-        plan.feed(q.id, &rows(&[&["id", "BIGINT"]]));
+        let q = plan.next_query().expect("the columns");
+        plan.feed(q.id, &id(), &[]);
         assert!(
             plan.next_query().is_none(),
             "no counts, no inclusions, no sample"
@@ -1204,7 +1236,7 @@ mod tests {
     #[test]
     fn a_source_that_cannot_be_described_is_a_failure_and_not_a_profile() {
         let mut plan = Profiler::new([csv("gone.csv")], Options::default());
-        let q = plan.next_query().expect("the DESCRIBE");
+        let q = plan.next_query().expect("the columns");
         plan.fail(q.id, "No files found that match the pattern");
         assert!(plan.next_query().is_none());
         assert!(plan.is_done());

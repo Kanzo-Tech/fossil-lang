@@ -62,9 +62,46 @@ export interface GraphFile {
  */
 export interface Table {
   readonly numRows: number;
-  readonly schema: { readonly fields: readonly { readonly name: string }[] };
+  readonly schema: { readonly fields: readonly Field[] };
   /** One column by name, or `null` when the answer has none of that name. */
   getChild(name: string): Vector | null;
+}
+
+/** One column of an answer, the part of apache-arrow's `Field` fossil reads: its name and its type. */
+export interface Field {
+  readonly name: string;
+  readonly nullable: boolean;
+  readonly type: DataType;
+}
+
+/**
+ * A column's type, the part of apache-arrow's `DataType` fossil reads. `typeId` numbers it as
+ * Arrow's IPC schema does (`Schema.fbs`'s `Type`, `-1` for a dictionary), and each parameter has
+ * the name the schema gives it; a type has only its own. It is how a profile types a source's
+ * columns: by what the engine answers, never by a name the engine prints.
+ */
+export interface DataType {
+  readonly typeId: number;
+  readonly bitWidth?: number;
+  readonly isSigned?: boolean;
+  readonly precision?: number;
+  readonly scale?: number;
+  readonly unit?: number;
+  readonly timezone?: string | null;
+  readonly byteWidth?: number;
+  readonly listSize?: number;
+  readonly keysSorted?: boolean;
+  readonly mode?: number;
+  readonly typeIds?: ArrayLike<number>;
+  readonly children?: readonly Field[];
+  readonly dictionary?: DataType;
+  readonly indices?: DataType;
+}
+
+/** One query's answer as the profiler takes it: the answer's fields, and every cell its text or `null`. */
+export interface ProfileAnswer {
+  readonly fields: readonly Field[];
+  readonly rows: (string | null)[][];
 }
 
 /**

@@ -21,7 +21,7 @@ The two names in the message are the documents, as the program wrote them. This 
 
 ## Why fossil refuses it
 
-The output descriptor is what a run classifies the graph's edges with, and it has to be the
+The program's graph type is what its mappings take their edges from, and it has to be the
 document the program compiled against. When a program names a `type` binding, that document wins
 and the sources' `schema =` documents only shape the rows read in. Without one, the run takes the
 RDF sources' `schema =` document as the output contract — and with two different ones it would

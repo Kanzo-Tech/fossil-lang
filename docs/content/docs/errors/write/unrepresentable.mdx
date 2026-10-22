@@ -1,9 +1,9 @@
 ---
 title: A value GraphAr cannot hold
-description: "`write/unrepresentable` — a value that the graph's property types cannot hold without changing it: an unsigned 64-bit integer above the largest signed one, a timestamp finer than a millisecond, or a column of a type with no GraphAr type."
+description: "`write/unrepresentable` — a value that its property's type cannot hold without changing it: an unsigned 64-bit integer above the largest signed one, a decimal with more digits than a double, a timestamp finer than a millisecond, or a column of a type with no GraphAr type."
 ---
 
-The writer stores each column as the Apache GraphAr type that holds its values, and one value does not
+The writer stores each property as the one Apache GraphAr type of its primitive, and one value does not
 fit:
 
 ```text
@@ -19,12 +19,14 @@ does.
 
 GraphAr's types are `bool`, `int32`, `int64`, `float`, `double`, `string`, `date` and `timestamp`
 (milliseconds since the Unix epoch), and a list of them
-([the data types](/docs/format/conventions/datatypes)). The writer widens what widens without loss —
-`int8` to `int32`, `uint32` to `int64` — and writes `time`, `binary` and `decimal` as the text they
-are. Two things it cannot do without changing the value:
+([the data types](/docs/format/conventions/datatypes)), and each primitive is one of them. The writer
+converts a value the source typed otherwise only when it survives the round trip — an `int32` to the
+`int64` of an `Integer` — and writes `time` and `binary` as the text they are. Three things it cannot
+do without changing the value:
 
 - **An unsigned 64-bit integer above `i64::MAX`** has no signed 64-bit twin. GraphAr has no unsigned
   type, and a wrapped value is a different number.
+- **A decimal with more digits than a `double` holds**, under a `Float`: a `double` would round it.
 - **A timestamp with a sub-millisecond part**: GraphAr's `timestamp` is milliseconds, and a string would
   lose the type every other reader sees. Rounding it would break the injectivity of the value-to-term
   map that the round trip relies on (A3).
@@ -34,7 +36,7 @@ value.
 
 ## How to repair it
 
-- **Cast in the program**: to a smaller integer, or truncate the timestamp to the millisecond when the
-  rest was never data.
+- **Cast in the program**: to a smaller integer, round the decimal, or truncate the timestamp to the
+  millisecond when the rest was never data.
 - **Write the value as text** (`str.concat`, a `parse.*`) when the exact value matters more than its
   type.

@@ -1,0 +1,121 @@
+# The engine: lowers `lower_to_mir_pg` to a DataFusion plan, executes it into
+# the graph `fossil-sinks` writes, through `Storage` — `Executor` is the run a
+# host drives. Compiles to wasm32 (the browser executor) and natively (the
+# tests) alike.
+[package]
+name = "fossil-exec"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "The engine: the property-graph MIR (lower_to_mir_pg) run on DataFusion"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
+
+# The workspace lint table (pedantic + nursery at warn). Every crate inherits
+# it, so `grep -L lints crates/*/Cargo.toml` is empty and this is a policy.
+[lints]
+workspace = true
+
+# One per sink besides `GraphAr`'s, which every run can write: a host compiles in
+# the formats it offers, so a module that writes only `GraphAr` carries no other.
+[features]
+ntriples = ["fossil-sinks/ntriples"]
+
+[lib]
+doctest = false
+
+[dependencies]
+# A run's phases are spans; a host's subscriber times them (`FmtSpan::CLOSE`).
+tracing = { workspace = true }
+fossil-base = { path = "../fossil-base" }
+fossil-hir = { path = "../fossil-hir" }
+fossil-mir = { path = "../fossil-mir" }
+# The one IO path of a run: sources read and the graph written through
+# `object_store` stores built from vended credentials. `object-store` only — the
+# `js` host adapter is `fossil-df-wasm`'s.
+fossil-storage = { path = "../fossil-storage", features = ["object-store"] }
+# `Storage::stores` hands `object_store` stores to `DataFusion`, and `put` takes
+# `Bytes`; `futures` drives the one-task session's streams. All wasm-clean.
+object_store = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+# A CSV column read as text when its text says it is not a number (`LeadingZeros`).
+csv-core = { workspace = true }
+# What the engine hands a sink, and the sink a run writes through: `graphar`
+# is the one `Executor` drives.
+fossil-sinks = { path = "../fossil-sinks", features = ["graphar"] }
+# The canonical graph-schema contract — the metadata fossil-exec produces and the
+# graph is laid out from (the universal substrate's single source).
+fossil-graph-schema = { path = "../fossil-graph-schema" }
+# RDF input seam: Turtle parsing for `io.rdf` sources → Arrow rows, through
+# `rudof_rdf`'s in-memory graph. Pure Rust, WASM-clean — RDF is decoded at the
+# I/O border, same as in the browser.
+rudof_rdf = { workspace = true }
+# The RDF terms of an `io.rdf` source, as `rudof_rdf` parses them (`rdf`).
+oxrdf = { workspace = true }
+# The engine. Pinned in the workspace table, whose comment says what it is
+# built with and why; `fossil-sinks` writes through the same build.
+datafusion = { workspace = true }
+
+# `src/report.rs` — what a run tells its caller, and what `serde-wasm-bindgen`
+# hands JS; `schemars` derives its TypeScript (`xtask/tests/wire.rs`).
+serde = { workspace = true }
+schemars = { workspace = true }
+# The JSON array reader (`read_json_source`). `arrow-json` decodes a slice of
+# `serde_json::Value`, so the parse and the decode speak the same type; both are
+# pure Rust, so neither costs the wasm build anything.
+serde_json = { workspace = true }
+# The stdlib UDFs no engine ships. Pure Rust, no C, wasm-clean — the logic is
+# the function's, not the database's, which is why it can live in the compiler
+# ring at all.
+slug = { workspace = true }
+unicode-normalization = { workspace = true }
+
+[dev-dependencies]
+# The tests read a written graph back: its information files (`graphar-info`),
+# its chunk paths (`graphar-parquet`), and a source's profile (`fossil-profile`).
+graphar-info = { workspace = true }
+graphar-parquet = { workspace = true }
+fossil-profile = { path = "../fossil-profile" }
+# `tests/programs.rs` keeps each conformance program's artefacts as files.
+expect-test = { workspace = true }
+# `tests/write.rs` reads the graph back with a second engine: a graph only
+# one writer can read is not a graph. `tests/builtin_smoke.rs` binds every
+# stdlib template on it.
+duckdb = { workspace = true }
+# `tests/mapping.rs` renders the mapping to a view over the written graph (`rml::sql`) and reads the
+# triples back, which is Statement R made a test.
+rml = { workspace = true, features = ["sql"] }
+# `tests/ntriples.rs` runs every conformance program through both sinks: this
+# crate with its `ntriples` feature, and the parser that reads the document back.
+fossil-exec = { path = ".", features = ["ntriples"] }
+oxrdf = { workspace = true }
+oxttl = { workspace = true }
+# `tests/write.rs` wraps an `object_store` store to record the order of the
+# writes, and the trait is an `async_trait`.
+async-trait = { workspace = true }
+# `NativeSystem` and the line-format decoder moved out of `fossil-base`'s
+# production surface into its `test_support` module, which is behind this
+# feature — they had no consumer that was not a test.
+fossil-base = { path = "../fossil-base", features = ["test-support"] }
+# Dev-only: the tests drive the async executor on a current-thread runtime. The
+# library holds no tokio at all — the browser drives it from JS's event loop.
+tokio = { workspace = true }
+tempfile = { workspace = true }
+# tests/pipeline.rs builds the op list by hand — the MIR operators, which no
+# `.fossil` reaches yet — so it spells `SmolStr` directly.
+smol_str = { workspace = true }
+fossil-graph-schema = { path = "../fossil-graph-schema" }
+# `tests/census` counts `PROPERTY` nodes in the CST.
+fossil-syntax = { path = "../fossil-syntax" }
+# `tests/written.rs` checks and runs the program `fossil_ide::model::write` makes of a model.
+fossil-ide = { path = "../fossil-ide" }
+# `tests/programs.rs` renders each diagnostic as `fossil check` rendered it —
+# graphical, unicode — into the committed `expected/diagnostic.txt`.
+miette = { workspace = true, features = ["fancy"] }
+# `tests/documents.rs` edits a registered document through its Salsa input and
+# counts `WillExecute` events.
+salsa = { workspace = true }

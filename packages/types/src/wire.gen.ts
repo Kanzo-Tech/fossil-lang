@@ -493,16 +493,11 @@ export interface Position {
 }
 
 /**
- * The canonical datatype lattice — format-neutral, and **the same enum the type system checks
- * against** (`TyKind::Primitive`). It lives in this crate because the schema, the checker and the
- * descriptors all speak it, and a lattice that crosses a crate boundary as a string is a lattice
- * with no single definition.
- *
- * Materializers map it to their own vocabulary (`GraphAr` `string/int64/double/…`, `DataFusion`
- * scalars, `DuckDB` column types) next to the materializer. XSD is one of those vocabularies, the
- * RDF border's, and `Xsd` is where the lattice meets it: this enum names no datatype IRI.
+ * The wire's spelling of a `Primitive`: one flat name, so a reader keys a table on it
+ * (`@fossil-lang/types`' `Primitive`). It is the program's spelling in `snake_case`, the parameter
+ * after the family.
  */
-export type Primitive = 'string' | 'integer' | 'float' | 'bool' | 'date' | 'date_time' | 'time' | 'g_year' | 'any_uri' | 'lang_string';
+export type Primitive = 'string' | 'string_lang' | 'integer' | 'float' | 'bool' | 'time_year' | 'time_date' | 'time_date_time' | 'time_hour' | 'uri';
 
 /**
  * What the profiler found.

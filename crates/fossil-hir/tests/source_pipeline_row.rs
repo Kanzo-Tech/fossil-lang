@@ -49,7 +49,7 @@ fn two_sources() -> Vec<(&'static str, &'static [(&'static str, Primitive)])> {
             "p.csv",
             &[
                 ("persona_id", Primitive::Integer),
-                ("nombre", Primitive::String),
+                ("nombre", Primitive::STRING),
             ],
         ),
     ]
@@ -243,14 +243,14 @@ fn two_sources_sharing_a_column_name_both_keep_it() {
                 &[
                     ("id", Primitive::Integer),
                     ("persona_id", Primitive::Integer),
-                    ("nombre", Primitive::String),
+                    ("nombre", Primitive::STRING),
                 ],
             ),
             (
                 "p.csv",
                 &[
                     ("persona_id", Primitive::Integer),
-                    ("nombre", Primitive::String),
+                    ("nombre", Primitive::STRING),
                 ],
             ),
         ],
@@ -265,7 +265,7 @@ fn two_sources_sharing_a_column_name_both_keep_it() {
 /// care about.
 fn twin_sources() -> Vec<(&'static str, &'static [(&'static str, Primitive)])> {
     const COLUMNS: &[(&str, Primitive)] =
-        &[("id", Primitive::Integer), ("nombre", Primitive::String)];
+        &[("id", Primitive::Integer), ("nombre", Primitive::STRING)];
     vec![("o.csv", COLUMNS), ("p.csv", COLUMNS)]
 }
 
@@ -304,7 +304,7 @@ fn a_union_answers_to_the_pipeline_and_to_neither_side() {
 /// The sides of a `union` are paired COLUMN BY COLUMN, and the refusal says
 /// which pair disagreed.
 ///
-/// `fossil-df` unions by position and hands back a schema with the left side's
+/// `fossil-exec` unions by position and hands back a schema with the left side's
 /// names, so a mismatch it accepted would be a corpus whose `nombre` column
 /// holds half integers. The rule is the backend's, said where a user hears it.
 #[test]
@@ -328,7 +328,7 @@ fn a_union_whose_sides_disagree_is_refused() {
         vec![
             (
                 "o.csv",
-                &[("id", Primitive::Integer), ("nombre", Primitive::String)],
+                &[("id", Primitive::Integer), ("nombre", Primitive::STRING)],
             ),
             (
                 "p.csv",
