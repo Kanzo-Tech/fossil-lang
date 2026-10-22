@@ -413,21 +413,25 @@
       "x-detail": "\"`{written}` is a prefixed name, and an IRI is written whole: `{expands_to}`\""
     },
     {
-      "description": "A declared type or a field with two `@iri`s; `name` is the type's or the field's.",
+      "description": "A declared type or a field with two of an attribute it has one of — `@iri`, or a field's `@severity`; `name` is the type's or the field's.",
       "properties": {
         "code": {
           "enum": [
-            "syntax/duplicate-iri"
+            "syntax/duplicate-attribute"
           ],
           "type": "string"
         },
         "data": {
           "properties": {
+            "attribute": {
+              "type": "string"
+            },
             "name": {
               "type": "string"
             }
           },
           "required": [
+            "attribute",
             "name"
           ],
           "type": "object"
@@ -437,9 +441,9 @@
         "code",
         "data"
       ],
-      "title": "Two IRIs for one declaration",
+      "title": "An attribute written twice",
       "type": "object",
-      "x-detail": "\"`{name}` has two `@iri`s, and a declaration has one IRI\""
+      "x-detail": "\"`{name}` has two `{attribute}`s, and a declaration has one\""
     },
     {
       "description": "A call whose callee is not a name.",
@@ -505,6 +509,42 @@
       "title": "Not a shape this program declares",
       "type": "object",
       "x-detail": "\"`{shape}` is not a shape this program declares\""
+    },
+    {
+      "description": "A severity no constraint has — `@severity(fatal)`. `severities` is the three there are.",
+      "properties": {
+        "code": {
+          "enum": [
+            "name/unknown-severity"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "severities": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "written": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "severities",
+            "written"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "Not a severity",
+      "type": "object",
+      "x-detail": "\"`{written}` is not a severity — it is one of {}\", code_list(.severities)"
     },
     {
       "description": "A property key the target shape does not declare.",
@@ -1542,6 +1582,76 @@
       "title": "A required property is never written",
       "type": "object",
       "x-detail": "\"`{mapping}` never writes `{property}`, and {shape} requires it\""
+    },
+    {
+      "description": "A field an assertion cannot read: on a field it reads that field alone, and on a type each single-valued field. `on` says which assertion — «the field `edad`», «the type `Persona`».",
+      "properties": {
+        "code": {
+          "enum": [
+            "shape/out-of-scope"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "field": {
+              "type": "string"
+            },
+            "on": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "field",
+            "on"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "A field an assertion cannot read",
+      "type": "object",
+      "x-detail": "\"`{field}` is not in scope in an assertion on {on}\""
+    },
+    {
+      "description": "A constant a mapping writes that a field's assertion refuses — decided where it is written, because nothing about it waits for the data. `assertion` is the condition as written.",
+      "properties": {
+        "code": {
+          "enum": [
+            "shape/assert-failed"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "assertion": {
+              "type": "string"
+            },
+            "property": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "assertion",
+            "property",
+            "value"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "A constant an assertion refuses",
+      "type": "object",
+      "x-detail": "\"`{property}` is written as {value}, and `{assertion}` does not hold of it\""
     },
     {
       "description": "A value disjunction in a shape, which one mapping cannot write.",
@@ -3129,6 +3239,39 @@
       "title": "A vertex has no absolute IRI as its subject",
       "type": "object",
       "x-detail": "\"a `{vertex_type}` vertex has the subject {subject}, which is not an absolute IRI\""
+    },
+    {
+      "description": "A value of a property the program types as an IRI that is not an absolute IRI: the object of its triple would be a term no RDF parser reads.",
+      "properties": {
+        "code": {
+          "enum": [
+            "write/invalid-iri"
+          ],
+          "type": "string"
+        },
+        "data": {
+          "properties": {
+            "property": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "property",
+            "value"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "code",
+        "data"
+      ],
+      "title": "A value typed as an IRI is not one",
+      "type": "object",
+      "x-detail": "\"`{property}` holds `{value}`, which is not an absolute IRI\""
     },
     {
       "description": "One IRI that names two things the mapping needs it to name one of (admissibility A2): two vertex types with one class, two columns of one type with one predicate, or a relation whose predicate is a column predicate of its source type. The RDF image would make the two one.",

@@ -1,6 +1,6 @@
 /**
  * `infer` across the wasm boundary. The rules are `fossil-ide`'s (`tests/model.rs`, and
- * `fossil-df`'s `tests/written.rs` over real files); this holds that a `Profile` and the choices
+ * `fossil-exec`'s `tests/written.rs` over real files); this holds that a `Profile` and the choices
  * reach them in their wire shape, and that the model comes back in its own.
  */
 import { describe, it, expect, beforeAll } from 'vitest';

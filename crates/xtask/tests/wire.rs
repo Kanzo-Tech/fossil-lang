@@ -60,7 +60,7 @@ fn the_wire() {
     generator.subschema_for::<fossil_storage::Scope>();
     generator.subschema_for::<fossil_storage::GrantPlan>();
     generator.subschema_for::<fossil_storage::LocationName>();
-    generator.subschema_for::<fossil_df::RunReport>();
+    generator.subschema_for::<fossil_exec::RunReport>();
     let schema = serde_json::json!({ "definitions": generator.take_definitions() });
     // The figures both sides wait by.
     let constants = [

@@ -1,0 +1,40 @@
+---
+title: An attribute written twice
+description: "`syntax/duplicate-attribute` — a declared type or a field written with two `@iri`s, or a field with two `@severity`s."
+---
+
+A declared type and each of its fields carry exactly one `@iri`, and a field at most one
+`@severity`. Stacking a second is refused, naming the field:
+
+```fossil
+@iri("https://schema.org/Person")
+type Laureate
+    @iri("https://schema.org/name")
+    @iri("https://schema.org/alternateName")
+    name: Seq<String<Lang>>
+```
+
+```text
+syntax/duplicate-attribute
+  × `name` has two `@iri`s, and a declaration has one
+  help: a type and a field each have one IRI. Keep the one that names the predicate or the class meant, and put anything else said about it in an `@annotation`.
+```
+
+## Why fossil refuses it
+
+A field is the one place its name is given a predicate: the graph column it becomes carries one
+IRI, and its triples one predicate. Attributes stack so that a field can carry several
+`@annotation`s and `@assert`s ([Types declared in the program](/docs/design/declared)); `@iri` stays
+one, and which of two was meant is not the parser's to guess.
+
+`@severity` is the same rule for a field's count: the count is enforced one way, and two severities
+would be two answers to whether a field with too many values refuses the run. An assertion is not a
+count and carries its own, so two assertions of two severities on one field are two constraints and
+are both kept.
+
+## How to repair it
+
+- **Keep one `@iri`.** Two predicates are two fields, each with its own name.
+- **Say the rest as an annotation**: `@annotation("http://www.w3.org/2004/02/skos/core#exactMatch", "…")`.
+- **Keep one `@severity`**, the one meant for the count. A condition that should only warn is an
+  `@assert(…, severity = warning)`.

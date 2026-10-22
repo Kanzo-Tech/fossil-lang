@@ -267,7 +267,10 @@ impl<'db> ResolvedShape<'db> {
 /// `name = Row.name` fails against `ex:name .` — a constraint that constrains
 /// nothing. `PropertyConstraint::datatype`'s doc in `fossil-graph-schema` says
 /// the same. A shape that does not narrow the value does not narrow it.
-fn expected_value_ty<'db>(db: &'db dyn fossil_base::Db, c: &PropertyConstraint) -> Option<Ty<'db>> {
+pub(crate) fn expected_value_ty<'db>(
+    db: &'db dyn fossil_base::Db,
+    c: &PropertyConstraint,
+) -> Option<Ty<'db>> {
     if let Some(p) = c.datatype() {
         return Some(Ty::new(db, TyKind::Primitive(p)));
     }
@@ -345,8 +348,7 @@ pub fn suggested_alias(predicate_iri: &str) -> SmolStr {
     let hint = namespace
         .split(|c: char| !c.is_ascii_alphanumeric())
         .filter(|t| t.chars().any(|c| c.is_ascii_alphabetic()))
-        .filter(|t| !NOT_A_VOCABULARY.contains(t))
-        .next_back();
+        .rfind(|t| !NOT_A_VOCABULARY.contains(t));
     hint.map_or_else(
         || SmolStr::from(format!("renamed_{short}")),
         |h| SmolStr::from(format!("{h}_{short}")),
@@ -599,7 +601,7 @@ mod tests {
         PropertyConstraint {
             name: "p".into(),
             predicate: "https://example.org/p".into(),
-            term: datatype.map(|p: Primitive| Term::Literal(Some(p.into()))),
+            term: datatype.map(Term::of),
             targets: targets.iter().map(|t| (*t).to_string()).collect(),
             occurs: Occurs::ONE,
             // A test fixture, not a document: no text to point into.

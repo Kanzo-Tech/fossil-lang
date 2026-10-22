@@ -182,7 +182,7 @@ pub enum Op<'db> {
     Sink { input: usize, sink: SinkRef },
 
     /// `Empty(schema)` — the empty relation, carrying the column schema it
-    /// would have produced. Nothing constructs it and `fossil_df::plan` does
+    /// would have produced. Nothing constructs it and `fossil_exec::plan` does
     /// not execute it; it is the identity of [`Op::Union`] and the target a
     /// statically-false filter rewrites to. A variant of its own rather than a
     /// `Source` with an empty marker, so `schema_of` stays total and no
@@ -233,7 +233,7 @@ pub struct ProjectedColumn {
 ///   paragraph below describes.
 ///
 /// The invariant this field states is checkable against the backend by
-/// induction over `fossil_df::plan::build`: a `Source` is qualified by its
+/// induction over `fossil_exec::plan::build`: a `Source` is qualified by its
 /// binding, `Filter`/`Distinct` preserve, `Project` keeps the qualifier each
 /// column was written with, `Union` collapses to the one name it carries,
 /// `GroupBy` keeps its keys' and adds its own for the aggregates, and `Join`
@@ -327,7 +327,7 @@ pub struct VProp<'db> {
 // `fossil_hir::stdlib::AggFn`. A copy on this side of the lowering would be a
 // second table to keep in step with four rows of `math/`.
 
-/// Source formats. `fossil_df::read_source` is where each one picks its reader.
+/// Source formats. `fossil_exec::read_source` is where each one picks its reader.
 ///
 /// [`Provider`](Self::Provider) covers the formats no built-in reader handles:
 /// the core stays format-agnostic — the plan scans a relation an external
@@ -386,7 +386,7 @@ pub enum Expr<'db> {
     /// String concatenation: `lhs || rhs`. Recursive via `Box` so the variant
     /// has a finite size; `salsa::SalsaValue` lifts through `Box<T>` when
     /// `T: SalsaValue`.
-    Concat(Box<Expr<'db>>, Box<Expr<'db>>),
+    Concat(Box<Self>, Box<Self>),
     /// `x IS NULL` / `x IS NOT NULL` — what `x == null` and `x != null` lower
     /// to, and the reason there is no null VALUE in this algebra.
     ///
@@ -396,21 +396,21 @@ pub enum Expr<'db> {
     /// `null` never survives as a value, which is the same statement the
     /// checker makes by refusing `name = null`.
     IsNull {
-        operand: Box<Expr<'db>>,
+        operand: Box<Self>,
         /// `true` for `!=` — the `NOT` of `IS NOT NULL`.
         negated: bool,
     },
     /// Function application: `func(args...)`, result typed `ty`.
     Call {
         func: SmolStr,
-        args: Vec<Expr<'db>>,
+        args: Vec<Self>,
         ty: Ty<'db>,
     },
     /// Binary operator: `lhs <op> rhs`, result typed `ty`.
     BinOp {
         op: BinOp,
-        lhs: Box<Expr<'db>>,
-        rhs: Box<Expr<'db>>,
+        lhs: Box<Self>,
+        rhs: Box<Self>,
         ty: Ty<'db>,
     },
     /// Unary operator: `-operand` or `not operand`, result typed `ty`.
@@ -421,16 +421,16 @@ pub enum Expr<'db> {
     /// the bits a `xsd:float` column carries.
     UnaryOp {
         op: UnOp,
-        operand: Box<Expr<'db>>,
+        operand: Box<Self>,
         ty: Ty<'db>,
     },
     /// `cond ? then : otherwise`, result typed `ty`. Renders as a two-armed
     /// `CASE` on every SQL engine; both branches have the same type by
     /// construction (the checker refuses anything else), so the CASE is total.
     Ternary {
-        cond: Box<Expr<'db>>,
-        then: Box<Expr<'db>>,
-        otherwise: Box<Expr<'db>>,
+        cond: Box<Self>,
+        then: Box<Self>,
+        otherwise: Box<Self>,
         ty: Ty<'db>,
     },
     /// Named runtime assertion. `span_line` carries the source line for the
@@ -439,6 +439,6 @@ pub enum Expr<'db> {
     Assert {
         name: SmolStr,
         span_line: u32,
-        inner: Box<Expr<'db>>,
+        inner: Box<Self>,
     },
 }

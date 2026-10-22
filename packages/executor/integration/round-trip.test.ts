@@ -13,7 +13,7 @@
  * 5. `mapping.ttl` is beside the graph document.
  *
  * That the mapping means the same RDF as the data is held on the Rust side, over native DuckDB:
- * `crates/fossil-df/tests/mapping.rs`.
+ * `crates/fossil-exec/tests/mapping.rs`.
  */
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -28,7 +28,7 @@ import { duckdb } from './engine.js';
 import { runShop } from './shop.js';
 import { installSyncXhr } from './sync-xhr.js';
 
-/** People; three orders each, so `Order` is past one row group of 122,880. */
+/** People; three orders each, so `Order` is past 122,880 rows — fossil's row group before a chunk was one, and still a table larger than DuckDB's own row group. */
 const PEOPLE = 50_000;
 
 const scratch = mkdtempSync(join(tmpdir(), 'fossil-round-trip-'));

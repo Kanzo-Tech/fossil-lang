@@ -199,8 +199,8 @@ it.
 
 ### A source the host could not describe is a warning at the call that reads it
 
-The compiler performs no IO, so the columns a source has arrive from the host: `profile` runs a
-`DESCRIBE` per source and answers `{ descriptors, undescribed }`, the second half each source it could
+The compiler performs no IO, so the columns a source has arrive from the host: `profile` asks
+the columns of each source and answers `{ descriptors, undescribed }`, the second half each source it could
 not read with the problem that stopped it — `source/not-found`, a `storage/*` code, `engine/failed`.
 The descriptors went to the checker and the problems went nowhere it could see, so the editor's one
 diagnostic list said nothing about a file that 404s, and the only symptom was field completion that
@@ -218,10 +218,10 @@ source that describes on a later call loses its warning. A run takes the same va
 program against the columns the editor did.
 
 The row is the workspace's and not the TypeScript layer's because only the def map knows where a
-source is read. It is one row per key — two bindings over one file are one `DESCRIBE` and one
+source is read. It is one row per key — two bindings over one file are one source described and one
 failure — at the call right of `:=` in the first binding that reads it, carrying the whole problem as
 every other row does: its code, `data`, `title`, `help`, and the code's page through `helpUrl`.
-`crates/fossil-wasm/tests/undescribed.rs` pins it, and `packages/wasm/tests/program.test.ts` pins it
+`bindings/editor/tests/undescribed.rs` pins it, and `packages/wasm/tests/program.test.ts` pins it
 again across the wasm boundary.
 
 **It is a warning, where an unread document is an error.** What a missing descriptor costs is the

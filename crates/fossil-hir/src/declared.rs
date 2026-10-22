@@ -17,15 +17,25 @@
 //! `Ref<T>` is an edge to the type `T` names — declared or imported, through
 //! [`crate::def_map::DefMap::lookup_type`] like every other use of a type name.
 //! `Option<…>` is zero or one and `Seq<…>` zero or more, and either holds a
-//! primitive or a `Ref<…>`.
+//! primitive or a `Ref<…>`. `Seq<T, n>` is at least `n` and `Seq<T, n, m>`
+//! between `n` and `m`: SHACL's `sh:minCount`/`sh:maxCount` and `ShEx`'s
+//! `{n,m}`, each with one spelling.
 //!
 //! That is the whole grammar, and what it leaves out is decided rather than
 //! missing. The vocabulary carries ONE `(min, max)` per property, so a
 //! cardinality is said once, outermost: `Option<Seq<T>>` would be a second
 //! spelling of `Seq<T>`, `Seq<Option<T>>` a list with holes the graph has no
-//! way to write, and `Option<Option<T>>` nothing at all. `Ref<String>` refers
-//! to a value, which is not a node. Each is refused as
+//! way to write, and `Option<Option<T>>` nothing at all. Bounds that another
+//! spelling already says are the same second spelling — `Seq<T, 0, 1>` is
+//! `Option<T>`, `Seq<T, 1, 1>` is `T`, `Seq<T, 0>` is `Seq<T>`. `Ref<String>`
+//! refers to a value, which is not a node. Each is refused as
 //! `type/invalid-field-type`, naming the rule.
+//!
+//! # What a type says beyond its fields
+//!
+//! A field's `@severity(…)` and every `@assert(…)` lower beside the shape into
+//! [`crate::asserts::DeclaredRules`], keyed by the type's IRI: what they mean is
+//! in [`crate::asserts`].
 //!
 //! # A refused field is still a field
 //!
@@ -36,13 +46,16 @@
 
 use fossil_base::{Diagnostic, Diagnostics};
 use fossil_graph_schema::{
-    Annotation, Occurs, OutputShapes, Primitive, Problem, PropertyConstraint, Severity, Shape,
-    Span, Term,
+    Annotation, ConstraintSeverity, Occurs, OutputShapes, Precision, Primitive, Problem,
+    PropertyConstraint, Severity, Shape, Span, Term,
 };
-use fossil_syntax::ast::{AnnotationAttr, Field, ImportMember, IriAttr, TypeDecl, TypeExpr};
-use fossil_syntax::{SyntaxKind, SyntaxNode};
+use fossil_syntax::ast::{
+    AnnotationAttr, AssertAttr, Field, ImportMember, IriAttr, TypeDecl, TypeExpr,
+};
+use fossil_syntax::{SyntaxKind, SyntaxNode, SyntaxToken};
 use smol_str::SmolStr;
 
+use crate::asserts::{CountSeverity, DeclaredAssert, DeclaredRules};
 use crate::def_map::DefMap;
 
 /// The constructors a field's type is written with, beside the primitives.
@@ -51,22 +64,27 @@ const SEQ: &str = "Seq";
 const REF: &str = "Ref";
 
 /// Lower every `TYPE_DECL` under `root` — one shape per declared type with an
-/// IRI, in written order — and refuse, into `sink`, what a declaration or a
-/// type name introduced twice, declared or imported, gets wrong. Every
-/// diagnostic is file-absolute.
+/// IRI, in written order, and what each constrains beyond its fields' types —
+/// and refuse, into `sink`, what a declaration or a type name introduced twice,
+/// declared or imported, gets wrong. Every diagnostic is file-absolute.
+///
+/// `types` is every type name the program binds, which an assertion's
+/// condition is lowered against as any expression is.
 pub(crate) fn lower_declarations(
     db: &dyn fossil_base::Db,
     dm: DefMap<'_>,
     root: &SyntaxNode,
+    types: &[SmolStr],
     sink: &mut Diagnostics,
-) -> OutputShapes {
+) -> (OutputShapes, DeclaredRules) {
     refuse_names_introduced_twice(root, sink);
+    let mut rules = DeclaredRules::default();
     let shapes = root
         .children()
         .filter_map(TypeDecl::cast)
-        .filter_map(|decl| lower_decl(db, dm, sink, &decl))
+        .filter_map(|decl| lower_decl(db, dm, types, sink, &mut rules, &decl))
         .collect();
-    OutputShapes::new(shapes, Vec::new())
+    (OutputShapes::new(shapes, Vec::new()), rules)
 }
 
 /// One declaration's shape. `None` without an IRI or a name, which the parser
@@ -74,13 +92,25 @@ pub(crate) fn lower_declarations(
 fn lower_decl(
     db: &dyn fossil_base::Db,
     dm: DefMap<'_>,
+    types: &[SmolStr],
     sink: &mut Diagnostics,
+    rules: &mut DeclaredRules,
     decl: &TypeDecl,
 ) -> Option<Shape> {
     let type_name = decl.name()?;
     let iri_attr = decl.iri_attr()?;
     refuse_prefixed_iri(&iri_attr, sink);
     let iri = iri_attr.iri()?;
+    let on = |field: Option<SmolStr>| Owner {
+        shape: iri.clone(),
+        type_name: type_name.clone(),
+        field,
+    };
+    for attr in decl.asserts() {
+        rules
+            .asserts
+            .extend(lower_assert(db, types, sink, &attr, on(None)));
+    }
     let mut properties: Vec<PropertyConstraint> = Vec::new();
     for field in decl.fields() {
         if let Some(attr) = field.iri_attr() {
@@ -113,6 +143,22 @@ fn lower_decl(
                         (UNCHECKED, None, Vec::new())
                     })
                 });
+        for attr in field.asserts() {
+            rules
+                .asserts
+                .extend(lower_assert(db, types, sink, &attr, on(Some(name.clone()))));
+        }
+        if let Some(severity) = field
+            .severity()
+            .and_then(|s| s.level())
+            .and_then(|level| severity(&level, sink))
+        {
+            rules.counts.push(CountSeverity {
+                shape: iri.clone(),
+                field: name.clone(),
+                severity,
+            });
+        }
         properties.push(PropertyConstraint {
             name: name.to_string(),
             predicate: predicate.to_string(),
@@ -129,6 +175,66 @@ fn lower_decl(
         properties,
         span: decl_name_span(decl),
         annotations: lower_annotations(decl.annotations(), sink),
+    })
+}
+
+/// Whose an assertion is: the type, and the field when it is on one.
+struct Owner {
+    shape: SmolStr,
+    type_name: SmolStr,
+    field: Option<SmolStr>,
+}
+
+/// An `@assert(…)`, its condition lowered as any expression is. `None` when
+/// there is no condition, which the parser has refused, or when the condition
+/// did not lower, which lowering has reported.
+fn lower_assert(
+    db: &dyn fossil_base::Db,
+    types: &[SmolStr],
+    sink: &mut Diagnostics,
+    attr: &AssertAttr,
+    owner: Owner,
+) -> Option<DeclaredAssert> {
+    let node = attr.condition()?;
+    // Lowering reports in the frame of whatever it was handed; this node is
+    // the whole file's, so what it says is file-absolute.
+    let mut lowering = Diagnostics::new();
+    let condition = crate::lower::lower_expr(db, &mut lowering, &node, types);
+    for d in lowering.into_vec() {
+        sink.push(d.file_absolute());
+    }
+    let severity = match attr.severity() {
+        Some(level) => severity(&level, sink)?,
+        None => ConstraintSeverity::Violation,
+    };
+    Some(DeclaredAssert {
+        shape: owner.shape,
+        type_name: owner.type_name,
+        field: owner.field,
+        condition: condition?,
+        text: SmolStr::from(node.text().to_string().trim()),
+        severity,
+        span: node_span(&node),
+    })
+}
+
+/// The severity a program wrote, or `None` and a refusal when it is not one.
+fn severity(level: &SyntaxToken, sink: &mut Diagnostics) -> Option<ConstraintSeverity> {
+    let written = level.text();
+    ConstraintSeverity::from_name(written).or_else(|| {
+        let names = ConstraintSeverity::ALL.map(ConstraintSeverity::name);
+        let help = crate::didyoumean::did_you_mean(written, names.iter().copied())
+            .map(|s| format!("did you mean `{s}`?"));
+        emit(
+            sink,
+            token_span(level),
+            Problem::UnknownSeverity {
+                written: written.to_string(),
+                severities: names.map(String::from).to_vec(),
+            },
+            help,
+        );
+        None
     })
 }
 
@@ -234,12 +340,16 @@ fn field_type(
     te: &TypeExpr,
 ) -> Result<(Occurs, Option<Term>, Vec<String>), Refusal> {
     let occurs = match te.name().as_deref() {
-        Some(OPTION) => Occurs {
-            min: 0,
-            max: Some(1),
-        },
-        Some(SEQ) => Occurs { min: 0, max: None },
+        Some(OPTION) => {
+            no_bounds(te)?;
+            Occurs {
+                min: 0,
+                max: Some(1),
+            }
+        }
+        Some(SEQ) => seq_bounds(te)?,
         _ => {
+            no_bounds(te)?;
             let (term, targets) = value_type(db, dm, te)?;
             return Ok((Occurs::ONE, term, targets));
         }
@@ -266,6 +376,71 @@ fn field_type(
     Ok((occurs, term, targets))
 }
 
+/// `Seq<T>`'s count, from the bounds after `T`: at least the first, at most
+/// the second. A pair another spelling says is refused for that spelling.
+fn seq_bounds(te: &TypeExpr) -> Result<Occurs, Refusal> {
+    let bounds = te
+        .bounds()
+        .map(|t| {
+            t.text().replace('_', "").parse::<u32>().map_err(|_| {
+                invalid(
+                    te,
+                    format!("`{}` is not a count of values a field can hold", t.text()),
+                )
+            })
+        })
+        .collect::<Result<Vec<u32>, _>>()?;
+    let occurs = match bounds.as_slice() {
+        [] => return Ok(Occurs { min: 0, max: None }),
+        [min] => Occurs {
+            min: *min,
+            max: None,
+        },
+        [min, max, ..] => Occurs {
+            min: *min,
+            max: Some(*max),
+        },
+    };
+    let said_otherwise = match (occurs.min, occurs.max) {
+        (0, None) => Some("`Seq<T>`"),
+        (0, Some(1)) => Some("`Option<T>`"),
+        (1, Some(1)) => Some("`T`"),
+        _ => None,
+    };
+    if let Some(spelling) = said_otherwise {
+        return Err(invalid(
+            te,
+            format!("that count has one spelling, and it is {spelling}"),
+        ));
+    }
+    if let Some(max) = occurs.max
+        && (max == 0 || max < occurs.min)
+    {
+        return Err(invalid(
+            te,
+            format!(
+                "a field holds at least {} and at most {max} values, which no field can",
+                occurs.min
+            ),
+        ));
+    }
+    Ok(occurs)
+}
+
+/// Bounds belong to `Seq` alone: one value or none is already a count.
+fn no_bounds(te: &TypeExpr) -> Result<(), Refusal> {
+    if te.bounds().next().is_some() {
+        return Err(invalid(
+            te,
+            format!(
+                "only `Seq` takes bounds — `Seq<T, 1, 3>`; `{}` already says how many",
+                te.name().unwrap_or_default()
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// What ONE value of a field is: a primitive, or a reference to a type.
 fn value_type(
     db: &dyn fossil_base::Db,
@@ -279,7 +454,7 @@ fn value_type(
             .ok_or_else(|| invalid(te, "`Ref` needs the type it refers to: `Ref<City>`".into()))?;
         let target_name = target.name().unwrap_or_default();
         if target.argument().is_some()
-            || Primitive::from_name(&target_name).is_some()
+            || Primitive::ALL.iter().any(|p| p.family() == target_name)
             || [OPTION, SEQ, REF].contains(&target_name.as_str())
         {
             return Err(invalid(
@@ -297,14 +472,8 @@ fn value_type(
             |iri| Ok((None, vec![iri.to_string()])),
         );
     }
-    if let Some(p) = Primitive::from_name(&name) {
-        if te.argument().is_some() {
-            return Err(invalid(
-                te,
-                format!("`{p}` is a primitive and takes no argument"),
-            ));
-        }
-        return Ok((Some(Term::Literal(Some(p.into()))), Vec::new()));
+    if let Some(p) = primitive(te, &name)? {
+        return Ok((Some(Term::of(p)), Vec::new()));
     }
     if dm.lookup_type(db, &name).is_some() || dm.lookup_type_error(db, &name).is_some() {
         return Err(invalid(
@@ -325,6 +494,59 @@ fn value_type(
         },
         help,
     ))
+}
+
+/// The primitive `te` writes, if `name` begins one: a family and its
+/// parameter, `Time<Year>` and `String<Lang>`, or a primitive that takes none.
+fn primitive(te: &TypeExpr, name: &str) -> Result<Option<Primitive>, Refusal> {
+    let parameter = te.argument();
+    if parameter
+        .as_ref()
+        .is_some_and(|a| a.argument().is_some() || a.bounds().next().is_some())
+    {
+        return Err(invalid(
+            te,
+            format!("`{name}` takes a bare name as its parameter"),
+        ));
+    }
+    let parameter = parameter.map(|a| a.name().unwrap_or_default());
+    let p = match (name, parameter.as_deref()) {
+        ("Time", Some(precision)) => Primitive::from_name(&format!("Time<{precision}>"))
+            .ok_or_else(|| {
+                invalid(
+                    te,
+                    format!(
+                        "a time is at one of {}",
+                        Precision::ALL.map(|p| format!("`Time<{p:?}>`")).join(", ")
+                    ),
+                )
+            })?,
+        ("Time", None) => {
+            return Err(invalid(
+                te,
+                "`Time` needs its precision: `Time<Year>`, `Time<Date>`, `Time<DateTime>` or \
+                 `Time<Hour>`"
+                    .into(),
+            ));
+        }
+        ("String", Some("Lang")) => Primitive::LANG_STRING,
+        ("String", Some(other)) => {
+            return Err(invalid(
+                te,
+                format!("`String` takes `Lang` and nothing else, not `{other}`: `String<Lang>`"),
+            ));
+        }
+        (name, parameter) => match Primitive::from_name(name) {
+            Some(p) if parameter.is_some() => {
+                return Err(invalid(
+                    te,
+                    format!("`{p}` is a primitive and takes no argument"),
+                ));
+            }
+            p => return Ok(p),
+        },
+    };
+    Ok(Some(p))
 }
 
 /// Every name a field's type may start with: the lattice, then the three

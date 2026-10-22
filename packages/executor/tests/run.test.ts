@@ -65,9 +65,9 @@ function recordingHost() {
 }
 
 const FIXTURES: Record<string, string> = {
-  '/lake/in/graph.shex': '../../../crates/fossil-df/tests/fixtures/graph.shex',
-  '/lake/in/users.csv': '../../../crates/fossil-df/tests/fixtures/users.csv',
-  '/lake/in/orders.csv': '../../../crates/fossil-df/tests/fixtures/orders.csv',
+  '/lake/in/graph.shex': '../../../crates/fossil-exec/tests/fixtures/graph.shex',
+  '/lake/in/users.csv': '../../../crates/fossil-exec/tests/fixtures/users.csv',
+  '/lake/in/orders.csv': '../../../crates/fossil-exec/tests/fixtures/orders.csv',
 };
 
 /** An S3 that serves the fixtures by path to signed HEADs and GETs (ranged too), and records PUTs.

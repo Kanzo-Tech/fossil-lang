@@ -252,7 +252,7 @@ fn run_db_wired_fixture(bucket: &str, name: &str) -> String {
                 &uri,
                 &[
                     ("id", Primitive::Integer),
-                    ("name", Primitive::String),
+                    ("name", Primitive::STRING),
                     ("age", Primitive::Integer),
                 ],
             );
@@ -298,7 +298,7 @@ fn constraint(predicate: &str, datatype: Option<Primitive>, occurs: Occurs) -> P
     PropertyConstraint {
         name: fossil_graph_schema::local_name(predicate).to_string(),
         predicate: predicate.to_string(),
-        term: datatype.map(|p: Primitive| Term::Literal(Some(p.into()))),
+        term: datatype.map(Term::of),
         targets: Vec::new(),
         occurs,
         // A test fixture, not a document: no text to point into.
@@ -441,7 +441,7 @@ fn backward_check_optional_for_required() {
         "https://example.org/Person",
         vec![constraint(
             "https://example.org/email",
-            Some(Primitive::String),
+            Some(Primitive::STRING),
             Occurs { min: 1, max: None },
         )],
     );
@@ -621,8 +621,8 @@ fn the_generated_split_suggestion_compiles() {
         "users.csv",
         &[
             ("id", Primitive::Integer),
-            ("email", Primitive::String),
-            ("phone", Primitive::String),
+            ("email", Primitive::STRING),
+            ("phone", Primitive::STRING),
         ],
     );
 
@@ -734,7 +734,7 @@ fn resolved_constraints_never_leak_unknown_or_inferenceid() {
             vec![
                 constraint(
                     "https://example.org/email",
-                    Some(Primitive::String),
+                    Some(Primitive::STRING),
                     Occurs { min: 1, max: None },
                 ),
                 constraint("https://example.org/name", None, Occurs::ONE),

@@ -1,9 +1,11 @@
 [toolchain]
-# Pinned to 1.90 because wasm-bindgen-cli 0.2.120 (matched to the workspace
-# wasm-bindgen pin) requires rustc 1.86+, and several transitive deps in its
-# install dep tree (time 0.3.47, idna_adapter 1.2.2) require 1.86–1.88. 1.90
-# is current stable as of 2025-09-14. Bump deliberately and update CI in tandem.
-channel = "1.90"
+# Pinned to 1.95 because `datafusion` is pinned to apache/datafusion `main` by git
+# rev (arrow/parquet 60, `crates/fossil-df/Cargo.toml`), and main declares
+# `rust-version = "1.95.0"`; cargo refuses to build it on anything older. Before
+# that, 1.90 was pinned for wasm-bindgen-cli 0.2.120's install tree (1.86–1.88).
+# Bump deliberately and update CI (`ci.yml`, `.github/actions/wasm-toolchain`) in
+# tandem.
+channel = "1.95"
 components = ["rustfmt", "clippy", "rust-src"]
 targets = ["wasm32-unknown-unknown"]
 profile = "minimal"

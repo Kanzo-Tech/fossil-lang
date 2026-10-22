@@ -42,8 +42,21 @@ wasm-bindgen-futures = { workspace = true, optional = true }
 js-sys = { workspace = true, optional = true }
 serde-wasm-bindgen = { workspace = true, optional = true }
 
+# On wasm32 `object_store` 0.14 signs with `ring` (the workspace entry says
+# why), and `ring::rand::SystemRandom` is a `SecureRandom` on
+# wasm32-unknown-unknown only behind this feature (its `getrandom/js`). Already
+# in the tree through `object_store`; no new crate.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+ring = { version = "0.17", default-features = false, features = ["wasm32_unknown_unknown_js"], optional = true }
+
+# Natively `reqwest` needs a TLS backend for `object_store` to compile at all,
+# so a native build takes the stores whole — TLS and crypto by `aws-lc-rs`, as
+# `object_store` bundles them — which wasm32 cannot build.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+object_store = { workspace = true, optional = true, features = ["aws", "azure", "http"] }
+
 [features]
-object-store = ["dep:object_store", "dep:async-trait", "dep:bytes", "dep:futures", "dep:web-time"]
+object-store = ["dep:object_store", "dep:async-trait", "dep:bytes", "dep:futures", "dep:web-time", "dep:ring"]
 js = ["object-store", "fossil-graph-schema/js", "dep:wasm-bindgen", "dep:wasm-bindgen-futures", "dep:js-sys", "dep:serde-wasm-bindgen"]
 
 [dev-dependencies]

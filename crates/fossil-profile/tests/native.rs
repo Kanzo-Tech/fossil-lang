@@ -5,6 +5,7 @@
 
 use std::fmt::Write as _;
 
+use arrow_schema::{Field, Fields};
 use fossil_graph_schema::Primitive;
 use fossil_profile::{ColumnRef, Inclusion, Options, Profile, Rows, Source};
 
@@ -24,10 +25,27 @@ fn rows(conn: &duckdb::Connection, sql: &str) -> duckdb::Result<Rows> {
     Ok(out)
 }
 
+/// The fields of a query's answer, the Arrow types `DuckDB` hands it over in.
+/// `duckdb` answers in its own arrow (58) and the profiler reads 60, so each
+/// type crosses as the text both print and parse.
+fn fields(conn: &duckdb::Connection, sql: &str) -> duckdb::Result<Fields> {
+    let mut stmt = conn.prepare(sql)?;
+    let schema = stmt.query_arrow([])?.get_schema();
+    Ok(schema
+        .fields()
+        .iter()
+        .map(|f| {
+            let t = f.data_type().to_string().parse().expect("an Arrow type");
+            Field::new(f.name(), t, f.is_nullable())
+        })
+        .collect())
+}
+
 fn profile(sources: impl IntoIterator<Item = Source>, options: Options) -> Profile {
     let conn = duckdb::Connection::open_in_memory().expect("in-memory duckdb");
     fossil_profile::run(sources, options, |sql| {
-        rows(&conn, sql).map_err(|e| e.to_string())
+        let answer = || Ok::<_, duckdb::Error>((fields(&conn, sql)?, rows(&conn, sql)?));
+        answer().map_err(|e| e.to_string())
     })
 }
 
@@ -91,9 +109,9 @@ fn a_profile_says_what_the_files_are() {
     assert_eq!(
         columns,
         [
-            ("id", Primitive::String),
+            ("id", Primitive::STRING),
             ("laureate", Primitive::Integer),
-            ("category", Primitive::String),
+            ("category", Primitive::STRING),
             ("share", Primitive::Float)
         ]
     );
@@ -211,12 +229,12 @@ fn a_sample_reads_the_counts_from_the_first_rows_and_says_so() {
     assert!(rows.sample.is_empty(), "shown: 0 keeps no rows");
 }
 
-/// Every spelling `DuckDB` has for an instant maps to an instant.
+/// Every type `DuckDB` has for an instant maps to an instant.
 ///
-/// **The table is derived from `DuckDB` and not from memory**: the arms are
-/// asserted against the `DESCRIBE` of a value `DuckDB` itself typed, so a
-/// version that renames a type fails here rather than silently widening a
-/// column to `String`. That widening is what this test exists for —
+/// **What `DuckDB` answers is asserted, not remembered**: each value is typed
+/// by `DuckDB` itself and handed over in Arrow, as every host receives it, so a
+/// version that answers a type differently fails here rather than silently
+/// widening a column to `String`. That widening is what this test exists for —
 /// `read_csv_auto` infers `TIMESTAMP WITH TIME ZONE` for any ISO-8601 string
 /// carrying an offset, and the checker compares this answer against the
 /// shape's declared `Primitive`. So a missing arm is not a slow path: it makes
@@ -226,26 +244,33 @@ fn a_sample_reads_the_counts_from_the_first_rows_and_says_so() {
 fn every_duckdb_instant_is_an_instant() {
     let conn = duckdb::Connection::open_in_memory().expect("in-memory duckdb");
     for (sql, expected) in [
-        ("TIMESTAMP '2012-01-01 00:00:00'", Primitive::DateTime),
-        ("TIMESTAMPTZ '2012-01-01 00:00:00+01'", Primitive::DateTime),
+        ("TIMESTAMP '2012-01-01 00:00:00'", Primitive::DATE_TIME),
+        ("TIMESTAMPTZ '2012-01-01 00:00:00+01'", Primitive::DATE_TIME),
         (
             "CAST('2012-01-01T00:00:00.000+00:00' AS TIMESTAMP WITH TIME ZONE)",
-            Primitive::DateTime,
+            Primitive::DATE_TIME,
         ),
-        ("DATE '2012-01-01'", Primitive::Date),
-        ("TIME '12:00:00'", Primitive::Time),
+        ("DATE '2012-01-01'", Primitive::DATE),
+        ("CAST('2012-01-01' AS TIMESTAMP_S)", Primitive::DATE_TIME),
+        ("CAST('2012-01-01' AS TIMESTAMP_MS)", Primitive::DATE_TIME),
+        ("CAST('2012-01-01' AS TIMESTAMP_NS)", Primitive::DATE_TIME),
+        ("TIME '12:00:00'", Primitive::HOUR),
+        ("CAST('12:00:00+01' AS TIMETZ)", Primitive::HOUR),
+        ("CAST(1 AS TINYINT)", Primitive::Integer),
+        ("CAST(1 AS HUGEINT)", Primitive::Integer),
+        ("CAST(1.5 AS FLOAT)", Primitive::Float),
         ("CAST(1 AS BIGINT)", Primitive::Integer),
         ("CAST(1.5 AS DOUBLE)", Primitive::Float),
         ("CAST(1.5 AS DECIMAL(38,18))", Primitive::Float),
         ("true", Primitive::Bool),
-        ("'x'", Primitive::String),
+        ("'x'", Primitive::STRING),
     ] {
-        let described = rows(&conn, &format!("DESCRIBE SELECT {sql} AS v")).expect("describe runs");
-        let declared = described[0][1].clone().expect("a type");
+        let answered = fields(&conn, &format!("SELECT {sql} AS v")).expect("the query runs");
+        let declared = answered[0].data_type();
         assert_eq!(
-            fossil_profile::generated::duckdb_primitive(&declared),
-            expected,
-            "DuckDB types `{sql}` as `{declared}`, which must not widen to String"
+            fossil_profile::primitive(declared).ok(),
+            Some(expected),
+            "DuckDB answers `{sql}` as `{declared}`, which must not widen to String"
         );
     }
 }

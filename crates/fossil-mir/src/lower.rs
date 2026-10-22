@@ -7,7 +7,8 @@
 //! and the per-mapping TYPES from
 //! [`fossil_hir::check::typecheck_mapping`]. Emits a [`MirGraph`] of the shape
 //! `Source → (pipeline verbs) → EmitVertex → Sink(Graph)`;
-//! [`apply_output_shape`] is the pass that adds [`Op::EmitEdge`].
+//! the edges are taken from the program's graph type, `G`, at the end of the
+//! same query ([`emit_edges`]).
 //!
 //! # Reachability
 //!
@@ -50,7 +51,7 @@
 //! forbidden read added HERE leaves the whole of that crate green.
 
 use fossil_graph_schema::Cardinality as GsCardinality;
-use fossil_graph_schema::{GraphSchema, Primitive, local_name};
+use fossil_graph_schema::{GraphSchema, Primitive, Term, local_name};
 use fossil_hir::body::{ExprId, HirBody, body, mapping_cst_node};
 use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::{DefMap, def_map};
@@ -70,11 +71,11 @@ use crate::op::{Expr, Op, SinkRef, SourceFormat, VProp};
 /// `Source` and the `EmitVertex` when the binding is a pipeline.
 ///
 /// The mapping's `@subject` interpolation becomes the vertex `id`; every other
-/// property becomes a [`VProp`]. EDGE classification (a property whose value
-/// points at another node type → [`Op::EmitEdge`]) and the cardinality/types
-/// refinement are a SEPARATE pass, [`apply_output_shape`], because they need a
-/// [`GraphSchema`] this query has no way to read: MIR is a property graph in
-/// the middle and never learns which schema language is on either side of it.
+/// property becomes a [`VProp`], and then `G`, the program's graph type
+/// ([`fossil_hir::graph_type::graph_type`]), says which of them are edges (a
+/// property whose range is another vertex type → [`Op::EmitEdge`]) and how many
+/// values each one holds ([`emit_edges`]). `G` is a property-graph type, so MIR
+/// still never learns which schema language a type was written in.
 #[salsa::tracked(returns(copy))]
 #[allow(clippy::elidable_lifetime_names)] // explicit 'db mirrors `MirGraph<'db>`
 pub fn lower_to_mir_pg<'db>(
@@ -85,7 +86,17 @@ pub fn lower_to_mir_pg<'db>(
     // A refusal leaves no ops: a graph that lost one is not a smaller graph,
     // it is a wrong one.
     let (ops, error) = match lower_mapping(db, &mut sink, mapping) {
-        Ok(ops) => (ops, None),
+        // A type that does not decode is the checker's to report, at the span
+        // that named it, and a host refuses to run the program before it reads
+        // these ops; the vertex keeps its columns as written.
+        Ok(ops) => (
+            emit_edges(
+                db,
+                &ops,
+                &fossil_hir::graph_type::graph_type(db, mapping.file(db)).unwrap_or_default(),
+            ),
+            None,
+        ),
         Err(eg) => (Vec::new(), Some(eg)),
     };
     MirGraph::new(db, ops, error, sink.into_vec())
@@ -145,7 +156,7 @@ fn lower_mapping<'db>(
     let predicates = checked.predicates(db).clone();
     // v0.1: every prop is typed String. The descriptor-driven type refinement is
     // the next increment; the backend derives the xsd spelling from `Ty`.
-    let string_ty = Ty::new(db, TyKind::Primitive(Primitive::String));
+    let string_ty = Ty::new(db, TyKind::Primitive(Primitive::STRING));
 
     let mut ops: Vec<Op<'db>> = Vec::with_capacity(3);
 
@@ -180,7 +191,7 @@ fn lower_mapping<'db>(
     };
 
     // Nothing here GUESSES an edge from template shapes: the lookup already
-    // exists downstream, where `apply_output_shape` classifies a predicate as an
+    // exists in [`emit_edges`], which classifies a predicate as an
     // edge when the SHAPE says its range is a shape. A mapping targets a type,
     // declared or imported, so that path is always available.
 
@@ -215,7 +226,7 @@ fn lower_mapping<'db>(
         // `buyer = Person(User.email)` becomes the target type's identity
         // template with this row's values in its holes, and from here down it IS
         // that interpolation — the same shape a hand-written IRI template has,
-        // which is why `apply_output_shape` needs no new case to turn it into an
+        // which is why [`emit_edges`] needs no new case to turn it into an
         // `Op::EmitEdge`. Nothing GUESSES at it by comparing templates between
         // mappings: one identity per type — the same `@subject` in every
         // mapping that produces it — makes it a lookup.
@@ -250,7 +261,7 @@ fn lower_mapping<'db>(
             // a String column here: the conditional's branches agree by the
             // time the checker is done, and without a source row that agreed
             // type is String. Whether an interpolation is an EDGE is the
-            // shape's answer, taken by `apply_output_shape`, not a fact about
+            // shape's answer, taken by [`emit_edges`], not a fact about
             // its text.
             HirExpr::StringLit(_) | HirExpr::Ternary { .. } | HirExpr::Interpolation(_) => props
                 .push(VProp {
@@ -290,7 +301,7 @@ fn lower_mapping<'db>(
             HirExpr::LangStringLit { .. } => props.push(VProp {
                 name: pred_local,
                 value: lower_property_value(db, sink, &prop.value, &m.source_binding, None),
-                ty: Ty::new(db, TyKind::Primitive(Primitive::LangString)),
+                ty: Ty::new(db, TyKind::Primitive(Primitive::LANG_STRING)),
                 rdf_uri: iri.clone(),
                 term: term.clone(),
                 single_valued: true,
@@ -381,30 +392,18 @@ fn mapping_span<'db>(
     )
 }
 
-/// Refine an agnostic [`lower_to_mir_pg`] op list against a
-/// [`GraphSchema`]: reclassify the `EmitVertex`'s properties into edges + set
-/// their cardinality from the schema's node/edge types.
+/// Take the edges and the cardinalities of a mapping's ops from `G`.
 ///
-/// The agnostic lowering types every property as a single-valued vertex column
-/// (it has no schema knowledge — `iri`-templates aside, an `hasProject = .x`
-/// `FieldRef` value looks like a column). The schema is what knows that
-/// `ex:hasProject` **references another node type** (→ a typed edge) and that its
-/// cardinality is **multi-valued**. The edge-vs-property decision is taken here,
-/// once, against the one shared model.
-///
-/// Takes the **schema**, not the document that produced it: a caller holding a
-/// `ShEx` or SHACL descriptor calls `to_graph_schema()` itself. MIR is a property
-/// graph in the middle and never learns which output format or schema language
-/// is on either side of it — the dependency says so, not just the intent.
-///
-/// The schema arrives as an **argument** and is NEVER read through
-/// `Db::system()`. That is what keeps this a plain `Vec<Op>`→`Vec<Op>` pass:
-/// it never constructs a [`MirGraph`] (a Salsa tracked struct, illegal outside
-/// a tracked query), never touches Salsa, and so cannot widen any query's
-/// fan-out. An empty schema (the walking-skeleton / accept-all case) returns
-/// the ops unchanged — the edges the agnostic lowering already produced stand.
-#[must_use]
-pub fn apply_output_shape<'db>(ops: &[Op<'db>], schema: &GraphSchema) -> Vec<Op<'db>> {
+/// The ops type every property as a single-valued vertex column: an
+/// `hasProject = .x` value looks like a column. `G` is what knows that
+/// `ex:hasProject` **references another vertex type** (→ a typed edge, one per
+/// destination of a union) and that it is **multi-valued**. The empty `G` (a
+/// program with no types) returns the ops unchanged.
+fn emit_edges<'db>(
+    db: &'db dyn fossil_base::Db,
+    ops: &[Op<'db>],
+    schema: &GraphSchema,
+) -> Vec<Op<'db>> {
     // The vertex's shape IRI keys its node type; without it (or a node the
     // model doesn't declare) there is nothing to refine.
     let shape_iri = ops.iter().find_map(|o| match o {
@@ -459,7 +458,14 @@ pub fn apply_output_shape<'db>(ops: &[Op<'db>], schema: &GraphSchema) -> Vec<Op<
                             });
                         }
                     } else if let Some(prop_def) = node.property_by_iri(predicate) {
+                        // The type the shape declares, not the value's: the
+                        // checker held the value to it, and the graph is
+                        // written in the program's types whatever the source
+                        // held (`Integer <: Float` writes a `Float`). A shape
+                        // that declares none (`.`) leaves the value's.
+                        let declared = prop_def.term.as_ref().and_then(Term::primitive);
                         kept.push(VProp {
+                            ty: declared.map_or(p.ty, |d| Ty::new(db, TyKind::Primitive(d))),
                             single_valued: matches!(prop_def.cardinality, GsCardinality::Single),
                             ..p.clone()
                         });
@@ -928,7 +934,7 @@ fn lower_iri_property<'db>(
 /// `buyer = Person(User.email)` becomes exactly the interpolation the `Person`
 /// mapping wrote for its own `@subject`, with `User.email` where its hole was.
 /// The result is indistinguishable from a hand-written IRI template — which is
-/// the point: `apply_output_shape` already classifies a predicate as an edge
+/// the point: [`emit_edges`] already classifies a predicate as an edge
 /// when the SHAPE says its range is a shape, so the constructor needs no new op
 /// and no new classification rule. What it needed was a per-row IRI value the
 /// language could actually produce, which is the hole it fills.
@@ -995,7 +1001,7 @@ fn operator_ty<'db>(
         },
         HirExpr::ColumnRef { column, .. } | HirExpr::FieldRef(column) => field_ty(column.as_str()),
         HirExpr::FloatLit(_) => prim(Primitive::Float),
-        HirExpr::LangStringLit { .. } => prim(Primitive::LangString),
+        HirExpr::LangStringLit { .. } => prim(Primitive::LANG_STRING),
         HirExpr::IntLit(_) => prim(Primitive::Integer),
         HirExpr::BoolLit(_) => prim(Primitive::Bool),
         // A row whose return is not a scalar is a VERB of the algebra, and no
@@ -1006,13 +1012,13 @@ fn operator_ty<'db>(
         HirExpr::Call { func, .. } => fossil_hir::stdlib::stdlib()
             .lookup(func.as_str())
             .and_then(|entry| entry.sig.ret.scalar())
-            .map_or_else(|| prim(Primitive::String), |s| s.to_ty(db)),
+            .map_or_else(|| prim(Primitive::STRING), |s| s.to_ty(db)),
         // A conditional's branches agree by construction, so either answers.
         HirExpr::Ternary { then, .. } => operator_ty(db, then, field_ty),
         HirExpr::NullLit
         | HirExpr::StringLit(_)
         | HirExpr::Interpolation(_)
-        | HirExpr::Edge { .. } => prim(Primitive::String),
+        | HirExpr::Edge { .. } => prim(Primitive::STRING),
     }
 }
 
@@ -1134,7 +1140,7 @@ fn substitute_edges<'db>(
 /// `Node.label` and `Other.label` two columns after a self-join instead of one.
 ///
 /// Not `source: SmolStr::default()` with the backend supplying the relation
-/// from the source URI: `fossil-df` resolves a `ColRef` against a `DFSchema`,
+/// from the source URI: `fossil-exec` resolves a `ColRef` against a `DFSchema`,
 /// so the binding is a name to RESOLVE, not text to paste into SQL, and
 /// dropping it loses the only thing that says which side of a join a column
 /// came from — a join whose two keys are spelled differently could not be
@@ -1170,7 +1176,7 @@ fn lower_property_value<'db>(
         HirExpr::LangStringLit { value, tag } => Expr::Call {
             func: SmolStr::new_static("str.lang"),
             args: vec![Expr::LitString(value.clone()), Expr::LitString(tag.clone())],
-            ty: Ty::new(db, TyKind::Primitive(Primitive::LangString)),
+            ty: Ty::new(db, TyKind::Primitive(Primitive::LANG_STRING)),
         },
         HirExpr::Interpolation(parts) => {
             lower_interpolation(db, sink, parts, source_binding, assert_line)
@@ -1208,7 +1214,7 @@ fn lower_property_value<'db>(
             // The branch type is the conditional's; the checker proved they
             // agree. Without a source row neither branch types, and String is
             // what every other untyped property gets.
-            ty: Ty::new(db, TyKind::Primitive(Primitive::String)),
+            ty: Ty::new(db, TyKind::Primitive(Primitive::STRING)),
         },
         // A comparison against `null` is `IS NULL`, and it is decided HERE
         // rather than in a backend because it is a fact about the algebra: in
@@ -1326,7 +1332,7 @@ fn call_result_ty<'db>(db: &'db dyn fossil_base::Db, func: &SmolStr) -> Ty<'db> 
         .lookup(func.as_str())
         .and_then(|e| e.sig.ret.scalar())
         .map_or_else(
-            || Ty::new(db, TyKind::Primitive(Primitive::String)),
+            || Ty::new(db, TyKind::Primitive(Primitive::STRING)),
             |s| s.to_ty(db),
         )
 }
@@ -1515,7 +1521,7 @@ People : Person from Adults
     /// The author writes the equality — `on = Orders.persona_id ==
     /// People.persona_id`, both sides qualified — so there is nothing to
     /// synthesise and the condition lowers like any other expression, KEEPING
-    /// the qualification: without it `fossil_df::plan` could not plan a join
+    /// the qualification: without it `fossil_exec::plan` could not plan a join
     /// whose two keys are spelled differently.
     #[test]
     fn a_join_lowers_to_an_inner_equi_join_on_one_name() {

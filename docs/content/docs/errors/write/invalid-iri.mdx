@@ -1,0 +1,26 @@
+---
+title: A value typed as an IRI is not one
+description: "`write/invalid-iri` — a value of a property the program types as an IRI that is not an absolute IRI, so no triples are written."
+---
+
+A property whose values the program types as IRIs holds one that is not:
+
+```text
+write/invalid-iri
+  × `Person.homepage` holds `example.org/ada`, which is not an absolute IRI
+```
+
+`data.property` is the property, `<Type>.<name>`, and `data.value` the value as the data made it.
+
+## Why fossil refuses it
+
+The value is the object of a triple, and the object of a triple that is a resource is an absolute IRI
+(RDF 1.1 Concepts §3.2). A relative reference or a string with a space in it names no resource, and an
+N-Triples line holding it is one no RDF parser reads. The check is the writer's because the value is
+data only the run sees.
+
+## How to repair it
+
+- **Build the value with a scheme**: `"https://" + Row.site`, or the template the subject uses.
+- **Filter the rows** whose value is not a link with a `where` before the mapping.
+- **Type the property as a string** if the values are text that happens to look like links.

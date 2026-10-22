@@ -12,7 +12,6 @@
  * - {@link infer} — the model a profile implies, and each question it took a default for.
  * - {@link write} — the program a model implies: what a host decided a graph holds, as Fossil;
  *   `program.mapping()` is the RML mapping its types describe, before any run.
- * - {@link DUCKDB_TYPES} — what a DuckDB `DESCRIBE` column type means on the lattice.
  * - {@link bindingName} — the binding name a file becomes in a program, one `IDENT`.
  * - {@link initFossilWasm} — Node only: hand over the `.wasm` bytes. Every door boots itself.
  *
@@ -30,9 +29,8 @@ export { initFossilWasm, type InitInput } from './load.js';
 export { formatFor, formats } from './format.js';
 export { inputs, openProgram } from './program.js';
 export type { FossilProgram, OpenProgramOptions } from './program.js';
-export { runProfiler, type ProfileRows } from './profile.js';
+export { runProfiler } from './profile.js';
 export { profile, type ProfileIO } from './describe.js';
 export { bindingName } from './name.js';
 export { infer } from './infer.js';
 export { write } from './write.js';
-export { DUCKDB_TYPES, type DuckdbType } from './catalogue.generated.js';

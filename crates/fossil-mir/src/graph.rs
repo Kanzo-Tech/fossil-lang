@@ -26,7 +26,7 @@ pub struct MirGraph<'db> {
     /// presence implies ≥1 `Diagnostic` reported by this lowering or by a query
     /// it read, so the editor shows the error while consumers refuse the graph.
     ///
-    /// Consumers MUST check this before executing; `fossil_df::execute_graph` is
+    /// Consumers MUST check this before executing; `fossil_exec::execute_graph` is
     /// the enforcement point.
     #[returns(copy)]
     pub error: Option<fossil_base::ErrorGuaranteed>,

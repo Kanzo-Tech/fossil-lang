@@ -155,9 +155,18 @@ syntax_kinds! {
     /// `AnnotationAttr`): a `ShEx` annotation, a predicate and an object, above a
     /// `TYPE_DECL` or a `FIELD`, any number of times.
     ANNOTATION_ATTR,
-    /// `String`, `Option<Date>`, `Seq<Ref<City>>` — `TypeExpr := IDENT (LT
-    /// TypeExpr GT)?` (grammar.bnf, `TypeExpr`). The argument is a nested
-    /// `TYPE_EXPR`; which names take one is the checker's.
+    /// `@assert(edad >= 0, severity = warning)` — `AssertAttr := AT_ATTR
+    /// LPAREN Expression (COMMA 'severity' ASSIGN IDENT)? RPAREN` (grammar.bnf,
+    /// `AssertAttr`): a condition on a `FIELD`'s values or a `TYPE_DECL`'s
+    /// nodes, as an `EXPR` child, any number of times.
+    ASSERT_ATTR,
+    /// `@severity(warning)` — `SeverityAttr := AT_ATTR LPAREN IDENT RPAREN`
+    /// (grammar.bnf, `SeverityAttr`): how a `FIELD`'s count is enforced.
+    SEVERITY_ATTR,
+    /// `String`, `Option<Date>`, `Seq<Ref<City>, 1, 3>` — `TypeExpr := IDENT
+    /// (LT TypeExpr (COMMA INTEGER (COMMA INTEGER)?)? GT)?` (grammar.bnf,
+    /// `TypeExpr`). The argument is a nested `TYPE_EXPR` and the bounds are
+    /// `INTEGER` tokens; which names take either is the checker's.
     TYPE_EXPR,
     MAPPING,
     MAPPING_HEADER,

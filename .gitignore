@@ -5,7 +5,7 @@ Cargo.lock.bak
 
 # WASM build outputs (wasm-bindgen-cli writes ./pkg next to the crate;
 # also covers the packages/wasm/pkg/ home)
-/crates/fossil-wasm/pkg/
+/bindings/editor/pkg/
 
 # IDE
 .idea/

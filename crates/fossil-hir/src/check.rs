@@ -212,7 +212,7 @@ pub fn typecheck_mapping<'db>(
 /// consuming mapping's CST, and a decoder has never seen the program — it has
 /// seen `ShEx`. Only the branch predicates come from the document, and those
 /// cross as plain strings in [`Rejection::Disjunction`], which is why the
-/// checker reads no type of [`crate::shex`] at all.
+/// checker reads no type of [`fossil_shapes::shex`] at all.
 ///
 /// «Re-emitting syntax stays with the decoder, because it is the decoder that
 /// knows the syntax» is the wrong argument here: the decoder knows the `ShEx`
@@ -379,6 +379,7 @@ impl Checker<'_> {
         self.expr.expected = None;
         if let PropertyKey::Name(name) = &prop.key {
             self.check_constant_language(expr_id, name, &prop.value);
+            self.check_constant_asserts(expr_id, name, &prop.value);
         }
 
         // A `Seq` is several values, and a slot the shape does not narrow takes
@@ -427,6 +428,47 @@ impl Checker<'_> {
                     shape: type_name,
                 }),
             );
+        }
+    }
+
+    /// A constant written into a field whose assertion refuses it is refused
+    /// here, at the line that writes it, with the field's severity: nothing
+    /// about it waits for the data. A value read from a column is the run's
+    /// to check ([`crate::asserts`]).
+    fn check_constant_asserts(&mut self, expr_id: ExprId, name: &SmolStr, value: &HirExpr) {
+        let Some(shape) = self.mapping_shape_iri() else {
+            return;
+        };
+        // Folded with no field bound, a value that reads a column is not a
+        // constant.
+        let Some(constant) = crate::asserts::fold(value, "", None) else {
+            return;
+        };
+        let db = self.expr.db;
+        let hir = crate::lower::lower_to_hir(db, self.expr.file);
+        for assert in hir.rules(db).on_field(&shape, name) {
+            if crate::asserts::fold(&assert.condition, name, Some(&constant))
+                != Some(crate::asserts::Constant::Bool(false))
+            {
+                continue;
+            }
+            let d = crate::asserts::label(
+                Diagnostic::new(
+                    assert.severity.diagnostic(),
+                    Problem::AssertFailed {
+                        property: name.to_string(),
+                        value: constant.spelled(),
+                        assertion: assert.text.to_string(),
+                    },
+                    self.expr.span_of(expr_id),
+                ),
+                assert,
+            );
+            if assert.severity == fossil_graph_schema::ConstraintSeverity::Violation {
+                self.expr.raise(d);
+            } else {
+                self.expr.sink.push(d);
+            }
         }
     }
 
@@ -689,7 +731,7 @@ impl Checker<'_> {
                         Diagnostic::new(
                             Severity::Error,
                             Problem::UnsupportedDisjunction {
-                                shape: shape_iri.to_string(),
+                                shape: shape_iri.clone(),
                                 branches: n as u64,
                             },
                             header_span,
@@ -710,8 +752,8 @@ impl Checker<'_> {
                     let eg = self.expr.sink.report(
                         header_span,
                         Problem::UnresolvedReference {
-                            reference: label.to_string(),
-                            shape: in_shape.to_string(),
+                            reference: label.clone(),
+                            shape: in_shape.clone(),
                         },
                     );
                     self.expr.record_error(eg);
@@ -732,7 +774,7 @@ impl Checker<'_> {
                         header_span,
                         Problem::Unparseable {
                             document: document.clone(),
-                            reason: Some(m.to_string()),
+                            reason: Some(m.clone()),
                         },
                     );
                     self.expr.record_error(eg);
@@ -1222,7 +1264,7 @@ impl<'db> Expr<'db> {
         self.expected.filter(|t| {
             matches!(
                 t.kind(self.db),
-                TyKind::Ref(_) | TyKind::Primitive(Primitive::AnyUri)
+                TyKind::Ref(_) | TyKind::Primitive(Primitive::Uri)
             )
         })
     }
@@ -1331,7 +1373,7 @@ impl<'db> Expr<'db> {
                     .denoted()
                     .filter(|t| !matches!(t.kind(db), TyKind::Ref(_)));
                 (
-                    iri.unwrap_or_else(|| Ty::new(db, TyKind::Primitive(Primitive::String))),
+                    iri.unwrap_or_else(|| Ty::new(db, TyKind::Primitive(Primitive::STRING))),
                     ProvenanceKind::Literal,
                 )
             }
@@ -1340,7 +1382,7 @@ impl<'db> Expr<'db> {
             HirExpr::LangStringLit { tag, .. } => {
                 self.refuse_ill_formed_tag(expr_id, tag);
                 (
-                    Ty::new(db, TyKind::Primitive(Primitive::LangString)),
+                    Ty::new(db, TyKind::Primitive(Primitive::LANG_STRING)),
                     ProvenanceKind::Literal,
                 )
             }
@@ -1363,7 +1405,7 @@ impl<'db> Expr<'db> {
                 // IRI-template type and no subtyping rule standing in for it.
                 let ty = self
                     .denoted()
-                    .unwrap_or_else(|| Ty::new(db, TyKind::Primitive(Primitive::String)));
+                    .unwrap_or_else(|| Ty::new(db, TyKind::Primitive(Primitive::STRING)));
                 (ty, ProvenanceKind::Literal)
             }
             // T-Column: the qualified spelling. Same resolution as T-Field,
@@ -1989,7 +2031,7 @@ impl<'db> Expr<'db> {
     /// `Operator::Divide` on two `Int64`s gives an `Int64` and TRUNCATES — so a
     /// result type read off the operands would mean `7 / 2` is `3` here and
     /// `3.5` there. Typing it `Float` picks the answer that loses nothing, and
-    /// `fossil_df::render` casts the left operand so the engine agrees with the
+    /// `fossil_exec::render` casts the left operand so the engine agrees with the
     /// type instead of the type flattering the engine.
     fn synth_binop(
         &mut self,
@@ -2112,7 +2154,7 @@ impl<'db> Expr<'db> {
                         },
                         self.span_of(expr_id),
                     );
-                    if matches!(kind, TyKind::Primitive(Primitive::String))
+                    if matches!(kind, TyKind::Primitive(Primitive::STRING))
                         && matches!(op, BinOp::Add)
                     {
                         d = d.with_help(

@@ -2,7 +2,7 @@
 #![allow(clippy::literal_string_with_formatting_args)]
 
 //! The program a model implies, in its one layout. That it compiles and runs over real files is
-//! `fossil-df`'s `tests/written.rs`; here is what it says.
+//! `fossil-exec`'s `tests/written.rs`; here is what it says.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -56,8 +56,8 @@ fn laureates(identity: &[&str]) -> ModelType {
         source: "laureates".into(),
         identity: identity.iter().map(|c| (*c).to_string()).collect(),
         fields: vec![
-            field("name", "name", Primitive::String, false),
-            field("born", "born", Primitive::Date, true),
+            field("name", "name", Primitive::STRING, false),
+            field("born", "born", Primitive::DATE, true),
         ],
     }
 }
@@ -77,14 +77,14 @@ fn nobel() -> Model {
                 name: "Countries".into(),
                 source: "countries".into(),
                 identity: vec!["code".into()],
-                fields: vec![field("name", "name", Primitive::String, false)],
+                fields: vec![field("name", "name", Primitive::STRING, false)],
             },
             laureates(&["id"]),
             ModelType {
                 name: "Institutions".into(),
                 source: "institutions".into(),
                 identity: vec!["id".into()],
-                fields: vec![field("city", "city", Primitive::String, true)],
+                fields: vec![field("city", "city", Primitive::STRING, true)],
             },
         ],
         edges: vec![
@@ -123,7 +123,7 @@ fn a_model_is_written_as_its_types_its_sources_and_a_mapping_per_type_and_link()
         @iri("https://acme.example/vocab/Laureates")
         type Laureates
             @iri("https://acme.example/vocab/name") name: String
-            @iri("https://acme.example/vocab/born") born: Option<Date>
+            @iri("https://acme.example/vocab/born") born: Option<Time<Date>>
             @iri("https://acme.example/vocab/country") country: Ref<Countries>
             @iri("https://acme.example/vocab/affiliation") affiliation: Seq<Ref<Institutions>>
 
@@ -233,7 +233,8 @@ fn a_relation_is_a_ref_an_optional_ref_or_a_sequence() {
 fn every_primitive_is_a_type_the_program_declares() {
     let fields: Vec<ModelField> = Primitive::ALL
         .into_iter()
-        .map(|primitive| field(&format!("f{primitive}"), "c", primitive, false))
+        .enumerate()
+        .map(|(i, primitive)| field(&format!("f{i}"), "c", primitive, false))
         .collect();
     let model = Model {
         sources: vec![],
@@ -244,9 +245,12 @@ fn every_primitive_is_a_type_the_program_declares() {
         edges: Vec::new(),
     };
     let text = write(&model, BASE);
-    assert!(text.contains("fGYear: GYear"), "{text}");
-    assert!(text.contains("fAnyUri: AnyUri"), "{text}");
-    assert!(text.contains("fLangString: LangString"), "{text}");
+    for primitive in Primitive::ALL {
+        assert!(
+            text.contains(&format!(": {primitive}\n")),
+            "{primitive}: {text}"
+        );
+    }
     assert!(syntax_errors(&text).is_empty(), "{text}");
 }
 
@@ -264,7 +268,7 @@ fn profiled(binding: &str, columns: &[&str], nulls: &[&str], keys: &[&str]) -> S
                 .iter()
                 .map(|c| InferredColumn {
                     name: (*c).into(),
-                    primitive: Primitive::String,
+                    primitive: Primitive::STRING,
                 })
                 .collect(),
             etag: String::new(),

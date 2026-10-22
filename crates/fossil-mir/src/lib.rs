@@ -7,7 +7,7 @@
 //! The HIR → MIR lowering [`lower::lower_to_mir_pg`] reaches every operator but
 //! [`op::Op::Extend`], [`op::Op::Rename`] and [`op::Op::Empty`], which have no
 //! surface syntax and are exercised by direct `MirGraph` construction.
-//! `fossil-df` consumes the [`graph::MirGraph`] and executes it on `DataFusion`.
+//! `fossil-exec` consumes the [`graph::MirGraph`] and executes it on `DataFusion`.
 //!
 //! # Failure discipline
 //!
@@ -33,7 +33,7 @@ pub mod schema;
 pub use diagnostics::program_diagnostics;
 pub use fossil_hir::stdlib::AggFn;
 pub use graph::MirGraph;
-pub use lower::{apply_output_shape, lower_to_mir_pg};
+pub use lower::lower_to_mir_pg;
 pub use op::{
     AggSpec, Expr, JoinKind, JoinSide, Op, ProjectedColumn, SinkRef, SourceFormat, VProp,
 };

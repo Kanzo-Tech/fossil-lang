@@ -1,0 +1,63 @@
+# fossil-df-wasm — wasm-bindgen wrapper exposing the DataFusion executor
+# (`fossil-exec`) to JS. Kept SEPARATE from `fossil-wasm` (the LSP shim) so the
+# editor's wasm stays lean and loads on page-load, while this heavy executor is
+# lazy-loaded only when a job runs.
+[package]
+name = "fossil-df-wasm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "WASM wrapper for the fossil DataFusion executor — runs mappings in the browser"
+# Unpublished — no crate here has a release channel (release.yml ships only the npm packages/ family), and this is what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# The executor itself — compile, documents, sources, execute, layout, write.
+# This crate is its `wasm-bindgen` shell.
+fossil-exec = { path = "../../crates/fossil-exec" }
+# `Failure` and `Problem` — what a run refuses with — and `Foreign`, the error
+# type of the `Host` this crate implements for a run with no storage. `js` is
+# the one function every wasm crate throws a failure through.
+fossil-graph-schema = { path = "../../crates/fossil-graph-schema", features = ["js"] }
+
+# Every byte of a run goes through `fossil-storage`'s `Storage` — stores built
+# from the credentials the JS `Host` vends, or `InMemory` for a host with no
+# storage — and `DataFusion` reads sources through the same stores.
+fossil-storage = { path = "../../crates/fossil-storage", features = ["js"] }
+object_store = { workspace = true }
+futures = { workspace = true }
+url = { workspace = true }
+# `wasmbind` — the workspace entry says why. `InMemory::put` stamps with
+# `Utc::now()` too, so the executor hits it without a cloud store.
+chrono = { workspace = true }
+
+# WASM glue — wasm-bindgen exact-pinned at workspace level (=0.2.120) to match
+# the wasm-bindgen-cli version exactly. `run()` is async, so
+# wasm-bindgen-futures bridges the Rust future to a JS Promise.
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+serde = { workspace = true }
+serde-wasm-bindgen = { workspace = true }
+js-sys = { workspace = true }
+console_error_panic_hook = { workspace = true }
+
+# Transitive WASM enablers — keep as direct deps so feature resolution sticks.
+# The `wasm_js` backend is what lets getrandom build for wasm32 at all, and who
+# needs it is DataFusion, not salsa: `cargo tree -p fossil-df-wasm -i
+# getrandom@0.3.4 --target wasm32-unknown-unknown` arrives through `rand` ←
+# `datafusion-datasource`, and getrandom 0.2 through `const-random` ← `ahash` ←
+# `arrow`. Salsa's own hashbrown hashes with foldhash and draws no randomness.
+getrandom = { workspace = true }
+# `object_store`'s cloud client adds two more lines: 0.2 from `ring`, 0.4 from `rand`.
+getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
+getrandom04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }

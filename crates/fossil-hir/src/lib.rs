@@ -30,7 +30,7 @@
 //!   span-free and only the layers that emit diagnostics pay for them (same
 //!   rationale as the provenance side table).
 //! - The shape-document decoders a host installs: [`providers::PROVIDERS`],
-//!   whose type-reading rows are [`shex`] over `shex_ast` and [`shacl`] over
+//!   whose type-reading rows are [`fossil_shapes::shex`] over `shex_ast` and [`fossil_shapes::shacl`] over
 //!   `shacl`'s `ShaclParser`. A document becomes the same [`fossil_graph_schema::OutputShapes`]
 //!   a declared type lowers to.
 //!
@@ -42,6 +42,9 @@
 //! downstream: bidirectional checking and [`fossil_base::ErrorGuaranteed`]
 //! propagation are built on top of them, not beside them.
 
+/// What a declared type constrains beyond its fields' types — `@assert` and
+/// `@severity` — and the checker's half of enforcing it.
+pub mod asserts;
 pub mod body;
 pub mod check;
 /// Types declared in the program, lowered to the shape vocabulary a document
@@ -51,12 +54,14 @@ pub mod def_map;
 pub mod didyoumean;
 /// The source spelling of a lowered node — the HIR said back in surface syntax.
 ///
-/// Its consumer is the conformance census — `fossil-df`'s `tests/census`,
+/// Its consumer is the conformance census — `fossil-exec`'s `tests/census`,
 /// which commits a per-program record of what the compiler UNDERSTOOD. Rendering
 /// that from source text would prove nothing; rendering it from the HIR is the
 /// only version of the artefact that can be wrong.
 pub mod display;
 pub mod documents;
+/// `G`, the type of the graph a program writes ([`graph_type::graph_type`]).
+pub mod graph_type;
 /// The identity of a TYPE: one `@subject` template per shape, file-keyed.
 ///
 /// The identity is unique per type — one `@subject` per shape, declared by the
@@ -73,10 +78,8 @@ pub mod providers;
 /// sentences, shared by every path that raises one. They were methods on `fossil_base::Provider`,
 /// which put English Fossil compiler errors in the trait-and-db substrate.
 pub mod refusals;
-pub mod shacl;
 pub mod shape_documents;
 pub mod shapes;
-pub mod shex;
 pub mod spans;
 /// The stdlib catalog: every function the language declares, its signature and
 /// how it compiles. It lives here because the checker resolves a call against

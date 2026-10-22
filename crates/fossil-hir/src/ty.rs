@@ -318,7 +318,7 @@ mod tests {
     fn record_interning_works_for_multiple_field_sets() {
         let db = db();
         let int_ty = Ty::new(&db, TyKind::Primitive(Primitive::Integer));
-        let str_ty = Ty::new(&db, TyKind::Primitive(Primitive::String));
+        let str_ty = Ty::new(&db, TyKind::Primitive(Primitive::STRING));
         let r1 = Record::new(
             &db,
             vec![
