@@ -82,27 +82,6 @@ export interface CompletionItem {
 export type CompletionKind = 'function' | 'field';
 
 /**
- * `@iri("<iri>") name: Type`.
- */
-export interface DeclaredField {
-  iri: string;
-  name: string;
-  /**
-   * The field's type as the program writes it: `String`, `Option<Date>`, `Seq<Ref<Person>>`.
-   */
-  type: string;
-}
-
-/**
- * A type the program declares, every IRI whole.
- */
-export interface DeclaredType {
-  fields: DeclaredField[];
-  iri: string;
-  name: string;
-}
-
-/**
  * One diagnostic row in the `WasmWorkspace::diagnostics` return array: the workspace's own shape,
  * not the LSP wire's (`lsp_types::Diagnostic`).
  *
@@ -259,24 +238,6 @@ export interface Hover {
 }
 
 /**
- * A type taken from a document, by the name the program gives it.
- */
-export interface ImportedType {
-  /**
-   * The name the program writes.
-   */
-  name: string;
-  /**
-   * The property keys a mapping of it may write.
-   */
-  properties: string[];
-  /**
-   * The document's name for it, when the import renames it with `as`.
-   */
-  shape?: string;
-}
-
-/**
  * Every value of `from` is a value of `to`, which is a candidate key: the shape of an edge.
  */
 export interface Inclusion {
@@ -426,21 +387,33 @@ export interface MissingDocument {
 }
 
 /**
- * What a host has decided a graph holds, before any program is written: the types, each over one
- * source and identified by some of its columns, and the relations between them. The vocabulary and
- * the subjects of the program that maps it are computed from it (`vocabulary_of`, `subject_of`) and
- * not written by whoever proposes the mappings.
+ * What a host has decided a graph holds: the sources it reads, the types over them and the
+ * relations between them. `write` makes it a program.
  */
 export interface Model {
-  edges?: ModelEdge[];
+  edges: ModelEdge[];
+  /**
+   * The files the program binds, in the order it binds them.
+   */
+  sources: ModelSource[];
   types: ModelType[];
 }
 
 /**
- * A relation of a `Model`, from one type to another.
+ * A relation of a `Model`, from one type to another: a column holding the `to`'s key, on the
+ * `from`'s own source, or on a link file joined to it.
  */
 export interface ModelEdge {
+  /**
+   * The column of `on` that holds the `to`'s key.
+   */
+  column: string;
   from: string;
+  /**
+   * On a link file, its column that holds the `from`'s key: `on` is joined to the `from`'s source
+   * by it, in a mapping of its own.
+   */
+  join?: string;
   /**
    * Zero or more per `from`: `Seq<Ref<…>>`.
    */
@@ -450,7 +423,7 @@ export interface ModelEdge {
    */
   name: string;
   /**
-   * The binding of the source that holds the `to`'s key.
+   * The binding of the source that holds the `to`'s key: the `from`'s own, or a link file's.
    */
   on: string;
   /**
@@ -464,12 +437,35 @@ export interface ModelEdge {
  * A column of a source, kept as a field of a `ModelType`.
  */
 export interface ModelField {
+  /**
+   * The column of the type's source it is read from, as the source names it.
+   */
+  column: string;
+  /**
+   * The name the program writes: one `IDENT`.
+   */
   name: string;
   /**
    * Some rows have none: the field is `Option<…>`.
    */
   optional?: boolean;
   primitive: Primitive;
+}
+
+/**
+ * `<name> := io.<format>("<reference>")`.
+ */
+export interface ModelSource {
+  delimiter?: string;
+  /**
+   * The constructor that reads it: `csv`, `parquet`, `json`.
+   */
+  format: string;
+  /**
+   * The binding every reference to it is qualified by: one `IDENT`.
+   */
+  name: string;
+  reference: string;
 }
 
 /**
@@ -691,17 +687,6 @@ export interface SourceProfile {
   sampled: boolean;
 }
 
-export interface SourceVocabulary {
-  columns: string[];
-  delimiter?: string;
-  format: string;
-  /**
-   * The binding every reference to it is qualified by.
-   */
-  name: string;
-  reference: string;
-}
-
 /**
  * A storage credential scoped to one prefix — Iceberg REST's `StorageCredential`, verbatim on the
  * wire.
@@ -749,36 +734,6 @@ export type TokenKind = 'Whitespace' | 'Newline' | 'Comment' | 'KwFrom' | 'KwAnd
 export interface TopValue {
   count: number;
   value: string;
-}
-
-/**
- * What a mapping can name: what a host knows before the model writes anything.
- */
-export interface Vocabulary {
-  /**
-   * The types the program declares.
-   */
-  declared?: DeclaredType[];
-  /**
-   * The shape documents imported, each with the types taken from it.
-   */
-  imports?: VocabularyImport[];
-  /**
-   * The sources, each with its columns — a profile's descriptor.
-   */
-  sources: SourceVocabulary[];
-}
-
-/**
- * `type { … } := io.<format>("<reference>")`.
- */
-export interface VocabularyImport {
-  /**
-   * The document's constructor: `shex`, `shacl`.
-   */
-  format: string;
-  reference: string;
-  types: ImportedType[];
 }
 
 /** `fossil_storage::HOST_MS`. */

@@ -15,9 +15,6 @@ export type {
   Format,
   FormatKind,
   Hover,
-  DeclaredField,
-  DeclaredType,
-  ImportedType,
   Inclusion,
   InferredColumn,
   InferredDescriptor,
@@ -26,6 +23,7 @@ export type {
   Model,
   ModelEdge,
   ModelField,
+  ModelSource,
   ModelType,
   Position,
   Primitive,
@@ -42,12 +40,9 @@ export type {
   Scope,
   SemanticToken,
   SourceProfile,
-  SourceVocabulary,
   StorageCredential,
   Token,
   TokenKind,
-  Vocabulary,
-  VocabularyImport,
 } from './wire.gen.js';
 export { HOST_MS } from './wire.gen.js';
 export {
