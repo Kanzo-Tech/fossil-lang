@@ -10,33 +10,42 @@ which can be used to represent complex data structures, such as the struct, map,
 (the format specification, "Property Data Types"). A fossil graph writes a property as one of
 those, and the mapping carries the rest.
 
-## What each value is written as
+## What each property is written as
 
-| the value is | the property is | and |
-| --- | --- | --- |
-| `bool`, `float`, `double`, `string`, `date` | `bool`, `float`, `double`, `string`, `date` | |
-| `int8`, `int16`, `int32`, `uint8`, `uint16` | `int32` | widened without loss |
-| `int64`, `uint32` | `int64` | widened without loss |
-| `uint64` | `int64` | a value above `i64::MAX` is refused as `write/unrepresentable` |
-| `timestamp` | `timestamp`, in milliseconds | a value with a sub-millisecond part is refused as `write/unrepresentable` |
-| `time` | `string`, ISO 8601 | `xsd:time` in the mapping |
-| `binary` | `string`, hexadecimal | `xsd:hexBinary` in the mapping |
-| `decimal` | `string`, the decimal's text | `xsd:decimal` in the mapping |
+**A property is written as the one GraphAr type of its primitive**, whatever type the source handed
+the run. A graph's schema is its program's, so it does not change with the files the graph was built
+from, and what each column will be is known before anything has run: the table below, read off the
+GraphAr type by any reader of the format.
 
-**`time` is written as a string** because neither of GraphAr's reference readers names the type,
-and a graph with no tagged property then stays within what both parse. **A timestamp finer than a
-millisecond is refused** and not written as a string, because GraphAr's `timestamp` is
-milliseconds, and a string would lose the type every other reader sees. [`write/unrepresentable`](/docs/errors/write/unrepresentable) is
-the code for a value GraphAr's types cannot hold, and a column of a type GraphAr has no word for.
+| the property is a | it is written as | DuckDB reads it as | and |
+| --- | --- | --- | --- |
+| `Integer` | `int64` | `BIGINT` | |
+| `Float` | `double` | `DOUBLE` | |
+| `Bool` | `bool` | `BOOLEAN` | |
+| `Time<Year>` | `int32` | `INTEGER` | `xsd:gYear` in the mapping |
+| `Time<Date>` | `date` | `DATE` | |
+| `Time<DateTime>` | `timestamp`, in milliseconds, without a zone | `TIMESTAMP` | |
+| `Time<Hour>` | `string`, ISO 8601 | `VARCHAR` | `xsd:time` in the mapping |
+| `String`, `Uri` | `string` | `VARCHAR` | a `binary` value is its hexadecimal, `xsd:hexBinary` in the mapping |
+| `String<Lang>` | `langString` | `STRUCT("value" VARCHAR, lang VARCHAR)` | [below](#a-tagged-value-is-langstring) |
 
-**A `decimal` is written as its text** and stated as `xsd:decimal` in the mapping, so the precision
-and the scale a value was written with survive and no reader needs a type GraphAr does not have.
-*Design question.* A consumer that must compare decimals in the files, without the mapping, would need
-GraphAr to name a decimal type; the first one settles it.
+**A value the source typed otherwise is converted only when it survives the round trip**, and refused
+as [`write/unrepresentable`](/docs/errors/write/unrepresentable) when it does not: an `int32` is an
+`int64`, a `decimal` is a `double` when the `double` holds every digit, and a `uint64` above
+`i64::MAX` is refused. **A timestamp finer than a millisecond is refused** and not written as a
+string, because GraphAr's `timestamp` is milliseconds and a string would lose the type every other
+reader sees. **A timestamp is written without its zone**, as the instant: GraphAr's `timestamp` is
+"milliseconds since the Unix epoch", and C++ writes it without one.
 
-**A datatype beyond these lives only in the mapping.** A shape that says `xsd:gYear` over an `int32`
-column makes an `int32` property, and `rml:datatype xsd:gYear` on its object map; the YAML carries
-nothing of it. A reader that wants the year axis reads it from [the mapping](/docs/format/reading/rdf),
+**`Time<Hour>` is written as a string** because neither of GraphAr's reference readers names the
+`time` type, and a graph with no tagged property then stays within what both parse.
+
+*Design question.* A decimal with more digits than a `double` holds is refused, not written as its
+text: `Float` is a `double`, and a column that is sometimes a `double` and sometimes a `string` is the
+schema changing with the source. A decimal primitive settles it.
+
+**A datatype beyond these lives only in the mapping.** A `Time<Year>` is an `int32` property, and
+`rml:datatype xsd:gYear` on its object map; the YAML carries nothing of it. A reader that wants the year axis reads it from [the mapping](/docs/format/reading/rdf),
 and a reader that does not, reads a number. A copy of the datatype in the Parquet schema was not
 taken: it is a second document that can disagree with the first.
 

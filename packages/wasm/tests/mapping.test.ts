@@ -1,6 +1,6 @@
 /**
  * `program.mapping()` is the RML-Core mapping a program's types describe, before any run, across the
- * real wasm boundary. The mapping's content is `fossil-mir`'s and `crates/fossil-df/tests/mapping.rs`
+ * real wasm boundary. The mapping's content is `fossil-mir`'s and `crates/fossil-exec/tests/mapping.rs`
  * holds it to the one a run writes; this holds that the export reaches JS, reads the types the program
  * declares, and needs no profile.
  */

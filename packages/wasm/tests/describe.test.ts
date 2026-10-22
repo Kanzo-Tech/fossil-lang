@@ -1,26 +1,10 @@
 import "./boot.js";
 
-import type { Access, Input, Scope, StorageCredential, Table } from "@fossil-lang/types";
+import type { Access, DataType, Input, Scope, StorageCredential } from "@fossil-lang/types";
 import { describe, expect, it, vi } from "vitest";
 import { profileInputs as profile, type ProfileIO } from "../src/describe.js";
 import { profile as profileNamed } from "../src/index.js";
-
-/** Rows as the columns an engine answers in. */
-function tableOf(rows: readonly Record<string, unknown>[]): Table {
-  const names = [...new Set(rows.flatMap((row) => Object.keys(row)))];
-  return {
-    numRows: rows.length,
-    schema: { fields: names.map((name) => ({ name })) },
-    getChild: (name) =>
-      names.includes(name)
-        ? {
-            length: rows.length,
-            get: (i) => rows[i]?.[name] ?? null,
-            toArray: () => rows.map((row) => row[name]),
-          }
-        : null,
-  };
-}
+import { ARROW, asksColumns, columnsOf, tableOf } from "./host.js";
 
 describe("profile", () => {
   const W = "s3://bucket/w/";
@@ -55,7 +39,7 @@ describe("profile", () => {
   /** A host that vends a read credential per connection, and an engine that
    *  records every statement but the `httpfs` probe, which it answers as loaded. */
   function fakeIO(
-    query: (sql: string) => Promise<Record<string, unknown>[]>,
+    query: (sql: string) => Promise<Record<string, DataType>>,
     overrides: Partial<ProfileIO> = {},
     vend: (scope: Scope) => StorageCredential[] = () => [credential(W)],
   ) {
@@ -67,7 +51,7 @@ describe("profile", () => {
         query: async (text) => {
           if (text.includes("duckdb_extensions()")) return tableOf([{ loaded: true }]);
           sql.push(text);
-          return tableOf(text.startsWith("DESCRIBE") ? await query(text) : []);
+          return asksColumns(text) ? columnsOf(await query(text)) : tableOf([]);
         },
         registerFiles: async () => {},
         dropFiles: async () => {},
@@ -79,10 +63,10 @@ describe("profile", () => {
     return { io, credentials, sql };
   }
 
-  const describes = (sql: string[]) => sql.filter((s) => s.startsWith("DESCRIBE"));
+  const describes = (sql: string[]) => sql.filter(asksColumns);
 
   it("reads the sources a host names as a program at the root binding each would", async () => {
-    const { io, sql } = fakeIO(async () => [{ column_name: "id", column_type: "BIGINT" }]);
+    const { io, sql } = fakeIO(async () => ({ id: ARROW.int64 }));
     const { profile: profiled, descriptors } = await profileNamed(
       [{ reference: "@w/users.csv", format: "csv", option: "|" }],
       io,
@@ -93,7 +77,7 @@ describe("profile", () => {
   });
 
   it("refuses two references that make one binding", async () => {
-    const { io } = fakeIO(async () => []);
+    const { io } = fakeIO(async () => ({}));
     await expect(
       profileNamed(
         [
@@ -108,8 +92,8 @@ describe("profile", () => {
   it("mounts each connection once, describes the s3:// location and drops the secret after", async () => {
     const { io, credentials, sql } = fakeIO(async (text) =>
       text.includes("users")
-        ? [{ column_name: "id", column_type: "BIGINT" }]
-        : [{ column_name: "total", column_type: "DOUBLE" }],
+        ? { id: ARROW.int64 }
+        : { total: ARROW.float64 },
     );
 
     const { descriptors } = await profile([users, orders], io);
@@ -118,8 +102,8 @@ describe("profile", () => {
     expect(credentials).toHaveBeenCalledWith({ connection: "w" }, "read", { signal: expect.any(AbortSignal) });
     expect(sql[0]).toMatch(/^CREATE OR REPLACE SECRET fossil_read_[0-9a-f]{16} \(TYPE s3, /);
     expect(describes(sql)).toEqual([
-      `DESCRIBE SELECT * FROM read_csv_auto('${W}users.csv')`,
-      `DESCRIBE SELECT * FROM read_csv_auto('${W}orders.csv')`,
+      `SELECT * FROM read_csv_auto('${W}users.csv') LIMIT 0`,
+      `SELECT * FROM read_csv_auto('${W}orders.csv') LIMIT 0`,
     ]);
     expect(sql.at(-1)).toMatch(/^DROP SECRET IF EXISTS fossil_read_[0-9a-f]{16}$/);
     expect(descriptors).toEqual([
@@ -137,18 +121,18 @@ describe("profile", () => {
   });
 
   it("describes a public source with no connection as it is, asking the host nothing", async () => {
-    const { io, credentials, sql } = fakeIO(async () => [{ column_name: "id", column_type: "INT" }]);
+    const { io, credentials, sql } = fakeIO(async () => ({ id: ARROW.int32 }));
     const { descriptors } = await profile(
       [{ role: "data", binding: "p", key: "https://x.test/p.csv", location: "https://x.test/p.csv", format: "csv" }],
       io,
     );
     expect(credentials).not.toHaveBeenCalled();
-    expect(sql).toEqual(["DESCRIBE SELECT * FROM read_csv_auto('https://x.test/p.csv')"]);
+    expect(sql).toEqual(["SELECT * FROM read_csv_auto('https://x.test/p.csv') LIMIT 0"]);
     expect(descriptors).toHaveLength(1);
   });
 
   it("describes a parquet source as parquet, and carries a csv source's delimiter", async () => {
-    const { io, sql } = fakeIO(async () => [{ column_name: "ts", column_type: "TIMESTAMP" }]);
+    const { io, sql } = fakeIO(async () => ({ ts: ARROW.timestamp }));
     await profile(
       [
         { role: "data", binding: "e", key: "@w/e.parquet", location: `${W}e.parquet`, connection: "w", format: "parquet" },
@@ -157,8 +141,8 @@ describe("profile", () => {
       io,
     );
     expect(describes(sql)).toEqual([
-      `DESCRIBE SELECT * FROM read_parquet('${W}e.parquet')`,
-      `DESCRIBE SELECT * FROM read_csv_auto('${W}users.csv', delim='|')`,
+      `SELECT * FROM read_parquet('${W}e.parquet') LIMIT 0`,
+      `SELECT * FROM read_csv_auto('${W}users.csv', delim='|') LIMIT 0`,
     ]);
   });
 
@@ -174,8 +158,8 @@ describe("profile", () => {
     expect(sql).toEqual([]);
   });
 
-  it("runs the whole plan when no depth is asked for: the counts after the DESCRIBEs", async () => {
-    const { io, sql } = fakeIO(async () => [{ column_name: "id", column_type: "BIGINT" }], { options: undefined });
+  it("runs the whole plan when no depth is asked for: the counts after the columns", async () => {
+    const { io, sql } = fakeIO(async () => ({ id: ARROW.int64 }), { options: undefined });
     const { profile: profiled } = await profile([users], io);
     expect(sql.some((s) => s.startsWith("SELECT CAST(count(*) AS VARCHAR)"))).toBe(true);
     expect(profiled.sources.map((s) => [s.binding, s.descriptor.key])).toEqual([["users", "@w/users.csv"]]);
@@ -183,7 +167,7 @@ describe("profile", () => {
 
   it("asks the host for an etag per source", async () => {
     const etag = vi.fn((source: Input) => `etag-for-${source.key}`);
-    const { io } = fakeIO(async () => [{ column_name: "id", column_type: "INT" }], { etag });
+    const { io } = fakeIO(async () => ({ id: ARROW.int32 }), { etag });
     const { descriptors } = await profile([users], io);
     expect(etag).toHaveBeenCalledWith(users);
     expect(descriptors[0]?.etag).toBe("etag-for-@w/users.csv");
@@ -193,7 +177,7 @@ describe("profile", () => {
     const { io, sql } = fakeIO(
       async (text) => {
         if (text.includes("orders")) throw new Error("CORS / unreachable");
-        return [{ column_name: "total", column_type: "INT" }];
+        return { total: ARROW.int32 };
       },
       {},
       (scope) => ("connection" in scope && scope.connection === "gone" ? [] : [credential(W)]),
@@ -242,13 +226,13 @@ describe("profile", () => {
     }
   });
 
-  it("stops a DESCRIBE that hangs when the caller does, and still gives the credential back", async () => {
+  it("stops a query of the columns that hangs when the caller does, and still gives the credential back", async () => {
     const stop = new AbortController();
     const { io, sql } = fakeIO(() => new Promise(() => {}), { signal: stop.signal });
     io.engine = {
       ...io.engine,
       query: (text, options) =>
-        text.startsWith("DESCRIBE")
+        asksColumns(text)
           ? new Promise((_, reject) => {
               options.signal.addEventListener("abort", () => reject(options.signal.reason));
               stop.abort(new DOMException("stopped", "AbortError"));

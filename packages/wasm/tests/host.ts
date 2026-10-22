@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 
 import { initFossilStorage } from '@fossil-lang/storage';
-import type { Engine, Host, Scope, Table } from '@fossil-lang/types';
+import type { DataType, Engine, Host, Scope, Table } from '@fossil-lang/types';
 import { vi } from 'vitest';
 
 await initFossilStorage(
@@ -65,7 +65,7 @@ export function tableOf(rows: readonly Record<string, unknown>[]): Table {
   const names = [...new Set(rows.flatMap((row) => Object.keys(row)))];
   return {
     numRows: rows.length,
-    schema: { fields: names.map((name) => ({ name })) },
+    schema: { fields: names.map((name) => ({ name, nullable: true, type: ARROW.utf8 })) },
     getChild: (name) =>
       names.includes(name)
         ? {
@@ -77,17 +77,35 @@ export function tableOf(rows: readonly Record<string, unknown>[]): Table {
   };
 }
 
-/** An engine whose `DESCRIBE` of any source answers `columns`, or throws `failure` when given one. */
-export function describingEngine(
-  columns: readonly { column_name: string; column_type: string }[],
-  failure?: Error,
-): Engine {
+/** Arrow's types as apache-arrow numbers them (`Schema.fbs`): what a test engine answers a column with. */
+export const ARROW = {
+  int32: { typeId: 2, bitWidth: 32, isSigned: true },
+  int64: { typeId: 2, bitWidth: 64, isSigned: true },
+  float64: { typeId: 3, precision: 2 },
+  utf8: { typeId: 5 },
+  timestamp: { typeId: 10, unit: 2, timezone: null },
+} satisfies Record<string, DataType>;
+
+/** Whether `sql` asks a source's columns: the profiler's query whose answer is its fields and no row. */
+export const asksColumns = (sql: string) => sql.endsWith(' LIMIT 0');
+
+/** The answer of no row whose fields are `columns`: what an engine says a source's columns are. */
+export function columnsOf(columns: Readonly<Record<string, DataType>>): Table {
+  return {
+    numRows: 0,
+    schema: { fields: Object.entries(columns).map(([name, type]) => ({ name, nullable: true, type })) },
+    getChild: () => null,
+  };
+}
+
+/** An engine that answers a source's columns with `columns`, or throws `failure` when asked them. */
+export function describingEngine(columns: Readonly<Record<string, DataType>>, failure?: Error): Engine {
   return {
     query: async (sql) => {
       if (sql.includes('duckdb_extensions()')) return tableOf([{ loaded: true }]);
-      if (!sql.startsWith('DESCRIBE')) return tableOf([]);
+      if (!asksColumns(sql)) return tableOf([]);
       if (failure !== undefined) throw failure;
-      return tableOf(columns);
+      return columnsOf(columns);
     },
     registerFiles: async () => {},
     registerFileBuffer: async () => {},

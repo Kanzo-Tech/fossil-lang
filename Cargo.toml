@@ -1,11 +1,11 @@
 [workspace]
-members = ["crates/*"]
+members = ["crates/*", "bindings/*"]
 resolver = "3"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.90"
+rust-version = "1.95"
 license = "Apache-2.0 OR MIT"
 authors = ["Angel Iglesias <angel.iglesias@kanzo.tech>"]
 repository = "https://github.com/Kanzo-Tech/fossil-lang"
@@ -39,16 +39,24 @@ url = "2"                               # the WHATWG URL Standard — every URI 
 # codegen depends on the 0.8 JSON Schema draft-07 dialect for
 # openapi-typescript interop.
 schemars = { version = "0.8" }
-# === The graph: Apache GraphAr, through Kanzo-Tech/graphar (crates.io, `/docs/design/graphar`) ===
+# === The graph: Apache GraphAr, through Kanzo-Tech/graphar (`/docs/design/graphar`) ===
 # `graphar-info` is the YAML model and `graphar-parquet` the chunk writers, over arrow-rs and
 # `object_store` at the majors fossil links. Both build for wasm32 and reach no `tokio`.
-graphar-info = "0.1.0-alpha.1"
-graphar-parquet = "0.1.0-alpha.1"
+# By git + rev, not crates.io: the published 0.1.0-alpha.1 is on arrow 58 and object_store 0.13,
+# and this rev is on arrow/parquet 60 and object_store 0.14, the majors DataFusion main takes; it
+# writes each chunk as one row group with Parquet's `distinct_count`. A graphar release on those
+# majors reverses it (`/docs/design/graphar`, "The pins").
+graphar-info = { git = "https://github.com/Kanzo-Tech/graphar", rev = "feff5b7f91051002f81eda4c3df0d970512ffd87" }
+graphar-parquet = { git = "https://github.com/Kanzo-Tech/graphar", rev = "feff5b7f91051002f81eda4c3df0d970512ffd87" }
 # `fossil-storage`'s IO half: a vended credential as a store `DataFusion`
 # reads through and fossil writes through. `aws` + `azure` are the stores a
 # host vends for, `http` the public URLs no credential covers. Its cloud client
 # runs on wasm32 over `fetch` (verified in a browser against MinIO, 2026-09-29).
-object_store = { version = "0.13", default-features = false, features = ["aws", "azure", "http"] }
+# 0.14 split each store into `<store>-base` and a TLS + crypto bundle whose
+# `aws-lc-rs` does not build for wasm32, so the bases are named here with
+# `reqwest` (the `fetch` client on wasm32) and `ring`, the signing crypto 0.13
+# used; `fossil-storage` adds the whole stores on native targets only.
+object_store = { version = "0.14", default-features = false, features = ["aws-base", "azure-base", "http-base", "reqwest", "ring"] }
 async-trait = "0.1"
 futures = "0.3"
 web-time = "1"
@@ -64,26 +72,30 @@ rudof_rdf = { git = "https://github.com/Kanzo-Tech/rudof", rev = "cbb80d7ea7bc56
 prefixmap = { git = "https://github.com/Kanzo-Tech/rudof", rev = "cbb80d7ea7bc5639b8a1f716c4ee5ba9ce7195b0", default-features = false }
 shacl = { git = "https://github.com/Kanzo-Tech/rudof", rev = "cbb80d7ea7bc5639b8a1f716c4ee5ba9ce7195b0", default-features = false }
 # The mapping `describe` builds and writes: `rml`'s AST and its Turtle writer. Its `sql` feature (a
-# sqlparser AST, wasm-clean) is a dev-dependency of `fossil-df`, which renders the mapping to hold it.
+# sqlparser AST, wasm-clean) is a dev-dependency of `fossil-exec`, which renders the mapping to hold it.
 rml = { git = "https://github.com/Kanzo-Tech/rudof", rev = "cbb80d7ea7bc5639b8a1f716c4ee5ba9ce7195b0", default-features = false }
 # The RDF terms `io.rdf` and the SHACL decoder read, from the graph `rudof_rdf` parses.
 #
 # `rdf-12` is oxrdf's RDF 1.2 gate and it is OFF by default. It gates `Term::Triple`,
 # `Literal::direction`, `BaseDirection` and `rdf::DIR_LANG_STRING`, and pulls in NO new
 # dependency. Turtle is parsed by `oxttl` inside `rudof_rdf`, which turns the same gate on for
-# the parser; `fossil-df/src/rdf.rs`'s two RDF 1.2 tests fail at parse time if it stops.
+# the parser; `fossil-exec/src/rdf.rs`'s two RDF 1.2 tests fail at parse time if it stops.
 oxrdf = { version = "0.3", features = ["rdf-12"] }
 # BCP 47 well-formedness (RFC 5646 §2.2.9) for a language tag the checker and
 # the writer hold to it, as RDF 1.1 Concepts §3.3 requires of a literal's tag.
 # Already in the lock through `oxrdf`, which validates its own tags with it, so
 # naming it adds no crate to the graph or the wasm closure.
 oxilangtag = "0.1"
+# The N-Triples parser `fossil-exec`'s equivalence test reads the sink's output
+# with, so a line it writes is held to a parser and not to its own printer.
+# Already in the lock through `rudof_rdf`.
+oxttl = { version = "0.2", features = ["rdf-12"] }
 
 # === Did-you-mean diagnostics ===
 strsim = "0.11"
 
 # `bytes` is what `object_store` puts and gets — the currency of every file
-# `fossil-df` writes and `fossil-storage` moves. Not a new crate in the tree:
+# `fossil-exec` writes and `fossil-storage` moves. Not a new crate in the tree:
 # `object_store` and `datafusion`'s `parquet` already depend on it, so this line names a
 # version rather than adding a dependency. Pure Rust, so it costs the wasm32
 # gate nothing.
@@ -93,15 +105,60 @@ bytes = "1"
 # tree either, and pure Rust.
 csv-core = "0.1"
 
+# The Arrow types alone, for the crates that read a column's type and run
+# nothing: `fossil-profile` reads what an engine answers a source as. The same
+# release `datafusion` re-exports, so one `DataType` crosses between them.
+arrow-schema = { version = "60", default-features = false }
+
+# === The engine: DataFusion, in `fossil-exec` and the sinks of `fossil-sinks` ===
+# `default-features = false` drops datafusion's `sql` frontend (we build plans
+# via the DataFrame/LogicalPlan API, not `ctx.sql()`) and its own `compression`
+# feature — shrinking the wasm surface. We KEEP `parquet`: `io.parquet` sources
+# must be READ (locally and, in the browser, remotely by signed URL — design C2).
+# CSV/JSON reading is core (ungated). Re-add a feature here if a plan op needs it.
+#
+# ⚠️ This does NOT remove the `zstd` C dep: datafusion (54, and `main` at the
+# pinned rev, re-checked 2026-10-21) HARDCODES `arrow-ipc` with `features=["lz4","zstd"]` in datafusion-common /
+# datafusion-datasource-arrow / datafusion-physical-plan (not behind any
+# feature). So `zstd-sys` cannot be cut from the feature graph — the wasm32
+# build needs a wasm-capable clang to compile zstd-C (verified 2026-06-09):
+#   CC_wasm32_unknown_unknown=<llvm>/clang AR_wasm32_unknown_unknown=<llvm>/llvm-ar \
+#     cargo build -p fossil-exec --target wasm32-unknown-unknown
+# (Apple's system clang lacks the wasm target; `brew install llvm` provides one.)
+# Cutting zstd entirely would require a `[patch.crates-io]` fork of those three
+# subcrates — deferred. The wasm CI job must install LLVM.
+#
+# `nested_expressions` is ON because a catalogue row asked for it, and that is
+# the only reason a feature is on here. `str.split` lowers to `string_split`,
+# which reconciles to DataFusion's `string_to_array` — a function that lives in
+# the nested-expressions package and is therefore absent from
+# `all_default_functions()`. The row was UNRENDERABLE on this engine for want of
+# a feature flag, which is a different thing from unrenderable for want of a
+# capability, and it was filed beside the ones that cannot be done at all.
+#
+# `crypto_expressions` is deliberately OFF. It is the sibling package, and no
+# function of the language needs its `sha256`. Turning it on would grow the
+# wasm surface for a function no template says.
+#
+# By git + rev on apache/datafusion `main`, not a release: 55.2.0 is on arrow 59,
+# and main is on arrow/parquet 60, the first whose writer counts `distinct_count`
+# in a row group's `Statistics` (`/docs/design/graphar`, "The pins"). Main needs
+# rustc 1.95, which is why `rust-toolchain.toml` says 1.95. A DataFusion release
+# on arrow 60 reverses it: back to `version = "…"`.
+datafusion = { git = "https://github.com/apache/datafusion", rev = "6c1727fcd9230dda428f8c3a2397fce235544bd5", default-features = false, features = [
+  "parquet",
+  "nested_expressions",
+] }
+
 # === The native engine — NATIVE ONLY ===
-# No crate links it on a normal edge; `fossil-df` and `fossil-profile` keep it as a
+# No crate links it on a normal edge; `fossil-exec` and `fossil-profile` keep it as a
 # dev-dependency, to read a written graph back or to bring an engine to a test.
 # `deny.toml`'s
 # `duckdb` wrappers list is the enforced version of that sentence.
 duckdb = { version = "1.10502", features = ["bundled"] }
 
 # === Reference implementations for stdlib fidelity tests (NATIVE ONLY) ===
-# `fossil-df` dev-depends on these to measure its SQL templates against the Rust
+# `fossil-exec` dev-depends on these to measure its SQL templates against the Rust
 # behaviour they are meant to reproduce.
 # NEVER referenced by a WASM-gated crate.
 unicode-normalization = "0.1"           # the NFC/NFD/NFKC/NFKD reference
@@ -147,7 +204,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 # === Dev / testing ===
 expect-test = "1"
 # Native temp dirs for integration tests that write Parquet to disk and read it
-# back via duckdb — `fossil-df` and `fossil-profile`, among its
+# back via duckdb — `fossil-exec` and `fossil-profile`, among its
 # dev-dependents. Native-only
 # (uses a real filesystem); no `tests/` target is built for wasm32.
 tempfile = "3"

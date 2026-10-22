@@ -33,8 +33,6 @@ artefacts. Every door boots the module itself:
   sources, the types over them with each field's column, and the relations between them), written
   as Fossil in one canonical layout, every IRI under `base`. The same model writes the same text,
   and the checker reads it like any other program.
-- `DUCKDB_TYPES` — what a DuckDB `DESCRIBE` column type means on the lattice, from `catalogue.bnf`,
-  in precedence order.
 - `bindingName(file, { signal })` — the name a file is bound by in a program: `people` for
   `people.csv`, `_2024_sales` for `2024-sales.parquet`. The rule is the lexer's
   (`fossil_syntax::name::binding_name`), so what comes back always lexes as one identifier.
@@ -112,12 +110,12 @@ pnpm --filter @fossil-lang/wasm build:wasm   # → packages/wasm/pkg/
 pnpm --filter @fossil-lang/wasm build         # = build:wasm + tsc
 ```
 
-Requires: Rust 1.90 toolchain (per `rust-toolchain.toml` at repo root) +
+Requires: Rust 1.95 toolchain (per `rust-toolchain.toml` at repo root) +
 `wasm-bindgen-cli` 0.2.120 (`cargo install --version 0.2.120 wasm-bindgen-cli`).
 Optionally `wasm-opt` (binaryen) for size reduction.
 
 ## Source of truth
 
-- Rust crate: `crates/fossil-wasm/` — everything here is a wrapper over its
+- Rust crate: `bindings/editor/` — everything here is a wrapper over its
   wasm-bindgen exports, and nothing in this package reimplements it.
 - The grammar the tokenizer follows: `grammar.bnf` at the repo root.

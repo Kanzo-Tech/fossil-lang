@@ -33,7 +33,7 @@ and says where it ran.
 | --- | --- | --- |
 | encoding a property graph as files, and reading those files into DuckDB | **`Kanzo-Tech/graphar`** — knows no RDF | `graphar-info`, `graphar-parquet`, `@kanzo-tech/graphar-duckdb` |
 | parsing, writing and validating RDF, ShEx, SHACL and RML, and turning tables into an `(s,p,o)` relation | **rudof, through our fork `Kanzo-Tech/rudof`** | `rudof_rdf`, `shex_ast`, `shacl`, a new `rml` crate, and `Mapping` on `rudof_wasm` |
-| the language and the engine | **fossil** | the compiler, `fossil-mir`'s `describe`, and `fossil-df`: execute, `layout`, write |
+| the language and the engine | **fossil** | the compiler, `fossil-mir`'s `describe`, and `fossil-exec`: execute, `layout`, write |
 | the global id, and how a graph is drawn | **`@kanzo-tech/graph`** | arithmetic over GraphAr's per-type index |
 | composing the above for a product | **keasy** | `mount` + `attachGraph` + `Mapping.triples`, about 20 lines |
 
@@ -54,7 +54,7 @@ flowchart LR
   subgraph F["fossil-lang"]
     hir["fossil-hir<br/>shapes → types"]
     mir["fossil-mir<br/>describe"]
-    df["fossil-df<br/>execute · layout · write"]
+    df["fossil-exec<br/>execute · layout · write"]
     exe["@fossil-lang/executor: run"]
     st["@fossil-lang/storage: mount"]
   end
@@ -94,7 +94,7 @@ The repository's name is not a crate name. The `graphar` crate on crates.io belo
 own `rust/` directory, a `cxx` binding over the C++ library, calls itself. So the crates are named by
 what each does, and they are **published at `0.1.0-alpha.1`**: `graphar-info` and `graphar-parquet`
 on crates.io, and `@kanzo-tech/graphar-duckdb` on npm under the `alpha` dist-tag. fossil depends on
-the crates from crates.io, by version and not by git.
+the crates **by git `rev`**, not on the published release, for the reason [below](#the-pins-datafusion-main-and-graphar-by-git).
 
 | crate or package | ≈ lines | public API (names) | what it follows |
 | --- | ---: | --- | --- |
@@ -166,7 +166,7 @@ the changes to upstream rudof is optional and later.
 `sqlparser`, the DuckDB dialect and the triples columns with `shacl::validator::sql`. It sits
 *beside* that validator and not inside it, because the validator's own documentation says it "knows
 no mapping language and no product vocabulary". fossil depends on `rml` without `sql`; `sql` is a
-dev-dependency of `fossil-df`, which the Statement R test renders the written mapping with.
+dev-dependency of `fossil-exec`, which the Statement R test renders the written mapping with.
 
 **The condition [incremental](/docs/design/incremental) set for moving fossil's SHACL decoder to
 rudof was met on the fork's `master`:** `shacl` and `shex_ast` are both on 0.3.4, `rudof_iri` takes no
@@ -186,7 +186,7 @@ directions.
 | `fossil-mir` | `describe`: the mapping of the types, public, so a host asks before a run (D6) |
 | `fossil-ide`, `fossil-wasm`, `@fossil-lang/wasm` | `program.mapping()` is that function over the program's types; `write` makes a model's program; a profile names its sources by binding ([profile](/docs/design/profile)) |
 | `fossil-hir` | `shacl.rs` walks rudof's `ASTSchema` from `ShaclParser` into `OutputShapes`, and `oxttl`/`oxrdf` leave the crate. `shex.rs` keeps `shex_ast`. The `providers` registry is unchanged: the names are fossil's, the parse each calls is rudof's |
-| `fossil-df` | the writer through `graphar-parquet`; `layout`, crate-private; `facts.rs` writes the Parquet footers (D2); `rdf.rs` on `rudof_rdf`'s parser; ids numbered per type. `corpus::*` is gone |
+| `fossil-sinks` | the writer through `graphar-parquet`; `layout`, crate-private; the Parquet footers' `Statistics` are `graphar-parquet`'s (D2); `rdf.rs` on `rudof_rdf`'s parser; ids numbered per type. `corpus::*` is gone |
 | `fossil-df-wasm`, `@fossil-lang/executor` | `run` unchanged; the executor holds the integration tests (`integration/`: run → `attachGraph` → assert) |
 | `fossil-storage` (+ `-wasm`), `@fossil-lang/storage` | `mount` has hosts as its callers; `Storage::at` addresses a prefix for the writer |
 | `@fossil-lang/types` | the whole `corpus/*` area is gone; `write/invalid-subject`, `write/duplicate-value`, `write/unrepresentable` and `write/ambiguous-iri` are added |
@@ -204,9 +204,9 @@ tables, and `Mapping.triples` for the `(s,p,o)` relation, built only on the rule
 
 ## What a run writes
 
-`fossil_df::Executor`, `fossil-df-wasm` and `@fossil-lang/executor`'s `run` keep their shape. A run
+`fossil_exec::Executor`, `fossil-df-wasm` and `@fossil-lang/executor`'s `run` keep their shape. A run
 reads its sources through the host's credentials, executes under the 2 GiB pool, and calls
-`crates/fossil-df/src/write.rs, write`. It answers `{ location, dropped }`, or `{ report, files }`
+`crates/fossil-sinks/src/graphar/write.rs, write`. It answers `{ location, dropped }`, or `{ report, files }`
 for a run into memory. **What is under `location` is a GraphAr graph and its mapping.**
 
 ```
@@ -241,7 +241,7 @@ entry.
 // fossil-mir::describe (public: a pure function of the types, which the editor's wasm links)
 pub fn describe(schema: &GraphSchema, natural: &Natural) -> Result<Mapping, DescribeError>;  // no data, no db; A2 held
 pub fn turtle(mapping: &Mapping) -> Result<String, DescribeError>;                           // mapping.ttl
-// fossil-df (crate-private: the module exports nothing; Executor::execute is the door)
+// fossil-exec (crate-private: the module exports nothing; Executor::execute is the door)
 pub(crate) fn layout(graph: &Graph) -> Result<Laid, WriteError>;     // the tables as GraphAr's, held to A1/A4/A5
 ```
 
@@ -263,10 +263,10 @@ of a graph by hand, to show a dashboard before data existed; the compiler alread
 `describe` takes the `GraphSchema` and nothing of the layout: a vertex type's table is its label, a
 relation's is `<Src>_<label>_<Dst>`, and a table's columns are its properties' names, the
 single-valued ones and then the multi-valued, beside `subject` and the index columns. The layout is
-the data's — its types, its nullability, its chunk size — and stays in `fossil-df`. So
-`FossilProgram.mapping()` in `@fossil-lang/wasm` is `fossil_hir::shapes::program_shapes`, the types a
-program declares and imports, through `describe`, and `mapping.ttl` is the same function over the
-schema the run produced. `crates/fossil-df/tests/mapping.rs`,
+the data's — its types, its nullability, its chunk size — and stays in `fossil-exec`. So
+`FossilProgram.mapping()` in `@fossil-lang/wasm` is the program's graph type
+(`crates/fossil-hir/src/graph_type.rs, graph_type`), the types it declares and imports, through
+`describe`, and `mapping.ttl` is the same function over the schema the run produced. `crates/fossil-exec/tests/mapping.rs`,
 "the_mapping_a_programs_types_describe_is_the_mapping_its_run_writes" holds the two to one document for a
 program that imports its type and one that declares its own.
 
@@ -334,7 +334,7 @@ version: gar/v1
 RML-IO §3.1 requires exactly one `rml:source` per logical source, so the writer emits one, and
 an anonymous `[ a rml:Source ]` is all it can honestly say: the logical sources are SQL table names,
 which the host resolves when it builds the relation (`tables:` in `Mapping.triples`), and a source
-description naming a file would claim what the host decides. **The walking skeleton reads it back:** `crates/fossil-df/tests/walking_skeleton.rs` runs
+description naming a file would claim what the host decides. **The walking skeleton reads it back:** `crates/fossil-exec/tests/walking_skeleton.rs` runs
 `examples/hello.fossil` through the executor and reads the written chunk back with native DuckDB,
 never through the writer's own types: five `Person` vertices, subjects `https://example.org/user/1`
 to `/5`, names `Alice` to `Eve`, indices `0` to `4`, and the graph read back with `graphar-info`. The
@@ -449,16 +449,16 @@ which narrows the claim or adds a condition (A7 for IRI-valued columns is the fi
 - **An absent set is a NULL list.** A shape-declared `langString` stays `set` (the executor makes a
   tagged property multi-valued); a single-valued tagged struct column is written as a bare
   `langString`.
-- **One chunk per table**, `chunk_size` = max(rows, 1), ZSTD level 3, row groups of 122,880 rows,
-  delta encoding on the sorted keys. Writes go through the routed store, one put per chunk; the
+- **One chunk per table**, `chunk_size` = max(rows, 1), ZSTD level 3, one row group per chunk
+  (`graphar-parquet`'s), delta encoding on the sorted keys. Writes go through the routed store, one put per chunk; the
   executor's earlier split of a large file into multipart parts is not kept.
-- **Widening and text.** `int8`, `int16`, `uint8`, `uint16` become `int32`; `uint32` becomes `int64`;
-  `decimal` is written as text with `xsd:decimal` in the mapping; `time` as text with `xsd:time`;
-  `binary` as hexadecimal with `xsd:hexBinary`.
-- **The counts**: nulls, minimum and maximum are the Parquet footer's; `fossil:stats` carries the
-  distinct count and the most common values. A set column is counted over its elements (a tagged one
-  by lexical form) and its frequencies are a share of the elements; a single column's, of the chunk's
-  rows.
+- **One type per primitive.** A property is written as its primitive's GraphAr type whatever the
+  source held ([the data types](/docs/format/conventions/datatypes)): an `Integer` is `int64`, a
+  `Float` `double`, converted only when the value survives the round trip; `time` is text with
+  `xsd:time`, and `binary` hexadecimal with `xsd:hexBinary`.
+- **The counts** are the Parquet footer's: nulls, minimum, maximum and the distinct count, per row
+  group and so per chunk. A set column is counted over its elements, since Parquet counts leaf
+  values.
 - **`docs/programs/distinct`** builds its subject with `str.slug`: its old subject contained a space,
   which A1 refuses.
 - **Annotations and the day-one description**: the mapping carries them; `iri`s and `derived_from` are
@@ -483,7 +483,7 @@ which narrows the claim or adds a condition (A7 for IRI-valued columns is the fi
   nor subject order, so the golden test renders the *parsed* mapping, and Statement R runs `rml::sql`
   over the *written* mapping and the *written* Parquet on native DuckDB and compares the seven-column
   rows, as sets, with the triples written out by hand from the programs' CSVs
-  (`crates/fossil-df/tests/mapping.rs`, for the walking skeleton and `docs/programs/labels`).
+  (`crates/fossil-exec/tests/mapping.rs`, for the walking skeleton and `docs/programs/labels`).
   **What would reverse it:** rudof's serialiser made deterministic.
 
 ## Ids: GraphAr's per type, and the global id is the graph's
@@ -543,7 +543,7 @@ the cast always fits.
 
 **Measured on 2026-10-14.** DuckDB-WASM 1.32.0 (DuckDB v1.4.3) in Node, blocking bindings, one
 thread, local files, a shared 4-core host at load average 8.4; 1,000,000 vertices and 2,000,000
-distinct random edges sorted by `(src, dst)`, written by pyarrow with fossil's writer settings (ZSTD
+distinct random edges sorted by `(src, dst)`, written by pyarrow with fossil's writer settings of that day (ZSTD
 level 3, 122,880-row groups, `DELTA_BINARY_PACKED` on the sorted key). Two runs of seven reads each,
 best and median:
 
@@ -720,93 +720,79 @@ contents have no collection section), so it is a different design and not a flag
 **What would reverse the edge layout.** Offsets measured as a cost on a write or a read that matters:
 then `ordered: false` (COO), and the `(src, dst)` sort is checked only by a test.
 
+### The pins: DataFusion main and graphar by git
+
+**`datafusion` is pinned to apache/datafusion `main` by git `rev`, and `graphar-info` and
+`graphar-parquet` to Kanzo-Tech/graphar by git `rev`.** Both are for one thing: Arrow and Parquet
+60, the first `parquet` whose Arrow writer counts `distinct_count` in a row group's `Statistics`
+(`WriterProperties::set_write_row_group_number_distinct_values`). With it the counts a reader needs
+are Parquet's own fields, and the writer keeps no key of its own ([Statistics](#statistics-counted-once-at-write)).
+
+- **DataFusion.** The newest release, 55.2.0, is on arrow 59; `main` moved to arrow and parquet 60
+  and `object_store` 0.14 in one commit (`b631f2c7`, apache/datafusion#25335). `main` declares
+  `rust-version = "1.95.0"`, which cargo enforces, so `rust-toolchain.toml` and CI say 1.95.
+  `crates/fossil-df/Cargo.toml` names the rev.
+- **graphar.** The published `0.1.0-alpha.1` is on arrow 58 and `object_store` 0.13. The rev fossil
+  pins is on arrow and parquet 60 and `object_store` 0.14 — the majors DataFusion `main` takes, since
+  fossil hands one store to both — and writes each chunk as one row group with `distinct_count`
+  counted (`counted` in `graphar-parquet`'s `write.rs`).
+
+- **`object_store` 0.14**, which both take, split each store into `<store>-base` and a TLS and
+  crypto bundle on `aws-lc-rs`, which does not build for wasm32. The workspace names the bases with
+  `reqwest` (`fetch`, on wasm32) and `ring`, the signing crypto 0.13 used, and `fossil-storage` takes
+  the whole stores on native targets only, where `reqwest` needs a TLS backend to compile.
+
+**What would reverse them.** A DataFusion release on arrow 60: `datafusion` goes back to a version,
+and the toolchain to whatever that release declares. A graphar release on arrow 60 and `object_store`
+0.14: the two crates go back to a version from crates.io. Neither pin is permanent; each is the
+release that does not exist yet.
+
 ## Statistics: counted once, at write
 
 **Column statistics are kept** (D2). A generated graph is written once and read many times, so each
-column is counted once, by the writer, on batches it already holds — not by every reader at every
-open. They have a reader: kanzo-ui's `readCatalog` and `useFieldStats` (kanzo-ui PR #218) use them
-in place of `SUMMARIZE`.
+column is counted once, by the writer, as it encodes the chunk — not by every reader at every open.
+They have a reader: kanzo-ui's `readCatalog` and `useFieldStats` (kanzo-ui PR #218) use them in
+place of `SUMMARIZE`.
 
-They go **in each chunk's own Parquet footer**, which is the one place a Parquet reader already looks:
+They are **Parquet's own `Statistics`**, in each chunk's footer, the one place a Parquet reader
+already looks: `null_count`, `min_value` and `max_value` with `is_min_value_exact` /
+`is_max_value_exact`, and `distinct_count`. No key of fossil's is in any footer.
 
-- `null_count`, `min_value` and `max_value` in the column chunks' `Statistics`, with
-  `is_min_value_exact` / `is_max_value_exact`;
-- the distinct count and the most common values with their frequencies in the file's
-  `key_value_metadata`, under the key **`fossil:stats`**, because Parquet has no field for them.
+**One row group per chunk, so a row group's counts are the chunk's.** Parquet's statistics are per row
+group. `graphar-parquet` writes each chunk as one row group and turns on
+`set_write_row_group_number_distinct_values`, the arrow-rs writer's count of distinct values, which
+`parquet` 60 is the first to have. fossil writes one chunk per table, so a chunk's counts are the
+table's. A reader of a graph of several chunks combines them: `null_count` by sum and the bounds by
+minimum and maximum — the *distributive* aggregates of Gray et al. — while a distinct count over a
+union cannot be computed from the parts' (it lies between the largest and the sum), so over several
+chunks it is a bound and not a count. `@kanzo-tech/graphar-duckdb` exposes the combined counts as
+`graphar_column_stats`. arrow-rs truncates a bound at 64 bytes and marks it inexact, so a reader that
+keeps only exact bounds never shows a cut value.
 
-**This is fossil's convention, not GraphAr's and not Parquet's.** `parquet.thrift` gives the file
-metadata (`FileMetaData.key_value_metadata`) and each column chunk's (`ColumnMetaData.key_value_metadata`)
-a list of string keys and string values, and names none; Arrow uses the file-level one for its own
-`ARROW:schema`. The `fossil:` prefix namespaces the key the way `ARROW:` does, and the value is this
-document, versioned, and checked by the writer's tests:
+**A dictionary column is written as its values.** arrow-rs counts a dictionary array's distinct
+values over its keys (apache/arrow-rs#11172), and `layout` casts every dictionary to its value type
+before the chunk is encoded — which GraphAr, naming no dictionary type, needs anyway.
 
-```json
-{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "required": ["version", "columns"],
-  "additionalProperties": false,
-  "properties": {
-    "version": { "const": 1 },
-    "columns": {
-      "type": "object",
-      "additionalProperties": {
-        "type": "object",
-        "required": ["distinct_count"],
-        "additionalProperties": false,
-        "properties": {
-          "distinct_count": { "type": "integer", "minimum": 0 },
-          "most_common_vals": { "type": "array", "maxItems": 10, "items": { "type": "string" } },
-          "most_common_freqs": { "type": "array", "maxItems": 10, "items": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 } }
-        }
-      }
-    }
-  }
-}
-```
+**The candidate keys are not stored.** A reader derives them: `is_primary`, plus every column with
+`null_count = 0` and `distinct_count = count` whose GraphAr type can be a key (`int32`, `int64`,
+`string`, `date`, `timestamp`), read from single-valued scalar columns only.
 
-`columns` is keyed by the property's name. `most_common_vals` and `most_common_freqs` are two arrays of
-the same length, as PostgreSQL's `pg_stats` has them: the ten most frequent non-null values that occur
-at least twice, most frequent first and ties by value, each as the column type's text, and each one's
-share of the chunk's rows. They are absent when no value repeats. A set column's `distinct_count` and
-values count its **elements**, since Parquet counts leaf values; a candidate key is read from
-single-valued scalar columns only. A reader that does not know the key loses nothing a Parquet reader
-needs; one that does checks `version` and refuses another.
+**The commonest values are not kept.** Parquet has no field for them, and a key of fossil's beside the
+footer was what carried them, `fossil:stats`; [Discarded](/docs/design/discarded#the-graph-as-apache-graphar)
+has the row and what would bring it back.
 
-**Why `key_value_metadata` and not `Statistics.distinct_count`.** Parquet's statistics are per row
-group: `null_count` sums and the bounds fold, but a distinct count does not combine, and the arrow-rs
-`ArrowWriter` (`parquet` 58.3.0) writes none — `distinct_count` reaches a chunk only through
-`write_batch_with_statistics`, and only if nothing else wrote to it. Nor is the reason only the
-writer's: `null_count` is a count and `min_value` and `max_value` are a minimum and a maximum, which
-combine across row groups by sum, minimum and maximum — the *distributive* aggregates of Gray et al.
-— while a distinct count over a union cannot be computed from the per-group ones (that it is
-*holistic* is our reading of their definition, which does not name it). `key_value_metadata` is the slot
-Parquet gives facts it has no field for, and the one Arrow itself uses (`ARROW:schema`). arrow-rs
-truncates a bound at 64 bytes and marks it inexact, so a reader that keeps only exact bounds never
-shows a cut value — the rule [the graph's own facts](/docs/design/facts) already states.
-
-**The graph reads them itself.** `@kanzo-tech/graph`'s `readCatalog` and `useFieldStats` take the
-counts from the footers with DuckDB's own table functions, over the paths `graphar_chunks(type, kind,
-path)` answers, with no fossil code and no `SUMMARIZE` — measured on DuckDB-WASM 1.4.3 on
-2026-10-14 over the hello chunk at 27 ms and 5 ms:
+**The graph reads them itself**, with DuckDB's own table function over the paths `graphar_chunks(type,
+kind, path)` answers, with no fossil code:
 
 ```sql
-SELECT path_in_schema, row_group_id, stats_null_count, stats_min_value, stats_max_value,
-       min_is_exact, max_is_exact
+SELECT path_in_schema, row_group_id, stats_null_count, stats_distinct_count,
+       stats_min_value, stats_max_value, min_is_exact, max_is_exact
 FROM parquet_metadata((SELECT list(path) FROM graphar_chunks WHERE type = 'Person' AND kind = 'vertex'));
-
-SELECT key::VARCHAR, decode(value)
-FROM parquet_kv_metadata((SELECT list(path) FROM graphar_chunks WHERE type = 'Person' AND kind = 'vertex'));
 ```
 
-The candidate keys are not stored. A reader derives them: `is_primary`, plus every column with
-`null_count = 0` and `distinct_count = count` whose GraphAr type can be a key (`int32`, `int64`,
-`string`, `date`, `timestamp`).
-
-**What would reverse it.** A Parquet release with table-level distinct counts or frequent values in
-the footer moves each fact out of `fossil:stats` into its field. A graph whose counting the writer
-measurably cannot afford counts in the reader, for that graph only. And the day no reader reads them,
-they go.
+**What would reverse it.** A Parquet release with a table-level distinct count moves it there. A
+graph whose counting the writer measurably cannot afford counts in the reader, for that graph only.
+And the day no reader reads them, they go.
 
 ## Datatypes GraphAr does not have
 
@@ -823,8 +809,9 @@ itself never parses RDF.
 a number and nothing more. A copy of the datatypes in Arrow field metadata was not taken: it is a
 second document that can disagree with the mapping.
 
-Other widths: `int8`, `int16`, `uint8`, `uint16` and `uint32` widen without loss; `uint64` above
-`i64::MAX` is refused; `binary` becomes `string`, with `xsd:hexBinary` in the mapping, and `time` is
+Each primitive is one of them whatever the source held: an `Integer` is `int64`, a `Float` `double`,
+and a value is converted only when it survives the round trip, so `uint64` above `i64::MAX` and a
+decimal with more digits than a `double` are refused; `binary` becomes `string`, with `xsd:hexBinary` in the mapping, and `time` is
 written as `string` with `xsd:time`, so a graph with no `langString` property stays within what the
 reference readers parse. The one type beyond them is `langString` ([above](#a-relation-and-a-multi-valued-property)). **A `timestamp`
 finer than a millisecond is refused, as `write/unrepresentable`**, because GraphAr's `timestamp` is
@@ -844,7 +831,7 @@ milliseconds and a string would lose the type every other reader sees.
 | the counts | `vertex_count`, `edge_count<k>`, and the footer's `num_rows` | GraphAr, Parquet |
 | a column's name, type and nullability | `name`, `data_type`, `is_nullable` — always written, since GraphAr's default is `true` | GraphAr |
 | a class, a predicate, a term type, a datatype, a language | `rml:class`, `rml:predicate`, `rml:termType`, `rml:datatype`, `rml:languageMap` | RML-Core, `mapping.ttl` |
-| nulls, bounds, distinct values, commonest values | footer `Statistics` and `key_value_metadata` `fossil:stats` | Parquet |
+| nulls, bounds, distinct values | footer `Statistics`, one row group per chunk | Parquet |
 | candidate keys | derived by the reader from the counts | — |
 | annotations | plain triples about the class and predicate IRIs, in the same document; read by `Mapping.model()` | RDF, `mapping.ttl` |
 | lineage | not emitted until a reader exists (D1) | — |
@@ -919,7 +906,7 @@ pairs of each vertex, and the set of `(source, target)` pairs of each relation.
    image does not entail them: Sequeda et al. prove for the Direct Mapping that no monotone mapping is
    semantics preserving once foreign keys are considered. Constraints survive only if shapes are
    emitted and validated, and D1 emits none.
-7. Statistics, `fossil:stats`, annotations and lineage.
+7. Statistics, annotations and lineage.
 8. **Query preservation** (Def. 3 there) is not claimed: nothing states a translation from SPARQL to
    SQL.
 
@@ -935,7 +922,7 @@ is deleted; each part of what it did is now somebody's relation:
 | the part | where it is |
 | --- | --- |
 | the views, the catalog of tables and columns | `attachGraph`'s views and its five relations |
-| the column statistics | the footers, read by `parquet_metadata` and `parquet_kv_metadata` |
+| the column statistics | the footers, read by `parquet_metadata`; combined by `graphar_column_stats` |
 | the annotations | the annotation triples of `mapping.ttl`, read by `Mapping.model()` after first paint; names until then |
 | the global id | `@kanzo-tech/graph`'s arithmetic |
 | the RDF view | rudof's `Mapping.triples`, over the mapping the run wrote, built only when rules are checked |
@@ -990,14 +977,14 @@ become a package — and it belongs to whoever that host is, not to fossil.
 | | `corpus/unreadable`, `corpus/not-a-location`, `corpus/duplicate-table`, `corpus/unsupported-format`, `corpus/not-json` | **deleted**: they were the earlier reader's; `attachGraph` throws its own |
 | | `write/invalid-subject`, `write/duplicate-value`, `write/ambiguous-iri`, `write/unrepresentable` | **new** |
 | `@fossil-lang/storage`, `@fossil-lang/codemirror-fossil` | every export | unchanged |
-| `@fossil-lang/wasm` | `program.mapping()`, `write`, `DUCKDB_TYPES` | **new** |
+| `@fossil-lang/wasm` | `program.mapping()`, `write` | **new** |
 | | `ProfileSource.name`; a profile's `SourceProfile`, `ColumnRef.source` and `ProfileFailure.source` | `name` is `location`, and a profile names its sources by `binding` ([profile](/docs/design/profile)) |
-| `fossil_df` | `Executor`, `Output`, `Ran`, `MEMORY`, `RunReport`, `EdgeDrops` | unchanged |
+| `fossil_exec` | `Executor`, `Output`, `Ran`, `MEMORY`, `RunReport`, `EdgeDrops` | unchanged |
 | | `CorpusFile`; `SinkRef::Corpus` in `fossil_mir` | **renamed** `GraphFile` and `SinkRef::Graph`; `MEMORY` is `memory://graph/` |
 | | `write(graph, ctx, storage, dest) -> Result<Written, WriteError>` | `Written.graph` is a `graphar_info::GraphInfo`; `WriteError` has `Unrepresentable`, `Describe` and `Graphar` and no `Json` |
 | | `layout` | crate-private |
-| `fossil_mir::describe` | `describe(schema, natural) -> Result<Mapping, DescribeError>`, `turtle`, `DescribeError`, `Natural` | **new**, moved out of `fossil-df`, where `describe` and `Description` were crate-private |
-| `fossil_df::corpus` | `manifest::*`, `generated::*` | **deleted**, with `corpus.bnf` and `cargo xtask corpus`; the path functions and `DataType` are `graphar-parquet`'s and `graphar-info`'s |
+| `fossil_mir::describe` | `describe(schema, natural) -> Result<Mapping, DescribeError>`, `turtle`, `DescribeError`, `Natural` | **new**, moved out of `fossil-exec`, where `describe` and `Description` were crate-private |
+| `fossil_exec::corpus` | `manifest::*`, `generated::*` | **deleted**, with `corpus.bnf` and `cargo xtask corpus`; the path functions and `DataType` are `graphar-parquet`'s and `graphar-info`'s |
 
 ## What has no owner or no standard
 
@@ -1014,10 +1001,8 @@ Named here rather than hidden:
 6. **The seven-column triples relation** — its column names come from SPARQL 1.1 Results JSON; no
    standard defines a "triples table". rudof owns it: `shacl/src/validator/sql/triples.rs`, `COLUMNS`,
    which `rml::sql` must produce.
-7. **`fossil:stats`** — the slot is Parquet's; the key, the JSON Schema of its value and its version are
-   the writer's, stated above and in [the format](/docs/format).
-8. **Datatypes beyond GraphAr's built-in types** — only in the mapping (D4).
-9. **Paths, chunk names and count files** — GraphAr conventions in its code and not its
+7. **Datatypes beyond GraphAr's built-in types** — only in the mapping (D4).
+8. **Paths, chunk names and count files** — GraphAr conventions in its code and not its
    specification, already inconsistent: the specification names `<label>.vertex.yml` while C++
    `GraphInfo::Dump` writes `.vertex.yaml`.
 
@@ -1084,12 +1069,12 @@ The owner decided D2, D3, D4, D7 and the names; the rest are the recommendation,
 | | decision | what would reverse it |
 | --- | --- | --- |
 | **D1** | The run describes its tables with the **mapping only**, which carries the program's annotations as triples. Shapes and lineage are not emitted; when they are, shapes are generated from `GraphSchema` through rudof, never passed through | The first reader of the program's shapes or lineage; or an annotation reader that cannot take them from the mapping |
-| **D2** | **Column statistics are kept**, counted once at write: Parquet footer `Statistics` (`null_count`, `min`, `max`) plus `key_value_metadata` (distinct count, most common values). kanzo-ui's `readCatalog` and `useFieldStats` read them through `parquet_metadata` and `parquet_kv_metadata` over `graphar_chunks` paths | No reader left; or a Parquet field for each fact, which moves it there |
+| **D2** | **Column statistics are kept**, counted once at write: Parquet footer `Statistics` (`null_count`, `min`, `max`, `distinct_count`), one row group per chunk. kanzo-ui's `readCatalog` and `useFieldStats` read them through `parquet_metadata` over `graphar_chunks` paths | No reader left; or a table-level Parquet field, which moves the distinct count there |
 | **D3** | A multi-valued property is a property of its owner with **`cardinality: set`**; a tagged one has the user-defined element type `langString` (`STRUCT<value, lang>`), declared as `gar/v1 (langString)`. The writer refuses duplicates (`write/duplicate-value`). `list` is rejected. **A known departure:** GraphAr's C++ and Java readers at `06dddb1` do not parse a user-defined type | The C++ and Java readers accepting a struct element, or an upstream tagged-string type merged; for `set`, a consumer for which order is data |
 | **D4** | Datatypes such as `xsd:gYear`, and the annotations, are read from the mapping through rudof's `Mapping.model()`, **deferred after the first paint**; names until then | A first paint the deferred load measurably still hurts |
 | **D5** | The entry is the fixed name `fossil.graph.yml`, and the mapping the fixed name `mapping.ttl` beside it; no pointer in `extra_info`; `RunReport` unchanged | Two graphs under one location |
-| **D6** | `describe` lives in `fossil-mir`, **public**, over the types alone, so a host asks before a run; `layout` lives in `fossil-df`, crate-private, because it reads the data | A column of the mapping that only the layout can name |
-| **D7** | graphar is **published at `0.1.0-alpha.1`**: `graphar-info` and `graphar-parquet` on crates.io, `@kanzo-tech/graphar-duckdb` on npm (`alpha`), and fossil depends on the crates by version. rudof is consumed **from our fork by git `rev`** (a tag when a newer one exists), and `@kanzo-tech/rudof-wasm` on npm | A fossil crate published to crates.io, which cannot depend on a git source: then the fork publishes too |
+| **D6** | `describe` lives in `fossil-mir`, **public**, over the types alone, so a host asks before a run; `layout` lives in `fossil-sinks`, crate-private, because it reads the data | A column of the mapping that only the layout can name |
+| **D7** | graphar is **published at `0.1.0-alpha.1`**: `graphar-info` and `graphar-parquet` on crates.io, `@kanzo-tech/graphar-duckdb` on npm (`alpha`); fossil depends on the crates by git `rev` until a release is on arrow 60 ([the pins](#the-pins-datafusion-main-and-graphar-by-git)). rudof is consumed **from our fork by git `rev`** (a tag when a newer one exists), and `@kanzo-tech/rudof-wasm` on npm | A fossil crate published to crates.io, which cannot depend on a git source: then the fork publishes too |
 | **D8** | `rml` lives in the rudof fork | Upstream rudof declining it while a second consumer appears |
 | **D9** | The editor's wasm is measured in F0 and accepted unless the first paint gets appreciably worse | That measured regression; then the SHACL decode stays out of the editor's module |
 | names | Repository `Kanzo-Tech/graphar`; crates `graphar-info`, `graphar-parquet`; npm `@kanzo-tech/graphar-duckdb`; the graph is named `fossil` | Apache taking the code, under Apache's names |
@@ -1097,7 +1082,6 @@ The owner decided D2, D3, D4, D7 and the names; the rest are the recommendation,
 | global id | `dense_id` is a prefix sum of per-type counts, valid only on contiguous indices: the writer is contiguous, and `attachGraph` refuses a gap as `invalid`. `ordinal`, the position in the document, is ours | A reader that needs global ids in the files; or a use that persists one (then `(type, index)`) |
 | order of shapes | the IRI each shape is known by (a `sh:targetClass`, a ShEx label, a declared class), then shapes with none by their predicate IRIs; a surviving tie is `shape/ambiguous-order`; `sh:order` orders a shape's properties; never the document's order | A standard giving node shapes a normative order |
 | round trip | Statement R: preserved set, admissibility A1–A7, the writer refuses the rest; derived from Sequeda et al., Def. 2, and not quoted | A graph the writer accepts whose image has no recovery |
-| `fossil:stats` | A namespaced, versioned key whose value has the JSON Schema above | A Parquet field for each fact |
 | RML-Core | A Community Group draft, whose one formalisation ignores language tags; kept for the language map | A conformance case or formalisation that disagrees, or R2RML gaining a language map |
 | upstream | Offered to Apache GraphAr **after** fossil runs on graphar | Apache asking for the code before fossil runs on it |
 

@@ -65,7 +65,7 @@
  * also double the interning, double the memory, and answer from a *different*
  * revision than the squiggles the user is looking at, which is the defect it was
  * meant to avoid wearing a different hat. The re-entrancy that made sharing look
- * dangerous is gone at the root: `crates/fossil-wasm`'s position methods
+ * dangerous is gone at the root: `bindings/editor`'s position methods
  * take a SHARED borrow because none of them mutates, and shared borrows nest, so
  * a hover during a live check returns an answer rather than an error. Only
  * `update` takes the exclusive borrow.

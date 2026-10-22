@@ -95,7 +95,7 @@ pub fn reachers(meta: &Value, dependency: &str, edges: Edges) -> BTreeSet<String
 ///
 /// Normal edges only: a dev-dependency is built for a test on the host, never
 /// for wasm32. Counting dev edges put a `DuckDB` host in the gate the day
-/// `fossil-df`'s tests took one.
+/// `fossil-exec`'s tests took one.
 ///
 /// # Panics
 ///

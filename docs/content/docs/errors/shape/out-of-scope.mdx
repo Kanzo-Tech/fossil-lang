@@ -1,0 +1,52 @@
+---
+title: A field an assertion cannot read
+description: "`shape/out-of-scope` — an assertion names a field of its type that its scope does not give it: another field, from a field's assertion, or a field of many values, from the type's."
+---
+
+An assertion reads bare names, and which names depends on where it is written. On a field it reads
+that field's value alone; on a type it reads each field that holds one value. Here the field's
+assertion names a second field:
+
+```fossil
+@iri("https://ex.org/Stay")
+type Stay
+    @iri("https://ex.org/arrival")
+    @assert(arrival <= departure)
+    arrival: Time<Date>
+
+    @iri("https://ex.org/departure")  departure: Option<Time<Date>>
+```
+
+```text
+`departure` is not in scope in an assertion on the field `arrival`
+help: an assertion on a field reads that field's value alone. To relate two fields, assert on the type: `@assert(…)` above `type Stay`
+```
+
+And here the type's assertion names a field of many values:
+
+```fossil
+@iri("https://ex.org/Post")
+@assert(str.length(tags) > 0)
+type Post
+    @iri("https://ex.org/tag")  tags: Seq<String>
+```
+
+```text
+`tags` is not in scope in an assertion on the type `Post`
+help: an assertion on a type reads one value of each field, and `tags` holds many. Assert on the field instead, and each of its values is checked
+```
+
+## Why fossil refuses it
+
+An assertion on a field holds of **each of its values**, so a `Seq<String>` is checked element by
+element. A second field in the same condition would ask which of its values goes with which, and
+there is no answer: the pairing is the node, which is what the type's assertion is over. An
+assertion on a type holds of **each node**, where a field of many values has no one value to compare.
+The rule is SHACL's: `sh:lessThan` is a property shape's, relating two paths of one focus node, and
+`sh:pattern` is checked against each value node ([Types declared in the program](/docs/design/declared)).
+
+## How to repair it
+
+- **Two fields compared**: move the assertion above the `type`. A field that is absent is not
+  checked, so `Option<Time<Date>>` on one side is fine.
+- **Each value of a `Seq` checked**: move the assertion onto the field.

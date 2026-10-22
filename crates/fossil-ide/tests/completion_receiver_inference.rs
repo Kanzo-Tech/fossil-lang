@@ -32,7 +32,7 @@ fn program(db: &mut FossilDb, src: &str) -> SourceFile {
     register_inferred(
         db,
         "users.csv",
-        &[("name", Primitive::String), ("age", Primitive::Integer)],
+        &[("name", Primitive::STRING), ("age", Primitive::Integer)],
     );
     let f = SourceFile::new(&*db, src.to_string(), "receiver.fossil".to_string());
     fossil_hir::documents::register_missing_documents(db, f, &|_, location| {
@@ -81,6 +81,7 @@ User : Person from users
             "lang",
             "length",
             "lower",
+            "matches",
             "replace",
             "slice",
             "slug",
@@ -327,8 +328,8 @@ User : Person from knows
         &mut db,
         "knows.csv",
         &[
-            ("Person.id", Primitive::String),
-            ("Person.id_1", Primitive::String),
+            ("Person.id", Primitive::STRING),
+            ("Person.id_1", Primitive::STRING),
             ("since", Primitive::Integer),
         ],
     );
@@ -359,7 +360,7 @@ User : Person from knows
     name = knows.\"first name\".
 ";
     let mut db = host();
-    register_inferred(&mut db, "knows.csv", &[("first name", Primitive::String)]);
+    register_inferred(&mut db, "knows.csv", &[("first name", Primitive::STRING)]);
     let f = SourceFile::new(&db, SRC.to_string(), "receiver.fossil".to_string());
     let items = fossil_ide::completions(&db, f, 2, after_trailing_dot(SRC, 2));
     let functions = labels(&items, CompletionItemKind::FUNCTION);

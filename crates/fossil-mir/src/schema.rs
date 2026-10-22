@@ -141,7 +141,7 @@ mod tests {
     }
 
     fn string_record<'db>(db: &'db dyn fossil_base::Db, names: &[&str]) -> Ty<'db> {
-        let string_ty = Ty::new(db, TyKind::Primitive(Primitive::String));
+        let string_ty = Ty::new(db, TyKind::Primitive(Primitive::STRING));
         let fields: Vec<RecordField<'db>> = names
             .iter()
             .map(|n| RecordField {
@@ -160,7 +160,7 @@ mod tests {
     fn schema_of_emit_vertex_edge_passthrough() {
         let db = db();
         let row_type = string_record(&db, &["id", "name"]);
-        let string_ty = Ty::new(&db, TyKind::Primitive(Primitive::String));
+        let string_ty = Ty::new(&db, TyKind::Primitive(Primitive::STRING));
         let iri = || Expr::ColRef {
             source: SmolStr::default(),
             column: SmolStr::new_static("iri"),

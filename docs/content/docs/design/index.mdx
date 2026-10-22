@@ -105,11 +105,6 @@ The remaining pages answer the questions that do not fit under a core.
     description="Why the output is an Apache GraphAr graph and its mapping as files, with the graph document written last, rather than a server; one index per type and the global id the reader's; and why write-once/read-many is what makes the whole-program checks available at all."
   />
   <Card
-    href="/docs/design/facts"
-    title="The graph's own facts"
-    description="Every fact of the information files as a relation, and the writer's profile of what it wrote — nulls, distinct values, bounds, commonest values and their frequencies, in each chunk's footer, under Parquet's and pg_stats' names — so a reader guesses nothing the writer knew."
-  />
-  <Card
     href="/docs/design/graphar"
     title="The graph as Apache GraphAr"
     description="A run writes an Apache GraphAr graph and the RML-Core mapping of its tables, together and once. Four owners — graphar, rudof through our fork, fossil, @kanzo-tech/graph — and keasy composing them. The decisions, what would reverse each, and what remains."

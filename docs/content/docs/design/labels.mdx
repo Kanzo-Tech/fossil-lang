@@ -14,7 +14,7 @@ annotation, a predicate and an RDF object** — `// rdfs:label "birth date"@en` 
 a language is an `rdf:langString`**, a lexical form and a BCP 47 tag. The grammar is
 `grammar.bnf, DeclAttrs`, `grammar.bnf, AnnotationAttr` and `grammar.bnf, LANG_STRING`; the
 conformance program is `docs/programs/labels`, run end to end by
-`crates/fossil-df/tests/labels_and_facts.rs`; and this page is why it is shaped as it is and what it
+`crates/fossil-exec/tests/labels.rs`; and this page is why it is shaped as it is and what it
 costs.
 
 ## What an annotation is
@@ -55,12 +55,12 @@ qualifier, and it is still an annotation.
 @annotation("http://www.w3.org/2000/01/rdf-schema#label", "Nobel laureate"@en)
 type Laureate
     @iri("https://schema.org/name")
-    name: Seq<LangString>
+    name: Seq<String<Lang>>
 
     @iri("https://schema.org/birthDate")
     @annotation("http://www.w3.org/2000/01/rdf-schema#label", "birth date"@en)
     @annotation("http://www.w3.org/2000/01/rdf-schema#label", "fecha de nacimiento"@es)
-    birthDate: Date
+    birthDate: Time<Date>
 ```
 
 **`@annotation(predicate, object)`** is ShExC's `// predicate object` in this language's attribute
@@ -104,8 +104,8 @@ for `@iri`; never an implicit context.
 ## Reading one from a shape document
 
 **ShEx.** `shex_ast` parses annotations on a shape and on a triple constraint into its AST
-(`Shape::annotations`, `TripleExpr::TripleConstraint { annotations, … }`), and `fossil_hir::shex`
-walks that AST already (`crates/fossil-hir/src/shex.rs, ShapeBinding`) and drops them. Reading them
+(`Shape::annotations`, `TripleExpr::TripleConstraint { annotations, … }`), and `fossil_shapes::shex`
+walks that AST already (`crates/fossil-shapes/src/shex.rs, ShapeBinding`) and drops them. Reading them
 is carrying them: a shape's onto the type, a triple constraint's onto the property or the relation it
 lowers to. `EachOf` and `OneOf` annotations are not carried, because a group is not a type, a field or a
 relation — and `OneOf` is refused anyway. One finding constrains the
@@ -114,7 +114,7 @@ compiled `SchemaIR` drops every annotation (`cnv_annotations` in `ast2ir.rs` is 
 an empty list), so a decoder written as a `TryFrom` over `SchemaIR` loses them until rudof fills that
 in. The reading stays on the AST.
 
-**SHACL.** `crates/fossil-hir/src/shacl.rs, decode_shacl` reads a shape's triples into the same pair:
+**SHACL.** `crates/fossil-shapes/src/shacl.rs, decode_shacl` reads a shape's triples into the same pair:
 on a property shape, `sh:name` and `sh:description`, SHACL's own two, as `rdfs:label` and `rdfs:comment`; on any shape, every triple whose
 predicate is outside SHACL's namespace and is not `rdf:type` — `rdfs:label`, `rdfs:comment`,
 `skos:prefLabel` — because §2.3.2 says a processor ignores them and ShEx admits any predicate.
@@ -186,19 +186,22 @@ Fossil writes no ShEx today. When a declared type is converted onto rudof's type
 
 ## Language-tagged strings in the data
 
-### The type is `LangString`
+### The type is `String<Lang>`
 
 ShEx and SHACL both write the type as a datatype, `rdf:langString`: ShEx 2.1's own example is
 `ex:IssueShape { rdfs:label rdf:langString }`, with the note that «in RDF 1.1, language-tagged strings
 have the datatype `rdf:langString`»; SHACL writes `sh:datatype rdf:langString` and constrains the tags
-with `sh:languageIn`, §4.4.4, «a list of basic language ranges as per [BCP47]». So the primitive is
-named for that datatype's local name, as `AnyUri` and `GYear` are for theirs: **`LangString`**, the
-tenth primitive of `crates/fossil-graph-schema/src/lib.rs, Primitive`, written as `rdf:langString`.
-`Option`, `Seq` and a bare `LangString` mean what they mean for any primitive; a multilingual name is
-`Seq<LangString>`.
+with `sh:languageIn`, §4.4.4, «a list of basic language ranges as per [BCP47]». Fossil does not
+name its type for that datatype. A language is something a text has, whatever format writes it, so
+the type is the text with its parameter: **`String<Lang>`**, `Primitive::String(Lang::Tagged)` in
+`crates/fossil-graph-schema/src/lib.rs, Primitive`, written as `rdf:langString` at the RDF border
+and nowhere else. It is not a `String`, and a `String` is not one: RDF 1.1 Concepts §3.3 makes
+`xsd:string` and `rdf:langString` disjoint and forbids an empty tag, so a text gains its tag only by a
+call that writes one. `Option`, `Seq` and a bare `String<Lang>` mean what they mean for any primitive;
+a multilingual name is `Seq<String<Lang>>`.
 
 Read from a document: a ShEx `rdf:langString` datatype, or a value set of languages (`[@en @es]`,
-`[@en~]`), is `LangString`; a SHACL `sh:datatype rdf:langString` is too, and `sh:languageIn` becomes
+`[@en~]`), is `String<Lang>`; a SHACL `sh:datatype rdf:langString` is too, and `sh:languageIn` becomes
 the property's `languages`, a list of basic language ranges in the neutral vocabulary
 (`crates/fossil-graph-schema/src/shapes.rs, PropertyConstraint`). ShEx's language stems and SHACL's
 list are one thing: both match by RFC 4647's basic filtering. Today a ShEx `rdf:langString` reads as
@@ -218,7 +221,7 @@ RML adds a tag read per row, §6.5: «A language map is represented by the `rml:
 term map. If present, its value must be a term map. The value generated by the language map is used as
 a language tag on the created term.»
 
-In Fossil both are **one catalogue row, `str.lang(text: String, tag: String) -> LangString`**, reached
+In Fossil both are **one catalogue row, `str.lang(text: String, tag: String) -> String<Lang>`**, reached
 as a member call: `PrizeRow.motivation.lang("en")` is `rr:language`, and
 `NameRow.name.lang(NameRow.lang)` is `rml:languageMap`. A tag is an ordinary argument, so it is a
 constant or a column with no second form, and the verb is a row and not a rule. The name is SPARQL's:
@@ -226,7 +229,7 @@ constant or a column with no second form, and the verb is a row and not a rule. 
 `str.` namespace already is the `STR`. It replaces `core.lang`, which lowered to its first argument
 because there was nowhere to put the second.
 
-**A constant is the literal.** `"Nobel laureate"@en` in an expression is a constant `LangString`, the
+**A constant is the literal.** `"Nobel laureate"@en` in an expression is a constant `String<Lang>`, the
 same token an annotation's object is. `"Nobel laureate".lang("en")` would be a second spelling of it,
 and is refused naming the literal — the rule [`needless-quotes`](/docs/errors/syntax/needless-quotes)
 already applies to a quoted member. An interpolated string takes no tag; its tag is the call's.
@@ -237,7 +240,7 @@ fallback argument; it does not become a second function.
 
 ### The graph: a `langString` property
 
-**A `LangString` property is a property of its owner whose element type is `langString`**, a GraphAr
+**A `String<Lang>` property is a property of its owner whose element type is `langString`**, a GraphAr
 user-defined type: a struct of the value and its `lang`. With `cardinality: set` it is a list of
 them, and a name in several languages is the ordinary case, not the exception — SHACL §2.3.2.1 says
 `sh:name` «should only have one value per language tag» — so a language-tagged property is multi-valued
@@ -267,7 +270,7 @@ admit a state where the values and the tags disagree, are
 
 ### The RDF view
 
-The mapping's triples emit a `LangString` value as `o_type` `L`, `o_value` the lexical form,
+The mapping's triples emit a `String<Lang>` value as `o_type` `L`, `o_value` the lexical form,
 `o_datatype` `rdf:langString` and `o_lang` the row's `lang`
 ([Its RDF meaning, as a mapping](/docs/format/reading/rdf)). In N-Triples that is
 `"Maria Skłodowska-Curie"@pl`. The writer lower-cases the tag it writes (RDF 1.1 Concepts §3.3: the
@@ -280,10 +283,10 @@ lexical forms and lower-cased tags are equal.
 | --- | --- | --- |
 | A constant tag that is not well-formed BCP 47 (RFC 5646 §2.2.9) — `"x"@abcdefghi`, a nine-letter language | checker, with `oxilangtag`, already in the lock through `oxrdf` | [`syntax/invalid-language-tag`](/docs/errors/syntax/invalid-language-tag) |
 | A constant tag outside the shape's `sh:languageIn` or ShEx language set | checker | [`type/language-not-allowed`](/docs/errors/type/language-not-allowed) |
-| A `LangString` field assigned a `String`, or `str.lang` given a non-string | checker | [`type/property-mismatch`](/docs/errors/type/property-mismatch), `type/argument-mismatch` |
+| A `String<Lang>` field assigned a `String`, or `str.lang` given a non-string | checker | [`type/property-mismatch`](/docs/errors/type/property-mismatch), `type/argument-mismatch` |
 | `"x".lang("en")` | checker | [`type/needless-lang`](/docs/errors/type/needless-lang) |
 | A predicate or an `@iri` written as a prefixed name — `"rdfs:label"` | checker | [`syntax/prefixed-iri`](/docs/errors/syntax/prefixed-iri) |
-| A second `@iri` stacked on one type or field | parser | [`syntax/duplicate-iri`](/docs/errors/syntax/duplicate-iri) |
+| A second `@iri` stacked on one type or field | parser | [`syntax/duplicate-attribute`](/docs/errors/syntax/duplicate-attribute) |
 | A per-row tag that is not well-formed, empty or NULL, or outside the shape's languages | the writer, as it lays the graph out | [`write/invalid-language-tag`](/docs/errors/write/invalid-language-tag), [`write/language-not-allowed`](/docs/errors/write/language-not-allowed) |
 | A tagged element repeated in a set, tags compared lower-cased | the writer | [`write/duplicate-value`](/docs/errors/write/duplicate-value) |
 
@@ -307,12 +310,12 @@ rows counted — the way a dropped edge is counted in a run's answer, never in t
 @annotation("http://www.w3.org/2000/01/rdf-schema#label", "galardonado con el Nobel"@es)
 type Laureate
     @iri("https://schema.org/name")
-    name: Seq<LangString>
+    name: Seq<String<Lang>>
 
     @iri("https://schema.org/birthDate")
     @annotation("http://www.w3.org/2000/01/rdf-schema#label", "birth date"@en)
     @annotation("http://www.w3.org/2000/01/rdf-schema#label", "fecha de nacimiento"@es)
-    birthDate: Date
+    birthDate: Time<Date>
 
     @iri("https://nobel.example/vocab/awarded")
     @annotation("http://www.w3.org/2000/01/rdf-schema#label", "awarded"@en)
@@ -321,7 +324,7 @@ type Laureate
 @iri("https://nobel.example/vocab/Prize")
 type Prize
     @iri("https://nobel.example/vocab/category")  category: String
-    @iri("https://nobel.example/vocab/motivation")  motivation: Option<LangString>
+    @iri("https://nobel.example/vocab/motivation")  motivation: Option<String<Lang>>
 
 LaureateRow := io.csv("data/laureate.csv")
 NameRow     := io.csv("data/laureate_name.csv")
@@ -412,8 +415,8 @@ Nobel*, and for Marie Curie the name whose tag matches, *Maria Skłodowska-Curie
 | --- | --- |
 | `fossil-syntax` | `LANG_STRING` in the lexer, the `@` read as the literal's suffix when it touches the quote; `DeclAttrs` — several attributes, stacked or inline — and `@annotation` in the parser; a CST node for each |
 | `fossil-graph-schema` | `Primitive::LangString` and `rdf:langString` in its XSD table both ways; `annotations` on `Shape` and `PropertyConstraint`, and `languages` on `PropertyConstraint`; the wire types `@fossil-lang/types` generates from them |
-| `fossil-hir` | `shex.rs` carries a shape's and a triple constraint's annotations, `rdf:langString` and language value sets; `shacl.rs` reads `sh:name` as an `rdfs:label` annotation and `sh:description` as an `rdfs:comment` one, carries the non-SHACL predicates, `sh:datatype rdf:langString` and `sh:languageIn`; `declared.rs` lowers `@annotation`; the checker types `LangString`, checks a constant tag with `oxilangtag`, refuses a CURIE predicate and `"x".lang("en")`; `fossil-ide` shows a field's annotations on hover |
-| `catalogue.bnf` | one row, `str.lang`, lowered to a two-field struct the writer splits; `LangString` in the type table both profiling hosts read |
-| `fossil-df` | `layout` writes a `LangString` property as a `langString` struct (a list when it is a set), checks the per-row tag and refuses a repeated element; `describe` writes the annotations as triples and the unnesting query of the tagged property |
+| `fossil-hir` | `shex.rs` carries a shape's and a triple constraint's annotations, `rdf:langString` and language value sets; `shacl.rs` reads `sh:name` as an `rdfs:label` annotation and `sh:description` as an `rdfs:comment` one, carries the non-SHACL predicates, `sh:datatype rdf:langString` and `sh:languageIn`; `declared.rs` lowers `@annotation`; the checker types `String<Lang>`, checks a constant tag with `oxilangtag`, refuses a CURIE predicate and `"x".lang("en")`; `fossil-ide` shows a field's annotations on hover |
+| `catalogue.bnf` | one row, `str.lang`, lowered to a two-field struct the writer splits; `String<Lang>` in the type table both profiling hosts read |
+| `fossil-exec` | `layout` writes a `String<Lang>` property as a `langString` struct (a list when it is a set), checks the per-row tag and refuses a repeated element; `describe` writes the annotations as triples and the unnesting query of the tagged property |
 | `codemirror-fossil` | a highlight for the new token, through the legend the wasm ships |
 | kanzo-ui | Ask and `@kanzo-tech/graph` read the labels from `Mapping.model()` and the tags from the struct |

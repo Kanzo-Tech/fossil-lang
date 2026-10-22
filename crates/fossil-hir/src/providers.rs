@@ -11,8 +11,8 @@
 //! the row produced.
 //!
 //! The decoders are this crate's because a shape document becomes a type, and
-//! the type system is here (`/docs/design/incremental`): [`crate::shex`] over
-//! `shex_ast`, [`crate::shacl`] over `shacl`'s parser.
+//! the type system is here (`/docs/design/incremental`): [`fossil_shapes::shex`] over
+//! `shex_ast`, [`fossil_shapes::shacl`] over `shacl`'s parser.
 
 mod generated;
 
@@ -20,8 +20,8 @@ pub use generated::{PROVIDERS, SHACL, SHEX};
 
 use fossil_graph_schema::{OutputShapes, Rejection};
 
-use crate::shacl::decode_shacl;
-use crate::shex::{ShExDescriptor, ShExLoweringError};
+use fossil_shapes::shacl::decode_shacl;
+use fossil_shapes::shex::{ShExDescriptor, ShExLoweringError};
 
 /// Decode a `ShEx` document — the `ShEx` row's `reads_types`.
 ///
@@ -257,7 +257,7 @@ ex:Contact {
         // answer is a bool. The SENTENCE it turns into is
         // `fossil_hir::refusals::decline_extension`, tested there and asserted
         // end-to-end over this very table in
-        // `fossil-df/tests/provider_registry.rs`.
+        // `fossil-exec/tests/provider_registry.rs`.
         assert!(!SHEX.accepts("catalogue.ttl"));
     }
 

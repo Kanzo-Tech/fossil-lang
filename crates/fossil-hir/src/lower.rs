@@ -67,6 +67,11 @@ pub struct HirFile<'db> {
     /// and `tests/invalidation_regression.rs` counts them.
     #[returns(ref)]
     pub declared: fossil_graph_schema::OutputShapes,
+    /// What the declarations constrain beyond their fields' types —
+    /// `@assert` and `@severity` ([`crate::asserts`]), lowered beside
+    /// [`Self::declared`] by the same walk.
+    #[returns(ref)]
+    pub rules: crate::asserts::DeclaredRules,
 }
 
 impl<'db> HirFile<'db> {
@@ -251,7 +256,7 @@ pub enum PropertyKey {
 ///
 /// [`crate::check`]'s `synth_binop` decides the RESULT TYPE (`Integer` unless
 /// an operand is `Float`, except for [`Self::Div`], which is always `Float`),
-/// and `fossil_df::render` decides what the engine computes. Neither can be
+/// and `fossil_exec::render` decides what the engine computes. Neither can be
 /// read off this enum, which is a tag and nothing else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::SalsaValue)]
 pub enum BinOp {
@@ -378,7 +383,7 @@ pub enum HirExpr {
     /// which `DuckDB` builtin or `DataFusion` UDF it becomes is the
     /// materializer's business, resolved from the catalog entry. Arguments are
     /// positional and recursive — `str.slug(str.trim(User.a))` nests.
-    Call { func: SmolStr, args: Vec<HirExpr> },
+    Call { func: SmolStr, args: Vec<Self> },
     /// `buyer = Person(User.email)` — an EDGE: «the `Person` whose identity is
     /// built from this email».
     ///
@@ -412,7 +417,7 @@ pub enum HirExpr {
     /// Arity is checked against the template's hole count
     /// ([`crate::identity::subject_templates`]) and a mismatch is a diagnostic
     /// naming both numbers — the check positional binding gives away free.
-    Edge { target: SmolStr, args: Vec<HirExpr> },
+    Edge { target: SmolStr, args: Vec<Self> },
     /// `18` — an integer literal.
     IntLit(i64),
     /// `0.5` — a float literal, carried as its bits. See [`FloatBits`].
@@ -428,8 +433,8 @@ pub enum HirExpr {
     /// the operator is the only thing that differs.
     BinOp {
         op: BinOp,
-        lhs: Box<HirExpr>,
-        rhs: Box<HirExpr>,
+        lhs: Box<Self>,
+        rhs: Box<Self>,
     },
     /// `-Row.drift`, `not Row.degraded` — L7 (grammar.bnf, `UnaryExpr`).
     ///
@@ -456,16 +461,16 @@ pub enum HirExpr {
     /// still one variant for both operators: two operators of one level, one
     /// node, and the alternative is a node for `-` and a desugaring for `not`,
     /// which is two answers to one question.
-    UnaryOp { op: UnOp, operand: Box<HirExpr> },
+    UnaryOp { op: UnOp, operand: Box<Self> },
     /// `.age >= 18 ? "adult" : "minor"` — the conditional.
     ///
     /// Both branches must have the same type and there is no implicit coercion
     /// (`/docs/design/typing`), which is what makes it a total function of the
     /// row rather than a source of nullable columns.
     Ternary {
-        cond: Box<HirExpr>,
-        then: Box<HirExpr>,
-        otherwise: Box<HirExpr>,
+        cond: Box<Self>,
+        then: Box<Self>,
+        otherwise: Box<Self>,
     },
 }
 
@@ -528,8 +533,16 @@ pub fn lower_to_hir<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> HirF
             _ => {}
         }
     }
-    let declared = crate::declared::lower_declarations(db, dm, &cst.root(db).syntax(), sink);
-    HirFile::new(db, mappings, source_pipes, diagnostics.into_vec(), declared)
+    let (declared, rules) =
+        crate::declared::lower_declarations(db, dm, &cst.root(db).syntax(), &type_names, sink);
+    HirFile::new(
+        db,
+        mappings,
+        source_pipes,
+        diagnostics.into_vec(),
+        declared,
+        rules,
+    )
 }
 
 /// **The provider a binding names, checked against what its POSITION asks of
@@ -2050,7 +2063,7 @@ fn lower_property(
 /// grammar admits has an HIR form, so what reaches the arm is the parser's own
 /// `ERROR` node — but a dropped property is a red build instead of a quiet
 /// hole in the data.
-fn lower_expr(
+pub(crate) fn lower_expr(
     db: &dyn fossil_base::Db,
     sink: &mut Diagnostics,
     expr_node: &fossil_syntax::SyntaxNode,
@@ -2529,7 +2542,7 @@ fn lower_postfix(
             Diagnostic::new(
                 Severity::Error,
                 Problem::UncalledFunction {
-                    function: source.to_string(),
+                    function: source.clone(),
                 },
                 span,
             )

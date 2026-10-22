@@ -35,7 +35,7 @@ fn program() -> (FossilDb, SourceFile) {
             key: "people.csv".into(),
             columns: vec![InferredColumn {
                 name: "name".into(),
-                primitive: Primitive::String,
+                primitive: Primitive::STRING,
             }],
             etag: String::new(),
         },

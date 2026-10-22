@@ -21,11 +21,11 @@
 //! **The disjunct predicates are written out here rather than decoded from a
 //! `ShEx` document, and that is the crate boundary, not a shortcut.** What
 //! crosses out of the decoder is `Rejection::Disjunction` — plain strings — and
-//! the `ShEx`-to-`Rejection` half is `fossil_hir::shex`'s own test. This file owes
+//! the `ShEx`-to-`Rejection` half is `fossil_shapes::shex`'s own test. This file owes
 //! the half after it: renderer → `suggestion_source` → code action → an edited
 //! document that still compiles. Reaching for a `ShExDescriptor` here would
 //! test the decoder twice and this boundary not at all, which is why this
-//! file names no `fossil_hir::shex` type.
+//! file names no `fossil_shapes::shex` type.
 
 // The split snippet + IRI templates are LITERAL Fossil source, not Rust
 // format-string args.
@@ -153,7 +153,7 @@ Contact : Contact from contacts
     // The two disjuncts of an `ex:Contact` `OneOf` over (`ex:email` | `ex:phone`),
     // in the vocabulary the checker actually hands the renderer: a
     // `Rejection::Disjunction` carries each branch's predicate IRIs and nothing
-    // `ShEx`-typed. `fossil_hir::shex` builds these in `rejection_of`; that lowering
+    // `ShEx`-typed. `fossil_shapes::shex` builds these in `rejection_of`; that lowering
     // is its own crate's test, and what this file owes is the half after it.
     let disjuncts = vec![
         vec!["http://example.org/email".to_string()],

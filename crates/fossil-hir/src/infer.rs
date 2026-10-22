@@ -480,7 +480,7 @@ fn apply_source_op<'db>(
         }
         // The one verb whose two inputs must agree rather than combine.
         // `Op::Union`'s schema rule is `left`, asserted equal to `right`, and
-        // `fossil-df` unions BY POSITION — so equal names in equal order with
+        // `fossil-exec` unions BY POSITION — so equal names in equal order with
         // equal types is not a stricter rule than the backend's, it is the
         // backend's rule stated where a user can be told about it.
         HirSourceOp::Union { right } => {
@@ -749,7 +749,7 @@ enum ConditionSide {
 ///
 /// # Why here and not one layer down
 ///
-/// `fossil_df::plan::join_equalities` enforces the same rule, and refuses a
+/// `fossil_exec::plan::join_equalities` enforces the same rule, and refuses a
 /// malformed condition with a `DataFusionError::Plan` at run time — late, and
 /// with no span, because by then the author's text is gone. The engine keeps
 /// its copy as a backstop: a MIR reaching it need not have come through this
@@ -882,7 +882,7 @@ fn check_join_condition<'db>(
 /// condition is taken apart by; everything else is a leaf for
 /// [`check_join_condition`] to admit or refuse.
 ///
-/// `fossil_df::plan::conjuncts` is the same function over `fossil_mir::Expr`,
+/// `fossil_exec::plan::conjuncts` is the same function over `fossil_mir::Expr`,
 /// and the two cannot be one: the HIR is where the author's names still are, and
 /// this crate is below the one that owns the MIR.
 fn conjuncts(on: &crate::lower::HirExpr) -> Vec<&crate::lower::HirExpr> {
@@ -992,11 +992,11 @@ fn pipe_error(
 /// **unsatisfiable**. And a type error is not informational — it taints
 /// `typecheck_mapping`, which poisons `lower_to_mir_pg`, which fails the run.
 ///
-/// Nothing downstream of the writer depends on it: `fossil_df` derives the
-/// physical column with `inner_primitive(...).unwrap_or(Primitive::String)`,
+/// Nothing downstream of the writer depends on it: `fossil_exec` derives the
+/// physical column with `inner_primitive(...).unwrap_or(Primitive::STRING)`,
 /// and a reference has no inner primitive, so the column is `string`. What it
 /// buys is that the checker can tell an edge column from a text column — the
-/// same argument the `AnyUri` row of
+/// same argument the `Uri` row of
 /// `a_shape_becomes_a_source_row_of_subject_plus_one_column_per_constraint`
 /// makes for opaque IRIs.
 ///
@@ -1020,7 +1020,7 @@ pub(crate) fn record_from_shape<'db>(db: &'db dyn fossil_base::Db, shape: &Shape
         let ty = if c.targets.is_empty() {
             Ty::new(
                 db,
-                TyKind::Primitive(c.datatype().unwrap_or(Primitive::String)),
+                TyKind::Primitive(c.datatype().unwrap_or(Primitive::STRING)),
             )
         } else {
             Ty::reference(db, c.targets.iter().map(SmolStr::from))
@@ -1232,12 +1232,12 @@ mod tests {
         fossil_base::test_support::register_inferred(
             &mut db,
             "l.csv",
-            &[("id", Primitive::Integer), ("k", Primitive::String)],
+            &[("id", Primitive::Integer), ("k", Primitive::STRING)],
         );
         fossil_base::test_support::register_inferred(
             &mut db,
             "r.csv",
-            &[("id", Primitive::String), ("k", Primitive::String)],
+            &[("id", Primitive::STRING), ("k", Primitive::STRING)],
         );
         let file = fossil_base::SourceFile::new(
             &db,
@@ -1249,7 +1249,7 @@ mod tests {
         );
         assert_eq!(
             scope_text(&db, file),
-            "Left{id,k} + Right{id,k} | Left.id=Primitive(Integer) Right.id=Primitive(String) \
+            "Left{id,k} + Right{id,k} | Left.id=Primitive(Integer) Right.id=Primitive(String(Untagged)) \
              flat=Some([\"id\", \"k\", \"id\", \"k\"])",
             "each side answers with its OWN `id`; the flat row still holds both, \
              which is why a qualified reference must never go through it"
@@ -1266,7 +1266,7 @@ mod tests {
             key: "users.csv".into(),
             columns: vec![fossil_base::sources::InferredColumn {
                 name: "born".into(),
-                primitive: Primitive::GYear,
+                primitive: Primitive::YEAR,
             }],
             etag: String::new(),
         };
@@ -1275,7 +1275,7 @@ mod tests {
         };
         assert_eq!(
             rec.fields(&db)[0].ty.kind(&db),
-            &TyKind::Primitive(Primitive::GYear),
+            &TyKind::Primitive(Primitive::YEAR),
             "the host's primitive arrives typed, with no name table in between"
         );
     }
@@ -1289,10 +1289,10 @@ mod tests {
     /// | `xsd:integer` (in lattice)      | Integer     |
     /// | an xsd type outside the lattice | String      |
     /// | `@<Shape>` (an edge)            | a reference |
-    /// | `nodeKind IRI` (opaque IRI)     | `AnyUri`    |
+    /// | `nodeKind IRI` (opaque IRI)     | `Uri`    |
     ///
-    /// An opaque IRI column is `Some(Primitive::AnyUri)` with no targets, and
-    /// `AnyUri` is in the lattice. The writer stores both IRI kinds as a
+    /// An opaque IRI column is `Some(Primitive::Uri)` with no targets, and
+    /// `Uri` is in the lattice. The writer stores both IRI kinds as a
     /// `string` column; what the types buy is that the checker can tell an IRI
     /// column from a text column.
     ///
@@ -1310,7 +1310,7 @@ mod tests {
             |predicate: &str, datatype: Option<Primitive>, targets: &[&str]| PropertyConstraint {
                 name: fossil_graph_schema::local_name(predicate).to_string(),
                 predicate: predicate.to_string(),
-                term: datatype.map(|p: Primitive| Term::Literal(Some(p.into()))),
+                term: datatype.map(Term::of),
                 targets: targets.iter().map(|t| (*t).to_string()).collect(),
                 occurs: Occurs::ONE,
                 // A test fixture, not a document: no text to point into.
@@ -1328,7 +1328,7 @@ mod tests {
                     None,
                     &["https://example.org/Storey"],
                 ),
-                constraint("https://example.org/seeAlso", Some(Primitive::AnyUri), &[]),
+                constraint("https://example.org/seeAlso", Some(Primitive::Uri), &[]),
             ],
             span: None,
             annotations: Vec::new(),
@@ -1354,7 +1354,7 @@ mod tests {
                 ),
                 ("len", &TyKind::Primitive(Primitive::Integer)),
                 // The document narrowed nothing: the permissive column.
-                ("note", &TyKind::Primitive(Primitive::String)),
+                ("note", &TyKind::Primitive(Primitive::STRING)),
                 // An edge's source-side value is the referenced subject, and it
                 // names WHICH shape — the same set `expected_value_ty` builds
                 // for the same predicate on the way out, so the two agree by
@@ -1364,7 +1364,7 @@ mod tests {
                     &TyKind::Ref(vec![SmolStr::new_static("https://example.org/Storey")]),
                 ),
                 // An opaque IRI: in the lattice, and not a reference.
-                ("seeAlso", &TyKind::Primitive(Primitive::AnyUri)),
+                ("seeAlso", &TyKind::Primitive(Primitive::Uri)),
             ],
             "field names are predicate local names, in declaration order"
         );

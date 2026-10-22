@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# build-wasm.sh — Build packages/executor/pkg/ from crates/fossil-df-wasm/.
+# build-wasm.sh — Build packages/executor/pkg/ from bindings/executor/.
 #
 # The DataFusion executor (datafusion + arrow + parquet-rs). SEPARATE artefact
 # from @fossil-lang/wasm (the LSP shim) so it lazy-loads only when running a job.
 #
-# Pinned tooling: Rust 1.90 (rust-toolchain.toml), wasm-bindgen-cli 0.2.120.
+# Pinned tooling: Rust 1.95 (rust-toolchain.toml), wasm-bindgen-cli 0.2.120.
 #
-# zstd-C: datafusion 54 hardcodes arrow-ipc["zstd"], so the wasm32 build needs a
+# zstd-C: datafusion hardcodes arrow-ipc["zstd"], so the wasm32 build needs a
 # wasm-capable clang (Apple's lacks the target). Set CC_wasm32_unknown_unknown /
 # AR_wasm32_unknown_unknown to an LLVM (brew install llvm). CI must install LLVM.
 #

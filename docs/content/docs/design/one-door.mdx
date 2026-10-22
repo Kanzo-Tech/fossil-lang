@@ -22,7 +22,7 @@ refuses a graph whose indices have a gap before any view is made, and attaches t
 engine as the catalog it is given: one view per vertex type and per edge type, and the information
 files as five relations — `graphar_vertex_types`, `graphar_edge_types`, `graphar_properties`,
 `graphar_extra_info` and `graphar_chunks`. The `GraphAttachment` it answers detaches the catalog.
-What every relation carries is [the graph's own facts](/docs/design/facts); a graph a run answered in
+What each relation carries is in [the graph as Apache GraphAr](/docs/design/graphar); a graph a run answered in
 memory is attached the same way once its files are registered with the engine
 ([A run off the page](/docs/design/off-the-page)); the credential is `@fossil-lang/storage`'s `mount`,
 which the host calls. The contract is [the graph](/docs/design/graph) and Apache GraphAr's; the
@@ -71,7 +71,7 @@ manifest a TypeScript parse and a read one statement; the second took the reader
 `Filter` away, because they were a second query language over the engine every view already spoke SQL
 to. Now the information files are parsed once, by `attachGraph`, into the catalog's relations, and
 nothing else restates them. Writing is held to the same rule: one writer,
-`crates/fossil-df/src/write.rs, write`, and one host that calls it, the wasm executor, in a browser and
+`crates/fossil-sinks/src/graphar/write.rs, write`, and one host that calls it, the wasm executor, in a browser and
 in Node.
 
 The same pattern is expected elsewhere, so the rule obliges an audit rather than a fix to this one

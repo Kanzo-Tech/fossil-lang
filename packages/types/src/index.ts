@@ -1,7 +1,7 @@
 // The public surface: the host contract, the engine, the error, the wire rows and `referenceTo`.
 // What siblings share and a host never calls is `./internal`, with no semver promise.
 export type { Host, HostCall } from './host.js';
-export type { GraphFile, Engine, Table, Vector } from './engine.js';
+export type { DataType, Engine, Field, GraphFile, ProfileAnswer, Table, Vector } from './engine.js';
 export type { Diagnostic } from './diagnostic.js';
 export type { Profiled, UndescribedSource } from './profiled.js';
 export type {

@@ -146,7 +146,7 @@ export interface LinterOptions {
    * scheduling again, so no two checks overlap no matter how fast anyone types —
    * which is what a host used to do by hand with a `setTimeout` and a
    * `busy` flag to stay clear of a wasm re-entrancy defect. That defect is fixed
-   * in `crates/fossil-wasm` now, but the scheduling was always the right shape for
+   * in `bindings/editor` now, but the scheduling was always the right shape for
    * an editor: an LSP client coalesces `didChange` rather than emitting one
    * notification per keystroke. Putting it here means a host cannot forget it.
    *

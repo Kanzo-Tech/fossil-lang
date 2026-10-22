@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# build-wasm.sh — Build packages/wasm/pkg/ from crates/fossil-wasm/.
+# build-wasm.sh — Build packages/wasm/pkg/ from bindings/editor/.
 #
 # Pinned tooling (CLAUDE.md):
-#   Rust toolchain: 1.90 (from rust-toolchain.toml at repo root)
+#   Rust toolchain: 1.95 (from rust-toolchain.toml at repo root)
 #   wasm-bindgen-cli: 0.2.120 (matches lib version pinned in workspace Cargo.toml)
 #
 # Output: packages/wasm/pkg/

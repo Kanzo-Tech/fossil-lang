@@ -39,9 +39,10 @@
 //! - **`MAX_REEXECUTIONS`.** `fossil-hir`'s total-cascade bound is its own
 //!   number over its own query set and is not restated here. This is about one
 //!   query's fan-out.
-//! - **Anything about `apply_output_shape` or `schema_of`.** They are not in the
-//!   loop. `src/schema.rs`'s claim that its queries do not affect the fan-out
-//!   remains prose.
+//! - **Anything about `schema_of`.** It is not in the loop. `src/schema.rs`'s
+//!   claim that its queries do not affect the fan-out remains prose. Every
+//!   lowering reads `graph_type`, which a body edit leaves as it was, so it is
+//!   in the loop and the count below holds it there.
 //! - **That the editor is fast.** A fan-out of 1 over a re-lowering that got
 //!   ten times slower per mapping measures the same here.
 

@@ -7,7 +7,7 @@ import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { fileURLToPath } from 'node:url';
 import { readFile } from 'node:fs/promises';
 import { initFossilWasm, open, type FossilProgram } from '../src/index.js';
-import { describingEngine, recordingHost } from './host.js';
+import { ARROW, describingEngine, recordingHost } from './host.js';
 
 beforeAll(async () => {
   const wasmPath = fileURLToPath(new URL('../pkg/fossil_wasm_bg.wasm', import.meta.url));
@@ -43,10 +43,10 @@ User : Person from users
 afterEach(() => vi.unstubAllGlobals());
 
 /** `users.csv` as DuckDB describes it: both columns text. */
-const USERS = describingEngine([
-  { column_name: 'id', column_type: 'VARCHAR' },
-  { column_name: 'name', column_type: 'VARCHAR' },
-]);
+const USERS = describingEngine({
+  id: ARROW.utf8,
+  name: ARROW.utf8,
+});
 const TYPES = { depth: 'types' } as const;
 
 describe('open', () => {
@@ -85,10 +85,10 @@ describe('open', () => {
       expect(program.hover(line, character)).toBeNull();
       program.update(PROGRAM);
       // `name` as the shape types it, so the expression types and hover has a type to show.
-      const typed = describingEngine([
-        { column_name: 'id', column_type: 'VARCHAR' },
-        { column_name: 'name', column_type: 'BIGINT' },
-      ]);
+      const typed = describingEngine({
+        id: ARROW.utf8,
+        name: ARROW.int64,
+      });
       await program.describe({ engine: typed, options: TYPES });
       expect(program.hover(line, character)).not.toBeNull();
       expect(program.completion(line, character).length).toBeGreaterThan(0);
@@ -169,7 +169,7 @@ describe('open, when a source cannot be described', () => {
     const { host } = recordingHost(SHAPE);
     const program = await open('prog.fossil', { host, text: PROGRAM });
     try {
-      const unreadable = describingEngine([], new Error('CORS / unreachable'));
+      const unreadable = describingEngine({}, new Error('CORS / unreachable'));
       const { undescribed } = await program.describe({ engine: unreadable, options: TYPES });
       expect(undescribed.map((u) => [u.source.key, u.problem.code])).toEqual([['@lake/users.csv', 'engine/failed']]);
       const rows = (await program.diagnostics()).filter((r) => r.code === 'engine/failed');

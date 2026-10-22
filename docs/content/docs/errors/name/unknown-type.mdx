@@ -4,7 +4,7 @@ description: "`name/unknown-type` — a declared field's type names neither a pr
 ---
 
 A field of a declared type is written in the names the checker prints: a primitive — `String`,
-`Integer`, `Float`, `Bool`, `Date`, `DateTime`, `Time`, `GYear`, `AnyUri` — or one of `Option`, `Seq`
+`String<Lang>`, `Integer`, `Float`, `Bool`, `Time<Year>`, `Time<Date>`, `Time<DateTime>`, `Time<Hour>`, `Uri` — or one of `Option`, `Seq`
 and `Ref`. Anything else names no type:
 
 ```fossil
@@ -14,7 +14,7 @@ type Person
 ```
 
 ```text
-`Strng` is not a type a field can have — it is one of `String`, `Integer`, `Float`, `Bool`, `Date`, `DateTime`, `Time`, `GYear`, `AnyUri`, `Option`, `Seq`, `Ref`
+`Strng` is not a type a field can have — it is one of `String`, `String<Lang>`, `Integer`, `Float`, `Bool`, `Time<Year>`, `Time<Date>`, `Time<DateTime>`, `Time<Hour>`, `Uri`, `Option`, `Seq`, `Ref`
 help: did you mean `String`?
 ```
 
@@ -35,5 +35,5 @@ node of it is `Ref<City>`, and the bare name is refused as
 ## How to repair it
 
 - **The name is misspelt.** The `help` suggests the nearest one.
-- **The value is a number with a fraction, a date, a year.** Each has its primitive: `Float`, `Date`,
-  `GYear`.
+- **The value is a number with a fraction, a date, a year.** Each has its primitive: `Float`, `Time<Date>`,
+  `Time<Year>`.

@@ -62,7 +62,7 @@ fn field_names(db: &FossilDb, file: SourceFile) -> Vec<String> {
 fn a_descriptor_registered_under_the_uri_reaches_the_binding_that_names_it() {
     let (db, file) = db_with(vec![descriptor(
         "data/users.csv",
-        &[("id", Primitive::Integer), ("name", Primitive::String)],
+        &[("id", Primitive::Integer), ("name", Primitive::STRING)],
     )]);
     assert_eq!(field_names(&db, file), ["id", "name"]);
 }
@@ -102,7 +102,7 @@ fn re_registering_a_uri_changes_what_the_checker_sees() {
         &mut db,
         descriptor(
             "data/users.csv",
-            &[("id", Primitive::Integer), ("email", Primitive::String)],
+            &[("id", Primitive::Integer), ("email", Primitive::STRING)],
         ),
     );
     assert_eq!(field_names(&db, file), ["id", "email"]);
@@ -131,7 +131,7 @@ fn describing_a_source_after_a_check_re_runs_the_check() {
         &mut db,
         descriptor(
             "data/users.csv",
-            &[("id", Primitive::Integer), ("name", Primitive::String)],
+            &[("id", Primitive::Integer), ("name", Primitive::STRING)],
         ),
     );
     assert!(

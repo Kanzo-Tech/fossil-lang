@@ -8,11 +8,11 @@
 //! # What it does NOT prove
 //!
 //! - **That a run writes what the declaration says.** That is the conformance
-//!   program `docs/programs/declared`, executed by `fossil-df`'s
+//!   program `docs/programs/declared`, executed by `fossil-exec`'s
 //!   `tests/programs.rs` and read back with `DuckDB`.
 //! - **That the decoder of a real `ShEx` document names its shapes as the line
 //!   decoder here does.** Both write the shape's full IRI and the import reads
-//!   its last segment; `fossil_hir::shex`'s own tests hold the IRIs it writes.
+//!   its last segment; `fossil_shapes::shex`'s own tests hold the IRIs it writes.
 
 use fossil_base::test_support::{db_with_document, register_inferred};
 use fossil_base::{Diagnostic, FossilDb, SourceFile};
@@ -33,8 +33,8 @@ shape https://other.example/Tag
 
 const COLUMNS: &[(&str, Primitive)] = &[
     ("id", Primitive::Integer),
-    ("name", Primitive::String),
-    ("nick", Primitive::String),
+    ("name", Primitive::STRING),
+    ("nick", Primitive::STRING),
     ("city", Primitive::Integer),
 ];
 
@@ -142,7 +142,7 @@ fn a_declared_type_lowers_to_the_shape_vocabulary() {
             )
         })
         .collect();
-    let string = Term::Literal(Some(Primitive::String.into()));
+    let string = Term::of(Primitive::STRING);
     assert_eq!(
         fields,
         [

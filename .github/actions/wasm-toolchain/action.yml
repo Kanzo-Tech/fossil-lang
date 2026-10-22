@@ -1,6 +1,6 @@
 name: wasm toolchain
 description: >
-  What `build:wasm` needs, pinned once: Rust 1.90 with wasm32, the cargo cache,
+  What `build:wasm` needs, pinned once: Rust 1.95 with wasm32, the cargo cache,
   wasm-bindgen-cli at the exact `wasm-bindgen` pin, wasm-opt from binaryen 116,
   and a wasm-capable clang for the zstd-sys C build datafusion pulls in.
 runs:
@@ -8,7 +8,7 @@ runs:
   steps:
     - uses: dtolnay/rust-toolchain@stable
       with:
-        toolchain: 1.90.0
+        toolchain: 1.95.0
         targets: wasm32-unknown-unknown
     # Without the cache every run rebuilds datafusion for wasm32 from scratch.
     - uses: Swatinem/rust-cache@v2
