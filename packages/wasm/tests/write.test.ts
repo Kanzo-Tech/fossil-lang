@@ -18,7 +18,7 @@ const MODEL: Model = {
   sources: [
     { name: 'laureates', format: 'csv', reference: 'laureates.csv' },
     { name: 'institutions', format: 'csv', reference: 'institutions.csv' },
-    { name: 'affiliations', format: 'csv', reference: 'affiliations.csv', delimiter: '|' },
+    { name: 'affiliations', format: 'csv', reference: 'affiliations.csv', option: '|' },
   ],
   types: [
     {

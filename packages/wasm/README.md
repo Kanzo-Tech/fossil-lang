@@ -23,6 +23,10 @@ artefacts. Every door boots the module itself:
 - `program.mapping()` — the RML-Core mapping the program's types describe, as Turtle, before any
   run: what `mapping.ttl` is, from the types the program declares and imports, with nothing read.
   rudof's `Mapping.parse` reads it, and `Mapping.model()` is the pre-run shape of the graph.
+- `infer(profile, { choices })` — the `Model` a `Profile` implies: a source with a key a type, an
+  inclusion on a key a relation, a keyless source between two types a link file. What the profile
+  cannot settle comes back as `ambiguities`, each standing at an option; `choices` answers them by
+  `id`.
 - `write(model, { base })` — the program a `Model` implies: what a host decided a graph holds (the
   sources, the types over them with each field's column, and the relations between them), written
   as Fossil in one canonical layout, every IRI under `base`. The same model writes the same text,

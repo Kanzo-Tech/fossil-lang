@@ -30,6 +30,10 @@ fossil-mir = { path = "../fossil-mir" }
 # `str.*` because `name` is a `Primitive::STRING`. It is already in the wasm
 # closure through fossil-hir, which speaks it too.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
+# `model::infer` reads a `Profile` — its sources, candidate keys and
+# inclusions — into the model `write` makes a program of. Sans-IO and in the
+# wasm closure already, through fossil-wasm.
+fossil-profile = { path = "../fossil-profile" }
 # goto-def + completion consume the stdlib classification catalog, which is
 # WASM-clean, so fossil-ide stays WASM-clean. Names resolve through
 # `fossil_hir::def_map`; this crate keeps no index of its own.

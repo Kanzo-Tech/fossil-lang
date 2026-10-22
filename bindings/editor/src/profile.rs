@@ -139,3 +139,23 @@ pub fn write(
     let model: fossil_ide::model::Model = argument("model", "a Model", model)?;
     Ok(fossil_ide::model::write(&model, base))
 }
+
+/// The model `profile` implies, at `choices` — each ambiguity's id to the option taken
+/// (`fossil_ide::model::infer`).
+///
+/// # Errors
+///
+/// `api/invalid-argument` when `profile` is not a `Profile` or `choices` not a record of text.
+#[wasm_bindgen(unchecked_return_type = "Inferred")]
+pub fn infer(
+    #[wasm_bindgen(unchecked_param_type = "Profile")] profile: JsValue,
+    #[wasm_bindgen(unchecked_param_type = "Record<string, string>")] choices: JsValue,
+) -> Result<JsValue, JsValue> {
+    let profile: fossil_profile::Profile = argument("profile", "a Profile", profile)?;
+    let choices: std::collections::HashMap<String, String> =
+        argument("choices", "a record of text", choices)?;
+    to_value(
+        "the inferred model",
+        &fossil_ide::model::infer(&profile, &choices),
+    )
+}
