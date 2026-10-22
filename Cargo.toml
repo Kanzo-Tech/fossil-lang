@@ -97,6 +97,11 @@ bytes = "1"
 # tree either, and pure Rust.
 csv-core = "0.1"
 
+# The Arrow types alone, for the crates that read a column's type and run
+# nothing: `fossil-profile` reads what an engine answers a source as. The same
+# release `datafusion` re-exports, so one `DataType` crosses between them.
+arrow-schema = { version = "58", default-features = false }
+
 # === The engine: DataFusion, in `fossil-exec` and the sinks of `fossil-sinks` ===
 # `default-features = false` drops datafusion's `sql` frontend (we build plans
 # via the DataFrame/LogicalPlan API, not `ctx.sql()`) and its own `compression`

@@ -27,7 +27,7 @@ prose.
 
 **There is no native write host** ([discarded](/docs/design/discarded#the-tooling) says why and what
 brings one back). The one host that writes is `fossil-df-wasm`, in a browser tab or in Node, so the
-compiler and the write path are both the wasm32 build and neither links a database. **DuckDB is still the engine that `DESCRIBE`s**: as DuckDB-WASM
+compiler and the write path are both the wasm32 build and neither links a database. **DuckDB is still the engine that profiles a source**: as DuckDB-WASM
 in a browser editor, and natively only under a test.
 
 ## How DataFusion reaches storage

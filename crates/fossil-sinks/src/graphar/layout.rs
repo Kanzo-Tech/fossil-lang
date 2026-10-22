@@ -38,7 +38,7 @@ use datafusion::arrow::array::{
 use datafusion::arrow::buffer::{NullBuffer, OffsetBuffer};
 use datafusion::arrow::compute::{CastOptions, cast_with_options, concat, kernels::numeric::sub};
 use datafusion::arrow::datatypes::{
-    DataType, Field, Fields, Int64Type, Schema, TimeUnit, UInt64Type,
+    DataType, Field, Fields, Int64Type, Schema, TimeUnit, TimestampMillisecondType, UInt64Type,
 };
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::arrow::util::display::array_value_to_string;
@@ -286,18 +286,36 @@ fn subjects(graph: &Graph) -> Result<Vec<StringArray>, WriteError> {
 
 // ─────────────────────────────────────────────────────────────────── vertices
 
-/// What an empty column of `primitive` is stored as — the type of a column with
-/// no row to read it from. A column with rows is stored as its values are.
-fn empty_type(primitive: Primitive) -> DataType {
+/// The one `GraphAr` type a property of `primitive` is stored as, whatever type
+/// the source handed the run: a graph's schema is its program's, and does not
+/// change with the files it was built from. `time` is a `string` because the
+/// reference readers refuse `GraphAr`'s `time` (`graphar-parquet`'s `holds`),
+/// and the mapping states `xsd:time` over it.
+pub(crate) fn stored_type(primitive: Primitive) -> Stored {
     match primitive {
-        Primitive::Integer => DataType::Int64,
-        Primitive::YEAR => DataType::Int32,
-        Primitive::Float => DataType::Float64,
-        Primitive::Bool => DataType::Boolean,
-        Primitive::DATE => DataType::Date32,
-        Primitive::DATE_TIME => DataType::Timestamp(TimeUnit::Millisecond, None),
-        Primitive::LANG_STRING => lang_string(),
-        Primitive::STRING | Primitive::HOUR | Primitive::Uri => DataType::Utf8,
+        Primitive::Integer => Stored::Int64,
+        Primitive::YEAR => Stored::Int32,
+        Primitive::Float => Stored::Double,
+        Primitive::Bool => Stored::Bool,
+        Primitive::DATE => Stored::Date,
+        Primitive::DATE_TIME => Stored::Timestamp,
+        Primitive::LANG_STRING => Stored::UserDefined(LANG_STRING.to_string()),
+        Primitive::STRING | Primitive::HOUR | Primitive::Uri => Stored::String,
+    }
+}
+
+/// The Arrow type a column of `primitive` is written as: [`stored_type`]'s, a
+/// `timestamp` in milliseconds and without a zone, as C++ writes it.
+fn arrow_type(primitive: Primitive) -> DataType {
+    match stored_type(primitive) {
+        Stored::Int64 => DataType::Int64,
+        Stored::Int32 => DataType::Int32,
+        Stored::Double => DataType::Float64,
+        Stored::Bool => DataType::Boolean,
+        Stored::Date => DataType::Date32,
+        Stored::Timestamp => DataType::Timestamp(TimeUnit::Millisecond, None),
+        Stored::UserDefined(_) => lang_string(),
+        _ => DataType::Utf8,
     }
 }
 
@@ -330,7 +348,7 @@ fn vertex(
             node.properties
                 .iter()
                 .filter(|p| p.cardinality == Cardinality::Single)
-                .map(|p| (p.name.clone(), empty_type(p.datatype)))
+                .map(|p| (p.name.clone(), arrow_type(p.datatype)))
                 .collect()
         },
         |first| {
@@ -346,13 +364,21 @@ fn vertex(
     for (name, arrow) in singles {
         let declared = node.properties.iter().find(|p| p.name == name);
         let array = gather(batches, |b| b.column_by_name(&name).cloned(), &arrow)?;
-        if let Some(xsd) = text_of(array.data_type()) {
+        let source = array.data_type().clone();
+        let (data_type, array) = match (array.data_type(), declared) {
+            (DataType::Struct(_), _) => tagged(&name, declared, &array)?,
+            (_, Some(declared)) => stored(&format!("{label}.{name}"), declared.datatype, &array)?,
+            (_, None) => {
+                return Err(WriteError::Internal(format!(
+                    "`{label}.{name}` is a column the type does not declare"
+                )));
+            }
+        };
+        if data_type == Stored::String
+            && let Some(xsd) = text_of(&source)
+        {
             natural.insert(name.clone(), xsd);
         }
-        let (data_type, array) = match array.data_type() {
-            DataType::Struct(_) => tagged(&name, declared, &array)?,
-            _ => stored(&format!("{label}.{name}"), &array)?,
-        };
         columns.push((
             Property {
                 name,
@@ -556,7 +582,7 @@ fn set(
         &if is_tagged {
             DataType::Utf8
         } else {
-            empty_type(declared.datatype)
+            arrow_type(declared.datatype)
         },
     )?;
 
@@ -582,7 +608,9 @@ fn set(
         )));
     }
 
-    let natural = text_of(elements.data_type());
+    let natural = (stored_type(declared.datatype) == Stored::String)
+        .then(|| text_of(elements.data_type()))
+        .flatten();
     let (data_type, elements) = if is_tagged {
         let form = exact(&elements, &DataType::Utf8)?;
         let lang = gather(
@@ -611,7 +639,7 @@ fn set(
             )?) as ArrayRef,
         )
     } else {
-        let (data_type, array) = stored(&at, &elements)?;
+        let (data_type, array) = stored(&at, declared.datatype, &elements)?;
         distinct(&at, &offsets, |i| array_value_to_string(&array, i).ok())?;
         (data_type, array)
     };
@@ -684,7 +712,7 @@ fn distinct(
 ///   without a tagged property stays within what the reference readers parse.
 ///
 /// `at` names the property for the refusal.
-fn stored(at: &str, array: &ArrayRef) -> Result<(Stored, ArrayRef), WriteError> {
+fn held(at: &str, array: &ArrayRef) -> Result<(Stored, ArrayRef), WriteError> {
     let unrepresentable = |value: String| WriteError::Unrepresentable {
         property: at.to_string(),
         datatype: array.data_type().to_string(),
@@ -730,12 +758,20 @@ fn stored(at: &str, array: &ArrayRef) -> Result<(Stored, ArrayRef), WriteError> 
                     ));
                 }
             }
+            // The instant, without its zone: `timestamp` is milliseconds
+            // since the epoch, and C++ writes it without one.
+            let millis = exact(
+                array,
+                &DataType::Timestamp(TimeUnit::Millisecond, zone.clone()),
+            )?;
             (
                 Stored::Timestamp,
-                exact(
-                    array,
-                    &DataType::Timestamp(TimeUnit::Millisecond, zone.clone()),
-                )?,
+                Arc::new(
+                    millis
+                        .as_primitive::<TimestampMillisecondType>()
+                        .clone()
+                        .with_timezone_opt(None::<String>),
+                ),
             )
         }
         DataType::Time32(_)
@@ -768,10 +804,39 @@ fn stored(at: &str, array: &ArrayRef) -> Result<(Stored, ArrayRef), WriteError> 
         }
         DataType::Dictionary(_, values) => {
             let plain = exact(array, values)?;
-            return stored(at, &plain);
+            return held(at, &plain);
         }
         _ => return Err(unrepresentable(String::new())),
     })
+}
+
+/// A column of `primitive`, as [`stored_type`] stores it. The values are first
+/// held as [`held`] says; a value the source typed otherwise — an `int32` for an
+/// `Integer`, a `decimal` for a `Float` — is converted only when it survives the
+/// round trip, so an `Integer` is always an `int64` and a decimal with more
+/// digits than a `double` keeps is refused, not rounded.
+fn stored(
+    at: &str,
+    primitive: Primitive,
+    array: &ArrayRef,
+) -> Result<(Stored, ArrayRef), WriteError> {
+    let want = stored_type(primitive);
+    let (have, value) = held(at, array)?;
+    if have == want {
+        return Ok((want, value));
+    }
+    let converted = exact(array, &arrow_type(primitive))?;
+    let back = exact(&converted, array.data_type())?;
+    if let Some(i) = (0..array.len())
+        .find(|&i| array_value_to_string(array, i).ok() != array_value_to_string(&back, i).ok())
+    {
+        return Err(WriteError::Unrepresentable {
+            property: at.to_string(),
+            datatype: array.data_type().to_string(),
+            value: array_value_to_string(array, i).unwrap_or_default(),
+        });
+    }
+    Ok((want, converted))
 }
 
 // ───────────────────────────────────────────────────────────────── relations
@@ -854,7 +919,8 @@ fn relation(
 #[cfg(test)]
 mod tests {
     use datafusion::arrow::array::{
-        StringArray, TimestampNanosecondArray, UInt32Array, UInt64Array,
+        Decimal128Array, Int32Array, StringArray, TimestampMillisecondArray,
+        TimestampNanosecondArray, UInt32Array, UInt64Array,
     };
     use fossil_graph_schema::{EdgeType, GraphSchema};
 
@@ -1033,6 +1099,80 @@ mod tests {
         assert_eq!(
             laid.vertices[0].batch.column(1).data_type(),
             &DataType::Timestamp(TimeUnit::Millisecond, None)
+        );
+    }
+
+    /// The one-column graph `T.v` of `primitive`, holding `values`.
+    fn one(primitive: Primitive, values: ArrayRef) -> Graph {
+        graph(
+            vec![node(
+                "T",
+                vec![property("v", primitive, Cardinality::Single)],
+            )],
+            vec![vertices("T", 0, &[A], vec![("v", values)])],
+        )
+    }
+
+    /// The type a property is stored as is its primitive's, whatever type the
+    /// source handed the run: an `Integer` is an `int64` from an `int32`.
+    #[test]
+    fn a_property_is_stored_as_its_primitive_not_as_its_source() {
+        let small: ArrayRef = Arc::new(Int32Array::from(vec![7]));
+        let laid = layout(&one(Primitive::Integer, small)).expect("an int32 widens");
+        let p = &laid.vertices[0].info.property_groups[0].properties[1];
+        assert_eq!(p.data_type, Stored::Int64);
+        assert_eq!(
+            laid.vertices[0].batch.column(1).data_type(),
+            &DataType::Int64
+        );
+        for primitive in Primitive::ALL {
+            assert_eq!(
+                arrow_type(primitive) == lang_string(),
+                stored_type(primitive) == Stored::UserDefined(LANG_STRING.to_string()),
+                "{primitive}"
+            );
+        }
+    }
+
+    /// A decimal under a `Float` is a `double` when the `double` holds it, and
+    /// refused when it would be rounded.
+    #[test]
+    fn a_decimal_is_a_double_only_when_nothing_is_rounded() {
+        let decimal = |v: i128| -> ArrayRef {
+            Arc::new(
+                Decimal128Array::from(vec![v])
+                    .with_precision_and_scale(38, 2)
+                    .unwrap(),
+            )
+        };
+        let laid = layout(&one(Primitive::Float, decimal(1_050))).expect("10.50 is a double");
+        let p = &laid.vertices[0].info.property_groups[0].properties[1];
+        assert_eq!(p.data_type, Stored::Double);
+        assert!(
+            laid.natural().is_empty(),
+            "a double is xsd:double, not text"
+        );
+        assert!(matches!(
+            refusal(&one(Primitive::Float, decimal(12_345_678_901_234_567_891))),
+            WriteError::Unrepresentable { property, .. } if property == "T.v"
+        ));
+    }
+
+    /// A zoned instant is written as the instant, without its zone.
+    #[test]
+    fn a_timestamp_is_written_without_its_zone() {
+        let zoned: ArrayRef =
+            Arc::new(TimestampMillisecondArray::from(vec![1_000_i64]).with_timezone("+01:00"));
+        let laid = layout(&one(Primitive::DATE_TIME, zoned)).expect("written");
+        let column = laid.vertices[0].batch.column(1);
+        assert_eq!(
+            column.data_type(),
+            &DataType::Timestamp(TimeUnit::Millisecond, None)
+        );
+        assert_eq!(
+            column.as_primitive::<TimestampMillisecondType>().value(0),
+            1_000,
+            "the same instant"
         );
     }
 

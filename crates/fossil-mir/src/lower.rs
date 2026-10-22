@@ -51,7 +51,7 @@
 //! forbidden read added HERE leaves the whole of that crate green.
 
 use fossil_graph_schema::Cardinality as GsCardinality;
-use fossil_graph_schema::{GraphSchema, Primitive, local_name};
+use fossil_graph_schema::{GraphSchema, Primitive, Term, local_name};
 use fossil_hir::body::{ExprId, HirBody, body, mapping_cst_node};
 use fossil_hir::check::typecheck_mapping;
 use fossil_hir::def_map::{DefMap, def_map};
@@ -91,6 +91,7 @@ pub fn lower_to_mir_pg<'db>(
         // these ops; the vertex keeps its columns as written.
         Ok(ops) => (
             emit_edges(
+                db,
                 &ops,
                 &fossil_hir::graph_type::graph_type(db, mapping.file(db)).unwrap_or_default(),
             ),
@@ -398,7 +399,11 @@ fn mapping_span<'db>(
 /// `ex:hasProject` **references another vertex type** (→ a typed edge, one per
 /// destination of a union) and that it is **multi-valued**. The empty `G` (a
 /// program with no types) returns the ops unchanged.
-fn emit_edges<'db>(ops: &[Op<'db>], schema: &GraphSchema) -> Vec<Op<'db>> {
+fn emit_edges<'db>(
+    db: &'db dyn fossil_base::Db,
+    ops: &[Op<'db>],
+    schema: &GraphSchema,
+) -> Vec<Op<'db>> {
     // The vertex's shape IRI keys its node type; without it (or a node the
     // model doesn't declare) there is nothing to refine.
     let shape_iri = ops.iter().find_map(|o| match o {
@@ -453,7 +458,14 @@ fn emit_edges<'db>(ops: &[Op<'db>], schema: &GraphSchema) -> Vec<Op<'db>> {
                             });
                         }
                     } else if let Some(prop_def) = node.property_by_iri(predicate) {
+                        // The type the shape declares, not the value's: the
+                        // checker held the value to it, and the graph is
+                        // written in the program's types whatever the source
+                        // held (`Integer <: Float` writes a `Float`). A shape
+                        // that declares none (`.`) leaves the value's.
+                        let declared = prop_def.term.as_ref().and_then(Term::primitive);
                         kept.push(VProp {
+                            ty: declared.map_or(p.ty, |d| Ty::new(db, TyKind::Primitive(d))),
                             single_valued: matches!(prop_def.cardinality, GsCardinality::Single),
                             ..p.clone()
                         });

@@ -38,9 +38,9 @@ answers, and runs nothing — the shape of `h11` and `quinn-proto`:
 
 ```rust
 let mut plan = Profiler::new(&sources);
-while let Some(query) = plan.next_query() { // DESCRIBE, counts, inclusions
-    let rows = host.run(&query)?;           // native DuckDB or DuckDB-WASM
-    plan.feed(query.id, &rows);
+while let Some(query) = plan.next_query() {  // columns, counts, inclusions
+    let (fields, rows) = host.run(&query)?;  // native DuckDB or DuckDB-WASM
+    plan.feed(query.id, &fields, &rows);
 }
 let profile = plan.finish();                // types, keys, inclusions, samples
 ```
@@ -63,7 +63,7 @@ links DuckDB into every build of the crate, the wasm one included.
 
 **What would reverse it:** a query only one host can run. Then that query is marked per host, and
 the module is still one. A host that cannot afford the statistics gets a mode of Profile —
-`Options::TYPES`, one `DESCRIBE` a source, which is what the editor asks for on every keystroke —
+`Options::TYPES`, one query of its columns a source, which is what the editor asks for on every keystroke —
 not a second package.
 
 **A profile names its sources by binding** (owner decision, 15 October 2026). `Profile.sources`,
@@ -163,22 +163,39 @@ the mapping reads no source and needs no `describe` first.
 a type that exists only by what a source contains. Then that type is absent before the run and present
 after, and the host says so.
 
-## The DuckDB type table reaches TypeScript from the catalogue
+## A column's type is the Arrow type its engine answers
 
-**`cargo xtask catalogue` projects the `duckdb` table of `catalogue.bnf` to
-`packages/wasm/src/catalogue.generated.ts` as `DUCKDB_TYPES`**, in file order, which is precedence. A
-host that stands in for an engine — a test double answering a `DESCRIBE` — says a primitive in the
-words the table does, and states no row of it; keasy's fixture kept its own `Primitive` to DuckDB-type
-map beside the Rust table. Only the table is projected. What a `DESCRIBE` type *means* is matched by
-`fossil-profile`, in the wasm module, from the same file, and a matcher in TypeScript would be a second
-implementation of it.
+**A source's columns are typed by the Arrow fields of an answer, and never by a name an engine
+prints.** The query is `SELECT * FROM <reader> LIMIT 0`, and its answer is fields and no row. Every
+engine fossil profiles on answers in Arrow: DuckDB-WASM hands the page an apache-arrow `Table`, the
+native `duckdb` crate an arrow-rs `RecordBatch`, and DataFusion is built on it. So
+`fossil_profile::primitive` reads a `DataType` into the lattice, as `Xsd` reads a datatype IRI, and
+it is the one such table in the tree; the graph writer counts what it wrote through it too
+(`fossil_sinks::graphar::facts`). A type the lattice has no primitive for — an interval, bytes, a
+list, a struct, a `UInt64` — is `OutsideLattice`, and the profiler is the caller that reads it as
+text. A decimal with no digit after the point is an integer, which is how DuckDB answers a
+`HUGEINT`; any other is a `Float`, because the lattice has no decimal yet.
 
-*Held by* `crates/xtask/tests/catalogue_generated.rs`,
-"the_duckdb_table_is_projected_to_typescript_in_file_order", and
-"the_checked_in_files_match_the_catalogue".
+In the browser, apache-arrow's types cross into the wasm module as plain objects, and
+`bindings/editor/src/arrow.rs` reads them as Arrow's own IPC schema numbers them (`Schema.fbs`'s
+`Type`): the format's reading, not an engine's table. `@fossil-lang/types` declares the part of
+apache-arrow's `Field` and `DataType` it reads, structurally, so no package of fossil depends on
+apache-arrow. A reader's `text` clause in `catalogue.bnf` names primitives: JSON's says
+`time_date time_date_time time_hour`, the meanings DuckDB guessed from text the run keeps as text.
 
-**What would reverse it:** a TypeScript host that has to read a `DESCRIBE` itself and cannot ask the
-module. Then the matcher is generated beside the table, from the same lines, as the Rust one is.
+This replaced reading the type column of a `DESCRIBE` — first a `duckdb` table of patterns in
+`catalogue.bnf` (`"TIMESTAMP*"`, `"TIME*"`, a final `"*"`) where the first line that matched won, then
+a match on DuckDB's `LogicalTypeId` names — and with it `duckdbTypeOf`, which told a host what
+DuckDB would print for each primitive before a run.
+
+*Held by* `crates/fossil-profile/src/arrow.rs`, "an_instant_is_never_an_hour" and
+"a_type_outside_the_lattice_is_refused"; `crates/fossil-profile/tests/native.rs`,
+"every_duckdb_instant_is_an_instant", which reads each type from an answer DuckDB itself gave; and
+`crates/fossil-exec/tests/declared_type_reaches_the_column.rs`,
+"every_primitive_is_profiled_as_it_was_declared".
+
+**What would reverse it:** an engine that cannot answer in Arrow. Then that engine's host turns its
+answer into Arrow fields, and the profiler still reads one kind of type.
 
 ## Order
 

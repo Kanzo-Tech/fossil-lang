@@ -4,13 +4,10 @@
  * Rust; this is only the loop.
  */
 import { Profiler } from '../pkg/fossil_wasm.js';
-import type { Profile, ProfileOptions, ProfileSource } from '@fossil-lang/types';
+import type { Profile, ProfileAnswer, ProfileOptions, ProfileSource } from '@fossil-lang/types';
 import { until } from '@fossil-lang/types/internal';
 
 import { initFossilWasm } from './load.js';
-
-/** One query's answer: its rows, every cell the text of a value or `null`. */
-export type ProfileRows = (string | null)[][];
 
 /**
  * Profile `sources`: each query the plan hands out is run by `query`, the queries of one phase at
@@ -19,7 +16,7 @@ export type ProfileRows = (string | null)[][];
  */
 export async function runProfiler(
   sources: readonly ProfileSource[],
-  query: (sql: string) => Promise<ProfileRows>,
+  query: (sql: string) => Promise<ProfileAnswer>,
   { options, signal }: { options?: ProfileOptions; signal?: AbortSignal } = {},
 ): Promise<Profile> {
   await until(initFossilWasm(), signal);
@@ -31,15 +28,15 @@ export async function runProfiler(
       if (phase.length === 0) return plan.finish();
       await Promise.all(
         phase.map(async ({ id, sql }) => {
-          let rows: ProfileRows;
+          let answer: ProfileAnswer;
           try {
-            rows = await query(sql);
+            answer = await query(sql);
           } catch (error) {
             signal?.throwIfAborted();
             plan.fail(id, error instanceof Error ? error.message : String(error));
             return;
           }
-          plan.feed(id, rows);
+          plan.feed(id, answer);
         }),
       );
     }

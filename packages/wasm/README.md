@@ -27,8 +27,6 @@ artefacts. Every door boots the module itself:
   are written in, computed from what a host decided: a `Model` (types over one source each, their
   identity and the relations between them) and the profiled `SourceVocabulary`s give the
   `Vocabulary` `grammarFor` takes, every IRI under `base`, and each type's `@subject`.
-- `DUCKDB_TYPES` — what a DuckDB `DESCRIBE` column type means on the lattice, from `catalogue.bnf`,
-  in precedence order.
 - `grammarFor(vocabulary)` — the grammar of Fossil for these names: the `prelude` the request
   already says (the types imported and declared, the sources bound), and the `grammar` of the
   mappings after it, as the EBNF a constrained decoder (WebLLM's xgrammar) takes. Every name in it

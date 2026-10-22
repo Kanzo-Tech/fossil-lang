@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 use datafusion::arrow::array::{Array, ArrayRef, AsArray, RecordBatch, StringArray};
 use datafusion::arrow::compute::cast;
-use datafusion::arrow::datatypes::{DataType, Field, Schema};
+use datafusion::arrow::datatypes::{DataType, Field, Fields, Schema};
 use datafusion::common::Column;
 use datafusion::datasource::MemTable;
 use datafusion::error::{DataFusionError, Result};
@@ -201,23 +201,11 @@ fn flatten(array: &ArrayRef) -> ArrayRef {
     }
 }
 
-/// What a column of this Arrow type is, as far as the counts care.
-const fn primitive(data_type: &DataType) -> Primitive {
-    match data_type {
-        DataType::Int8
-        | DataType::Int16
-        | DataType::Int32
-        | DataType::Int64
-        | DataType::UInt8
-        | DataType::UInt16
-        | DataType::UInt32
-        | DataType::UInt64 => Primitive::Integer,
-        DataType::Float16 | DataType::Float32 | DataType::Float64 => Primitive::Float,
-        DataType::Boolean => Primitive::Bool,
-        DataType::Date32 | DataType::Date64 => Primitive::DATE,
-        DataType::Timestamp(..) => Primitive::DATE_TIME,
-        _ => Primitive::STRING,
-    }
+/// What a column of this Arrow type is, as far as the counts care: what a
+/// profile reads it as, and text for one outside the lattice — a tagged
+/// value's struct is counted by its lexical form.
+fn primitive(data_type: &DataType) -> Primitive {
+    fossil_profile::primitive(data_type).unwrap_or(Primitive::STRING)
 }
 
 /// One table as it is to be counted.
@@ -257,7 +245,7 @@ async fn count_written(ctx: &SessionContext, tables: &[Written]) -> Result<Vec<V
     );
     while let Some((id, ask)) = plan.next_ask() {
         let rows = answer(ctx, &ask).await?;
-        plan.feed(id, &rows);
+        plan.feed(id, &Fields::empty(), &rows);
     }
     for t in tables {
         ctx.deregister_table(registered(&t.name))?;

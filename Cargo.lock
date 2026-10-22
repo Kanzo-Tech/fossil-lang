@@ -1804,6 +1804,7 @@ dependencies = [
 name = "fossil-profile"
 version = "0.1.0"
 dependencies = [
+ "arrow-schema",
  "duckdb",
  "fossil-base",
  "fossil-graph-schema",
@@ -1909,6 +1910,7 @@ dependencies = [
 name = "fossil-wasm"
 version = "0.1.0"
 dependencies = [
+ "arrow-schema",
  "console_error_panic_hook",
  "fossil-base",
  "fossil-graph-schema",

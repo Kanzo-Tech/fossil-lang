@@ -2,36 +2,12 @@
 //
 // The `io.` constructors that read through a native DuckDB table function. A
 // materialised row (`io.rdf`) has no reader to DESCRIBE through and is
-// deliberately absent. And the `duckdb` table: what a `DESCRIBE` column type
-// means on the lattice.
+// deliberately absent.
 //
 // Edit `catalogue.bnf` and re-run `cargo xtask catalogue`.
-
-import type { Primitive } from "@fossil-lang/types";
 
 /** The constructors a host can DESCRIBE, in catalogue order. */
 export const NATIVE_ROWS = ["csv", "json", "parquet"] as const;
 
 /** One `io.` constructor that reads through a native reader. */
 export type NativeRow = (typeof NATIVE_ROWS)[number];
-
-/**
- * One line of the `duckdb` table: a `Primitive`, and the `DESCRIBE` column types that mean it.
- * A spelling is matched case-blind and whole; `"X*"` matches every spelling that starts with
- * `X`, and `"*"` matches anything.
- */
-export interface DuckdbType {
-  primitive: Primitive;
-  spellings: readonly string[];
-}
-
-/** The `duckdb` table, in file order — which is precedence: the first line that matches wins. */
-export const DUCKDB_TYPES: readonly DuckdbType[] = [
-  { primitive: "integer", spellings: ["INTEGER", "BIGINT", "INT", "SMALLINT", "TINYINT", "HUGEINT"] },
-  { primitive: "float", spellings: ["DOUBLE", "FLOAT", "REAL", "DECIMAL*"] },
-  { primitive: "bool", spellings: ["BOOLEAN", "BOOL"] },
-  { primitive: "time_date", spellings: ["DATE"] },
-  { primitive: "time_date_time", spellings: ["TIMESTAMP*", "DATETIME"] },
-  { primitive: "time_hour", spellings: ["TIME*"] },
-  { primitive: "string", spellings: ["*"] },
-];
