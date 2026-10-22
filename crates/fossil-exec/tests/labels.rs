@@ -1,4 +1,5 @@
-//! **What a run writes of `/docs/design/labels` and `/docs/design/facts`**:
+//! **What a run writes of `/docs/design/labels`**, and the counts its chunks
+//! carry:
 //! `docs/programs/labels` executed, and its graph read back — the information
 //! files with `graphar-info`, the Parquet with `DuckDB`, never through the
 //! writer's own types.
@@ -10,8 +11,9 @@
 //!
 //! - **That a reader reads them.** `@kanzo-tech/graphar-duckdb`'s views are held
 //!   by its own tests.
-//! - **That the counts fit the budget on a large graph.** Nothing here is
-//!   measured; `/docs/design/facts` says what would be.
+//! - **That `distinct_count` is exact past what parquet-rs counts exactly.** It
+//!   is the writer's count of one row group, and three prizes prove the
+//!   field is there and counted, not its precision at scale.
 
 use std::path::Path;
 
@@ -77,50 +79,42 @@ fn a_lang_string_is_a_set_of_structs_on_its_vertex_type() {
     );
 }
 
-/// The writer counts every property of every vertex chunk: Parquet's own
-/// counts and bounds in the column statistics, and the distinct count and the
-/// commonest values — `pg_stats`' with their share of the rows — under
-/// `fossil:stats`. An adjacency chunk carries neither, and no inclusion or
-/// candidate key is stored.
+/// Every property of every chunk is counted in the footer's own column
+/// `Statistics` — nulls, bounds and `distinct_count` — Parquet's and not a key of
+/// fossil's (`/docs/format/conventions/statistics`). A chunk is one row group,
+/// so a row group's counts are the chunk's. A set is counted over its elements:
+/// Parquet counts leaf values.
 #[test]
-fn the_writer_counts_what_it_wrote() {
+fn the_footer_counts_what_was_written() {
     let ran = labels();
     let root = ran.materialise();
     let chunk = native::at(root.path(), &ran.chunk("Prize"));
 
-    let footer = native::rows(&format!(
-        "SELECT decode(value) FROM parquet_kv_metadata({chunk}) WHERE key::VARCHAR = 'fossil:stats'"
+    let distinct = native::rows(&format!(
+        "SELECT path_in_schema, stats_distinct_count::VARCHAR FROM parquet_metadata({chunk}) \
+         WHERE path_in_schema IN ('subject', 'category') OR path_in_schema LIKE 'motivation%value' \
+         ORDER BY 1"
     ));
-    let stats: serde_json::Value =
-        serde_json::from_str(footer[0][0].as_deref().expect("fossil:stats")).expect("JSON");
-    assert_eq!(stats["version"], 1);
-    let columns = stats["columns"].as_object().expect("columns");
-    let mut keys: Vec<&str> = columns.keys().map(String::as_str).collect();
-    keys.sort_unstable();
+    let distinct: Vec<(String, String)> = distinct
+        .into_iter()
+        .map(|r| {
+            (
+                r[0].clone().expect("a column"),
+                r[1].clone().expect("a distinct count"),
+            )
+        })
+        .collect();
     assert_eq!(
-        keys,
-        ["category", "motivation", "subject"],
-        "by property name, the index column not among them"
-    );
-    let category = &columns["category"];
-    assert_eq!(
-        category["distinct_count"], 2,
-        "three prizes in two categories"
-    );
-    assert_eq!(category["most_common_vals"], serde_json::json!(["physics"]));
-    assert_eq!(
-        category["most_common_freqs"],
-        serde_json::json!([2.0 / 3.0]),
-        "two of the three prizes"
-    );
-    assert_eq!(
-        columns["subject"],
-        serde_json::json!({ "distinct_count": 3 }),
-        "no value repeats, so none is commonest"
-    );
-    assert_eq!(
-        columns["motivation"]["distinct_count"], 3,
-        "a set is counted over its elements, by lexical form"
+        distinct
+            .iter()
+            .map(|(p, n)| (p.split(", ").last().unwrap_or(p).to_string(), n.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("category".to_string(), "2"),
+            ("value".to_string(), "3"),
+            ("subject".to_string(), "3"),
+        ],
+        "three prizes in two categories, three motivations: {distinct:?}"
     );
 
     // Nulls and bounds are the footer's own.
@@ -157,9 +151,10 @@ fn the_writer_counts_what_it_wrote() {
         "the greatest motivation is longer than 64 bytes, and cut and marked inexact"
     );
 
+    // No chunk carries a key of fossil's.
     let edge = native::at(root.path(), &ran.adjacency("Person_awarded_Prize"));
     let none = native::rows(&format!(
-        "SELECT count(*)::VARCHAR FROM parquet_kv_metadata({edge}) WHERE key::VARCHAR = 'fossil:stats'"
+        "SELECT count(*)::VARCHAR FROM parquet_kv_metadata({edge}) WHERE key::VARCHAR LIKE 'fossil:%'"
     ));
     assert_eq!(none[0][0].as_deref(), Some("0"));
 }

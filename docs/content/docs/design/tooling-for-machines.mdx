@@ -45,7 +45,7 @@ So what fossil publishes is the part an agent would otherwise reconstruct. The i
 every vertex and edge type, its properties with their types, its row count and, for an edge type, the
 vertex type at each end — and `attachGraph` attaches them beside the tables as relations —
 `graphar_vertex_types`, `graphar_edge_types`, `graphar_properties` and the rest, with the writer's
-counts in the footers ([the graph's own facts](/docs/design/facts)), and the mapping says what the
+counts in the footers ([Statistics](/docs/format/conventions/statistics)), and the mapping says what the
 tables mean as RDF — so an agent reads the structure with the same SQL it reads the data with, before
 it has to guess a column name.
 

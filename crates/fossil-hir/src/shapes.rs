@@ -348,8 +348,7 @@ pub fn suggested_alias(predicate_iri: &str) -> SmolStr {
     let hint = namespace
         .split(|c: char| !c.is_ascii_alphanumeric())
         .filter(|t| t.chars().any(|c| c.is_ascii_alphabetic()))
-        .filter(|t| !NOT_A_VOCABULARY.contains(t))
-        .next_back();
+        .rfind(|t| !NOT_A_VOCABULARY.contains(t));
     hint.map_or_else(
         || SmolStr::from(format!("renamed_{short}")),
         |h| SmolStr::from(format!("{h}_{short}")),

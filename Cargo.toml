@@ -5,7 +5,7 @@ resolver = "3"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.90"
+rust-version = "1.95"
 license = "Apache-2.0 OR MIT"
 authors = ["Angel Iglesias <angel.iglesias@kanzo.tech>"]
 repository = "https://github.com/Kanzo-Tech/fossil-lang"
@@ -39,16 +39,24 @@ url = "2"                               # the WHATWG URL Standard — every URI 
 # codegen depends on the 0.8 JSON Schema draft-07 dialect for
 # openapi-typescript interop.
 schemars = { version = "0.8" }
-# === The graph: Apache GraphAr, through Kanzo-Tech/graphar (crates.io, `/docs/design/graphar`) ===
+# === The graph: Apache GraphAr, through Kanzo-Tech/graphar (`/docs/design/graphar`) ===
 # `graphar-info` is the YAML model and `graphar-parquet` the chunk writers, over arrow-rs and
 # `object_store` at the majors fossil links. Both build for wasm32 and reach no `tokio`.
-graphar-info = "0.1.0-alpha.1"
-graphar-parquet = "0.1.0-alpha.1"
+# By git + rev, not crates.io: the published 0.1.0-alpha.1 is on arrow 58 and object_store 0.13,
+# and this rev is on arrow/parquet 60 and object_store 0.14, the majors DataFusion main takes; it
+# writes each chunk as one row group with Parquet's `distinct_count`. A graphar release on those
+# majors reverses it (`/docs/design/graphar`, "The pins").
+graphar-info = { git = "https://github.com/Kanzo-Tech/graphar", rev = "feff5b7f91051002f81eda4c3df0d970512ffd87" }
+graphar-parquet = { git = "https://github.com/Kanzo-Tech/graphar", rev = "feff5b7f91051002f81eda4c3df0d970512ffd87" }
 # `fossil-storage`'s IO half: a vended credential as a store `DataFusion`
 # reads through and fossil writes through. `aws` + `azure` are the stores a
 # host vends for, `http` the public URLs no credential covers. Its cloud client
 # runs on wasm32 over `fetch` (verified in a browser against MinIO, 2026-09-29).
-object_store = { version = "0.13", default-features = false, features = ["aws", "azure", "http"] }
+# 0.14 split each store into `<store>-base` and a TLS + crypto bundle whose
+# `aws-lc-rs` does not build for wasm32, so the bases are named here with
+# `reqwest` (the `fetch` client on wasm32) and `ring`, the signing crypto 0.13
+# used; `fossil-storage` adds the whole stores on native targets only.
+object_store = { version = "0.14", default-features = false, features = ["aws-base", "azure-base", "http-base", "reqwest", "ring"] }
 async-trait = "0.1"
 futures = "0.3"
 web-time = "1"
@@ -100,7 +108,7 @@ csv-core = "0.1"
 # The Arrow types alone, for the crates that read a column's type and run
 # nothing: `fossil-profile` reads what an engine answers a source as. The same
 # release `datafusion` re-exports, so one `DataType` crosses between them.
-arrow-schema = { version = "58", default-features = false }
+arrow-schema = { version = "60", default-features = false }
 
 # === The engine: DataFusion, in `fossil-exec` and the sinks of `fossil-sinks` ===
 # `default-features = false` drops datafusion's `sql` frontend (we build plans
@@ -109,8 +117,8 @@ arrow-schema = { version = "58", default-features = false }
 # must be READ (locally and, in the browser, remotely by signed URL — design C2).
 # CSV/JSON reading is core (ungated). Re-add a feature here if a plan op needs it.
 #
-# ⚠️ This does NOT remove the `zstd` C dep: datafusion 54 HARDCODES
-# `arrow-ipc` with `features=["lz4","zstd"]` in datafusion-common /
+# ⚠️ This does NOT remove the `zstd` C dep: datafusion (54, and `main` at the
+# pinned rev, re-checked 2026-10-21) HARDCODES `arrow-ipc` with `features=["lz4","zstd"]` in datafusion-common /
 # datafusion-datasource-arrow / datafusion-physical-plan (not behind any
 # feature). So `zstd-sys` cannot be cut from the feature graph — the wasm32
 # build needs a wasm-capable clang to compile zstd-C (verified 2026-06-09):
@@ -131,7 +139,13 @@ arrow-schema = { version = "58", default-features = false }
 # `crypto_expressions` is deliberately OFF. It is the sibling package, and no
 # function of the language needs its `sha256`. Turning it on would grow the
 # wasm surface for a function no template says.
-datafusion = { version = "54", default-features = false, features = [
+#
+# By git + rev on apache/datafusion `main`, not a release: 55.2.0 is on arrow 59,
+# and main is on arrow/parquet 60, the first whose writer counts `distinct_count`
+# in a row group's `Statistics` (`/docs/design/graphar`, "The pins"). Main needs
+# rustc 1.95, which is why `rust-toolchain.toml` says 1.95. A DataFusion release
+# on arrow 60 reverses it: back to `version = "…"`.
+datafusion = { git = "https://github.com/apache/datafusion", rev = "6c1727fcd9230dda428f8c3a2397fce235544bd5", default-features = false, features = [
   "parquet",
   "nested_expressions",
 ] }

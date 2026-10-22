@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use duckdb::arrow::datatypes::Fields;
+use datafusion::arrow::datatypes::{Field, Fields};
 use fossil_base::Db;
 use fossil_hir::lineage::Input;
 use fossil_profile::{Options, Rows, Source};
@@ -15,12 +15,17 @@ use fossil_profile::{Options, Rows, Source};
 /// every cell as text — the profiler's queries cast what they select to
 /// `VARCHAR`.
 fn answer(conn: &duckdb::Connection, sql: &str) -> duckdb::Result<(Fields, Rows)> {
-    let fields = conn
-        .prepare(sql)?
-        .query_arrow([])?
-        .get_schema()
+    let schema = conn.prepare(sql)?.query_arrow([])?.get_schema();
+    // `duckdb` answers in its own arrow (58), the profiler reads DataFusion's
+    // (60): each type crosses as the text both print and parse.
+    let fields = schema
         .fields()
-        .clone();
+        .iter()
+        .map(|f| {
+            let t = f.data_type().to_string().parse().expect("an Arrow type");
+            Field::new(f.name(), t, f.is_nullable())
+        })
+        .collect();
     Ok((fields, rows(conn, sql)?))
 }
 

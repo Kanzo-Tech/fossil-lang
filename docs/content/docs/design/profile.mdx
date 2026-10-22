@@ -185,9 +185,12 @@ and Ask's resolver. Both are built: `fossil-profile` with its two hosts, introsp
 program](/docs/design/declared). On keasy's side the executor runs in a worker of
 its own, and it has moved into the executor itself ([A run off the page](/docs/design/off-the-page)).
 
-## The graph's profile is the same plan
+## The graph is not profiled with this plan
 
-A run profiles what it wrote with this plan, over the tables instead of the sources, and stores it in
-each vertex chunk's footer for the readers of the graph — [the graph's own facts](/docs/design/facts) argues why
-the output and not the sources, and what the plan gains for it: its queries as data so DataFusion can
-run them too, the least, greatest and commonest values, and Parquet's names for the counts.
+A written graph's counts are Parquet's own `Statistics` — nulls, bounds and the distinct count, in each
+chunk's footer, counted by the Parquet writer as it encodes the chunk
+([Statistics](/docs/design/graphar#statistics-counted-once-at-write)). This plan is for sources, which
+nothing has counted; it keeps Parquet's names for the counts so a source's profile and a graph's
+footer say the same thing in the same words. The writer once ran it over the tables it wrote, under a
+key of its own, `fossil:stats`; [Discarded](/docs/design/discarded#the-graphs-statistics) says why
+it stopped.

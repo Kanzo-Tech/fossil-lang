@@ -802,6 +802,10 @@ fn held(at: &str, array: &ArrayRef) -> Result<(Stored, ArrayRef), WriteError> {
                 .collect();
             (Stored::String, Arc::new(hex))
         }
+        // A dictionary is written as its values, never its keys: besides
+        // `GraphAr` naming no dictionary type, parquet-rs counts a dictionary
+        // array's `distinct_count` over its keys (apache/arrow-rs#11172), and
+        // that count is what a reader takes for the property's.
         DataType::Dictionary(_, values) => {
             let plain = exact(array, values)?;
             return held(at, &plain);

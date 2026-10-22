@@ -31,6 +31,14 @@
 //! batch out of a shared buffer before that operator counts it. The copy is of
 //! what the slice spans, once.
 //!
+//! **`DataFusion` `main` counts a shared buffer once** (`RecordBatchMemoryCounter`,
+//! at the rev `Cargo.toml` pins), so the same sort without `Compact` no longer
+//! refuses under the budget the test below gives it: the seventy-fold
+//! overcount is gone upstream. A slice still keeps its parent's whole buffer
+//! alive, and the copy is what releases it. **What would reverse it:** the shop
+//! program at 200,000 people run in the browser with and without `Compact`
+//! and peaking the same — then `Compact` goes.
+//!
 //! **The hash join stays.** With a disk, clearing `prefer_hash_join` under a
 //! budget would buy something, because a sort-merge join can spill and a hash
 //! join's build side cannot. With no disk neither can, and a sort-merge join
@@ -56,7 +64,7 @@ use std::sync::{Arc, Mutex};
 use datafusion::arrow::array::{Array, ArrayRef, MutableArrayData, make_array};
 use datafusion::arrow::record_batch::RecordBatch;
 use datafusion::common::config::ConfigOptions;
-use datafusion::common::tree_node::{Transformed, TreeNode};
+use datafusion::common::tree_node::{Transformed, TreeNode, TreeNodeRecursion};
 use datafusion::common::utils::memory::get_record_batch_memory_size;
 use datafusion::common::{DataFusionError, Result};
 use datafusion::execution::TaskContext;
@@ -66,7 +74,8 @@ use datafusion::physical_plan::joins::HashJoinExec;
 use datafusion::physical_plan::sorts::sort::SortExec;
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{
-    DisplayAs, DisplayFormatType, ExecutionPlan, PlanProperties, SendableRecordBatchStream,
+    ChildrenPropertiesMode, DisplayAs, DisplayFormatType, ExecutionPlan, PhysicalExpr,
+    PlanProperties, ReplaceChildrenOptions, SendableRecordBatchStream,
 };
 use fossil_graph_schema::Problem;
 use futures::StreamExt;
@@ -212,7 +221,10 @@ impl PhysicalOptimizerRule for Compact {
                     return Ok(Transformed::no(node));
                 }
                 children[held] = Arc::new(CompactExec::new(Arc::clone(&children[held])));
-                Ok(Transformed::yes(node.with_new_children(children)?))
+                Ok(Transformed::yes(node.replace_children(
+                    children,
+                    ReplaceChildrenOptions::new(ChildrenPropertiesMode::Recompute),
+                )?))
             })?
             .data)
     }
@@ -266,11 +278,30 @@ impl ExecutionPlan for CompactExec {
         vec![false]
     }
 
-    fn with_new_children(
+    fn apply_expressions(
+        &self,
+        _f: &mut dyn FnMut(&Arc<dyn PhysicalExpr>) -> Result<TreeNodeRecursion>,
+    ) -> Result<TreeNodeRecursion> {
+        Ok(TreeNodeRecursion::Continue)
+    }
+
+    fn replace_children(
         self: Arc<Self>,
         mut children: Vec<Arc<dyn ExecutionPlan>>,
+        _: ReplaceChildrenOptions,
     ) -> Result<Arc<dyn ExecutionPlan>> {
         Ok(Arc::new(Self::new(children.swap_remove(0))))
+    }
+
+    // Deprecated and still required: `DataFusion` asks that it delegate.
+    fn with_new_children(
+        self: Arc<Self>,
+        children: Vec<Arc<dyn ExecutionPlan>>,
+    ) -> Result<Arc<dyn ExecutionPlan>> {
+        self.replace_children(
+            children,
+            ReplaceChildrenOptions::new(ChildrenPropertiesMode::Recompute),
+        )
     }
 
     fn execute(
@@ -296,15 +327,15 @@ fn compact(batch: RecordBatch) -> Result<RecordBatch> {
     if get_record_batch_memory_size(&batch) <= spans.saturating_mul(2) {
         return Ok(batch);
     }
-    let columns: Vec<ArrayRef> = batch.columns().iter().map(copy).collect();
+    let columns: Vec<ArrayRef> = batch.columns().iter().map(copy).collect::<Result<_>>()?;
     Ok(RecordBatch::try_new(batch.schema(), columns)?)
 }
 
-fn copy(column: &ArrayRef) -> ArrayRef {
+fn copy(column: &ArrayRef) -> Result<ArrayRef> {
     let data = column.to_data();
     let mut out = MutableArrayData::new(vec![&data], false, column.len());
-    out.extend(0, 0, column.len());
-    make_array(out.freeze())
+    out.try_extend(0, 0, column.len())?;
+    Ok(make_array(out.freeze()))
 }
 
 #[cfg(test)]
@@ -316,14 +347,11 @@ mod tests {
     use datafusion::arrow::record_batch::RecordBatch;
     use datafusion::catalog::MemTable;
     use datafusion::common::utils::memory::get_record_batch_memory_size;
-    use datafusion::execution::disk_manager::{DiskManagerBuilder, DiskManagerMode};
     use datafusion::execution::memory_pool::{MemoryConsumer, MemoryPool};
-    use datafusion::execution::runtime_env::RuntimeEnvBuilder;
-    use datafusion::execution::session_state::SessionStateBuilder;
-    use datafusion::prelude::{SessionConfig, SessionContext, col};
+    use datafusion::prelude::{SessionContext, col};
 
     use super::{Budget, compact};
-    use crate::session::{OneTask, session_within};
+    use crate::session::session_within;
 
     const ROWS: i64 = 200_000;
 
@@ -370,29 +398,6 @@ mod tests {
         let rows = dedup_then_sort(&session_within(Arc::new(Budget::new(LIMIT)), None))
             .expect("fits once compacted");
         assert_eq!(rows, usize::try_from(ROWS).expect("small"));
-
-        // The control: the same session without `Compact` charges the sort for
-        // every slice's parent batch, and the same budget refuses it.
-        let budget = Arc::new(Budget::new(LIMIT));
-        let runtime = RuntimeEnvBuilder::new()
-            .with_memory_pool(Arc::clone(&budget) as _)
-            .with_disk_manager_builder(
-                DiskManagerBuilder::default().with_mode(DiskManagerMode::Disabled),
-            )
-            .build_arc()
-            .expect("runtime");
-        let state = SessionStateBuilder::new()
-            .with_config(SessionConfig::new().with_target_partitions(1))
-            .with_runtime_env(runtime)
-            .with_default_features()
-            .with_physical_optimizer_rule(Arc::new(OneTask))
-            .build();
-        dedup_then_sort(&SessionContext::new_with_state(state)).expect_err("refused");
-        let refusal = budget.refusal().expect("the budget refused it");
-        assert!(
-            refusal.consumer.starts_with("ExternalSorter"),
-            "{refusal:?}"
-        );
     }
 
     #[test]

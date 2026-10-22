@@ -104,7 +104,7 @@ pnpm --filter @fossil-lang/wasm build:wasm   # → packages/wasm/pkg/
 pnpm --filter @fossil-lang/wasm build         # = build:wasm + tsc
 ```
 
-Requires: Rust 1.90 toolchain (per `rust-toolchain.toml` at repo root) +
+Requires: Rust 1.95 toolchain (per `rust-toolchain.toml` at repo root) +
 `wasm-bindgen-cli` 0.2.120 (`cargo install --version 0.2.120 wasm-bindgen-cli`).
 Optionally `wasm-opt` (binaryen) for size reduction.
 

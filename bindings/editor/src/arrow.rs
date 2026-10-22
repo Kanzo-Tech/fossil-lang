@@ -38,8 +38,8 @@ struct JsType {
     mode: Option<u8>,
     type_ids: Option<Vec<i8>>,
     children: Option<Vec<JsField>>,
-    dictionary: Option<Box<JsType>>,
-    indices: Option<Box<JsType>>,
+    dictionary: Option<Box<Self>>,
+    indices: Option<Box<Self>>,
 }
 
 impl JsField {

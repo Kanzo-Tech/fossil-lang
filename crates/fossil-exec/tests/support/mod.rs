@@ -172,14 +172,9 @@ pub(crate) async fn write_in_memory(
     storage
         .with_store("mem://out/", Arc::clone(&out) as Arc<dyn ObjectStore>)
         .expect("route the in-memory store");
-    let written = fossil_sinks::graphar::write(
-        graph,
-        &datafusion::prelude::SessionContext::new(),
-        &storage,
-        MEMORY_DEST,
-    )
-    .await
-    .expect("write");
+    let written = fossil_sinks::graphar::write(graph, &storage, MEMORY_DEST)
+        .await
+        .expect("write");
     let mut files = std::collections::BTreeMap::new();
     let listed: Vec<_> = out.list(None).try_collect().await.expect("list");
     for meta in listed {

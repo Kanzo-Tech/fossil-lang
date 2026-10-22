@@ -73,9 +73,10 @@ ones**, which is what makes it worth a convention.
 GraphAr orders a list by its aligned end. **Within a source, fossil's writer orders by
 destination**, so the list is sorted by `(source, destination)`; that second key is fossil's
 convention and not GraphAr's. Because the source ascends, a filter on a range of sources — the
-out-edges of one vertex type, which is one range of indices — prunes row groups off the footer. A
-range of destinations does not: the destination order inside a run is unrelated to it, so a filter
-on the destination reads the table.
+out-edges of one vertex type, which is one range of indices — prunes chunks off their footers: a
+chunk is one row group, whose bounds are the chunk's. A range of destinations does not: the
+destination order inside a run is unrelated to it, so a filter on the destination reads every chunk.
+A table written as one chunk is read whole by either.
 
 **The offset table is as long as its vertex type, plus one.** The specification does not give the
 length; GraphAr's testing data (`ldbc_sample/parquet`) is written so, and GraphAr's C++ and Spark
