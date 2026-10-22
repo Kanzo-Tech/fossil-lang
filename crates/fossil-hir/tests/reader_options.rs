@@ -14,7 +14,7 @@
 //! # What it does NOT prove
 //!
 //! - **That the option reaches either engine.** `fossil-mir` carries it into
-//!   `SourceFormat::Csv` and `fossil-df` turns it into a `CsvReadOptions`
+//!   `SourceFormat::Csv` and `fossil-exec` turns it into a `CsvReadOptions`
 //!   delimiter; both have their own tests, and
 //!   `docs/programs/pipe-delimited` is the one artefact that proves the
 //!   whole thread at once.
@@ -34,7 +34,7 @@ shape http://example.org/Persona
 prop http://example.org/name - 1 1
 ";
 
-const COLUMNS: &[(&str, Primitive)] = &[("id", Primitive::Integer), ("name", Primitive::String)];
+const COLUMNS: &[(&str, Primitive)] = &[("id", Primitive::Integer), ("name", Primitive::STRING)];
 
 /// A program whose only interesting line is the binding under test.
 fn program(binding: &str) -> String {
@@ -137,7 +137,7 @@ fn a_delimiter_wider_than_one_character_is_refused() {
 /// **One `char` is not one byte, and the rule is the byte.**
 ///
 /// `§` is a single character and two bytes, so a `chars().count() == 1` check
-/// would pass it here and `fossil-df` would then have nothing to give
+/// would pass it here and `fossil-exec` would then have nothing to give
 /// `CsvReadOptions::delimiter`, which takes a `u8` — an option accepted by the
 /// checker and dropped by the reader, which is the exact defect the whole
 /// thread is about. The rule is stated in bytes on both sides.

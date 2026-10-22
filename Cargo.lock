@@ -1931,50 +1931,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "fossil-df"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bytes",
- "csv-core",
- "datafusion",
- "duckdb",
- "expect-test",
- "fossil-base",
- "fossil-graph-schema",
- "fossil-hir",
- "fossil-mir",
- "fossil-profile",
- "fossil-storage",
- "fossil-syntax",
- "futures",
- "graphar-info",
- "graphar-parquet",
- "miette",
- "object_store",
- "oxrdf",
- "rml",
- "rudof_rdf",
- "salsa",
- "schemars",
- "serde",
- "serde_json",
- "slug",
- "smol_str",
- "tempfile",
- "thiserror 1.0.69",
- "tokio",
- "tracing",
- "unicode-normalization",
-]
-
-[[package]]
 name = "fossil-df-wasm"
 version = "0.1.0"
 dependencies = [
  "chrono",
  "console_error_panic_hook",
- "fossil-df",
+ "fossil-exec",
  "fossil-graph-schema",
  "fossil-storage",
  "futures",
@@ -1988,6 +1950,46 @@ dependencies = [
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "fossil-exec"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "csv-core",
+ "datafusion",
+ "duckdb",
+ "expect-test",
+ "fossil-base",
+ "fossil-exec",
+ "fossil-graph-schema",
+ "fossil-hir",
+ "fossil-mir",
+ "fossil-profile",
+ "fossil-sinks",
+ "fossil-storage",
+ "fossil-syntax",
+ "futures",
+ "graphar-info",
+ "graphar-parquet",
+ "miette",
+ "object_store",
+ "oxrdf",
+ "oxttl",
+ "rml",
+ "rudof_rdf",
+ "salsa",
+ "schemars",
+ "serde",
+ "serde_json",
+ "slug",
+ "smol_str",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "unicode-normalization",
 ]
 
 [[package]]
@@ -2010,19 +2012,14 @@ dependencies = [
  "expect-test",
  "fossil-base",
  "fossil-graph-schema",
+ "fossil-shapes",
  "fossil-syntax",
  "indexmap",
  "oxilangtag",
- "oxrdf",
- "prefixmap",
  "rowan",
- "rudof_iri",
- "rudof_rdf",
  "salsa",
  "schemars",
  "serde",
- "shacl",
- "shex_ast",
  "smol_str",
  "strsim",
  "thiserror 1.0.69",
@@ -2069,6 +2066,7 @@ dependencies = [
 name = "fossil-profile"
 version = "0.1.0"
 dependencies = [
+ "arrow-schema 60.0.0",
  "duckdb",
  "fossil-base",
  "fossil-graph-schema",
@@ -2076,6 +2074,39 @@ dependencies = [
  "serde",
  "smol_str",
  "tempfile",
+]
+
+[[package]]
+name = "fossil-shapes"
+version = "0.1.0"
+dependencies = [
+ "fossil-graph-schema",
+ "oxrdf",
+ "prefixmap",
+ "rudof_iri",
+ "rudof_rdf",
+ "shacl",
+ "shex_ast",
+]
+
+[[package]]
+name = "fossil-sinks"
+version = "0.1.0"
+dependencies = [
+ "datafusion",
+ "fossil-base",
+ "fossil-graph-schema",
+ "fossil-hir",
+ "fossil-mir",
+ "fossil-storage",
+ "graphar-info",
+ "graphar-parquet",
+ "object_store",
+ "oxrdf",
+ "schemars",
+ "serde",
+ "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]
@@ -2140,6 +2171,7 @@ dependencies = [
 name = "fossil-wasm"
 version = "0.1.0"
 dependencies = [
+ "arrow-schema 60.0.0",
  "console_error_panic_hook",
  "fossil-base",
  "fossil-graph-schema",
@@ -5914,7 +5946,7 @@ version = "0.1.0"
 dependencies = [
  "expect-test",
  "fossil-base",
- "fossil-df",
+ "fossil-exec",
  "fossil-graph-schema",
  "fossil-hir",
  "fossil-ide",

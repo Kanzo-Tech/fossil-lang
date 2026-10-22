@@ -71,7 +71,7 @@ manifest a TypeScript parse and a read one statement; the second took the reader
 `Filter` away, because they were a second query language over the engine every view already spoke SQL
 to. Now the information files are parsed once, by `attachGraph`, into the catalog's relations, and
 nothing else restates them. Writing is held to the same rule: one writer,
-`crates/fossil-df/src/write.rs, write`, and one host that calls it, the wasm executor, in a browser and
+`crates/fossil-sinks/src/graphar/write.rs, write`, and one host that calls it, the wasm executor, in a browser and
 in Node.
 
 The same pattern is expected elsewhere, so the rule obliges an audit rather than a fix to this one

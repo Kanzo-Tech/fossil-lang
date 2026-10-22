@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-wasm.sh — Build packages/wasm/pkg/ from crates/fossil-wasm/.
+# build-wasm.sh — Build packages/wasm/pkg/ from bindings/editor/.
 #
 # Pinned tooling (CLAUDE.md):
 #   Rust toolchain: 1.95 (from rust-toolchain.toml at repo root)

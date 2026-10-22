@@ -1,0 +1,45 @@
+---
+title: A constant an assertion refuses
+description: "`shape/assert-failed` — a mapping writes a constant into a field whose assertion does not hold of it, refused at the line that writes it."
+---
+
+A mapping that writes a constant into a field has said the value of every node it produces, so the
+field's assertions are decided at that line rather than after a run:
+
+```fossil
+@iri("https://schema.org/Person")
+type Person
+    @iri("https://schema.org/age")
+    @assert(age >= 0 and age < 150)
+    age: Option<Integer>
+
+rows := io.csv("people.csv")
+
+People : Person from rows
+    @subject = "https://ex.org/person/{rows.id}"
+    age      = 200
+```
+
+```text
+`age` is written as 200, and `age >= 0 and age < 150` does not hold of it
+```
+
+with a second label under the assertion. Its severity is the assertion's: an error for a
+`violation`, the default, and a warning for `severity = warning` or `info`.
+
+## Why fossil refuses it
+
+The checker reads the program and its documents and nothing else, so what it can decide of an
+assertion is what follows from constants. A constant written into a field is one: every node the
+mapping produces would break the assertion, and the run would say so about each of them. Saying it
+once, where it is written, is the same answer sooner.
+
+A value read from a column is not decided here, and neither is a condition whose meaning the
+checker does not fix — `str.matches`, a call to the catalogue it does not fold. Those are the run's
+to check.
+
+## How to repair it
+
+- **The constant is wrong.** Write the value meant.
+- **The assertion is too strict.** Loosen it on the declaration, or give it `severity = warning`
+  so the run reports it and writes the graph.

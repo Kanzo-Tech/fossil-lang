@@ -16,7 +16,7 @@ second file.
 So a type can be declared in the program, and an imported one is named by its name. The grammar is
 [`grammar.bnf`](/docs/book/grammar), `TypeDecl`; this page is why it is shaped as it is. All of it is
 built except the conversions onto rudof's types, which is what the `direction` above declares. The
-stacked attributes, `@annotation` and `LangString` are
+stacked attributes, `@annotation` and `String<Lang>` are
 [Annotations and language-tagged strings](/docs/design/labels).
 
 ```
@@ -24,7 +24,7 @@ stacked attributes, `@annotation` and `LangString` are
 type Person
     @iri("https://schema.org/name")          name: String
     @iri("https://shop.example/vocab/name")  handle: String
-    @iri("https://schema.org/birthDate")     born: Option<Date>
+    @iri("https://schema.org/birthDate")     born: Option<Time<Date>>
     @iri("https://schema.org/homeLocation")  livesIn: Ref<City>
 ```
 
@@ -37,8 +37,9 @@ read that vocabulary and never learn whether it came from a declaration or a doc
 [Inference from shapes](/docs/design/shapes) already made between ShEx and SHACL, made once more.
 A declaration is a third decoder whose input is the program. A declared type is a row of the same
 table an import's name is (`crates/fossil-hir/src/def_map.rs, TypeEntry`), so a mapping header, an
-edge and a `Ref<…>` resolve both by one lookup, and the run classifies edges with every type the
-program has, declared and imported (`crates/fossil-hir/src/shapes.rs, program_shapes`).
+edge and a `Ref<…>` resolve both by one lookup, and the lowering takes its edges from every type the
+program has, declared and imported: the program's graph type
+(`crates/fossil-hir/src/graph_type.rs, graph_type`).
 
 The vocabulary grew by one field for it, and it is the field the next section is about: a property
 carries its `name` (`crates/fossil-graph-schema/src/shapes.rs, PropertyConstraint`). A decoder writes
@@ -66,8 +67,10 @@ which indentation alone would make ambiguous.
 A field's type is a primitive of the lattice (`crates/fossil-graph-schema/src/lib.rs, Primitive`) or
 one of three constructors, written as the checker already prints them: `Option<T>` zero or one,
 `Seq<T>` zero or more, `Ref<T>` a reference to a node of the declared or imported type `T`, which is
-an edge. A bare `T` is exactly one. Cardinality is the type, not a marker beside it: ShEx's `?`, `*`
-and `+` do not appear.
+an edge. A bare `T` is exactly one. `Seq` takes bounds: `Seq<T, n>` is at least `n` and
+`Seq<T, n, m>` between `n` and `m`. Cardinality is the type, not a marker beside it: ShEx's `?`, `*`,
+`+` and `{n,m}` do not appear, and SHACL's `sh:minCount` and `sh:maxCount` are each one of those
+spellings.
 
 `Option` and `Seq` hold a primitive or a `Ref<T>`, and the count is said once, outermost: the
 vocabulary carries one `(min, max)` per property, so `Option<Seq<T>>` would be a second spelling of
@@ -79,8 +82,11 @@ is refused as [`type/invalid-field-type`](/docs/errors/type/invalid-field-type),
 have is [`name/unknown-shape`](/docs/errors/name/unknown-shape), the code a mapping header naming
 one gets.
 
-ShEx's `+`, one or more, has no type of its own. **What would reverse it:** a program that needs the
-checker to refuse an empty list — then `NonEmpty<T>`, as a fourth constructor.
+Each count has one spelling, so bounds another spelling already says are refused too: `Seq<T, 0, 1>`
+is `Option<T>`, `Seq<T, 1, 1>` is `T` and `Seq<T, 0>` is `Seq<T>`. Bounds belong to `Seq` alone, and
+a maximum below the minimum is no count at all. ShEx's `+` is `Seq<T, 1>`; the fourth constructor
+this page once kept in reserve for it, `NonEmpty<T>`, would be one more spelling of that.
+**What would reverse it:** a count that two numbers cannot say.
 
 There is no `&` or other sugar for `Ref<T>`. `&` was a token once, the intersection of two shapes, and
 went; a second spelling of a reference would be the second way to say one thing that this page
@@ -136,22 +142,77 @@ separate two fields:
 @iri("https://schema.org/Person")
 type Laureate
     @iri("https://schema.org/name")
-    name: Seq<LangString>
+    name: Seq<String<Lang>>
 
     @iri("https://schema.org/birthDate")
     @annotation("http://www.w3.org/2000/01/rdf-schema#label", "birth date"@en)
     @annotation("http://www.w3.org/2000/01/rdf-schema#label", "fecha de nacimiento"@es)
-    birthDate: Date
+    birthDate: Time<Date>
 ```
 
 The body is still indented and still one field per entry; only the attribute's line moved. The second
 attribute is `@annotation`, a ShEx annotation — a predicate and an RDF object — and the reason a field
 would carry several; [Annotations and language-tagged strings](/docs/design/labels) is the argument for
-it, for `"…"@en` and for `LangString`. The grammar is `grammar.bnf, DeclAttrs`.
+it, for `"…"@en` and for `String<Lang>`. The grammar is `grammar.bnf, DeclAttrs`.
 
 **What would reverse it:** a field whose attributes outgrow their lines often enough that the field's
 name is hard to find under them. Then the attributes move into the body of the field, and that is an
 indented block again, never braces.
+
+## What a type does not say is an `@assert`
+
+A type says what a value is and how many there are. What else a value must satisfy — a range, a
+pattern, an order between two fields — is a condition written beside it, in the language's own
+expressions, as one more attribute:
+
+```
+@iri("https://schema.org/Person")
+@assert(alta <= baja)
+type Persona
+    @iri("https://schema.org/age")
+    @assert(edad >= 0 and edad < 150)
+    edad: Option<Integer>
+
+    @iri("https://schema.org/email")
+    @assert(str.matches(email, "^[^@]+@[^@]+$"), severity = warning)
+    @severity(info)
+    email: Seq<String, 1, 3>
+
+    @iri("https://ex.org/alta")  alta: Time<Date>
+    @iri("https://ex.org/baja")  baja: Option<Time<Date>>
+```
+
+It is the shape of a validator in Pydantic or Zod — a condition on the field, with no schema language
+beside the program — and it is what SHACL Core's components translate into, nearly one for one:
+`sh:minInclusive` is `x >= n`, `sh:pattern` is `str.matches(x, "…")`, `sh:in` is a disjunction of
+equalities, `sh:lessThan` is `x < y` on the type. The grammar is `grammar.bnf, AssertAttr`.
+
+**One rule says what an assertion reads.** On a field, the field's own name is one of its values, and
+the assertion holds of each: a `Seq<String>` is checked element by element. On a type, the names are
+its fields that hold one value, and the assertion holds of each node. A value that is absent is not
+checked, as in SHACL, which is what lets `alta <= baja` stand beside an `Option<Time<Date>>`. A name the
+rule does not give — a second field from a field's assertion, a field of many values from the type's —
+is [`shape/out-of-scope`](/docs/errors/shape/out-of-scope), and a condition that is not a `Bool` is
+[`type/expected-bool`](/docs/errors/type/expected-bool).
+
+**Each constraint has a severity**, SHACL's three: `violation`, the default, `warning` and `info`. An
+assertion takes its own as an argument; a field's count takes the one `@severity` gives that field.
+So an ill-formed email can warn while a person without one refuses — in SHACL, two property shapes on
+one `sh:path`. A `violation` the checker can decide is an error; a `warning` or an `info`, a warning.
+A name that is none of the three is [`name/unknown-severity`](/docs/errors/name/unknown-severity).
+
+**The checker decides what follows from the program, and nothing about the data.** It reads the program
+and its documents, which are already Salsa inputs, and no fact about a source: a candidate key a
+profile measured depends on what the data holds, not on what the source is, and a program would
+compile one way in the editor and another in the run. What it decides is the condition's type and
+scope, and a constant: a mapping that writes `edad = 200` is
+[`shape/assert-failed`](/docs/errors/shape/assert-failed) at that line. The rest — every value read
+from a column, and a count — is the run's, per value and per subject, and the run checks none of it
+yet: that is the step after this one, with the count `write/cardinality` and a broken assertion
+`run/assert-failed`, a `warning` or an `info` listed beside the graph it still writes.
+
+**What would reverse it:** a constraint the language's expressions cannot say, met often enough that
+writing it as a SHACL document beside the program is the smaller cost.
 
 ## RDF is rudof's, through `From` and `Into`
 
@@ -163,7 +224,7 @@ from, instead of tables and `match`es of our own (`crates/fossil-graph-schema/sr
 holds them: the XSD table both ways, and the names a declared field's type is read in). A ShEx
 document then becomes declared types by a `TryFrom` over `shex_ast`'s compiled schema, `SchemaIR`
 ([One database, end to end](/docs/design/incremental) says where it lives), where
-`fossil_hir::shex` resolves references and labels by hand today. What Fossil supports of RDF is then the
+`fossil_shapes::shex` resolves references and labels by hand today. What Fossil supports of RDF is then the
 set of those conversions, and the page that lists it is generated from what has a `From`. One
 measured limit: `shex_ast` 0.3.1 drops every annotation on its way to `SchemaIR`, so the conversion
 that carries them reads the AST ([Annotations and language-tagged strings](/docs/design/labels)).
@@ -228,3 +289,15 @@ One per refusal:
 - a `Ref<T>` whose `T` the program does not have: `crates/fossil-hir/tests/declared_types.rs, a_ref_to_a_type_the_program_does_not_have_is_refused`
 - an import the document does not declare: `crates/fossil-hir/tests/declared_types.rs, an_import_the_document_does_not_declare_is_refused_listing_the_ones_it_does`
 - two shapes sharing an imported local name: `crates/fossil-hir/tests/declared_types.rs, two_shapes_sharing_an_imported_local_name_are_refused_naming_both`
+
+The bounds, the assertions and the severities are titled tests in
+`crates/fossil-hir/tests/asserts.rs`: the design's own declaration is clean
+(`crates/fossil-hir/tests/asserts.rs, the_design_declaration_is_clean`), bounds are a `Seq`'s count
+and a count with another spelling is refused
+(`crates/fossil-hir/tests/asserts.rs, a_count_another_spelling_says_or_no_field_can_hold_is_refused`),
+the scope rule both ways
+(`crates/fossil-hir/tests/asserts.rs, an_assertion_on_a_field_reads_that_field_alone`,
+`crates/fossil-hir/tests/asserts.rs, an_assertion_on_a_type_reads_its_single_valued_fields`), and a
+constant refused at its severity
+(`crates/fossil-hir/tests/asserts.rs, a_constant_an_assertion_refuses_is_refused_where_it_is_written`,
+`crates/fossil-hir/tests/asserts.rs, a_warning_assertion_warns`).

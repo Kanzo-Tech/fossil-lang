@@ -4,7 +4,7 @@ description: The compiler runs on DataFusion and links no database. Why wasm32 i
 ---
 
 fossil compiles to relational algebra and something has to execute it. Two things did: DataFusion in
-`fossil-df`, and DuckDB — bundled, compiled from C++ — across the layout pass, the engine and the
+`fossil-exec`, and DuckDB — bundled, compiled from C++ — across the layout pass, the engine and the
 hosts. **The compiler runs on DataFusion; DuckDB leaves the compiler and stays in the hosts.** The
 argument is four sentences:
 
@@ -27,7 +27,7 @@ prose.
 
 **There is no native write host** ([discarded](/docs/design/discarded#the-tooling) says why and what
 brings one back). The one host that writes is `fossil-df-wasm`, in a browser tab or in Node, so the
-compiler and the write path are both the wasm32 build and neither links a database. **DuckDB is still the engine that `DESCRIBE`s**: as DuckDB-WASM
+compiler and the write path are both the wasm32 build and neither links a database. **DuckDB is still the engine that profiles a source**: as DuckDB-WASM
 in a browser editor, and natively only under a test.
 
 ## How DataFusion reaches storage

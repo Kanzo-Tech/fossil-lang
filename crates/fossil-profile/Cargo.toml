@@ -19,8 +19,11 @@ workspace = true
 # `sources::InferredDescriptor`, the columns a profile finds, which is the
 # value of the input a host writes them into.
 fossil-base = { path = "../fossil-base" }
-# `Primitive`, the lattice a DuckDB column type maps onto.
+# `Primitive`, the lattice a column's Arrow type maps onto.
 fossil-graph-schema = { path = "../fossil-graph-schema" }
+# The type of each column an engine answers with: every engine fossil profiles
+# on answers in Arrow. The types alone, so this crate still runs nothing.
+arrow-schema = { workspace = true }
 # A profile crosses to a host as JSON, and `@fossil-lang/types` declares its
 # shape from this schema (`crates/xtask/tests/wire.rs`).
 schemars = { workspace = true }

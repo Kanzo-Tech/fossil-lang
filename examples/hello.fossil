@@ -3,7 +3,7 @@
 // `Person.vertex.yml` declares their columns.
 //
 // This is the one program asserted by CONTENT rather than by success:
-// `crates/fossil-df/tests/walking_skeleton.rs` runs it through the executor and
+// `crates/fossil-exec/tests/walking_skeleton.rs` runs it through the executor and
 // checks the five subjects `https://example.org/user/1`…`/5` and the five names
 // on a `name` column. It may be made clearer; it may not be made to mean
 // something else.

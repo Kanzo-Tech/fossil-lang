@@ -5,7 +5,7 @@
  * above `Order`'s dedup charged each of its seventy-three slices for the whole batch it was cut
  * from — 5.6 GiB accounted for a 78 MiB batch. On `wasm32` that sum wrapped and a reservation
  * split unwrapped a `None`: `unreachable`, mid-run, with the promise never settled. 60,000 people
- * ran. `crates/fossil-df/src/memory.rs` is the fix and says why.
+ * ran. `crates/fossil-exec/src/memory.rs` is the fix and says why.
  *
  * The run must finish, every order must be written, and the executor's linear memory must stay
  * under a gigabyte — it measured 624 MiB when this was written, against 4 GiB of address space.

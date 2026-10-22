@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build-wasm.sh — Build packages/storage/pkg/ from crates/fossil-storage-wasm/.
+# build-wasm.sh — Build packages/storage/pkg/ from bindings/storage/.
 #
 # Sibling of packages/wasm/scripts/build-wasm.sh (the same wasm-bindgen
 # `--target web` recipe). The only differences are the

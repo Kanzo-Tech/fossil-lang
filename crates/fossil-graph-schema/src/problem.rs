@@ -370,11 +370,11 @@ catalogue! {
     #[error("`{written}` is a prefixed name, and an IRI is written whole: `{expands_to}`")]
     PrefixedIri { written: String, expands_to: String },
 
-    /// A declared type or a field with two `@iri`s; `name` is the type's or
-    /// the field's.
-    "syntax/duplicate-iri", "Two IRIs for one declaration",
-    #[error("`{name}` has two `@iri`s, and a declaration has one IRI")]
-    DuplicateIri { name: String },
+    /// A declared type or a field with two of an attribute it has one of —
+    /// `@iri`, or a field's `@severity`; `name` is the type's or the field's.
+    "syntax/duplicate-attribute", "An attribute written twice",
+    #[error("`{name}` has two `{attribute}`s, and a declaration has one")]
+    DuplicateAttribute { attribute: String, name: String },
 
     /// A call whose callee is not a name.
     "syntax/invalid-callee", "Not a function name",
@@ -389,6 +389,12 @@ catalogue! {
     "name/unknown-shape", "Not a shape this program declares",
     #[error("`{shape}` is not a shape this program declares")]
     UnknownShape { shape: String, declared: Vec<String> },
+
+    /// A severity no constraint has — `@severity(fatal)`. `severities` is the
+    /// three there are.
+    "name/unknown-severity", "Not a severity",
+    #[error("`{written}` is not a severity — it is one of {}", code_list(.severities))]
+    UnknownSeverity { written: String, severities: Vec<String> },
 
     /// A property key the target shape does not declare.
     "name/unknown-property", "Not a property the shape declares",
@@ -567,6 +573,20 @@ catalogue! {
     "shape/missing-required-property", "A required property is never written",
     #[error("`{mapping}` never writes `{property}`, and {shape} requires it")]
     MissingRequiredProperty { mapping: String, property: String, shape: String },
+
+    /// A field an assertion cannot read: on a field it reads that field
+    /// alone, and on a type each single-valued field. `on` says which
+    /// assertion — «the field `edad`», «the type `Persona`».
+    "shape/out-of-scope", "A field an assertion cannot read",
+    #[error("`{field}` is not in scope in an assertion on {on}")]
+    OutOfScope { field: String, on: String },
+
+    /// A constant a mapping writes that a field's assertion refuses — decided
+    /// where it is written, because nothing about it waits for the data.
+    /// `assertion` is the condition as written.
+    "shape/assert-failed", "A constant an assertion refuses",
+    #[error("`{property}` is written as {value}, and `{assertion}` does not hold of it")]
+    AssertFailed { property: String, value: String, assertion: String },
 
     /// A value disjunction in a shape, which one mapping cannot write.
     "shape/unsupported-disjunction", "A value disjunction",
@@ -868,6 +888,13 @@ catalogue! {
     "write/invalid-subject", "A vertex has no absolute IRI as its subject",
     #[error("a `{vertex_type}` vertex has the subject {subject}, which is not an absolute IRI")]
     WriteInvalidSubject { vertex_type: String, subject: String },
+
+    /// A value of a property the program types as an IRI that is not an
+    /// absolute IRI: the object of its triple would be a term no RDF parser
+    /// reads.
+    "write/invalid-iri", "A value typed as an IRI is not one",
+    #[error("`{property}` holds `{value}`, which is not an absolute IRI")]
+    WriteInvalidIri { property: String, value: String },
 
     /// One IRI that names two things the mapping needs it to name one of
     /// (admissibility A2): two vertex types with one class, two columns of one

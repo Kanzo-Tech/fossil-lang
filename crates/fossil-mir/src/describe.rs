@@ -9,16 +9,15 @@
 //! a datatype (`GraphAr` has no word for them), so the mapping is where the
 //! program's IRIs are.
 //!
-//! **It is a pure function of the types**, the [`GraphSchema`] a program
-//! declares or imports (`fossil_hir::shapes::program_shapes`) or a run
-//! produced: it reads no data and no engine, so a host asks it before any run
+//! **It is a pure function of the types**, the [`GraphSchema`] of the program
+//! (`fossil_hir::graph_type::graph_type`) or the one a run produced: it reads no data and no engine, so a host asks it before any run
 //! (`/docs/design/graphar`, D6). One triples map per vertex type, over the
 //! table of that name (`rml:SQL2008Table`); one per relation, over a query that
 //! joins the adjacency list to the two end tables on the index and reads the
 //! two subjects; one per multi-valued or language-tagged property, over a query
 //! that unnests the list once so each row is one element. The tables are SQL
 //! names, which the host resolves, and their names and columns are the layout's
-//! (`fossil-df`'s `layout`): a vertex type's table is its label, a relation's is
+//! (`fossil-exec`'s `layout`): a vertex type's table is its label, a relation's is
 //! `<Src>_<label>_<Dst>`, and the columns are the properties' names beside the
 //! `subject` and the three index columns.
 //!
@@ -56,7 +55,7 @@ use rudof_iri::IriS;
 pub const PAYLOAD_IDENTITY: &str = "subject";
 
 /// `GraphAr`'s name for the column of a vertex's index within its type
-/// (`graphar_parquet::VERTEX_INDEX_COL`, which `fossil-df` holds this to).
+/// (`graphar_parquet::VERTEX_INDEX_COL`, which `fossil-exec` holds this to).
 pub const VERTEX_INDEX_COL: &str = "_graphArVertexIndex";
 /// `GraphAr`'s name for the column of a relation's source index
 /// (`graphar_parquet::SRC_INDEX_COL`).
@@ -228,7 +227,7 @@ fn vertex_maps(
         annotate(&predicate, &declared.annotations, notes)?;
         // A language-tagged value is a struct of the form and its tag, whatever
         // its cardinality; a set is a list of values.
-        let tagged = declared.datatype == Primitive::LangString;
+        let tagged = declared.datatype == Primitive::LANG_STRING;
         let several = declared.cardinality == Cardinality::Multi;
         let text = natural.get(&(label.to_string(), name.to_string())).copied();
         let object = if tagged {
@@ -311,8 +310,8 @@ fn object(
             // None declared: the literal is the column's natural one, except
             // where the writer stored a text for a type `GraphAr` lacks.
             let xsd = match declared.datatype {
-                Primitive::GYear => Some("gYear"),
-                Primitive::Time => Some("time"),
+                Primitive::YEAR => Some("gYear"),
+                Primitive::HOUR => Some("time"),
                 _ => text,
             };
             match xsd {
@@ -468,7 +467,7 @@ mod tests {
     fn property(name: &str, iri: Option<&str>) -> Property {
         Property {
             name: name.to_string(),
-            datatype: Primitive::String,
+            datatype: Primitive::STRING,
             iri: iri.map(str::to_string),
             term: None,
             cardinality: Cardinality::Single,

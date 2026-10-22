@@ -2,14 +2,14 @@
 //!
 //! [`Primitive`] is fossil's lattice and names no datatype IRI. A shape document
 //! states a value's datatype as an XSD IRI, and a mapping writes one back, so
-//! the two meet here and nowhere else: [`Xsd`] wraps the IRI, `From<Primitive>`
-//! writes the canonical one, and `TryFrom<&Xsd>` reads one into the lattice.
+//! the two meet here and nowhere else: [`Xsd`] wraps the IRI, `TryFrom<Primitive>`
+//! writes the canonical one (a `Uri` has none: it is a node), and `TryFrom<&Xsd>` reads one into the lattice.
 //! The second is a `TryFrom` because the lattice is smaller than XSD:
 //! `xsd:duration` has no primitive, and `xsd:decimal` folds into `Float`.
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Primitive, RDF_LANG_STRING};
+use crate::{Lang, Precision, Primitive, RDF_LANG_STRING};
 
 /// An XSD datatype IRI, exactly as written: the full
 /// `http://www.w3.org/2001/XMLSchema#<name>` IRI, the `xsd:<name>` prefixed
@@ -41,23 +41,31 @@ impl std::fmt::Display for Xsd {
 
 /// The canonical datatype of each primitive, the one a mapping writes. An alias
 /// like `xsd:long` reads in as [`Primitive::Integer`] and comes back as
-/// `xsd:integer`.
-impl From<Primitive> for Xsd {
-    fn from(primitive: Primitive) -> Self {
-        Self::new(match primitive {
-            Primitive::String => "http://www.w3.org/2001/XMLSchema#string",
+/// `xsd:integer`. A [`Primitive::Uri`] has none: it is written as an IRI node,
+/// never a literal.
+impl TryFrom<Primitive> for Xsd {
+    type Error = NotALiteral;
+
+    fn try_from(primitive: Primitive) -> Result<Self, NotALiteral> {
+        Ok(Self::new(match primitive {
+            Primitive::String(Lang::Untagged) => "http://www.w3.org/2001/XMLSchema#string",
+            Primitive::String(Lang::Tagged) => RDF_LANG_STRING,
             Primitive::Integer => "http://www.w3.org/2001/XMLSchema#integer",
             Primitive::Float => "http://www.w3.org/2001/XMLSchema#double",
             Primitive::Bool => "http://www.w3.org/2001/XMLSchema#boolean",
-            Primitive::Date => "http://www.w3.org/2001/XMLSchema#date",
-            Primitive::DateTime => "http://www.w3.org/2001/XMLSchema#dateTime",
-            Primitive::Time => "http://www.w3.org/2001/XMLSchema#time",
-            Primitive::GYear => "http://www.w3.org/2001/XMLSchema#gYear",
-            Primitive::AnyUri => "http://www.w3.org/2001/XMLSchema#anyURI",
-            Primitive::LangString => RDF_LANG_STRING,
-        })
+            Primitive::Time(Precision::Year) => "http://www.w3.org/2001/XMLSchema#gYear",
+            Primitive::Time(Precision::Date) => "http://www.w3.org/2001/XMLSchema#date",
+            Primitive::Time(Precision::DateTime) => "http://www.w3.org/2001/XMLSchema#dateTime",
+            Primitive::Time(Precision::Hour) => "http://www.w3.org/2001/XMLSchema#time",
+            Primitive::Uri => return Err(NotALiteral),
+        }))
     }
 }
+
+/// A primitive RDF writes as a node and not as a literal: [`Primitive::Uri`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("the primitive is written as an IRI node, and has no datatype")]
+pub struct NotALiteral;
 
 /// A datatype the lattice has no primitive for. Callers decide between a
 /// diagnostic and a `String` fallback, and they do differ: `ShEx` narrowing
@@ -74,20 +82,21 @@ impl TryFrom<&Xsd> for Primitive {
     fn try_from(xsd: &Xsd) -> Result<Self, OutsideLattice> {
         let local = xsd.0.rsplit(['#', '/', ':']).next().unwrap_or(&xsd.0);
         Ok(match local {
-            "string" | "normalizedString" | "token" | "language" => Self::String,
+            // `xsd:anyURI` is a literal, a text whose shape says so; an
+            // identifier written as a node is `Term::Iri`, read as `Uri`.
+            "string" | "normalizedString" | "token" | "language" | "anyURI" => Self::STRING,
             "integer" | "long" | "int" | "short" | "byte" | "nonNegativeInteger"
             | "positiveInteger" | "nonPositiveInteger" | "negativeInteger" | "unsignedLong"
             | "unsignedInt" => Self::Integer,
             "decimal" | "float" | "double" | "number" => Self::Float,
             "boolean" => Self::Bool,
-            "date" => Self::Date,
-            "dateTime" | "dateTimeStamp" => Self::DateTime,
-            "time" => Self::Time,
-            "gYear" => Self::GYear,
-            "anyURI" => Self::AnyUri,
+            "gYear" => Self::YEAR,
+            "date" => Self::DATE,
+            "dateTime" | "dateTimeStamp" => Self::DATE_TIME,
+            "time" => Self::HOUR,
             // RDF's, not XSD's: the one datatype of the lattice outside the
             // `xsd:` namespace, read by its local name like the rest.
-            "langString" => Self::LangString,
+            "langString" => Self::LANG_STRING,
             _ => return Err(OutsideLattice),
         })
     }
@@ -105,7 +114,7 @@ mod tests {
     fn datatype_iris_read_into_the_lattice() {
         assert_eq!(
             read("http://www.w3.org/2001/XMLSchema#string"),
-            Some(Primitive::String)
+            Some(Primitive::STRING)
         );
         assert_eq!(read("xsd:integer"), Some(Primitive::Integer));
         assert_eq!(
@@ -114,7 +123,8 @@ mod tests {
         );
         assert_eq!(
             read("http://www.w3.org/2001/XMLSchema#anyURI"),
-            Some(Primitive::AnyUri)
+            Some(Primitive::STRING),
+            "an `xsd:anyURI` literal is a text; `Uri` is a node"
         );
         assert_eq!(read("http://example.org/Custom"), None);
     }
@@ -126,9 +136,9 @@ mod tests {
     fn every_xsd_spelling_reaches_one_lattice() {
         for (name, want) in [
             ("integer", Primitive::Integer),
-            ("dateTime", Primitive::DateTime),
-            ("anyURI", Primitive::AnyUri),
-            ("gYear", Primitive::GYear),
+            ("dateTime", Primitive::DATE_TIME),
+            ("anyURI", Primitive::STRING),
+            ("gYear", Primitive::YEAR),
         ] {
             let iri = format!("http://www.w3.org/2001/XMLSchema#{name}");
             let prefixed = format!("xsd:{name}");
@@ -161,9 +171,9 @@ mod tests {
             assert_eq!(read(name), Some(Primitive::Float), "{name}");
         }
         for name in ["string", "normalizedString", "token", "language"] {
-            assert_eq!(read(name), Some(Primitive::String), "{name}");
+            assert_eq!(read(name), Some(Primitive::STRING), "{name}");
         }
-        assert_eq!(read("dateTimeStamp"), Some(Primitive::DateTime));
+        assert_eq!(read("dateTimeStamp"), Some(Primitive::DATE_TIME));
     }
 
     /// Outside the lattice is an error, never a silent `String`. `duration` is a
@@ -175,19 +185,23 @@ mod tests {
         assert_eq!(read(""), None);
     }
 
-    /// Every variant writes a datatype that reads back to itself — the two
-    /// directions are inverses, not two tables that happen to agree today.
+    /// Every literal writes a datatype that reads back to itself — the two
+    /// directions are inverses, not two tables that happen to agree today —
+    /// and `Uri` alone writes none.
     #[test]
     fn every_primitive_round_trips_through_its_datatype() {
         for p in Primitive::ALL {
-            assert_eq!(Primitive::try_from(&Xsd::from(p)), Ok(p), "{p:?}");
+            match Xsd::try_from(p) {
+                Ok(xsd) => assert_eq!(Primitive::try_from(&xsd), Ok(p), "{p:?}"),
+                Err(NotALiteral) => assert_eq!(p, Primitive::Uri),
+            }
         }
     }
 
     /// The wire carries the IRI as a plain string, as it did before the type.
     #[test]
     fn the_wire_is_the_bare_iri() {
-        let xsd = Xsd::from(Primitive::Date);
+        let xsd = Xsd::try_from(Primitive::DATE).expect("a literal");
         let json = serde_json::to_string(&xsd).expect("serialises");
         assert_eq!(json, "\"http://www.w3.org/2001/XMLSchema#date\"");
     }

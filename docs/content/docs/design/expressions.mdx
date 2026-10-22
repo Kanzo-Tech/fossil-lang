@@ -62,13 +62,13 @@ equivalence is demonstrated rather than asserted.
 
 The catalogue is 41 rows: twelve relation verbs, four source constructors, and **25 functions an
 expression may call**. Twenty-one of the 25 render on the DataFusion backend; the four that do not
-are pinned in `crates/fossil-df/src/stdlib.rs, UNREACHABLE_ON_DATAFUSION` with the cause beside them, and it is one cause
+are pinned in `crates/fossil-exec/src/stdlib.rs, UNREACHABLE_ON_DATAFUSION` with the cause beside them, and it is one cause
 and not four — `math.sum`, `avg`, `min` and `max` are aggregates, and an aggregate in a scalar
 position is [a pipeline with a group-by](/docs/design/algebra) rather than a call this backend
 declines to render. **That list is measured, not guessed:** the test beside it plans each catalogued
 row's real template through the renderer and compares what fails against the list, so a function
 becoming reachable — or stopping — is a diff there and not a surprise in someone's program. A call
-*running* is a separate claim, and a narrower one (`crates/fossil-df/tests/expressions.rs, a_call_produces_its_column`
+*running* is a separate claim, and a narrower one (`crates/fossil-exec/tests/expressions.rs, a_call_produces_its_column`
 asserts the values, not the plan).
 
 ## The drop is loud

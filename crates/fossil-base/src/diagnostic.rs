@@ -16,7 +16,7 @@
 //! compiles".
 //!
 //! The checker consumes the format-neutral `Rejection::Disjunction` that
-//! `fossil_hir::shex::rejection_of` builds, and renders the syntax itself — no
+//! `fossil_shapes::shex::rejection_of` builds, and renders the syntax itself — no
 //! renderer lives on the `ShEx` side.
 //!
 //! Why structured (not Markdown-message-substring): type-safe, future-proof
@@ -90,7 +90,7 @@ pub enum SpanFrame {
 /// **A renderer owes one snippet per text.** miette resolves a range against
 /// ONE `SourceCode`, so a report that underlines two files is two `Rendered`s
 /// under one message; the conformance harness's renderer
-/// (`fossil-df/tests/support/native.rs`) groups by this field before rendering. A renderer
+/// (`fossil-exec/tests/support/native.rs`) groups by this field before rendering. A renderer
 /// that ignored it would resolve a `.shex` offset against the program's text
 /// and underline whatever happens to sit at that byte — silently, and inside
 /// the right file.

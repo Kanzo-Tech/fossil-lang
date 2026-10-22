@@ -18,7 +18,7 @@ nowhere in a program to write a type.
 
 ```mermaid
 graph LR
-  S["<b>source file</b><br/>data/users.csv"] -->|DESCRIBE| P["provider"]
+  S["<b>source file</b><br/>data/users.csv"] -->|"its columns"| P["provider"]
   P -->|"row type · synthesised"| A["<b>property assignment</b><br/>total = Purchase.reference"]
   D["<b>shape document</b><br/>shape.shex"] -->|decode| C["constraint table"]
   C -->|"target type · expected"| A
@@ -27,7 +27,7 @@ graph LR
 **Forward, from the source.** `User := io.csv("data/users.csv")` gives `User` a row type whose
 fields are the columns of the file, with the types the file has, and every expression in the body is
 synthesised from it. That row type comes from the file itself: one
-`DESCRIBE SELECT * FROM read_csv_auto(…)` per source, run by the host over the sources the def map
+`SELECT * FROM read_csv_auto(…) LIMIT 0` per source, typed by the Arrow fields of its answer, run by the host over the sources the def map
 bound and before the check (`fossil-profile`'s plan, [Profile](/docs/design/profile)) and cached per source. The programs are small and
 the sources are large, so it is the only step of a compile that costs real time.
 

@@ -4,10 +4,10 @@
 //! # What it does NOT prove
 //!
 //! - **That a run writes the language column.** That is the conformance
-//!   program `docs/programs/labels`, executed by `fossil-df`'s
+//!   program `docs/programs/labels`, executed by `fossil-exec`'s
 //!   `tests/programs.rs` and read back with `DuckDB`.
-//! - **That a shape document's annotations are read.** `fossil_hir::shex`'s and
-//!   `fossil_hir::shacl`'s own tests hold the two decoders.
+//! - **That a shape document's annotations are read.** `fossil_shapes::shex`'s and
+//!   `fossil_shapes::shacl`'s own tests hold the two decoders.
 
 use fossil_base::test_support::{db_with_document, register_inferred};
 use fossil_base::{FossilDb, SourceFile};
@@ -19,8 +19,8 @@ use fossil_hir::typecheck_mapping;
 
 const COLUMNS: &[(&str, Primitive)] = &[
     ("id", Primitive::Integer),
-    ("name", Primitive::String),
-    ("lang", Primitive::String),
+    ("name", Primitive::STRING),
+    ("lang", Primitive::STRING),
 ];
 
 /// The declaration from the page, shrunk: annotations stacked above the type
@@ -30,7 +30,7 @@ const LAUREATE: &str = "\
 @annotation(\"http://www.w3.org/2000/01/rdf-schema#label\", \"Nobel laureate\"@en)
 type Laureate
     @iri(\"https://schema.org/name\")
-    name: Seq<LangString>
+    name: Seq<String<Lang>>
 
     @iri(\"https://schema.org/alternateName\")
     @annotation(\"http://www.w3.org/2000/01/rdf-schema#label\", \"alias\"@en)
@@ -87,7 +87,7 @@ Laureates : Laureate from rows
 }
 
 /// `@annotation` lowers to `ShEx`'s Annotation on the shape and on the field, in
-/// written order, the object a plain or a tagged string; a `LangString` field
+/// written order, the object a plain or a tagged string; a `String<Lang>` field
 /// is a literal of `rdf:langString`.
 #[test]
 fn an_annotation_lowers_onto_the_type_and_the_field_it_is_written_above() {
@@ -124,7 +124,7 @@ fn an_annotation_lowers_onto_the_type_and_the_field_it_is_written_above() {
     );
 }
 
-/// A `LangString` field takes `str.lang` over a column with a column tag —
+/// A `String<Lang>` field takes `str.lang` over a column with a column tag —
 /// `rml:languageMap` — and the program is clean.
 #[test]
 fn a_per_row_tag_is_str_lang_over_a_column() {
@@ -132,13 +132,13 @@ fn a_per_row_tag_is_str_lang_over_a_column() {
     assert_eq!(problems(&mapping("rows.name.lang(\"en\")")), []);
 }
 
-/// A constant is the literal, and the literal is a `LangString`.
+/// A constant is the literal, and the literal is a `String<Lang>`.
 #[test]
 fn a_tagged_literal_is_a_constant_lang_string() {
     assert_eq!(problems(&mapping("\"Marie Curie\"@en")), []);
 }
 
-/// A `String` where a `LangString` belongs is the property mismatch it always
+/// A `String` where a `String<Lang>` belongs is the property mismatch it always
 /// should have been.
 #[test]
 fn a_string_is_not_a_lang_string() {

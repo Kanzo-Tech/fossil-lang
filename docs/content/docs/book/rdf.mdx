@@ -14,18 +14,23 @@ A field's type is one of the primitives the checker knows
 
 | Type | Written as | Also read from a shape document as |
 | --- | --- | --- |
-| `String` | `xsd:string` | `xsd:normalizedString`, `xsd:token`, `xsd:language` |
+| `String` | `xsd:string` | `xsd:normalizedString`, `xsd:token`, `xsd:language`, `xsd:anyURI` |
+| `String<Lang>` | `rdf:langString`, a string and its BCP 47 tag | a ShEx value set of languages (`[@en @es~]`) |
 | `Integer` | `xsd:integer` | `xsd:long`, `xsd:int`, `xsd:short`, `xsd:byte`, `xsd:nonNegativeInteger`, `xsd:positiveInteger`, `xsd:nonPositiveInteger`, `xsd:negativeInteger`, `xsd:unsignedLong`, `xsd:unsignedInt` |
 | `Float` | `xsd:double` | `xsd:decimal`, `xsd:float`, `xsd:double` |
 | `Bool` | `xsd:boolean` | — |
-| `Date` | `xsd:date` | — |
-| `DateTime` | `xsd:dateTime` | `xsd:dateTimeStamp` |
-| `Time` | `xsd:time` | — |
-| `GYear` | `xsd:gYear` | — |
-| `AnyUri` | `xsd:anyURI` | — |
-| `LangString` | `rdf:langString`, a string and its BCP 47 tag | a ShEx value set of languages (`[@en @es~]`) |
+| `Time<Year>` | `xsd:gYear` | — |
+| `Time<Date>` | `xsd:date` | — |
+| `Time<DateTime>` | `xsd:dateTime` | `xsd:dateTimeStamp` |
+| `Time<Hour>` | `xsd:time` | — |
+| `Uri` | an IRI node, never a literal | a ShEx `IRI`, a SHACL `sh:nodeKind sh:IRI` |
 
-A `LangString` value is given its tag by `str.lang` — `Row.name.lang(Row.lang)`, or a constant
+None of these types is RDF's: `String<Lang>` is a text that carries its language, `Time<…>` is a point
+in time at one precision, and `Uri` is an identifier. RDF is where each is written as a datatype, and
+this table is the whole of that writing. An `xsd:anyURI` in a shape is a literal, so it is read as a
+`String` and keeps its datatype in the mapping as the shape wrote it.
+
+A `String<Lang>` value is given its tag by `str.lang` — `Row.name.lang(Row.lang)`, or a constant
 `"Marie Curie"@en` — and a field of it is always a property table with a `lang` column, whatever its
 count ([Annotations and language-tagged strings](/docs/design/labels)).
 
@@ -37,7 +42,7 @@ XSD datatype in a shape document narrows nothing; a ShEx document reads it as `S
 
 Every node has an IRI, minted from its mapping's `@subject` template, and every mapping of one type
 mints it the same way ([Identity](/docs/design/identity)). An edge is a reference to that IRI,
-written `T(…)` in a mapping. An `AnyUri` field is an IRI written as a value, not an edge.
+written `T(…)` in a mapping. A `Uri` field is an IRI written as a value, not an edge.
 
 There are no blank nodes. A node without an IRI has no key in a vertex table, so a value that would be
 a blank node in RDF is a node with a minted IRI here.

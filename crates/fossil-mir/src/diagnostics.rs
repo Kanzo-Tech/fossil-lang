@@ -94,6 +94,9 @@ fn file_level(db: &dyn Db, file: SourceFile) -> Vec<Diagnostic> {
     // it rebased both of them itself, being the only party that holds two
     // mappings at once — and the filter keeps a mapping-relative one, which
     // would have an owner elsewhere, from being shown unrebased.
+    // An assertion is checked once, where it is declared, and not once per
+    // mapping that writes the field: its scope is the type, not a mapping.
+    out.extend(fossil_hir::asserts::check_asserts(db, file).iter().cloned());
     out.extend(
         fossil_hir::identity::check_identities(db, file)
             .iter()

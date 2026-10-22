@@ -24,9 +24,10 @@ export type Code =
   | 'syntax/hole-in-member-name'
   | 'syntax/invalid-language-tag'
   | 'syntax/prefixed-iri'
-  | 'syntax/duplicate-iri'
+  | 'syntax/duplicate-attribute'
   | 'syntax/invalid-callee'
   | 'name/unknown-shape'
+  | 'name/unknown-severity'
   | 'name/unknown-property'
   | 'name/unknown-field'
   | 'name/row-not-in-scope'
@@ -56,6 +57,8 @@ export type Code =
   | 'shape/no-document'
   | 'shape/name-collision'
   | 'shape/missing-required-property'
+  | 'shape/out-of-scope'
+  | 'shape/assert-failed'
   | 'shape/unsupported-disjunction'
   | 'shape/cyclic-reference'
   | 'shape/unresolved-reference'
@@ -102,6 +105,7 @@ export type Code =
   | 'write/duplicate-value'
   | 'write/too-many-values'
   | 'write/invalid-subject'
+  | 'write/invalid-iri'
   | 'write/ambiguous-iri'
   | 'write/unrepresentable'
   | 'run/too-large'
@@ -136,9 +140,10 @@ export const CODES: readonly Code[] = [
   'syntax/hole-in-member-name',
   'syntax/invalid-language-tag',
   'syntax/prefixed-iri',
-  'syntax/duplicate-iri',
+  'syntax/duplicate-attribute',
   'syntax/invalid-callee',
   'name/unknown-shape',
+  'name/unknown-severity',
   'name/unknown-property',
   'name/unknown-field',
   'name/row-not-in-scope',
@@ -168,6 +173,8 @@ export const CODES: readonly Code[] = [
   'shape/no-document',
   'shape/name-collision',
   'shape/missing-required-property',
+  'shape/out-of-scope',
+  'shape/assert-failed',
   'shape/unsupported-disjunction',
   'shape/cyclic-reference',
   'shape/unresolved-reference',
@@ -214,6 +221,7 @@ export const CODES: readonly Code[] = [
   'write/duplicate-value',
   'write/too-many-values',
   'write/invalid-subject',
+  'write/invalid-iri',
   'write/ambiguous-iri',
   'write/unrepresentable',
   'run/too-large',
@@ -327,9 +335,11 @@ export interface ProblemData {
     written: string;
   };
   /**
-   * A declared type or a field with two `@iri`s; `name` is the type's or the field's.
+   * A declared type or a field with two of an attribute it has one of — `@iri`, or a field's
+   * `@severity`; `name` is the type's or the field's.
    */
-  'syntax/duplicate-iri': {
+  'syntax/duplicate-attribute': {
+    attribute: string;
     name: string;
   };
   /**
@@ -345,6 +355,13 @@ export interface ProblemData {
   'name/unknown-shape': {
     declared: string[];
     shape: string;
+  };
+  /**
+   * A severity no constraint has — `@severity(fatal)`. `severities` is the three there are.
+   */
+  'name/unknown-severity': {
+    severities: string[];
+    written: string;
   };
   /**
    * A property key the target shape does not declare.
@@ -572,6 +589,24 @@ export interface ProblemData {
     mapping: string;
     property: string;
     shape: string;
+  };
+  /**
+   * A field an assertion cannot read: on a field it reads that field alone, and on a type each
+   * single-valued field. `on` says which assertion — «the field `edad`», «the type
+   * `Persona`».
+   */
+  'shape/out-of-scope': {
+    field: string;
+    on: string;
+  };
+  /**
+   * A constant a mapping writes that a field's assertion refuses — decided where it is written,
+   * because nothing about it waits for the data. `assertion` is the condition as written.
+   */
+  'shape/assert-failed': {
+    assertion: string;
+    property: string;
+    value: string;
   };
   /**
    * A value disjunction in a shape, which one mapping cannot write.
@@ -921,6 +956,14 @@ export interface ProblemData {
     vertex_type: string;
   };
   /**
+   * A value of a property the program types as an IRI that is not an absolute IRI: the object of
+   * its triple would be a term no RDF parser reads.
+   */
+  'write/invalid-iri': {
+    property: string;
+    value: string;
+  };
+  /**
    * One IRI that names two things the mapping needs it to name one of (admissibility A2): two
    * vertex types with one class, two columns of one type with one predicate, or a relation whose
    * predicate is a column predicate of its source type. The RDF image would make the two one.
@@ -1055,9 +1098,10 @@ export const TITLES: { readonly [C in Code]: string } = {
   'syntax/hole-in-member-name': 'A hole in a member\'s name',
   'syntax/invalid-language-tag': 'Not a language tag',
   'syntax/prefixed-iri': 'A prefixed name where an IRI belongs',
-  'syntax/duplicate-iri': 'Two IRIs for one declaration',
+  'syntax/duplicate-attribute': 'An attribute written twice',
   'syntax/invalid-callee': 'Not a function name',
   'name/unknown-shape': 'Not a shape this program declares',
+  'name/unknown-severity': 'Not a severity',
   'name/unknown-property': 'Not a property the shape declares',
   'name/unknown-field': 'Not a field of this row',
   'name/row-not-in-scope': 'A row that is not in scope',
@@ -1087,6 +1131,8 @@ export const TITLES: { readonly [C in Code]: string } = {
   'shape/no-document': 'No shape document',
   'shape/name-collision': 'Two predicates share a name',
   'shape/missing-required-property': 'A required property is never written',
+  'shape/out-of-scope': 'A field an assertion cannot read',
+  'shape/assert-failed': 'A constant an assertion refuses',
   'shape/unsupported-disjunction': 'A value disjunction',
   'shape/cyclic-reference': 'A cyclic shape reference',
   'shape/unresolved-reference': 'An unresolved shape reference',
@@ -1133,6 +1179,7 @@ export const TITLES: { readonly [C in Code]: string } = {
   'write/duplicate-value': 'A value appears twice where it must be unique',
   'write/too-many-values': 'A single-valued property has more than one value',
   'write/invalid-subject': 'A vertex has no absolute IRI as its subject',
+  'write/invalid-iri': 'A value typed as an IRI is not one',
   'write/ambiguous-iri': 'One IRI names two things',
   'write/unrepresentable': 'A value GraphAr cannot hold',
   'run/too-large': 'The graph has too many vertices',
@@ -1167,7 +1214,7 @@ export type DetailedCode =
   | 'syntax/hole-in-member-name'
   | 'syntax/invalid-language-tag'
   | 'syntax/prefixed-iri'
-  | 'syntax/duplicate-iri'
+  | 'syntax/duplicate-attribute'
   | 'syntax/invalid-callee'
   | 'name/unknown-shape'
   | 'name/unknown-field'
@@ -1188,6 +1235,8 @@ export type DetailedCode =
   | 'type/invalid-field-type'
   | 'shape/name-collision'
   | 'shape/missing-required-property'
+  | 'shape/out-of-scope'
+  | 'shape/assert-failed'
   | 'shape/unsupported-disjunction'
   | 'shape/cyclic-reference'
   | 'shape/unresolved-reference'
@@ -1224,6 +1273,7 @@ export type DetailedCode =
   | 'write/duplicate-value'
   | 'write/too-many-values'
   | 'write/invalid-subject'
+  | 'write/invalid-iri'
   | 'write/ambiguous-iri'
   | 'write/unrepresentable'
   | 'run/too-large'
@@ -1257,7 +1307,7 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'syntax/hole-in-member-name': (_) => `a quoted member names a column, and a name is a constant: it cannot interpolate`,
   'syntax/invalid-language-tag': (d) => `\`${d.tag}\` is not a well-formed BCP 47 language tag`,
   'syntax/prefixed-iri': (d) => `\`${d.written}\` is a prefixed name, and an IRI is written whole: \`${d.expands_to}\``,
-  'syntax/duplicate-iri': (d) => `\`${d.name}\` has two \`@iri\`s, and a declaration has one IRI`,
+  'syntax/duplicate-attribute': (d) => `\`${d.name}\` has two \`${d.attribute}\`s, and a declaration has one`,
   'syntax/invalid-callee': (d) => `\`${d.callee}\` calls something that is not a function name; only a catalogued name may be called`,
   'name/unknown-shape': (d) => `\`${d.shape}\` is not a shape this program declares`,
   'name/unknown-field': (d) => `\`${d.field}\` is not a field of \`${d.relation}\``,
@@ -1278,6 +1328,8 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'type/invalid-field-type': (d) => `\`${d.written}\` is not a field type: ${d.reason}`,
   'shape/name-collision': (d) => `two predicates of ${d.shape} are both called \`${d.name}\``,
   'shape/missing-required-property': (d) => `\`${d.mapping}\` never writes \`${d.property}\`, and ${d.shape} requires it`,
+  'shape/out-of-scope': (d) => `\`${d.field}\` is not in scope in an assertion on ${d.on}`,
+  'shape/assert-failed': (d) => `\`${d.property}\` is written as ${d.value}, and \`${d.assertion}\` does not hold of it`,
   'shape/unsupported-disjunction': (d) => `a value disjunction is not supported: shape \`${d.shape}\` has ${d.branches} branches`,
   'shape/cyclic-reference': (d) => `cyclic shape graph not supported: ${d.path.join(' -> ')}`,
   'shape/unresolved-reference': (d) => `unresolved shape reference \`${d.reference}\` in shape \`${d.shape}\``,
@@ -1314,6 +1366,7 @@ export const DETAILS: { readonly [C in DetailedCode]: (data: ProblemData[C]) => 
   'write/duplicate-value': (d) => `\`${d.at}\` holds \`${d.value}\` twice`,
   'write/too-many-values': (d) => `\`${d.at}\` is single-valued, and \`${d.subject}\` has both \`${d.first}\` and \`${d.second}\``,
   'write/invalid-subject': (d) => `a \`${d.vertex_type}\` vertex has the subject ${d.subject}, which is not an absolute IRI`,
+  'write/invalid-iri': (d) => `\`${d.property}\` holds \`${d.value}\`, which is not an absolute IRI`,
   'write/ambiguous-iri': (d) => `\`${d.iri}\` names both \`${d.first}\` and \`${d.second}\``,
   'write/unrepresentable': (d) => `\`${d.property}\` holds \`${d.value}\`, of type ${d.datatype}, which GraphAr cannot hold`,
   'run/too-large': (d) => `the graph has ${d.vertices} vertices; a \`dense_id\` is a u32`,
