@@ -1966,6 +1966,7 @@ dependencies = [
  "fossil-exec",
  "fossil-graph-schema",
  "fossil-hir",
+ "fossil-ide",
  "fossil-mir",
  "fossil-profile",
  "fossil-sinks",
