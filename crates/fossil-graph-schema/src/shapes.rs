@@ -194,7 +194,7 @@ pub struct PropertyConstraint {
     /// a SHACL one (a separate decoder over Turtle, with no lookup of its own
     /// yet), and a compact document where the lookup did not find the
     /// predicate. A consumer drops one label; nothing else changes. See
-    /// `fossil_hir::shex::spans`, which is a lookup over text and explains at length
+    /// `fossil_shapes::shex::spans`, which is a lookup over text and explains at length
     /// why that is not a second parser.
     pub span: Option<Span>,
     /// The predicate's annotations in this shape. A label is one predicate

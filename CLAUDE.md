@@ -119,9 +119,11 @@ crates/
                            connections. `stdlib.rs` owns the TYPES a row is written in; the ROWS
                            are `catalogue.bnf` and `stdlib/generated.rs` is what
                            `cargo xtask catalogue` makes of them. Adding a function is a
-                           line in the `.bnf` and touches no Rust. And the shape-document
-                           decoders: `shex` over `shex_ast`, `shacl` over rudof's `ShaclParser`, and
+                           line in the `.bnf` and touches no Rust. And
                            `providers::PROVIDERS`, the registry a compiling host installs
+  fossil-shapes/           the shape-document decoders: `shex` over `shex_ast`, `shacl` over
+                           rudof's `ShaclParser`. A document becomes the vocabulary a declared
+                           type lowers to; nothing above this crate names either language
   fossil-mir/              typed operator algebra; `src/op.rs` is the operator enum
   fossil-storage/          a vended `StorageCredential` (Iceberg REST's) → a scoped DuckDB secret,
                            an Azure SAS lend, or (feature `object-store`) an `object_store` store

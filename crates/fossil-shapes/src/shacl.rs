@@ -143,7 +143,7 @@ const SH_NODE_SHAPE: &str = "http://www.w3.org/ns/shacl#NodeShape";
 ///
 /// The `uri` is unread: SHACL's relative-reference base would change which IRIs
 /// a document resolves to, and choosing one is a decision rather than a
-/// tidy-up — the same call [`crate::providers::decode_shex`] makes and for the same reason.
+/// tidy-up — the same call `fossil_hir::providers::decode_shex` makes and for the same reason.
 ///
 /// # Errors
 ///

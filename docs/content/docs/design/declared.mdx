@@ -224,7 +224,7 @@ from, instead of tables and `match`es of our own (`crates/fossil-graph-schema/sr
 holds them: the XSD table both ways, and the names a declared field's type is read in). A ShEx
 document then becomes declared types by a `TryFrom` over `shex_ast`'s compiled schema, `SchemaIR`
 ([One database, end to end](/docs/design/incremental) says where it lives), where
-`fossil_hir::shex` resolves references and labels by hand today. What Fossil supports of RDF is then the
+`fossil_shapes::shex` resolves references and labels by hand today. What Fossil supports of RDF is then the
 set of those conversions, and the page that lists it is generated from what has a `From`. One
 measured limit: `shex_ast` 0.3.1 drops every annotation on its way to `SchemaIR`, so the conversion
 that carries them reads the AST ([Annotations and language-tagged strings](/docs/design/labels)).

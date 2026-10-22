@@ -16,7 +16,7 @@
 //! compiles".
 //!
 //! The checker consumes the format-neutral `Rejection::Disjunction` that
-//! `fossil_hir::shex::rejection_of` builds, and renders the syntax itself — no
+//! `fossil_shapes::shex::rejection_of` builds, and renders the syntax itself — no
 //! renderer lives on the `ShEx` side.
 //!
 //! Why structured (not Markdown-message-substring): type-safe, future-proof

@@ -1,7 +1,7 @@
 //! Every shape and predicate the conformance corpus declares in `ShExC` has a
 //! span, and the span selects its label.
 //!
-//! The spans are found by `fossil_hir::shex::spans`, a lookup over the document's
+//! The spans are found by `fossil_shapes::shex::spans`, a lookup over the document's
 //! text with rudof's own prefix spellings. Goto-definition and the second label
 //! of a type error both read them, and a `None` costs a silent `0..0` jump or a
 //! missing label — nothing fails. This walks `docs/programs` so a corpus
@@ -13,7 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fossil_hir::shex::ShExDescriptor;
+use fossil_shapes::shex::ShExDescriptor;
 
 fn shex_documents(dir: &Path, out: &mut Vec<PathBuf>) {
     let mut paths: Vec<_> = std::fs::read_dir(dir)

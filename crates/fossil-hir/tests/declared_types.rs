@@ -12,7 +12,7 @@
 //!   `tests/programs.rs` and read back with `DuckDB`.
 //! - **That the decoder of a real `ShEx` document names its shapes as the line
 //!   decoder here does.** Both write the shape's full IRI and the import reads
-//!   its last segment; `fossil_hir::shex`'s own tests hold the IRIs it writes.
+//!   its last segment; `fossil_shapes::shex`'s own tests hold the IRIs it writes.
 
 use fossil_base::test_support::{db_with_document, register_inferred};
 use fossil_base::{Diagnostic, FossilDb, SourceFile};

@@ -212,7 +212,7 @@ pub fn typecheck_mapping<'db>(
 /// consuming mapping's CST, and a decoder has never seen the program — it has
 /// seen `ShEx`. Only the branch predicates come from the document, and those
 /// cross as plain strings in [`Rejection::Disjunction`], which is why the
-/// checker reads no type of [`crate::shex`] at all.
+/// checker reads no type of [`fossil_shapes::shex`] at all.
 ///
 /// «Re-emitting syntax stays with the decoder, because it is the decoder that
 /// knows the syntax» is the wrong argument here: the decoder knows the `ShEx`

@@ -6,8 +6,8 @@
 //! - **That a run writes the language column.** That is the conformance
 //!   program `docs/programs/labels`, executed by `fossil-exec`'s
 //!   `tests/programs.rs` and read back with `DuckDB`.
-//! - **That a shape document's annotations are read.** `fossil_hir::shex`'s and
-//!   `fossil_hir::shacl`'s own tests hold the two decoders.
+//! - **That a shape document's annotations are read.** `fossil_shapes::shex`'s and
+//!   `fossil_shapes::shacl`'s own tests hold the two decoders.
 
 use fossil_base::test_support::{db_with_document, register_inferred};
 use fossil_base::{FossilDb, SourceFile};

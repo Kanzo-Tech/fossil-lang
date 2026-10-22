@@ -1750,19 +1750,14 @@ dependencies = [
  "expect-test",
  "fossil-base",
  "fossil-graph-schema",
+ "fossil-shapes",
  "fossil-syntax",
  "indexmap",
  "oxilangtag",
- "oxrdf",
- "prefixmap",
  "rowan",
- "rudof_iri",
- "rudof_rdf",
  "salsa",
  "schemars",
  "serde",
- "shacl",
- "shex_ast",
  "smol_str",
  "strsim",
  "thiserror 1.0.69",
@@ -1816,6 +1811,19 @@ dependencies = [
  "serde",
  "smol_str",
  "tempfile",
+]
+
+[[package]]
+name = "fossil-shapes"
+version = "0.1.0"
+dependencies = [
+ "fossil-graph-schema",
+ "oxrdf",
+ "prefixmap",
+ "rudof_iri",
+ "rudof_rdf",
+ "shacl",
+ "shex_ast",
 ]
 
 [[package]]
