@@ -264,9 +264,9 @@ of a graph by hand, to show a dashboard before data existed; the compiler alread
 relation's is `<Src>_<label>_<Dst>`, and a table's columns are its properties' names, the
 single-valued ones and then the multi-valued, beside `subject` and the index columns. The layout is
 the data's — its types, its nullability, its chunk size — and stays in `fossil-exec`. So
-`FossilProgram.mapping()` in `@fossil-lang/wasm` is `fossil_hir::shapes::program_shapes`, the types a
-program declares and imports, through `describe`, and `mapping.ttl` is the same function over the
-schema the run produced. `crates/fossil-exec/tests/mapping.rs`,
+`FossilProgram.mapping()` in `@fossil-lang/wasm` is the program's graph type
+(`crates/fossil-hir/src/graph_type.rs, graph_type`), the types it declares and imports, through
+`describe`, and `mapping.ttl` is the same function over the schema the run produced. `crates/fossil-exec/tests/mapping.rs`,
 "the_mapping_a_programs_types_describe_is_the_mapping_its_run_writes" holds the two to one document for a
 program that imports its type and one that declares its own.
 

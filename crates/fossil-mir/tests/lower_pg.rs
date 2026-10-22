@@ -14,16 +14,15 @@ use std::sync::Arc;
 use fossil_base::test_support::NativeSystem;
 use fossil_base::test_support::db_with_document_at;
 use fossil_base::{FossilDb, SourceFile, System};
-use fossil_graph_schema::{Cardinality, EdgeType, GraphSchema, NodeType, Primitive, Property};
 use fossil_hir::def_map::def_map;
-use fossil_mir::{Op, apply_output_shape, lower_to_mir_pg};
+use fossil_mir::{Op, lower_to_mir_pg};
 
 // ── the two halves a program's shape contract needs, and neither is the disk ──
 //
 // A property key is a bare name whose meaning is the last segment of a predicate
 // IRI THE DOCUMENT DECLARES, which is why naming a shape document is MANDATORY:
 // a program that names no document carries no `rdf_uri` on any property and
-// `apply_output_shape` has nothing to match against. Two things are needed and
+// the graph type has nothing to match against. Two things are needed and
 // both are easy to half-do:
 //
 //  1. a HOST WITH A TYPE-READING ROW — `NativeSystem::providers` is the trait
@@ -155,15 +154,14 @@ Thing : Thing from filtered
     );
 }
 
-// ── Schema-driven refinement (GraphSchema → edges + cardinality) ────────────
+// ── Edges and cardinality from the program's graph type ────────────────────
 
 // An io.rdf mapping: the reference property `hasProject` is written as a plain
-// qualified column reference (`Graph.hasProject`), so the agnostic lowering
-// CANNOT tell it from a literal column — only the graph schema knows it's an
-// edge to `Project` (and multi-valued). This is the run_rdf.rs case at the MIR
-// level.
+// qualified column reference (`Graph.hasProject`), so the body alone CANNOT tell
+// it from a literal column — only the graph type knows it's an edge to `Project`
+// (and multi-valued). This is the run_rdf.rs case at the MIR level.
 const KB_FOSSIL: &str = "\
-type { KB } := io.shex(\"kb.shex\")
+type { KB, Project } := io.shex(\"kb.shex\")
 
 Graph := io.rdf(\"graph.ttl\")
 
@@ -173,97 +171,26 @@ Facts : KB from Graph
     hasProject = Graph.hasProject
 ";
 
-/// `KB`'s output contract. It declares the two predicates the body writes, so
-/// the props reach MIR carrying `rdf_uri`; what it does NOT say is which of them
-/// is an edge in the property-graph sense — that is `kb_schema()`'s answer, and
-/// keeping the two apart is the point of the test.
+/// `KB`: a single-valued literal `label` and a multi-valued `hasProject` whose
+/// range is `Project`, which is what makes it an edge.
 const KB_SHAPE: &str = "\
 shape https://ex.org/KB
 prop https://ex.org/label - 1 1
-prop https://ex.org/hasProject - 0 *
+prop https://ex.org/hasProject @https://ex.org/Project 0 *
+shape https://ex.org/Project
+prop https://ex.org/title - 1 1
 ";
 
-// `KB`: a single-valued literal `label` + a multi-valued edge `hasProject` →
-// `Project`; `Project`: a literal `title`. Written as the schema itself, not as
-// the ShEx document that would derive it: which schema language produced this is
-// exactly what MIR must not know (the ShEx path is covered end-to-end by
-// `fossil-exec/tests/rdf_source.rs`).
-fn kb_schema() -> GraphSchema {
-    let string_prop = |name: &str, iri: &str, cardinality| Property {
-        name: name.to_string(),
-        datatype: Primitive::String,
-        iri: Some(iri.to_string()),
-        term: None,
-        cardinality,
-        annotations: Vec::new(),
-        languages: Vec::new(),
-    };
-    GraphSchema {
-        nodes: vec![
-            NodeType {
-                label: "KB".to_string(),
-                iri: Some("https://ex.org/KB".to_string()),
-                properties: vec![string_prop(
-                    "label",
-                    "https://ex.org/label",
-                    Cardinality::Single,
-                )],
-                annotations: Vec::new(),
-            },
-            NodeType {
-                label: "Project".to_string(),
-                iri: Some("https://ex.org/Project".to_string()),
-                properties: vec![string_prop(
-                    "title",
-                    "https://ex.org/title",
-                    Cardinality::Single,
-                )],
-                annotations: Vec::new(),
-            },
-        ],
-        edges: vec![EdgeType {
-            label: "hasProject".to_string(),
-            iri: Some("https://ex.org/hasProject".to_string()),
-            source: "KB".to_string(),
-            destination: "Project".to_string(),
-            cardinality: Cardinality::Multi,
-            annotations: Vec::new(),
-        }],
-    }
-}
-
 #[test]
-fn apply_output_shape_reclassifies_shape_ref_to_edge() {
+fn a_property_whose_range_is_a_type_is_lowered_as_an_edge() {
     let (db, file) = db_with_document_at("kb.fossil", KB_FOSSIL, "kb.shex", KB_SHAPE);
     let kb = *def_map(&db, file)
         .mappings(&db)
         .first()
         .expect("`Facts` is the first mapping");
 
-    // Agnostic: both `label` and `hasProject` look like literal columns.
-    let agnostic = lower_to_mir_pg(&db, kb);
-    let ops = agnostic.ops(&db);
-    let agnostic_props: Vec<String> = ops
-        .iter()
-        .find_map(|o| match o {
-            Op::EmitVertex { props, .. } => {
-                Some(props.iter().map(|p| p.name.to_string()).collect())
-            }
-            _ => None,
-        })
-        .expect("an EmitVertex");
-    assert_eq!(
-        agnostic_props,
-        ["label", "hasProject"],
-        "agnostic lowering can't tell the shape-ref from a literal"
-    );
-    assert!(
-        !ops.iter().any(|o| matches!(o, Op::EmitEdge { .. })),
-        "agnostic lowering synthesises no edge for a FieldRef value"
-    );
-
-    // The schema reclassifies `hasProject` into a typed, multi-valued edge.
-    let refined = apply_output_shape(ops, &kb_schema());
+    let lowered = lower_to_mir_pg(&db, kb);
+    let refined = lowered.ops(&db);
 
     // `label` stays a vertex prop (single-valued); `hasProject` leaves the props.
     let Op::EmitVertex { props, .. } = refined

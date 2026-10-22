@@ -712,9 +712,7 @@ impl FossilWorkspace {
     }
 
     fn mapping_of(&self, file: SourceFile) -> Result<String, Failure> {
-        let schema = fossil_hir::shapes::program_shapes(&self.db, file)?
-            .map(|shapes| shapes.to_graph_schema())
-            .unwrap_or_default();
+        let schema = fossil_hir::graph_type::graph_type(&self.db, file)?;
         let mapping =
             fossil_mir::describe::describe(&schema, &fossil_mir::describe::Natural::new())?;
         Ok(fossil_mir::describe::turtle(&mapping)?)

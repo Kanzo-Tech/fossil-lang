@@ -41,14 +41,9 @@ async fn execute_vertex_materialises_the_vertex_table_shape() {
         .expect("hello.fossil must contain one mapping");
 
     let ctx = SessionContext::new();
-    let (vertex, node) = fossil_exec::execute_vertex(
-        &ctx,
-        &db,
-        mapping,
-        &fossil_graph_schema::GraphSchema::default(),
-    )
-    .await
-    .unwrap_or_else(|e| panic!("execute_vertex: {e}; {:?}", support::diagnostics(&db, file)));
+    let (vertex, node) = fossil_exec::execute_vertex(&ctx, &db, mapping)
+        .await
+        .unwrap_or_else(|e| panic!("execute_vertex: {e}; {:?}", support::diagnostics(&db, file)));
 
     // The node's metadata is the graph-schema contract; the table holds the data.
     assert_eq!(vertex.label, "Person");

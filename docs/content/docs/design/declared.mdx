@@ -37,8 +37,9 @@ read that vocabulary and never learn whether it came from a declaration or a doc
 [Inference from shapes](/docs/design/shapes) already made between ShEx and SHACL, made once more.
 A declaration is a third decoder whose input is the program. A declared type is a row of the same
 table an import's name is (`crates/fossil-hir/src/def_map.rs, TypeEntry`), so a mapping header, an
-edge and a `Ref<…>` resolve both by one lookup, and the run classifies edges with every type the
-program has, declared and imported (`crates/fossil-hir/src/shapes.rs, program_shapes`).
+edge and a `Ref<…>` resolve both by one lookup, and the lowering takes its edges from every type the
+program has, declared and imported: the program's graph type
+(`crates/fossil-hir/src/graph_type.rs, graph_type`).
 
 The vocabulary grew by one field for it, and it is the field the next section is about: a property
 carries its `name` (`crates/fossil-graph-schema/src/shapes.rs, PropertyConstraint`). A decoder writes

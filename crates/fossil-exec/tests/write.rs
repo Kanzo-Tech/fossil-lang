@@ -217,7 +217,6 @@ async fn run(
         .with_store(DEST, Arc::clone(&out) as Arc<dyn ObjectStore>)
         .expect("route");
     let (db, file) = support::db_with_shapes(program, "write.fossil", &[("executor.shex", SHEX)]);
-    let descriptor = fossil_exec::output_descriptor(&db, file).expect("the descriptor");
     let ctx = fossil_exec::session::session_within(
         Arc::new(fossil_exec::memory::Budget::new(
             fossil_exec::memory::BUDGET,
@@ -227,7 +226,7 @@ async fn run(
     for (authority, store) in storage.stores() {
         ctx.register_object_store(authority, store);
     }
-    let graph = fossil_exec::execute_graph(&ctx, &db, file, &descriptor)
+    let graph = fossil_exec::execute_graph(&ctx, &db, file)
         .await
         .expect("the graph");
     let result = fossil_sinks::graphar::write(

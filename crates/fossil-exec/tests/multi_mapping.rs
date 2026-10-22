@@ -35,14 +35,9 @@ async fn same_type_from_two_sources_merges_into_one_table() {
         support::db_with_shapes(PROGRAM, "merge.fossil", &[("person.shex", PERSON_SHEX)]);
 
     let ctx = SessionContext::new();
-    let graph = fossil_exec::execute_graph(
-        &ctx,
-        &db,
-        file,
-        &fossil_graph_schema::GraphSchema::default(),
-    )
-    .await
-    .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
+    let graph = fossil_exec::execute_graph(&ctx, &db, file)
+        .await
+        .unwrap_or_else(|e| panic!("execute_graph: {e}; {:#?}", support::diagnostics(&db, file)));
 
     // Exactly ONE Person vertex table (not one per mapping).
     assert_eq!(
