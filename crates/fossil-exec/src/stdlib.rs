@@ -43,6 +43,10 @@ pub fn datafusion_name(duckdb_name: &str) -> Option<&'static str> {
         "upper" => "upper",
         // Shared, and reached only through a template.
         "regexp_replace" => "regexp_replace",
+        // DuckDB's `regexp_matches` is a search, as `str.matches` is;
+        // DataFusion's of that name returns the capture groups, and its
+        // boolean search is `regexp_like`.
+        "regexp_matches" => "regexp_like",
         // `str.lang`'s two-field struct, by position in both engines.
         "row" => "struct",
         // The two that differ.

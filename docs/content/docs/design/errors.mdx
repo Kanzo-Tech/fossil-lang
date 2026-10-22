@@ -315,11 +315,11 @@ are the same mistake. The dead `ParseDiagnostic::InconsistentDedent` gets no cod
 
 | Area | Codes |
 | --- | --- |
-| `syntax` (13) | `expected-token`, `unexpected-token`, `unknown-character`, `missing-iri`, `misplaced-attribute`, `invalid-mapping-header`, `invalid-property-name`, `number-out-of-range`, `incomplete-conditional`, `uncalled-function`, `invalid-callee`, `needless-quotes`, `hole-in-member-name` |
-| `name` (11) | `unknown-shape`, `unknown-property`, `unknown-field`, `row-not-in-scope`, `unknown-function`, `unknown-parameter`, `unknown-source`, `dotted-column`, `unknown-type`, `duplicate-field`, `duplicate-type` |
+| `syntax` (16) | `expected-token`, `unexpected-token`, `unknown-character`, `missing-iri`, `misplaced-attribute`, `duplicate-attribute`, `invalid-mapping-header`, `invalid-property-name`, `number-out-of-range`, `incomplete-conditional`, `uncalled-function`, `invalid-callee`, `needless-quotes`, `hole-in-member-name`, `invalid-language-tag`, `prefixed-iri` |
+| `name` (12) | `unknown-shape`, `unknown-property`, `unknown-field`, `row-not-in-scope`, `unknown-function`, `unknown-parameter`, `unknown-source`, `dotted-column`, `unknown-type`, `unknown-severity`, `duplicate-field`, `duplicate-type` |
 | `argument` (6) | `arity`, `duplicate`, `skipped-parameter`, `positional-after-named`, `named-on-edge`, `alias-in-value-call` |
-| `type` (8) | `property-mismatch`, `argument-mismatch`, `relation-as-value`, `expected-bool`, `expected-number`, `incomparable`, `branch-mismatch`, `invalid-field-type` |
-| `shape` (9) | `no-document`, `name-collision`, `missing-required-property`, `unsupported-disjunction`, `cyclic-reference`, `unresolved-reference`, `not-in-document`, `ambiguous-import`, `ambiguous-order` |
+| `type` (10) | `property-mismatch`, `argument-mismatch`, `relation-as-value`, `expected-bool`, `expected-number`, `incomparable`, `branch-mismatch`, `invalid-field-type`, `language-not-allowed`, `needless-lang` |
+| `shape` (11) | `no-document`, `name-collision`, `missing-required-property`, `out-of-scope`, `assert-failed`, `unsupported-disjunction`, `cyclic-reference`, `unresolved-reference`, `not-in-document`, `ambiguous-import`, `ambiguous-order` |
 | `document` (2) | `not-registered`, `unparseable` |
 | `provider` (6) | `unknown`, `wrong-capability`, `wrong-extension`, `invalid-reader-option`, `foreign-reader-option`, `bare-document-path` |
 | `identity` (6) | `missing-subject`, `duplicate-subject`, `subject-not-first`, `conflicting`, `edge-without-template`, `edge-arity` |
@@ -337,7 +337,7 @@ codes above (`provider/unknown`, `provider/wrong-capability`, `document/not-regi
 | `document` (+1) | `unread` | the executor's `run`, over the documents it could not read |
 | `source` (2) | `not-found`, `unparseable` | a CSV, JSON or Parquet source that names no file; the RDF sources a run decodes |
 | `engine` (1) | `failed` — DataFusion or DuckDB, the engine's error as `cause` | `execute_graph`, the profile's queries |
-| `write` | `failed`, `invalid-language-tag`, `language-not-allowed`, `duplicate-value`, `invalid-subject`, `ambiguous-iri`, `unrepresentable`, `too-many-values` | `WriteError`: the file the store refused, and the graph the writer holds to admissibility ([the round trip](/docs/format/round-trip)); its other variants are `internal/bug`. `too-many-values` is the executor's, where it merges a subject's rows: a single-valued property or relation offered more than one value |
+| `write` | `failed`, `invalid-language-tag`, `language-not-allowed`, `duplicate-value`, `invalid-subject`, `invalid-iri`, `ambiguous-iri`, `unrepresentable`, `too-many-values` | `WriteError`: the file the store refused, and the graph the writer holds to admissibility ([the round trip](/docs/format/round-trip)); its other variants are `internal/bug`. `too-many-values` is the executor's, where it merges a subject's rows: a single-valued property or relation offered more than one value |
 | `storage` (9) | `no-credential`, `ambiguous-prefix`, `outside-prefix`, `malformed-credential`, `no-route`, `unreachable`, `no-httpfs`, `host-refused`, `host-silent` | `StorageError`, `@fossil-lang/storage`'s `mount`, `JsHost` — `host-silent` is [failure](/docs/design/failure)'s deadline |
 | `module` (1) | `unreachable` | the three wasm loaders, when a module cannot be fetched |
 | `api` (3) | `invalid-argument`, `busy`, `unknown-handle` | argument shapes on every wasm entry point, `busy` and the executor's borrow, the workspace's `unknown_handle` |
@@ -347,7 +347,7 @@ codes above (`provider/unknown`, `provider/wrong-capability`, `document/not-regi
 fresh object. Nobody branches on it; a host shows it and reports it. A panic stays a
 `WebAssembly.RuntimeError` — it is not a value that can be built at the moment it happens.
 
-**99 codes**, 98 of them a mistake someone other than fossil can repair.
+**102 codes**, 101 of them a mistake someone other than fossil can repair.
 
 **Retired, with no program that reached them.** `write/unknown-type` and `layout/dangling-endpoint`
 were released in `v0.3.0-alpha.18` and are gone: the executor builds the schema it writes
@@ -357,7 +357,9 @@ it, so neither could fire. `pipeline/source-as-stage`, `name/ambiguous-member` a
 value itself, a stage resolves only against relation verbs, and no member is spelled on two
 receivers. Each of their arms reports `internal/bug` now. `syntax/retired-spelling`, released through
 `v0.3.0-alpha.26`, went with the parser's refusals of forms the grammar no longer has: such a form is
-now an ordinary `syntax/expected-token` or `syntax/unexpected-token`.
+now an ordinary `syntax/expected-token` or `syntax/unexpected-token`. `syntax/duplicate-iri`
+became `syntax/duplicate-attribute` when `@severity` became the second attribute a
+declaration has one of: one rule, the attribute named in its data.
 
 ## The screen: kanzo-ui's `Diagnostic`, and the product decides the words
 

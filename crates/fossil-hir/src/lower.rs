@@ -67,6 +67,11 @@ pub struct HirFile<'db> {
     /// and `tests/invalidation_regression.rs` counts them.
     #[returns(ref)]
     pub declared: fossil_graph_schema::OutputShapes,
+    /// What the declarations constrain beyond their fields' types —
+    /// `@assert` and `@severity` ([`crate::asserts`]), lowered beside
+    /// [`Self::declared`] by the same walk.
+    #[returns(ref)]
+    pub rules: crate::asserts::DeclaredRules,
 }
 
 impl<'db> HirFile<'db> {
@@ -528,8 +533,16 @@ pub fn lower_to_hir<'db>(db: &'db dyn fossil_base::Db, file: SourceFile) -> HirF
             _ => {}
         }
     }
-    let declared = crate::declared::lower_declarations(db, dm, &cst.root(db).syntax(), sink);
-    HirFile::new(db, mappings, source_pipes, diagnostics.into_vec(), declared)
+    let (declared, rules) =
+        crate::declared::lower_declarations(db, dm, &cst.root(db).syntax(), &type_names, sink);
+    HirFile::new(
+        db,
+        mappings,
+        source_pipes,
+        diagnostics.into_vec(),
+        declared,
+        rules,
+    )
 }
 
 /// **The provider a binding names, checked against what its POSITION asks of
@@ -2050,7 +2063,7 @@ fn lower_property(
 /// grammar admits has an HIR form, so what reaches the arm is the parser's own
 /// `ERROR` node — but a dropped property is a red build instead of a quiet
 /// hole in the data.
-fn lower_expr(
+pub(crate) fn lower_expr(
     db: &dyn fossil_base::Db,
     sink: &mut Diagnostics,
     expr_node: &fossil_syntax::SyntaxNode,

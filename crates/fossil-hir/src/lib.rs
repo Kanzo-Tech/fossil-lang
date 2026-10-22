@@ -42,6 +42,9 @@
 //! downstream: bidirectional checking and [`fossil_base::ErrorGuaranteed`]
 //! propagation are built on top of them, not beside them.
 
+/// What a declared type constrains beyond its fields' types — `@assert` and
+/// `@severity` — and the checker's half of enforcing it.
+pub mod asserts;
 pub mod body;
 pub mod check;
 /// Types declared in the program, lowered to the shape vocabulary a document

@@ -81,6 +81,7 @@ User : Person from users
             "lang",
             "length",
             "lower",
+            "matches",
             "replace",
             "slice",
             "slug",

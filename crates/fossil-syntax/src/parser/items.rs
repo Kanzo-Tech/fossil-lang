@@ -21,12 +21,15 @@
 //! TypeDef             := 'type' LBRACE ImportMember (COMMA ImportMember)* RBRACE
 //!                        DEFINE Expression                 — as specified
 //! ImportMember        := IDENT ('as' IDENT)?               — as specified
-//! TypeDecl            := IriAttr 'type' IDENT NEWLINE INDENT Field+ DEDENT
+//! TypeDecl            := DeclAttrs 'type' IDENT NEWLINE INDENT Field+ DEDENT
 //!                                                          — as specified
-//! Field               := IriAttr IDENT SHAPE_SEP TypeExpr NEWLINE
+//! Field               := DeclAttrs IDENT SHAPE_SEP TypeExpr NEWLINE
 //!                                                          — as specified
-//! IriAttr             := AT_ATTR LPAREN STRING RPAREN      — as specified
-//! TypeExpr            := IDENT (LT TypeExpr GT)?           — as specified
+//! DeclAttr            := IriAttr | AnnotationAttr
+//!                      | AssertAttr | SeverityAttr         — as specified
+//! TypeExpr            := IDENT (LT TypeExpr
+//!                        (COMMA INTEGER (COMMA INTEGER)?)? GT)?
+//!                                                          — as specified
 //! Mapping             := MappingHeader NEWLINE INDENT MappingBody DEDENT
 //! MappingHeader       := IDENT SHAPE_SEP ShapeExpr 'from' Expression
 //! ShapeExpr           := IDENT                             — as specified
@@ -79,7 +82,7 @@
 //!    `TypeDecl`, `type :=` a `SourceDef` binding the name `type`, `type :` a
 //!    mapping called `type`. One token of lookahead, in [`parse_program`], and
 //!    the word stays a column name.
-//! 6. `@iri` vs `@subject`: both lex as `AT_ATTR` and POSITION decides.
+//! 6. a declaration's attributes vs `@subject`: all lex as `AT_ATTR` and POSITION decides.
 //!    [`parse_iri_attr`] takes the top-level position — `TypeDecl` starts with
 //!    `AT_ATTR`, and it is that token's only derivation at top level — and the
 //!    start of a line in a declaration's body; [`parse_subject_assign`] takes
@@ -310,7 +313,7 @@ fn parse_import_member(p: &mut Parser) {
 // ───────────────────────────────────────────────────────────────────────
 fn parse_type_decl(p: &mut Parser) {
     p.start(SyntaxKind::TYPE_DECL);
-    let attrs = parse_decl_attrs(p, "above a `type` declaration");
+    let attrs = parse_decl_attrs(p, "above a `type` declaration", false);
     p.skip_trivia();
     let is_type = p.current() == Some(SyntaxKind::IDENT) && p.current_text() == Some("type");
     if is_type {
@@ -357,10 +360,18 @@ fn parse_type_decl(p: &mut Parser) {
     p.finish();
 }
 
-/// Is `text` the name of an attribute a declaration takes — `@iri` or
-/// `@annotation`?
+/// Is `text` the name of an attribute a declaration takes — `@iri`,
+/// `@annotation`, `@assert` or `@severity`?
 fn is_decl_attr(text: Option<&str>) -> bool {
-    matches!(text, Some(crate::attr::IRI | crate::attr::ANNOTATION))
+    matches!(
+        text,
+        Some(
+            crate::attr::IRI
+                | crate::attr::ANNOTATION
+                | crate::attr::ASSERT
+                | crate::attr::SEVERITY
+        )
+    )
 }
 
 /// Do the attributes starting here stand above a `type { … }` import? Skips
@@ -395,21 +406,37 @@ fn above_an_import(p: &Parser) -> bool {
 /// What a run of attributes held, for the checks a declaration owes them.
 struct DeclAttrs {
     iris: usize,
+    severities: usize,
     /// An attribute of another kind was written, and refused: a missing `@iri`
     /// is then not a second report about the same line.
     misplaced: bool,
 }
 
 impl DeclAttrs {
-    /// `@iri` is exactly one per type and per field (grammar.bnf, `DeclAttrs`);
-    /// `@annotation` any number.
+    /// `@iri` is exactly one per type and per field and `@severity` at most
+    /// one per field (grammar.bnf, `DeclAttrs`); `@annotation` and `@assert`
+    /// any number.
     fn check(&self, p: &mut Parser, name: String) {
+        if self.severities > 1 {
+            malformed(
+                p,
+                Problem::DuplicateAttribute {
+                    attribute: crate::attr::SEVERITY.to_string(),
+                    name: name.clone(),
+                },
+                "a field's count is enforced one way. Keep the severity meant; an assertion \
+                 carries its own, `@assert(…, severity = warning)`.",
+            );
+        }
         match self.iris {
             0 if !self.misplaced => missing_iri(p, name),
             0 | 1 => {}
             _ => malformed(
                 p,
-                Problem::DuplicateIri { name },
+                Problem::DuplicateAttribute {
+                    attribute: crate::attr::IRI.to_string(),
+                    name,
+                },
                 "a type and a field each have one IRI. Keep the one that names the predicate \
                  or the class meant, and put anything else said about it in an `@annotation`.",
             ),
@@ -419,16 +446,17 @@ impl DeclAttrs {
 
 // ───────────────────────────────────────────────────────────────────────
 // DeclAttrs := DeclAttr+ (NEWLINE DeclAttr+)* NEWLINE?
-// DeclAttr  := IriAttr | AnnotationAttr
+// DeclAttr  := IriAttr | AnnotationAttr | AssertAttr | SeverityAttr
 //
 // On the line of what they describe, or stacked on the lines above it. A
 // stacked attribute starts its line at the same column as the field, so the
 // indent pass emits nothing for it, and a NEWLINE is trivia: the run is simply
 // every `AT_ATTR` before the name.
 // ───────────────────────────────────────────────────────────────────────
-fn parse_decl_attrs(p: &mut Parser, place: &str) -> DeclAttrs {
+fn parse_decl_attrs(p: &mut Parser, place: &str, on_field: bool) -> DeclAttrs {
     let mut attrs = DeclAttrs {
         iris: 0,
+        severities: 0,
         misplaced: false,
     };
     loop {
@@ -442,6 +470,24 @@ fn parse_decl_attrs(p: &mut Parser, place: &str) -> DeclAttrs {
                 parse_iri_attr(p);
             }
             Some(crate::attr::ANNOTATION) => parse_annotation_attr(p),
+            Some(crate::attr::ASSERT) => parse_assert_attr(p),
+            Some(crate::attr::SEVERITY) if on_field => {
+                attrs.severities += 1;
+                parse_severity_attr(p);
+            }
+            // A type has no count of its own to enforce: how many nodes it has
+            // is not something it declares.
+            Some(crate::attr::SEVERITY) => {
+                attrs.misplaced = true;
+                parse_misplaced_attr(
+                    p,
+                    crate::attr::SEVERITY.to_string(),
+                    place,
+                    "`@severity` says how a FIELD's count is enforced, and a type declares no \
+                     count. An assertion on a type carries its own: \
+                     `@assert(…, severity = warning)`.",
+                );
+            }
             // `@subject` here is not an unknown name, it is a known one in the
             // wrong place, and only the parser knows which place.
             found => {
@@ -451,8 +497,8 @@ fn parse_decl_attrs(p: &mut Parser, place: &str) -> DeclAttrs {
                     p,
                     found,
                     place,
-                    "the attributes in this position are `@iri(\"…\")` and `@annotation(…)`. \
-                     `@subject` is the first line of a MAPPING BODY — it assigns the identity of \
+                    "the attributes in this position are `@iri(\"…\")`, `@annotation(…)`, \
+                     `@assert(…)` and, before a field, `@severity(…)`. `@subject` is the first line of a MAPPING BODY — it assigns the identity of \
                      the rows a mapping writes, and a declaration writes no rows.",
                 );
             }
@@ -493,7 +539,7 @@ fn parse_fields(p: &mut Parser) {
 // ───────────────────────────────────────────────────────────────────────
 fn parse_field(p: &mut Parser) {
     p.start(SyntaxKind::FIELD);
-    let attrs = parse_decl_attrs(p, "before a field of a `type` declaration");
+    let attrs = parse_decl_attrs(p, "before a field of a `type` declaration", true);
     let name = p.current_text().unwrap_or_default().to_string();
     attrs.check(p, name);
     recover::expect_or_recover(p, SyntaxKind::IDENT, FIELD_ANCHORS);
@@ -508,11 +554,12 @@ fn parse_field(p: &mut Parser) {
 const TYPE_EXPR_ANCHORS: &[SyntaxKind] = &[SyntaxKind::GT, SyntaxKind::DEDENT, SyntaxKind::AT_ATTR];
 
 // ───────────────────────────────────────────────────────────────────────
-// TypeExpr := IDENT (LT TypeExpr GT)?
+// TypeExpr := IDENT (LT TypeExpr (COMMA INTEGER (COMMA INTEGER)?)? GT)?
 //
 // `<` and `>` are LT and GT, and in type position nothing else can follow an
 // IDENT, so they open and close and never compare. Which names take an
-// argument, and which are types at all, is the checker's: `Ref<String>` parses.
+// argument, and which take bounds, and which are types at all, is the
+// checker's: `Ref<String>` and `Option<String, 2>` parse.
 // ───────────────────────────────────────────────────────────────────────
 fn parse_type_expr(p: &mut Parser) {
     p.start(SyntaxKind::TYPE_EXPR);
@@ -524,6 +571,16 @@ fn parse_type_expr(p: &mut Parser) {
         p.bump(); // LT
         p.skip_trivia();
         parse_type_expr(p);
+        // The bounds: a minimum, then a maximum. A third is not a bound, and
+        // is left to the `GT` that does not come.
+        for _ in 0..2 {
+            p.skip_trivia();
+            if p.current() != Some(SyntaxKind::COMMA) {
+                break;
+            }
+            p.bump(); // COMMA
+            recover::expect_or_recover(p, SyntaxKind::INTEGER, TYPE_EXPR_ANCHORS);
+        }
         recover::expect_or_recover(p, SyntaxKind::GT, TYPE_EXPR_ANCHORS);
     }
     p.finish();
@@ -566,6 +623,60 @@ fn parse_annotation_attr(p: &mut Parser) {
     } else {
         recover::expect_or_recover(p, SyntaxKind::STRING, IRI_ANCHORS);
     }
+    recover::expect_or_recover(p, SyntaxKind::RPAREN, IRI_ANCHORS);
+    p.finish();
+}
+
+// ───────────────────────────────────────────────────────────────────────
+// AssertAttr := AT_ATTR LPAREN Expression (COMMA 'severity' ASSIGN IDENT)? RPAREN
+//
+// The condition is an ordinary expression, under an `EXPR` node, and what it
+// may name is the checker's. `severity` is contextual, as `as` is: after the
+// condition's comma nothing else can stand, so it is read by text.
+// ───────────────────────────────────────────────────────────────────────
+fn parse_assert_attr(p: &mut Parser) {
+    p.start(SyntaxKind::ASSERT_ATTR);
+    p.bump(); // AT_ATTR, `@assert`
+    recover::expect_or_recover(p, SyntaxKind::LPAREN, IRI_ANCHORS);
+    p.parse_expr();
+    p.skip_trivia();
+    if p.current() == Some(SyntaxKind::COMMA) {
+        p.bump();
+        p.skip_trivia();
+        if p.current() == Some(SyntaxKind::IDENT) && p.current_text() != Some(SEVERITY_PARAM) {
+            let parameter = p.current_text().unwrap_or_default().to_string();
+            malformed(
+                p,
+                Problem::UnknownParameter {
+                    function: crate::attr::ASSERT.to_string(),
+                    parameter,
+                    parameters: vec![SEVERITY_PARAM.to_string()],
+                },
+                "an assertion takes its condition and, after it, how it is enforced: \
+                 `@assert(edad >= 0, severity = warning)`.",
+            );
+        }
+        recover::expect_or_recover(p, SyntaxKind::IDENT, IRI_ANCHORS);
+        recover::expect_or_recover(p, SyntaxKind::ASSIGN, IRI_ANCHORS);
+        recover::expect_or_recover(p, SyntaxKind::IDENT, IRI_ANCHORS);
+    }
+    recover::expect_or_recover(p, SyntaxKind::RPAREN, IRI_ANCHORS);
+    p.finish();
+}
+
+/// The one named argument `@assert` takes.
+const SEVERITY_PARAM: &str = "severity";
+
+// ───────────────────────────────────────────────────────────────────────
+// SeverityAttr := AT_ATTR LPAREN IDENT RPAREN
+//
+// Which names are severities is the checker's, as which names are types is.
+// ───────────────────────────────────────────────────────────────────────
+fn parse_severity_attr(p: &mut Parser) {
+    p.start(SyntaxKind::SEVERITY_ATTR);
+    p.bump(); // AT_ATTR, `@severity`
+    recover::expect_or_recover(p, SyntaxKind::LPAREN, IRI_ANCHORS);
+    recover::expect_or_recover(p, SyntaxKind::IDENT, IRI_ANCHORS);
     recover::expect_or_recover(p, SyntaxKind::RPAREN, IRI_ANCHORS);
     p.finish();
 }
@@ -1167,9 +1278,118 @@ mod disambiguation {
                    a: String\n";
         assert_eq!(
             messages(src),
-            [Problem::DuplicateIri {
+            [Problem::DuplicateAttribute {
+                attribute: "@iri".to_string(),
                 name: "a".to_string()
             }]
+        );
+    }
+
+    /// The constraints design's declaration (`/docs/design/declared`): an
+    /// `@assert` above the type, one on a field with a severity, a
+    /// `@severity` on a field, and a `Seq` with both bounds — every attribute
+    /// a child of what it describes, the condition an `EXPR`.
+    #[test]
+    fn asserts_severities_and_bounds_belong_to_what_they_describe() {
+        let src = "@iri(\"https://schema.org/Person\")\n\
+                   @assert(alta <= baja)\n\
+                   type Persona\n    \
+                   @iri(\"https://schema.org/age\")\n    \
+                   @assert(edad >= 0 and edad < 150)\n    \
+                   edad: Option<Integer>\n\
+                   \n    \
+                   @iri(\"https://schema.org/email\")\n    \
+                   @assert(str.matches(email, \"^[^@]+@[^@]+$\"), severity = warning)\n    \
+                   @severity(info)\n    \
+                   email: Seq<String, 1, 3>\n    \
+                   @iri(\"https://ex.org/alta\") alta: Date\n    \
+                   @iri(\"https://ex.org/baja\") baja: Option<Date>\n";
+        assert!(messages(src).is_empty(), "got {:?}", messages(src));
+        let root = parse_str(src);
+        assert_eq!(root.text().to_string(), src, "the tree is lossless");
+        let decl = find_first_kind(&root, SyntaxKind::TYPE_DECL)
+            .and_then(TypeDecl::cast)
+            .expect("a TYPE_DECL");
+        let on_type: Vec<_> = decl
+            .asserts()
+            .map(|a| a.condition().map(|c| c.text().to_string()))
+            .collect();
+        assert_eq!(on_type, [Some("alta <= baja".to_string())]);
+        let fields: Vec<Field> = decl.fields().collect();
+        let email = &fields[1];
+        let assert = email.asserts().next().expect("the field's assert");
+        assert_eq!(
+            assert.condition().map(|c| c.text().to_string()).as_deref(),
+            Some("str.matches(email, \"^[^@]+@[^@]+$\")")
+        );
+        assert_eq!(
+            assert.severity().map(|t| t.text().to_string()).as_deref(),
+            Some("warning")
+        );
+        assert_eq!(
+            email
+                .severity()
+                .and_then(|s| s.level())
+                .map(|t| t.text().to_string())
+                .as_deref(),
+            Some("info")
+        );
+        let ty = email.type_expr().expect("a type");
+        let bounds: Vec<String> = ty.bounds().map(|t| t.text().to_string()).collect();
+        assert_eq!(bounds, ["1", "3"]);
+        assert_eq!(
+            ty.argument().and_then(|a| a.name()).as_deref(),
+            Some("String")
+        );
+        assert!(fields[0].severity().is_none());
+    }
+
+    /// `@severity` says how a field's count is enforced; above a type it is in
+    /// the wrong place, and a field takes one.
+    #[test]
+    fn a_severity_is_one_per_field_and_never_on_a_type() {
+        let on_type = "@iri(\"https://e.org/T\")\n\
+                       @severity(warning)\n\
+                       type T\n    \
+                       @iri(\"https://e.org/a\") a: String\n";
+        assert!(
+            matches!(
+                messages(on_type).as_slice(),
+                [Problem::MisplacedAttribute { attribute, .. }] if attribute == "@severity"
+            ),
+            "got {:?}",
+            messages(on_type)
+        );
+        let twice = "@iri(\"https://e.org/T\")\n\
+                     type T\n    \
+                     @iri(\"https://e.org/a\")\n    \
+                     @severity(warning) @severity(info)\n    \
+                     a: String\n";
+        assert_eq!(
+            messages(twice),
+            [Problem::DuplicateAttribute {
+                attribute: "@severity".to_string(),
+                name: "a".to_string()
+            }]
+        );
+    }
+
+    /// `@assert` takes one named argument, `severity`; another name is refused
+    /// by name.
+    #[test]
+    fn an_assert_takes_only_a_severity() {
+        let src = "@iri(\"https://e.org/T\")\n\
+                   type T\n    \
+                   @iri(\"https://e.org/a\")\n    \
+                   @assert(a > 0, level = warning)\n    \
+                   a: Integer\n";
+        assert!(
+            matches!(
+                messages(src).as_slice(),
+                [Problem::UnknownParameter { parameter, .. }] if parameter == "level"
+            ),
+            "got {:?}",
+            messages(src)
         );
     }
 

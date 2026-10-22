@@ -379,6 +379,7 @@ impl Checker<'_> {
         self.expr.expected = None;
         if let PropertyKey::Name(name) = &prop.key {
             self.check_constant_language(expr_id, name, &prop.value);
+            self.check_constant_asserts(expr_id, name, &prop.value);
         }
 
         // A `Seq` is several values, and a slot the shape does not narrow takes
@@ -427,6 +428,47 @@ impl Checker<'_> {
                     shape: type_name,
                 }),
             );
+        }
+    }
+
+    /// A constant written into a field whose assertion refuses it is refused
+    /// here, at the line that writes it, with the field's severity: nothing
+    /// about it waits for the data. A value read from a column is the run's
+    /// to check ([`crate::asserts`]).
+    fn check_constant_asserts(&mut self, expr_id: ExprId, name: &SmolStr, value: &HirExpr) {
+        let Some(shape) = self.mapping_shape_iri() else {
+            return;
+        };
+        // Folded with no field bound, a value that reads a column is not a
+        // constant.
+        let Some(constant) = crate::asserts::fold(value, "", None) else {
+            return;
+        };
+        let db = self.expr.db;
+        let hir = crate::lower::lower_to_hir(db, self.expr.file);
+        for assert in hir.rules(db).on_field(&shape, name) {
+            if crate::asserts::fold(&assert.condition, name, Some(&constant))
+                != Some(crate::asserts::Constant::Bool(false))
+            {
+                continue;
+            }
+            let d = crate::asserts::label(
+                Diagnostic::new(
+                    assert.severity.diagnostic(),
+                    Problem::AssertFailed {
+                        property: name.to_string(),
+                        value: constant.spelled(),
+                        assertion: assert.text.to_string(),
+                    },
+                    self.expr.span_of(expr_id),
+                ),
+                assert,
+            );
+            if assert.severity == fossil_graph_schema::ConstraintSeverity::Violation {
+                self.expr.raise(d);
+            } else {
+                self.expr.sink.push(d);
+            }
         }
     }
 

@@ -1,0 +1,32 @@
+---
+title: Not a severity
+description: "`name/unknown-severity` — an `@assert` or a `@severity` names a severity that is not one of the three, and the refusal lists them."
+---
+
+A constraint is enforced at one of SHACL's three severities — `violation`, `warning` and `info` —
+and a name that is none of them is refused:
+
+```fossil
+@iri("https://schema.org/Person")
+type Person
+    @iri("https://schema.org/email")
+    @severity(warnig)
+    email: Seq<String, 1, 3>
+```
+
+```text
+`warnig` is not a severity — it is one of `violation`, `warning`, `info`
+help: did you mean `warning`?
+```
+
+## Why fossil refuses it
+
+The severity decides whether a constraint the data breaks refuses the run or is reported beside the
+graph it wrote. A name that is no severity would leave that undecided, and the safe guess,
+`violation`, is the one the author wrote something else to avoid. The three are SHACL's (§2.1.5),
+so a SHACL document's `sh:severity` and a declaration say the same thing in the same words.
+
+## How to repair it
+
+- **The name is misspelt.** The `help` suggests the nearest one.
+- **The constraint should refuse.** Leave the severity out: `violation` is the default.

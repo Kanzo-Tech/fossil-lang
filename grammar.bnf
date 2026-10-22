@@ -351,12 +351,13 @@ Field               := DeclAttrs IDENT SHAPE_SEP TypeExpr NEWLINE
    (a blank line touches no indentation and is no NEWLINE), so a body may
    space its fields without a production saying so.
 
-   `@iri` is still exactly one per type and per field, and `@annotation` any
-   number. The parser counts them as it reads the run — a missing `@iri` is
-   `syntax/missing-iri`, a second `syntax/duplicate-iri` — and the grammar
+   `@iri` is still exactly one per type and per field, `@severity` at most one
+   per field, and `@annotation` and `@assert` any number. The parser counts
+   them as it reads the run — a missing `@iri` is `syntax/missing-iri`, a
+   second `@iri` or `@severity` `syntax/duplicate-attribute` — and the grammar
    admits attributes, because their arity is a fact of the name. *)
 DeclAttrs           := DeclAttr+ (NEWLINE DeclAttr+)* NEWLINE?
-DeclAttr            := IriAttr | AnnotationAttr
+DeclAttr            := IriAttr | AnnotationAttr | AssertAttr | SeverityAttr
 IriAttr             := AT_ATTR LPAREN STRING RPAREN
 
 (* An annotation: a predicate and an RDF object, ShEx 2.1's Annotation
@@ -381,17 +382,39 @@ IriAttr             := AT_ATTR LPAREN STRING RPAREN
 AnnotationAttr      := AT_ATTR LPAREN STRING COMMA AnnotationObject RPAREN
 AnnotationObject    := STRING | LANG_STRING
 
+(* What a type does not say: a condition, an ordinary Expression, on a field's
+   values or on a type's nodes. Over a field its name is one of the field's
+   values; over a type, the names are its single-valued fields. Which names
+   are in scope, and that the condition is a Bool, is the checker's.
+
+       @iri("https://schema.org/email")
+       @assert(str.matches(email, "^[^@]+@[^@]+$"), severity = warning)
+       @severity(info)
+       email: Seq<String, 1, 3>
+
+   `severity` is contextual, as `as` is: after the condition's comma nothing
+   else can stand. A severity is SHACL's (§2.1.5) — `violation`, the default,
+   `warning` or `info` — and which names are severities is the checker's, as
+   which names are types is. `@severity` says how a field's COUNT is
+   enforced, so it stands before a field and never above a type, which
+   declares no count. *)
+AssertAttr          := AT_ATTR LPAREN Expression (COMMA 'severity' ASSIGN IDENT)? RPAREN
+SeverityAttr        := AT_ATTR LPAREN IDENT RPAREN
+
 (* The type of a field, in the names the checker already prints: a primitive
    (`String`, `Integer`, `Float`, `Bool`, `Date`, `DateTime`, `Time`, `GYear`,
    `AnyUri`, and `LangString` — `rdf:langString`, a string and its language
    tag), and three constructors — `Option<T>` zero or one, `Seq<T>` zero or
    more, `Ref<T>` a reference to a node of the declared or imported type `T`,
-   which is an edge. A bare `T` is exactly one. Which names are valid in which
-   position is the checker's: `Ref<String>` parses and is refused.
+   which is an edge. A bare `T` is exactly one. `Seq<T, n>` is at least `n`
+   and `Seq<T, n, m>` between `n` and `m`, SHACL's `sh:minCount` and
+   `sh:maxCount` and ShEx's `{n,m}`. Which names are valid in which position,
+   and which take bounds, is the checker's: `Ref<String>` and
+   `Option<String, 2>` parse and are refused.
 
    `<` and `>` are LT and GT; in type position nothing else can follow an
    IDENT, so they open and close and never compare. *)
-TypeExpr            := IDENT (LT TypeExpr GT)?
+TypeExpr            := IDENT (LT TypeExpr (COMMA INTEGER (COMMA INTEGER)?)? GT)?
 
 (* `as` is one of two survivors of the word (the other is AliasArg, for the
    self-join). It is CONTEXTUAL, not reserved: it is recognised only between
@@ -690,13 +713,13 @@ Interpolation       := INTERP_OPEN Expression RBRACE
 (*       `type`.  One token of lookahead, and the word stays available as  *)
 (*       a column name.                                                    *)
 (*                                                                         *)
-(*  6. `@iri` and `@annotation` vs `@subject`                              *)
-(*     - All three lex as AT_ATTR; position decides. At top level, above a *)
+(*  6. `@iri`, `@annotation`, `@assert` and `@severity` vs `@subject`      *)
+(*     - All five lex as AT_ATTR; position decides. At top level, above a  *)
 (*       `type IDENT`, and at the start of a line inside a declaration's   *)
-(*       body → DeclAttr, and the token's text picks IriAttr or            *)
-(*       AnnotationAttr. As the first line inside a mapping body →         *)
-(*       SubjectAssign. No name is valid in another's position, and no     *)
-(*       fourth name is valid anywhere.                                    *)
+(*       body → DeclAttr, and the token's text picks IriAttr,              *)
+(*       AnnotationAttr, AssertAttr or SeverityAttr. As the first line     *)
+(*       inside a mapping body → SubjectAssign. No name is valid in        *)
+(*       another's position, and no sixth name is valid anywhere.          *)
 (*     - Inside a declaration's body, a line that starts with AT_ATTR is   *)
 (*       attributes, and the field they belong to is the first line that   *)
 (*       does not: one token of lookahead at each line start.              *)

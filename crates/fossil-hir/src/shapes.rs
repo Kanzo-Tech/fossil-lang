@@ -267,7 +267,10 @@ impl<'db> ResolvedShape<'db> {
 /// `name = Row.name` fails against `ex:name .` — a constraint that constrains
 /// nothing. `PropertyConstraint::datatype`'s doc in `fossil-graph-schema` says
 /// the same. A shape that does not narrow the value does not narrow it.
-fn expected_value_ty<'db>(db: &'db dyn fossil_base::Db, c: &PropertyConstraint) -> Option<Ty<'db>> {
+pub(crate) fn expected_value_ty<'db>(
+    db: &'db dyn fossil_base::Db,
+    c: &PropertyConstraint,
+) -> Option<Ty<'db>> {
     if let Some(p) = c.datatype() {
         return Some(Ty::new(db, TyKind::Primitive(p)));
     }

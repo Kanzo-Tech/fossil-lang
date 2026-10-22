@@ -283,7 +283,7 @@ lexical forms and lower-cased tags are equal.
 | A `LangString` field assigned a `String`, or `str.lang` given a non-string | checker | [`type/property-mismatch`](/docs/errors/type/property-mismatch), `type/argument-mismatch` |
 | `"x".lang("en")` | checker | [`type/needless-lang`](/docs/errors/type/needless-lang) |
 | A predicate or an `@iri` written as a prefixed name — `"rdfs:label"` | checker | [`syntax/prefixed-iri`](/docs/errors/syntax/prefixed-iri) |
-| A second `@iri` stacked on one type or field | parser | [`syntax/duplicate-iri`](/docs/errors/syntax/duplicate-iri) |
+| A second `@iri` stacked on one type or field | parser | [`syntax/duplicate-attribute`](/docs/errors/syntax/duplicate-attribute) |
 | A per-row tag that is not well-formed, empty or NULL, or outside the shape's languages | the writer, as it lays the graph out | [`write/invalid-language-tag`](/docs/errors/write/invalid-language-tag), [`write/language-not-allowed`](/docs/errors/write/language-not-allowed) |
 | A tagged element repeated in a set, tags compared lower-cased | the writer | [`write/duplicate-value`](/docs/errors/write/duplicate-value) |
 
