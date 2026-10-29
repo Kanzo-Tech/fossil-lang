@@ -20,7 +20,12 @@ use datafusion::logical_expr::{LogicalPlan, LogicalPlanBuilder, SubqueryAlias};
 use datafusion::parquet::arrow::ArrowWriter;
 use datafusion::prelude::DataFrame;
 use datafusion_sql::unparser::Unparser;
-use datafusion_sql::unparser::dialect::DuckDBDialect;
+use datafusion::logical_expr::{Expr, cast};
+use datafusion::common::Column;
+use datafusion_sql::sqlparser::ast;
+use datafusion_sql::sqlparser::dialect::DuckDbDialect;
+use datafusion_sql::sqlparser::parser::Parser;
+use datafusion_sql::unparser::dialect::{Dialect as _, DuckDBDialect};
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
@@ -42,8 +47,14 @@ async fn write(df: DataFrame, batches: &[RecordBatch], dir: &Path) -> Result<(),
     let schema: SchemaRef = Arc::new(df.schema().as_arrow().clone());
     parquet(&dir.join("result.parquet"), schema, batches)?;
     let (state, plan) = df.into_parts();
+    fs::write(dir.join("plan.txt"), plan.display_indent().to_string()).map_err(|e| e.to_string())?;
     let plan = named(plan).map_err(|e| e.to_string())?;
-    match Unparser::new(&DuckDBDialect::new()).plan_to_sql(&plan) {
+    let dialect = DuckDBDialect::new().with_custom_scalar_overrides(vec![
+        ("btrim", Box::new(|u: &Unparser<'_>, args: &[Expr]| call(u, "trim", args, false))),
+        ("struct", Box::new(|u: &Unparser<'_>, args: &[Expr]| call(u, "struct_pack", args, true))),
+    ]);
+    let typed = typed(plan.clone()).map_err(|e| e.to_string())?;
+    match Unparser::new(&dialect).plan_to_sql(&typed) {
         Ok(sql) => fs::write(dir.join("query.sql"), sql.to_string()),
         Err(e) => fs::write(dir.join("error.txt"), e.to_string()),
     }
@@ -75,6 +86,47 @@ async fn write(df: DataFrame, batches: &[RecordBatch], dir: &Path) -> Result<(),
 /// Give every scan a name of its own, `t<i>`, under an alias of the name it
 /// had: a source read from a file is `?table?`, and two of them would be one
 /// view in `DuckDB`.
+/// `name(args)` in `DuckDB`'s spelling; with `fields`, each argument is named
+/// `c<i>`, the field `DataFusion`'s positional `struct` gives it.
+fn call(
+    u: &Unparser<'_>,
+    name: &str,
+    args: &[Expr],
+    fields: bool,
+) -> datafusion::error::Result<Option<ast::Expr>> {
+    let args = args
+        .iter()
+        .enumerate()
+        .map(|(i, a)| {
+            let sql = u.expr_to_sql(a)?.to_string();
+            Ok(if fields { format!("c{i} := {sql}") } else { sql })
+        })
+        .collect::<datafusion::error::Result<Vec<_>>>()?;
+    let sql = format!("{name}({})", args.join(", "));
+    let expr = Parser::new(&DuckDbDialect {})
+        .try_with_sql(&sql)
+        .and_then(|mut p| p.parse_expr())
+        .map_err(|e| datafusion::error::DataFusionError::External(Box::new(e)))?;
+    Ok(Some(expr))
+}
+
+/// Every output column cast to the type `DataFusion` gave it: the type is the
+/// program's, and not what the engine running the SQL infers.
+fn typed(plan: LogicalPlan) -> datafusion::error::Result<LogicalPlan> {
+    let exprs: Vec<Expr> = plan
+        .schema()
+        .iter()
+        .map(|(q, f)| {
+            let column = Expr::Column(Column::new(q.cloned(), f.name()));
+            // The unparser spells an unsigned integer as MySQL does and has no
+            // spelling for a struct or a list: those stay as the engine types them.
+            let spelled = !f.data_type().is_unsigned_integer() && !f.data_type().is_nested();
+            if spelled { cast(column, f.data_type().clone()) } else { column }.alias(f.name())
+        })
+        .collect();
+    LogicalPlanBuilder::from(plan).project(exprs)?.build()
+}
+
 fn named(plan: LogicalPlan) -> datafusion::error::Result<LogicalPlan> {
     let mut n = 0;
     let mut rename = |scan: &datafusion::logical_expr::TableScan| {
