@@ -66,6 +66,9 @@ pub use plan::plan_relation;
 /// What a run hands its caller.
 pub use report::RunReport;
 
+#[cfg(feature = "unparse")]
+mod unparse;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -511,11 +514,11 @@ async fn finalize_vertex(
             .aggregate(vec![col(PAYLOAD_IDENTITY)], merged)?
             .select(renamed)?
             .sort(by_subject)?
-            .collect()
+            .collected()
             .await?;
         single_valued(&node.label, &columns, batches)?
     } else {
-        row.sort(by_subject)?.collect().await?
+        row.sort(by_subject)?.collected().await?
     };
 
     let batches = prepend_dense_id(sorted, first_id)?;
@@ -549,7 +552,7 @@ async fn finalize_vertex(
                 col(ENDPOINT_SRC).sort(true, false),
                 column(&name).sort(true, false),
             ])?
-            .collect()
+            .collected()
             .await?;
         let batches = language_tagged(batches, &name)?;
         let derived_from = property_sources
@@ -744,6 +747,25 @@ fn prepend_dense_id(
         next = end;
     }
     Ok(out)
+}
+
+/// `DataFrame::collect`, the one way the engine runs a plan; with the
+/// `unparse` feature the plan is also kept as `DuckDB` SQL (`unparse.rs`).
+trait Collected {
+    async fn collected(self) -> datafusion::error::Result<Vec<RecordBatch>>;
+}
+
+impl Collected for DataFrame {
+    async fn collected(self) -> datafusion::error::Result<Vec<RecordBatch>> {
+        #[cfg(feature = "unparse")]
+        {
+            let batches = self.clone().collect().await?;
+            unparse::record(self, &batches).await;
+            Ok(batches)
+        }
+        #[cfg(not(feature = "unparse"))]
+        self.collect().await
+    }
 }
 
 /// Register in-memory `batches` as a [`MemTable`] named `name`, so a later plan
@@ -1026,7 +1048,7 @@ async fn finalize_edge(
             col("src_dense").sort(true, false),
             col("dst_dense").sort(true, false),
         ])?
-        .collect()
+        .collected()
         .await?;
     if edge.cardinality == Cardinality::Single {
         single_valued_edge(ctx, edge, &batches).await?;
@@ -1087,7 +1109,7 @@ async fn single_valued_edge(
             .await?
             .filter(col(PAYLOAD_ADDRESS).eq(lit(id)))?
             .select(vec![col(PAYLOAD_IDENTITY)])?
-            .collect()
+            .collected()
             .await?;
         Ok(batches
             .iter()

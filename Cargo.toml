@@ -150,6 +150,10 @@ datafusion = { git = "https://github.com/apache/datafusion", rev = "6c1727fcd923
   "nested_expressions",
 ] }
 
+# The unparser alone, for `fossil-exec`'s `unparse` experiment (a plan rendered
+# as `DuckDB` SQL). Same rev as `datafusion`; no crate enables it by default.
+datafusion-sql = { git = "https://github.com/apache/datafusion", rev = "6c1727fcd9230dda428f8c3a2397fce235544bd5", default-features = false, features = ["unparser"] }
+
 # === The native engine — NATIVE ONLY ===
 # No crate links it on a normal edge; `fossil-exec` and `fossil-profile` keep it as a
 # dev-dependency, to read a written graph back or to bring an engine to a test.

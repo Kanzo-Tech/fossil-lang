@@ -23,6 +23,8 @@ workspace = true
 # the formats it offers, so a module that writes only `GraphAr` carries no other.
 [features]
 ntriples = ["fossil-sinks/ntriples"]
+# Experiment: every collected plan also rendered as `DuckDB` SQL (`src/unparse.rs`).
+unparse = ["dep:datafusion-sql"]
 
 [lib]
 doctest = false
@@ -59,6 +61,7 @@ oxrdf = { workspace = true }
 # The engine. Pinned in the workspace table, whose comment says what it is
 # built with and why; `fossil-sinks` writes through the same build.
 datafusion = { workspace = true }
+datafusion-sql = { workspace = true, optional = true }
 
 # `src/report.rs` — what a run tells its caller, and what `serde-wasm-bindgen`
 # hands JS; `schemars` derives its TypeScript (`xtask/tests/wire.rs`).
