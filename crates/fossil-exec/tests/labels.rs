@@ -28,7 +28,7 @@ fn labels() -> native::Written {
     native::run_dir(&dir, "labels.fossil", &[]).expect("labels.fossil runs")
 }
 
-/// A language-tagged value is the user-defined type `langString`, a set of
+/// A language-tagged value is the user-defined type `langstring`, a set of
 /// `(value, lang)` structs on the vertex type that owns it, whatever the field's
 /// count; and the document that uses it declares it on its version line.
 #[test]
@@ -41,9 +41,9 @@ fn a_lang_string_is_a_set_of_structs_on_its_vertex_type() {
             .iter()
             .find(|p| p.name == property)
             .unwrap_or_else(|| panic!("{ty}.{property}"));
-        assert_eq!(p.data_type, DataType::UserDefined("langString".to_string()));
+        assert_eq!(p.data_type, DataType::UserDefined("langstring".to_string()));
         assert_eq!(p.cardinality, Cardinality::Set);
-        assert_eq!(info.version.to_string(), "gar/v1 (langString)");
+        assert_eq!(info.version.to_string(), "gar/v1 (langstring)");
     }
     assert_eq!(
         ran.graph().version.to_string(),

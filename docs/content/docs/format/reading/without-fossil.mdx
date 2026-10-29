@@ -51,7 +51,7 @@ await using g = await graphar.attachGraph(
 `resolve` is handed paths relative to the graph document and answers, in order, the names the engine
 reads them by — a URL, a path, a file registered with the engine, a name a storage mount lent. The
 engine is `query(sql, { signal })` in, columns out. `entry` is the graph document. The option `userTypes` gives a user-defined type its DuckDB
-spelling — for `langString`, a struct of two `VARCHAR`s named `value` and `lang` — and is needed
+spelling — for `langstring`, a struct of two `VARCHAR`s named `value` and `lang` — and is needed
 only to type a view that has no rows, since a view over chunks reads its type from the Parquet
 file.
 
@@ -153,7 +153,7 @@ Read whole, a relation is small: two million edges' endpoints came back as 16 MB
 
 The files are GraphAr's, so GraphAr's own libraries (C++, Java, Spark, PySpark) read a fossil
 graph's tables as they read any other — **with one exception**. A graph with a tagged multi-valued
-property declares the user-defined type `langString` in its version, and GraphAr's C++ and Java
+property declares the user-defined type `langstring` in its version, and GraphAr's C++ and Java
 readers refuse such a graph as a whole: not a skipped column, an unreadable document
 ([data types](/docs/format/conventions/datatypes#a-tagged-value-and-the-readers-that-refuse-it)).
 A graph without one is opened by every reader.

@@ -119,7 +119,7 @@ Counts are `UBIGINT`. `ordinal` is the order of the YAML lists, which is what ma
 
 **A user-defined type has no storage in GraphAr, so its Arrow type comes from the caller.** The writer
 takes `Options { props, user_types }`, where `user_types` maps a declared name to its Arrow type
-(`langString` to `Struct<value: Utf8, lang: Utf8>`), and a column must match its entry exactly;
+(`langstring` to `Struct<value: Utf8, lang: Utf8>`), and a column must match its entry exactly;
 `attachGraph` takes the same as a `userTypes` option, in DuckDB's spelling, and needs it only to type
 a view with no rows, since a view over chunks reads its type from the Parquet file. The
 relations are a SQL projection of `GraphInfo`, so they are one fact and not a second document; they
@@ -446,9 +446,9 @@ which narrows the claim or adds a condition (A7 for IRI-valued columns is the fi
 - **`is_nullable`** is written for every property but the key, and is true exactly when the column
   holds a null (true for an empty type), since `Property` carries no minimum count. The walking
   skeleton's `name` is `false`.
-- **An absent set is a NULL list.** A shape-declared `langString` stays `set` (the executor makes a
+- **An absent set is a NULL list.** A shape-declared `langstring` stays `set` (the executor makes a
   tagged property multi-valued); a single-valued tagged struct column is written as a bare
-  `langString`.
+  `langstring`.
 - **One chunk per table**, `chunk_size` = max(rows, 1), ZSTD level 3, one row group per chunk
   (`graphar-parquet`'s), delta encoding on the sorted keys. Writes go through the routed store, one put per chunk; the
   executor's earlier split of a large file into multipart parts is not kept.
@@ -620,7 +620,7 @@ padding: its last chunk is **as long as its vertex chunk, plus one** (`write_edg
 `vertex_count` for it), the alignment `ldbc_sample/parquet` is written with.
 
 **A multi-valued property is a property of the vertex type that owns it, with `cardinality: set`**
-(D3). A language-tagged one is one column whose element type is `langString`, a GraphAr
+(D3). A language-tagged one is one column whose element type is `langstring`, a GraphAr
 user-defined type. `Person.vertex.yml` declares it, and the version line names the type it uses:
 
 ```yaml
@@ -632,20 +632,20 @@ property_groups:
         data_type: string
         is_primary: true
       - name: nickname
-        data_type: langString
+        data_type: langstring
         cardinality: set
-version: gar/v1 (langString)
+version: gar/v1 (langstring)
 ```
 
-`langString` is `STRUCT<value: STRING, lang: STRING>`, and `cardinality: set` makes the column a
+`langstring` is `STRUCT<value: STRING, lang: STRING>`, and `cardinality: set` makes the column a
 `LIST` of it: Parquet's three-level `LIST` annotation over a group, which Parquet's `LogicalTypes.md`
 allows to hold nested structures, and Arrow's `List<Struct<value: Utf8, lang: Utf8>>`. GraphAr's C++
 writer already wraps any property whose cardinality is not single in `arrow::list(…)`, so the
-declaration `data_type: langString` with `cardinality: set` is one level of list, not two. An untagged
+declaration `data_type: langstring` with `cardinality: set` is one level of list, not two. An untagged
 multi-valued property is the same with `data_type: string`. A single-valued tagged property is
-`langString` with no cardinality, a bare struct. `graphar-info` carries `gar/v1 (langString)`
+`langstring` with no cardinality, a bare struct. `graphar-info` carries `gar/v1 (langstring)`
 (`InfoVersion`), and `attachGraph` takes the DuckDB type for a view with no chunk to read through
-its `userTypes` option, `{ langString: 'STRUCT(value VARCHAR, lang VARCHAR)' }`.
+its `userTypes` option, `{ langstring: 'STRUCT(value VARCHAR, lang VARCHAR)' }`.
 
 **Why `set`.** An RDF graph is a set of triples (RDF 1.1 Concepts §3; RDF 1.2 keeps it), and an
 R2RML output dataset is an RDF dataset (R2RML §11), so several objects for one predicate are an
@@ -699,17 +699,17 @@ map, and union types". The reference readers do not. Read at `apache/incubator-g
 - Java `DataType.fromString` (`maven-projects/info`) accepts the same eight scalars and `list<…>` of
   them, and throws `IllegalArgumentException("Unknown data type: …")` for any other name.
 
-So **a graph with a `langString` property is not opened by GraphAr's C++ and Java readers at that
+So **a graph with a `langstring` property is not opened by GraphAr's C++ and Java readers at that
 revision**, and the claim "a GraphAr reader opens the tables" holds for it only for readers that
 follow the specification's user-defined-type clause: `graphar-info` and `@kanzo-tech/graphar-duckdb`.
 The owner chose this knowing it, because the alternative either loses the tag or admits a
 misaligned state ([the parallel-list encoding](/docs/design/discarded#the-graph-as-apache-graphar) is discarded for it). A graph with no tagged multi-valued property uses only
 built-in types and every reader opens it. The conformance job's C++ and PySpark readers therefore
-open the graphs without a `langString` property; the property is tested through `graphar-duckdb`.
+open the graphs without a `langstring` property; the property is tested through `graphar-duckdb`.
 
 **What would reverse it.** The C++ and Java readers accepting a struct element type, or an upstream
 proposal for a tagged-string type merged into GraphAr (then the type takes GraphAr's name and
-`langString` goes). Or a reader our users run, that refuses a user-defined type, having to open such
+`langstring` goes). Or a reader our users run, that refuses a user-defined type, having to open such
 a graph: then the tag is dropped from that graph's files (`set` of `string`), and the tag stays in
 the mapping's constant `rml:language` where one language is all a column holds.
 
@@ -812,8 +812,8 @@ second document that can disagree with the mapping.
 Each primitive is one of them whatever the source held: an `Integer` is `int64`, a `Float` `double`,
 and a value is converted only when it survives the round trip, so `uint64` above `i64::MAX` and a
 decimal with more digits than a `double` are refused; `binary` becomes `string`, with `xsd:hexBinary` in the mapping, and `time` is
-written as `string` with `xsd:time`, so a graph with no `langString` property stays within what the
-reference readers parse. The one type beyond them is `langString` ([above](#a-relation-and-a-multi-valued-property)). **A `timestamp`
+written as `string` with `xsd:time`, so a graph with no `langstring` property stays within what the
+reference readers parse. The one type beyond them is `langstring` ([above](#a-relation-and-a-multi-valued-property)). **A `timestamp`
 finer than a millisecond is refused, as `write/unrepresentable`**, because GraphAr's `timestamp` is
 milliseconds and a string would lose the type every other reader sees.
 **What would reverse it:** GraphAr gaining a finer timestamp.
@@ -822,7 +822,7 @@ milliseconds and a string would lose the type every other reader sees.
 
 | fact | where | owner |
 | --- | --- | --- |
-| the format and its version | `version: gar/v1` on every information file (`gar/v1 (langString)` where the type is used) | GraphAr |
+| the format and its version | `version: gar/v1` on every information file (`gar/v1 (langstring)` where the type is used) | GraphAr |
 | the vertex types, the relations, their names and labels | `vertices:` and `edges:`; `type`; `src_type`, `edge_type`, `dst_type` | GraphAr |
 | where a file is | the `prefix`es plus `chunk0`, `part0`, `ordered_by_source/` by convention | GraphAr |
 | a vertex's address | `_graphArVertexIndex` per type; the global id is `@kanzo-tech/graph`'s | GraphAr, kanzo-ui |
@@ -997,7 +997,7 @@ Named here rather than hidden:
    [the format](/docs/format).
 3. **The commit** — the graph YAML written last. fossil's writer convention; GraphAr defines none.
 4. **The global id** — `@kanzo-tech/graph`'s arithmetic.
-5. **A language tag per value** — `langString` is a user-defined type, which the specification permits and GraphAr's C++ and Java readers do not parse; the struct's shape is fossil's, stated in [the format](/docs/format) (D3).
+5. **A language tag per value** — `langstring` is a user-defined type, which the specification permits and GraphAr's C++ and Java readers do not parse; the struct's shape is fossil's, stated in [the format](/docs/format) (D3).
 6. **The seven-column triples relation** — its column names come from SPARQL 1.1 Results JSON; no
    standard defines a "triples table". rudof owns it: `shacl/src/validator/sql/triples.rs`, `COLUMNS`,
    which `rml::sql` must produce.
@@ -1029,7 +1029,7 @@ Named here rather than hidden:
 - **RDF 1.2 and SHACL 1.2 are not Recommendations.** RDF 1.2 Concepts is a Candidate Recommendation
   (7 April 2026) and SHACL 1.2 Core a Working Draft (14 October 2026). The Recommendations in this
   design are R2RML, the Direct Mapping, RDF 1.1, SHACL 2017 and PROV-O. A tagged string is an RDF 1.1
-  concept that RDF 1.2 extends with a base direction, which `langString` does not carry.
+  concept that RDF 1.2 extends with a base direction, which `langstring` does not carry.
 - **Annotations are statements about the vocabulary, in the document that defines the data.**
   R2RML §4.1 and RML-Core §3.2 allow a mapping graph to hold arbitrary further triples and name
   documentation such as `rdfs:label` as the example, but as documentation of *mapping components*.
@@ -1070,7 +1070,7 @@ The owner decided D2, D3, D4, D7 and the names; the rest are the recommendation,
 | --- | --- | --- |
 | **D1** | The run describes its tables with the **mapping only**, which carries the program's annotations as triples. Shapes and lineage are not emitted; when they are, shapes are generated from `GraphSchema` through rudof, never passed through | The first reader of the program's shapes or lineage; or an annotation reader that cannot take them from the mapping |
 | **D2** | **Column statistics are kept**, counted once at write: Parquet footer `Statistics` (`null_count`, `min`, `max`, `distinct_count`), one row group per chunk. kanzo-ui's `readCatalog` and `useFieldStats` read them through `parquet_metadata` over `graphar_chunks` paths | No reader left; or a table-level Parquet field, which moves the distinct count there |
-| **D3** | A multi-valued property is a property of its owner with **`cardinality: set`**; a tagged one has the user-defined element type `langString` (`STRUCT<value, lang>`), declared as `gar/v1 (langString)`. The writer refuses duplicates (`write/duplicate-value`). `list` is rejected. **A known departure:** GraphAr's C++ and Java readers at `06dddb1` do not parse a user-defined type | The C++ and Java readers accepting a struct element, or an upstream tagged-string type merged; for `set`, a consumer for which order is data |
+| **D3** | A multi-valued property is a property of its owner with **`cardinality: set`**; a tagged one has the user-defined element type `langstring` (`STRUCT<value, lang>`), declared as `gar/v1 (langstring)`. The writer refuses duplicates (`write/duplicate-value`). `list` is rejected. **A known departure:** GraphAr's C++ and Java readers at `06dddb1` do not parse a user-defined type | The C++ and Java readers accepting a struct element, or an upstream tagged-string type merged; for `set`, a consumer for which order is data |
 | **D4** | Datatypes such as `xsd:gYear`, and the annotations, are read from the mapping through rudof's `Mapping.model()`, **deferred after the first paint**; names until then | A first paint the deferred load measurably still hurts |
 | **D5** | The entry is the fixed name `fossil.graph.yml`, and the mapping the fixed name `mapping.ttl` beside it; no pointer in `extra_info`; `RunReport` unchanged | Two graphs under one location |
 | **D6** | `describe` lives in `fossil-mir`, **public**, over the types alone, so a host asks before a run; `layout` lives in `fossil-sinks`, crate-private, because it reads the data | A column of the mapping that only the layout can name |

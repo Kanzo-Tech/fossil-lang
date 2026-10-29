@@ -126,7 +126,7 @@ Eve)`: the index, the subject and the name, on DuckDB-WASM 1.4.3.
 | the type's identity, `@subject` | the property `subject`, `is_primary: true`, first in the group |
 | a single-valued property | a property of the group, with the [GraphAr type](/docs/format/conventions/datatypes) its value needs, `is_nullable` always written |
 | a multi-valued property | a property of the same group with `cardinality: set`, a list in the chunk |
-| a language-tagged property | a property of type `langString`, a struct of `value` and `lang` |
+| a language-tagged property | a property of type `langstring`, a struct of `value` and `lang` |
 | a relation between two types | an **edge type** `<Src>_<label>_<Dst>`, one adjacency list, `ordered_by_source`, `directed: true`, and no property group |
 | the shape's class, predicate, term and datatype | the [mapping](/docs/format/reading/rdf), and nowhere in the YAML |
 | the sources a table was derived from | nowhere: the graph names no input |
@@ -146,7 +146,7 @@ then destination ([identity](/docs/format/conventions/identity),
 | --- | --- | --- |
 | [Identity](/docs/format/conventions/identity) | a vertex's index is its row, `0 … count − 1` in its type; the global id is the reader's arithmetic over the types; the identity is the subject IRI | one dense id space without storing one, and an index that does not move when a type is read |
 | [Adjacency](/docs/format/conventions/adjacency) | a relation is one `ordered_by_source` list of per-type indices, with its offset table | the CSR a graph algorithm wants, read as it lies |
-| [Data types](/docs/format/conventions/datatypes) | GraphAr's types, `time` as a string, millisecond timestamps, `set` and `langString` | a graph every GraphAr reader opens, except where a tagged value is declared |
+| [Data types](/docs/format/conventions/datatypes) | GraphAr's types, `time` as a string, millisecond timestamps, `set` and `langstring` | a graph every GraphAr reader opens, except where a tagged value is declared |
 | [Statistics](/docs/format/conventions/statistics) | Parquet's footer statistics — nulls, bounds and the distinct count — one row group per chunk | an engine reads counts and bounds off the footer without a scan |
 | Payload | plain Parquet, one row group per chunk, every page ZSTD | the footer's statistics are the chunk's, and any Parquet reader opens the file |
 
@@ -169,7 +169,7 @@ them still reads the tables.
 | The global id | the reader's, and not stored |
 | The commit: the graph document written last | fossil's |
 | The names `fossil.graph.yml` and `mapping.ttl` | fossil's |
-| `langString`, the struct's shape | fossil's, under the specification's user-defined types, which GraphAr's C++ and Java readers do not parse |
+| `langstring`, the struct's shape | fossil's, under the specification's user-defined types, which GraphAr's C++ and Java readers do not parse |
 | Datatypes beyond GraphAr's, such as `xsd:gYear` over an `int32` | the mapping's, and only there |
 | The seven-column `triples` relation | rudof's: its column names come from SPARQL 1.1 Results JSON, and no standard defines a triples table |
 | A logical source in the mapping that names a GraphAr graph | none: the mapping's sources are SQL names the host resolves |
@@ -185,7 +185,7 @@ that did not finish. A reader opens `fossil.graph.yml` and refuses a location th
 The versions inside it are other people's:
 
 - `version: gar/v1` in every information file, which is GraphAr's, and the only one GraphAr defines.
-  A graph with a tagged multi-valued property writes `gar/v1 (langString)` in the documents that use
+  A graph with a tagged multi-valued property writes `gar/v1 (langstring)` in the documents that use
   it, which is how GraphAr declares a user-defined type.
 - the draft of RML-Core that `mapping.ttl` is written against, which is the vocabulary's namespace
   IRI, `http://w3id.org/rml/`, and no version.

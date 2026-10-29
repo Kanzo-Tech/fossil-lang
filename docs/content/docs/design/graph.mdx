@@ -220,13 +220,13 @@ Parquet back with native DuckDB through the information files, and compute the m
 `rml::sql` over the same files (`crates/fossil-exec/tests/mapping.rs`). **An assertion there can only be
 satisfied by agreeing with the bytes**, never by agreeing with another implementation of the same
 arithmetic — the gap through which GraphAr's fourth implementation landed green and wrong. What the
-tests cannot prove is what the engines cannot see: a graph with a `langString` property is not opened
+tests cannot prove is what the engines cannot see: a graph with a `langstring` property is not opened
 by GraphAr's C++ and Java readers at the revision read ([the datatypes](/docs/format/conventions/datatypes)).
 
 ## A multi-valued property is a property of its owner
 
 A property a shape declares `*` or `+` is **a property of the vertex type that owns it, with
-`cardinality: set`**, a list in the chunk; a language-tagged one is a list of `langString`. The vertex
+`cardinality: set`**, a list in the chunk; a language-tagged one is a list of `langstring`. The vertex
 row carries it and nothing else is written. It is the form GraphAr has a slot for, and the mapping's
 logical source unnests the list once, so the standard reader still reads one cell as one term at the
 point where the term is made ([the mapping](/docs/format/reading/rdf#a-multi-valued-property)). The
@@ -271,7 +271,7 @@ a term with its trimmings**: a literal's language tag, and in RDF 1.2 its base d
 the pivot into columns unless the layout carries them explicitly. Base direction exists precisely
 because the first strong character of a string does **not** determine how it should be laid out, so a
 value returned without it is one the host renders backwards with nothing in the cell to say so. The
-tag travels as `langString`; the base direction is not written.
+tag travels as `langstring`; the base direction is not written.
 
 The format itself — the conventions and what a round trip preserves — is documented in
 [/docs/format](/docs/format), for somebody implementing a reader and requiring no knowledge of the

@@ -11,7 +11,7 @@
 //!   property group, its rows `(src, dst)` as indices *within* their types;
 //! - a multi-valued property is a property of the vertex type with
 //!   `cardinality: set`, and a language-tagged value is the user-defined type
-//!   `langString` (`Struct<value, lang>`), which `GraphAr` declares through the
+//!   `langstring` (`Struct<value, lang>`), which `GraphAr` declares through the
 //!   version line and leaves the caller to store.
 //!
 //! **This is also where the graph is held to what its RDF image can recover**
@@ -58,10 +58,10 @@ use crate::{ENDPOINT_SRC, EdgeTable, Graph, PROPERTY_LANGUAGE, PropertyValues, V
 const GRAPH: &str = "fossil";
 
 /// The user-defined type of a language-tagged value, as the version line
-/// declares it (`gar/v1 (langString)`).
-pub(crate) const LANG_STRING: &str = "langString";
+/// declares it (`gar/v1 (langstring)`).
+pub(crate) const LANG_STRING: &str = "langstring";
 
-/// What `GraphAr` leaves to the caller: how `langString` is stored. A struct of
+/// What `GraphAr` leaves to the caller: how `langstring` is stored. A struct of
 /// the lexical form and the tag, neither null.
 pub(crate) fn lang_string() -> DataType {
     DataType::Struct(lang_string_fields())
@@ -475,7 +475,7 @@ fn text_of(data_type: &DataType) -> Option<&'static str> {
     }
 }
 
-/// A column of structs as the user-defined type `langString`: the lexical form
+/// A column of structs as the user-defined type `langstring`: the lexical form
 /// and its tag, the tag held to BCP 47 and to the shape's languages and
 /// written in lower case. A struct row that is null stays null.
 fn tagged(
@@ -1244,11 +1244,11 @@ mod tests {
         ))
         .expect("two tags are two terms");
         let p = &laid.vertices[0].info.property_groups[0].properties[1];
-        assert_eq!(p.data_type, Stored::UserDefined("langString".to_string()));
+        assert_eq!(p.data_type, Stored::UserDefined("langstring".to_string()));
         assert_eq!(p.cardinality, Several::Set);
         assert_eq!(
             laid.vertices[0].info.version.to_string(),
-            "gar/v1 (langString)"
+            "gar/v1 (langstring)"
         );
     }
 

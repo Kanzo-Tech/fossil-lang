@@ -197,7 +197,7 @@ id,n,x,ok,y,d,t,s
 /// primitive's column, written by a run and read by `DuckDB`, is answered in an
 /// Arrow type the profiler reads back as that primitive — but for the three the
 /// lattice keeps apart only by meaning: a year is stored as an integer, and a
-/// tagged text as `GraphAr`'s `langString`, a struct no primitive holds.
+/// tagged text as `GraphAr`'s `langstring`, a struct no primitive holds.
 #[test]
 fn every_primitive_is_profiled_as_it_was_declared() {
     let dir = native::write_dir(&[

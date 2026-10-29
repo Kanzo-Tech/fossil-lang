@@ -1,6 +1,6 @@
 ---
 title: Annotations and language-tagged strings
-description: "What a type, a field or a relation is called, in which language, carried the standard way — a ShEx annotation, a predicate and an RDF object — from a shape document or a declaration to mapping.ttl; and rdf:langString as a value in the data, from R2RML's rr:language and RML's languageMap to a langString property of the graph."
+description: "What a type, a field or a relation is called, in which language, carried the standard way — a ShEx annotation, a predicate and an RDF object — from a shape document or a declaration to mapping.ttl; and rdf:langString as a value in the data, from R2RML's rr:language and RML's languageMap to a langstring property of the graph."
 ---
 
 Two things are missing between a shape and a reader, and they are the same thing at two levels. A
@@ -238,14 +238,14 @@ already applies to a quoted member. An interpolated string takes no tag; its tag
 language map that yields no valid tag falls back to `rr:language`. Then `lang` grows a named
 fallback argument; it does not become a second function.
 
-### The graph: a `langString` property
+### The graph: a `langstring` property
 
-**A `String<Lang>` property is a property of its owner whose element type is `langString`**, a GraphAr
+**A `String<Lang>` property is a property of its owner whose element type is `langstring`**, a GraphAr
 user-defined type: a struct of the value and its `lang`. With `cardinality: set` it is a list of
 them, and a name in several languages is the ordinary case, not the exception — SHACL §2.3.2.1 says
 `sh:name` «should only have one value per language tag» — so a language-tagged property is multi-valued
 in practice even when each language has one; a single-valued one is a bare struct. The version line of
-the information files names the type (`gar/v1 (langString)`)
+the information files names the type (`gar/v1 (langstring)`)
 ([the data types](/docs/format/conventions/datatypes)). The mapping reads the tag from the struct:
 
 ```turtle
@@ -263,7 +263,7 @@ know `lang` would read the value and write a literal with no tag, which RDF 1.1 
 («if and only if the datatype IRI is `rdf:langString`, a non-empty language tag»); the reader that
 knows it is `rml:languageMap`, and the graph is written together with its mapping.
 
-**GraphAr's C++ and Java readers do not parse a user-defined type**, so a graph with a `langString`
+**GraphAr's C++ and Java readers do not parse a user-defined type**, so a graph with a `langstring`
 property is not opened by them at the revision read; the alternatives, which either lose the tag or
 admit a state where the values and the tags disagree, are
 [discarded](/docs/design/discarded#the-graph-as-apache-graphar).
@@ -347,7 +347,7 @@ Prizes : Prize from PrizeRow
 ```
 
 **`Laureate.vertex.yml`**, abridged to what changes: one property group holding the subject, the
-date and the tagged names, the last a set of `langString`:
+date and the tagged names, the last a set of `langstring`:
 
 ```yaml
 type: Laureate
@@ -362,9 +362,9 @@ property_groups:
       - name: birthDate
         data_type: date
       - name: name
-        data_type: langString
+        data_type: langstring
         cardinality: set
-version: gar/v1 (langString)
+version: gar/v1 (langstring)
 ```
 
 **`mapping.ttl`**, abridged to the maps of `Laureate`: the type's, the tagged names' (above), the
@@ -417,6 +417,6 @@ Nobel*, and for Marie Curie the name whose tag matches, *Maria Skłodowska-Curie
 | `fossil-graph-schema` | `Primitive::LangString` and `rdf:langString` in its XSD table both ways; `annotations` on `Shape` and `PropertyConstraint`, and `languages` on `PropertyConstraint`; the wire types `@fossil-lang/types` generates from them |
 | `fossil-hir` | `shex.rs` carries a shape's and a triple constraint's annotations, `rdf:langString` and language value sets; `shacl.rs` reads `sh:name` as an `rdfs:label` annotation and `sh:description` as an `rdfs:comment` one, carries the non-SHACL predicates, `sh:datatype rdf:langString` and `sh:languageIn`; `declared.rs` lowers `@annotation`; the checker types `String<Lang>`, checks a constant tag with `oxilangtag`, refuses a CURIE predicate and `"x".lang("en")`; `fossil-ide` shows a field's annotations on hover |
 | `catalogue.bnf` | one row, `str.lang`, lowered to a two-field struct the writer splits; `String<Lang>` in the type table both profiling hosts read |
-| `fossil-exec` | `layout` writes a `String<Lang>` property as a `langString` struct (a list when it is a set), checks the per-row tag and refuses a repeated element; `describe` writes the annotations as triples and the unnesting query of the tagged property |
+| `fossil-exec` | `layout` writes a `String<Lang>` property as a `langstring` struct (a list when it is a set), checks the per-row tag and refuses a repeated element; `describe` writes the annotations as triples and the unnesting query of the tagged property |
 | `codemirror-fossil` | a highlight for the new token, through the legend the wasm ships |
 | kanzo-ui | Ask and `@kanzo-tech/graph` read the labels from `Mapping.model()` and the tags from the struct |
