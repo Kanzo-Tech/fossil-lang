@@ -88,7 +88,7 @@ expect-test = { workspace = true }
 # `tests/write.rs` reads the graph back with a second engine: a graph only
 # one writer can read is not a graph. `tests/builtin_smoke.rs` binds every
 # stdlib template on it.
-duckdb = { workspace = true }
+duckdb = { workspace = true, features = ["parquet"] }
 # `tests/mapping.rs` renders the mapping to a view over the written graph (`rml::sql`) and reads the
 # triples back, which is Statement R made a test.
 rml = { workspace = true, features = ["sql"] }

@@ -15,8 +15,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use datafusion::arrow::datatypes::SchemaRef;
 use datafusion::arrow::record_batch::RecordBatch;
-use datafusion::common::tree_node::{TreeNode, TreeNodeRecursion};
-use datafusion::logical_expr::{LogicalPlan, LogicalPlanBuilder};
+use datafusion::common::tree_node::{Transformed, TreeNode, TreeNodeRecursion};
+use datafusion::logical_expr::{LogicalPlan, LogicalPlanBuilder, SubqueryAlias};
 use datafusion::parquet::arrow::ArrowWriter;
 use datafusion::prelude::DataFrame;
 use datafusion_sql::unparser::Unparser;
@@ -26,7 +26,7 @@ static NEXT: AtomicUsize = AtomicUsize::new(0);
 
 /// Record `df`, whose collected answer is `batches`. Never fails the run: an
 /// experiment that breaks the engine measures nothing.
-pub async fn record(df: DataFrame, batches: &[RecordBatch]) {
+pub(crate) async fn record(df: DataFrame, batches: &[RecordBatch]) {
     let Ok(root) = std::env::var("FOSSIL_UNPARSE_DIR") else {
         return;
     };
@@ -42,6 +42,7 @@ async fn write(df: DataFrame, batches: &[RecordBatch], dir: &Path) -> Result<(),
     let schema: SchemaRef = Arc::new(df.schema().as_arrow().clone());
     parquet(&dir.join("result.parquet"), schema, batches)?;
     let (state, plan) = df.into_parts();
+    let plan = named(plan).map_err(|e| e.to_string())?;
     match Unparser::new(&DuckDBDialect::new()).plan_to_sql(&plan) {
         Ok(sql) => fs::write(dir.join("query.sql"), sql.to_string()),
         Err(e) => fs::write(dir.join("error.txt"), e.to_string()),
@@ -69,6 +70,44 @@ async fn write(df: DataFrame, batches: &[RecordBatch], dir: &Path) -> Result<(),
         tables.push_str(&format!("{name}\t{file}\n"));
     }
     fs::write(dir.join("tables.tsv"), tables).map_err(|e| e.to_string())
+}
+
+/// Give every scan a name of its own, `t<i>`, under an alias of the name it
+/// had: a source read from a file is `?table?`, and two of them would be one
+/// view in `DuckDB`.
+fn named(plan: LogicalPlan) -> datafusion::error::Result<LogicalPlan> {
+    let mut n = 0;
+    let mut rename = |scan: &datafusion::logical_expr::TableScan| {
+        let mut renamed = scan.clone();
+        renamed.table_name = format!("t{n}").into();
+        n += 1;
+        Arc::new(LogicalPlan::TableScan(renamed))
+    };
+    plan.transform_down(|node| match node {
+        // An aliased scan keeps its alias, the name the SQL refers to it by.
+        LogicalPlan::SubqueryAlias(alias) => match alias.input.as_ref() {
+            LogicalPlan::TableScan(scan) => {
+                let renamed = SubqueryAlias::try_new(rename(scan), alias.alias.clone())?;
+                Ok(Transformed::new(
+                    LogicalPlan::SubqueryAlias(renamed),
+                    true,
+                    TreeNodeRecursion::Jump,
+                ))
+            }
+            _ => Ok(Transformed::no(LogicalPlan::SubqueryAlias(alias))),
+        },
+        LogicalPlan::TableScan(scan) => {
+            let alias = scan.table_name.clone();
+            let aliased = SubqueryAlias::try_new(rename(&scan), alias)?;
+            Ok(Transformed::new(
+                LogicalPlan::SubqueryAlias(aliased),
+                true,
+                TreeNodeRecursion::Jump,
+            ))
+        }
+        other => Ok(Transformed::no(other)),
+    })
+    .map(|t| t.data)
 }
 
 fn parquet(path: &Path, schema: SchemaRef, batches: &[RecordBatch]) -> Result<(), String> {
