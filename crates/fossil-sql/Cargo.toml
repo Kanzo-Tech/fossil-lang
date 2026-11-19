@@ -1,0 +1,53 @@
+# The SQL backend: a compiled program as ONE DuckDB query whose rows are its
+# triples, grouped by subject — `artefact()`. It runs nothing and links no
+# engine: the host runs the query on its own DuckDB. Sans-IO, so it builds for
+# wasm32 beside the editor.
+[package]
+name = "fossil-sql"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "A fossil program lowered from its MIR to one DuckDB query over its triples"
+# Unpublished, as every crate here: what lets deny.toml's allow-wildcard-paths accept the sibling path deps.
+publish = false
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+fossil-base = { path = "../fossil-base" }
+fossil-hir = { path = "../fossil-hir" }
+fossil-mir = { path = "../fossil-mir" }
+# The lattice and its XSD spelling: a literal's datatype is `Xsd::try_from`.
+fossil-graph-schema = { path = "../fossil-graph-schema" }
+smol_str = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# `tests/oracle.rs` runs the query on a native DuckDB and the same program
+# through the engine's N-Triples sink, and compares the two sets of triples.
+duckdb = { workspace = true }
+fossil-exec = { path = "../fossil-exec", features = ["ntriples"] }
+fossil-sinks = { path = "../fossil-sinks", features = ["graphar", "ntriples"] }
+# The engine's own test host (`fossil-exec/tests/support`), included by path,
+# and what it links.
+fossil-storage = { path = "../fossil-storage", features = ["object-store"] }
+datafusion = { workspace = true }
+futures = { workspace = true }
+rml = { workspace = true, features = ["sql"] }
+tempfile = { workspace = true }
+fossil-base = { path = "../fossil-base", features = ["test-support"] }
+fossil-profile = { path = "../fossil-profile" }
+graphar-info = { workspace = true }
+graphar-parquet = { workspace = true }
+miette = { workspace = true, features = ["fancy"] }
+object_store = { workspace = true }
+oxrdf = { workspace = true }
+oxttl = { workspace = true }
+tokio = { workspace = true }

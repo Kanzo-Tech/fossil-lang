@@ -2112,6 +2112,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "fossil-sql"
+version = "0.1.0"
+dependencies = [
+ "datafusion",
+ "duckdb",
+ "fossil-base",
+ "fossil-exec",
+ "fossil-graph-schema",
+ "fossil-hir",
+ "fossil-mir",
+ "fossil-profile",
+ "fossil-sinks",
+ "fossil-storage",
+ "futures",
+ "graphar-info",
+ "graphar-parquet",
+ "miette",
+ "object_store",
+ "oxrdf",
+ "oxttl",
+ "rml",
+ "smol_str",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "fossil-storage"
 version = "0.1.0"
 dependencies = [
