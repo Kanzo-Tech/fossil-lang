@@ -1970,6 +1970,7 @@ dependencies = [
  "fossil-mir",
  "fossil-profile",
  "fossil-sinks",
+ "fossil-sql",
  "fossil-storage",
  "fossil-syntax",
  "futures",
@@ -2109,6 +2110,18 @@ dependencies = [
  "serde",
  "thiserror 1.0.69",
  "tracing",
+]
+
+[[package]]
+name = "fossil-sql"
+version = "0.1.0"
+dependencies = [
+ "fossil-base",
+ "fossil-graph-schema",
+ "fossil-hir",
+ "fossil-mir",
+ "smol_str",
+ "thiserror 1.0.69",
 ]
 
 [[package]]

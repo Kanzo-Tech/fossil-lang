@@ -75,6 +75,9 @@ slug = { workspace = true }
 unicode-normalization = { workspace = true }
 
 [dev-dependencies]
+# `tests/oracle.rs` holds `fossil_sql::artefact`'s query, run on native `duckdb`, to
+# this engine's N-Triples, until the engine is deleted (decision of 29 October).
+fossil-sql = { path = "../fossil-sql" }
 # The tests read a written graph back: its information files (`graphar-info`),
 # its chunk paths (`graphar-parquet`), and a source's profile (`fossil-profile`).
 graphar-info = { workspace = true }
