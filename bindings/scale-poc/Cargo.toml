@@ -1,0 +1,36 @@
+# Proof of concept, not for main: the engine partitions a graph that does not fit
+# its budget — ids by range partition (count, prefix sums, rank), edges scattered
+# once by destination and once by source, spilled through the host — and feeds
+# graphar-parquet's clustered writers in order. See README.md beside this file.
+[package]
+name = "scale-poc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[dependencies]
+fossil-exec = { path = "../../crates/fossil-exec" }
+datafusion = { workspace = true }
+graphar-info = { workspace = true }
+graphar-parquet = { workspace = true }
+object_store = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
+web-time = { workspace = true }
+md5 = "0.7"
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+js-sys = { workspace = true }
+console_error_panic_hook = { workspace = true }
+getrandom = { workspace = true }
+getrandom02 = { package = "getrandom", version = "0.2", features = ["js"] }
+getrandom04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }

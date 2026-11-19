@@ -46,8 +46,8 @@ schemars = { version = "0.8" }
 # and this rev is on arrow/parquet 60 and object_store 0.14, the majors DataFusion main takes; it
 # writes each chunk as one row group with Parquet's `distinct_count`. A graphar release on those
 # majors reverses it (`/docs/design/graphar`, "The pins").
-graphar-info = { git = "https://github.com/Kanzo-Tech/graphar", rev = "feff5b7f91051002f81eda4c3df0d970512ffd87" }
-graphar-parquet = { git = "https://github.com/Kanzo-Tech/graphar", rev = "feff5b7f91051002f81eda4c3df0d970512ffd87" }
+graphar-info = { git = "https://github.com/Kanzo-Tech/graphar", rev = "c575a400d8622b6d71b3ba50efd8d221b7f48fdf" }
+graphar-parquet = { git = "https://github.com/Kanzo-Tech/graphar", rev = "c575a400d8622b6d71b3ba50efd8d221b7f48fdf" }
 # `fossil-storage`'s IO half: a vended credential as a store `DataFusion`
 # reads through and fossil writes through. `aws` + `azure` are the stores a
 # host vends for, `http` the public URLs no credential covers. Its cloud client
