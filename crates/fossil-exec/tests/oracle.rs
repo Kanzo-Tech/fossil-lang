@@ -12,9 +12,8 @@
 
 #![allow(clippy::future_not_send, clippy::redundant_pub_crate, dead_code)]
 
-#[path = "../../fossil-exec/tests/support/native.rs"]
+#[path = "support/native.rs"]
 mod native;
-#[path = "../../fossil-exec/tests/support/mod.rs"]
 mod support;
 
 use std::collections::BTreeSet;

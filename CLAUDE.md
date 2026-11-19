@@ -126,7 +126,7 @@ crates/
   fossil-mir/              typed operator algebra; `src/op.rs` is the operator enum
   fossil-sql/              `artefact()`: a program as ONE DuckDB query whose rows are its triples
                            `(s, type, p, o, datatype, lang)`, by subject, lowered straight from the
-                           MIR; sans-IO, the host runs it. `tests/oracle.rs` holds it to the engine
+                           MIR; sans-IO, the host runs it. `fossil-exec/tests/oracle.rs` holds it to the engine
   fossil-storage/          a vended `StorageCredential` (Iceberg REST's) → a scoped DuckDB secret,
                            an Azure SAS lend, or (feature `object-store`) an `object_store` store
                            routed by longest prefix and renewed at expires−5min — the one IO path

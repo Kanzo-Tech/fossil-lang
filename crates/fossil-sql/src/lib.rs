@@ -33,7 +33,7 @@
 //!
 //! # What the meaning is held to
 //!
-//! `tests/oracle.rs` runs every conformance program both ways — this query on
+//! `fossil-exec/tests/oracle.rs` runs every conformance program both ways — this query on
 //! `DuckDB`, and the engine (`fossil-exec`) through its N-Triples sink — and
 //! compares the triples. The engine is the definition until it is deleted.
 
